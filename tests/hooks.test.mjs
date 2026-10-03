@@ -1096,3 +1096,41 @@ test('3c codex: every question line of the last message counts as a decision ask
   const got = decisionsIn(taskLines(cx.toLines(rows)));
   assert.deepEqual(got.map((d) => [d.question, d.chosen]), [['1) ¿Backoff o cola?', 'backoff, 3'], ['2) ¿Cuántos reintentos?', 'backoff, 3']]);
 });
+
+// ---- 3c, replay of the real Codex rollouts (2026-10-03 · T2k) ----
+test('3c gate: a ">" inside quotes, a heredoc body or a here-string is not a redirect; one outside still is', () => {
+  for (const c of [
+    'cd /x && node -e "import(\'./a.mjs\').then(cx=>{console.log(cx)})"',
+    "node -e 'if (a > b) console.log(1)'",
+    'awk \'$3 > 10 {print}\' data.txt',
+    'grep -n "a -> b" notes.md',
+    'node script.mjs <<\'EOF\'\nconst f = (x) => x > 1;\nEOF',
+    "pwsh -Command @'\nif ($a -gt 1) { 'x' > $null }\n'@",
+  ]) assert.ok(!mutatesFiles(c), c);
+  for (const c of ['echo "a > b" > src/out.txt', 'cat > src/a.ts <<EOF\nx\nEOF', 'node -e "1" > "src/out file.json"', 'printf x >> src/log.txt']) assert.ok(mutatesFiles(c), c);
+  assert.ok(!mutatesFiles('echo "x" > "$TEMP/wm.txt"'), 'a quoted temp target is still temp');
+});
+
+test('3c codex: request_user_input_async counts as the choice window, answered by the next message; a rejected call never counts', () => {
+  const asyncAsk = (callId, q) => row('response_item', { type: 'function_call', name: 'request_user_input_async', call_id: callId, arguments: JSON.stringify({ questions: q }) });
+  const out = (callId, output) => row('response_item', { type: 'function_call_output', call_id: callId, output });
+  const rows = [cxUser('t1', 'i1', 'haz el paso 2'), cxSay('t1', 'Waymark → L2 · dept-frontend · skills: ninguna'), cxCmd('t1', 'Get-Content C:/skills/dept-frontend/SKILL.md'),
+    asyncAsk('bad', [{ title: 'Alcance', question: 'x', options: ['A'] }]), out('bad', 'failed to parse function arguments: unknown field `question`'),
+    asyncAsk('ok', [{ title: 'Alcance: ¿cómo cierro el paso?', options: ['Agregar specs críticos y solo proponer limpiezas (Recomendado)', 'Solo analizar'] }, { title: 'Cobertura: ¿cuál priorizo?', options: ['Las tres áreas (Recomendado)', 'Solo medios'] }]),
+    out('ok', '{"accepted":true}'),
+    cxSay('t1', 'Alcance: ¿Cómo quieres cerrar el paso?\n- A\nCobertura: ¿Cuál priorizo?'), cxSay('t1', 'Te dejé dos decisiones pendientes.'),
+    cxUser('t2', 'i2', 'Agregar specs críticos y solo proponer limpiezas; las tres áreas'), cxEdit('t2', FILE)];
+  const lines = cx.toLines(rows);
+  const got = decisionsIn(taskLines(lines));
+  assert.deepEqual(got.map((d) => [d.question, d.chosen, d.discarded, d.source]), [
+    ['Alcance: ¿cómo cierro el paso?', 'Agregar specs críticos y solo proponer limpiezas (Recomendado)', ['Solo analizar'], 'async'],
+    ['Cobertura: ¿cuál priorizo?', 'Las tres áreas (Recomendado)', ['Solo medios'], 'async'],
+  ], 'the options the reply names; the chat copy of the same questions is not counted again');
+  assert.equal(checkDecision(FILE, lines, `s-async-${n}`, path.join(home, `gate-${n++}.json`)), null, 'asked: the inherited L2 gate passes');
+  const noWait = cx.toLines([...rows.slice(0, 7), cxEdit('t1', FILE)]); // asked async, then edited in the same turn
+  assert.match(checkDecision(FILE, noWait, `s-async-${n}`, path.join(home, `gate-${n++}.json`)) || '', /L2 decision gate/, 'not answered yet: still gated');
+  const noAsync = cx.toLines([rows[0], rows[1], cxCmd('t1', 'npm test'), cxSay('t1', 'Opciones:\n¿Backoff o cola?\n¿Cuántos reintentos?'), cxSay('t1', 'Espero tu elección.'), cxUser('t2', 'i2', 'backoff, 3')]);
+  assert.equal(decisionsIn(taskLines(noAsync)).length, 2, 'chat questions written after the last action, even with a summary after them');
+  const narration = cx.toLines([rows[0], rows[1], cxSay('t1', '¿Qué hace este servicio? Lo reviso.'), cxCmd('t1', 'npm test'), cxSay('t1', 'Listo, apliqué el cambio.'), cxUser('t2', 'i2', 'gracias')]);
+  assert.equal(decisionsIn(taskLines(narration)).length, 0, 'a question before the last action is narration');
+});

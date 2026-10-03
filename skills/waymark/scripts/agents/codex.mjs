@@ -7,8 +7,11 @@
 //   FileChange → one Edit per changed path; McpToolCall → mcp__<server>__<tool>; WebSearch → WebSearch.
 // - A read of <dir>/<skill>/SKILL.md counts as invoking that skill (Codex has no Skill tool).
 // - request_user_input (Codex's choice window: Plan mode, or the default_mode_request_user_input flag) → AskUserQuestion
-//   with the user's answers. Without it, a turn that ended asking in the chat and the user's next message count as the
-//   decisions asked in chat, one per question line (user's choice, 2026-10-03 · T2i, T2j; docs/adr/0009, 0010).
+//   with the user's answers. request_user_input_async (seen in codex 0.160's default mode: {"accepted":true}, the answer
+//   is the user's next message) → AskUserQuestion answered by that message; a rejected call (bad arguments) never counts.
+//   Without either, a turn that ended asking in the chat and the user's next message count as the decisions asked in
+//   chat, one per question line written after the turn's last action (user's choice, 2026-10-03 · T2i, T2j, T2k;
+//   docs/adr/0009, 0010).
 // - token_count → usage per response (cached input apart); turn_context → model; session_meta → Codex version.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,30 +35,38 @@ const shellOf = (cmd) => {
 };
 
 // The rollout's rows → the core's lines (Claude Code .jsonl shape, canonical tool names).
+// A question of request_user_input(_async) → { id, question, options: [{ label }] } ("question" or "title"; options as
+// strings or { label }).
+const asQuestion = (q) => ({ id: q.id, question: String(q.question || q.title || '').trim(), options: (q.options || []).map((o) => ({ label: String(o?.label ?? o) })) });
+const bare = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s*\(recomendad[oa]\)\s*$/, '').replace(/\s+/g, ' ').trim();
+
 export function toLines(rows) {
   const lines = [], asked = new Map();
-  let version = null, model = null, lastTotal = 0, lastText = null, choiceInTurn = false, n = 0;
+  let version = null, model = null, lastTotal = 0, tail = [], choiceInTurn = false, pendingAsync = [], n = 0;
   const assistant = (ts, content, extra = {}) => lines.push({ type: 'assistant', timestamp: ts, version, message: { id: `cx-${n++}`, model, content, ...extra } });
   const result = (ts, id, isError, text) => lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(text || '').slice(0, 400) }] } });
   for (const d of rows) {
     const p = d.payload || {}, ts = d.timestamp;
     if (d.type === 'session_meta') { version = p.cli_version || version; continue; }
     if (d.type === 'turn_context') { model = p.model || model; continue; }
-    if (d.type === 'response_item' && p.type === 'function_call' && p.name === 'request_user_input') {
+    if (d.type === 'response_item' && p.type === 'function_call' && /^request_user_input(_async)?$/.test(p.name)) {
       let a = {};
       try { a = JSON.parse(p.arguments || '{}'); } catch {}
-      asked.set(p.call_id, a.questions || []);
-      assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id: p.call_id, input: { questions: a.questions || [] } }]);
-      choiceInTurn = true;
+      asked.set(p.call_id, { ts, async: p.name.endsWith('_async'), questions: (a.questions || []).map(asQuestion) });
       continue;
     }
     if (d.type === 'response_item' && p.type === 'function_call_output' && asked.has(p.call_id)) {
-      const qs = asked.get(p.call_id);
+      const { ts: at, async, questions: qs } = asked.get(p.call_id);
       let o = {};
       try { o = JSON.parse(p.output || '{}'); } catch {}
+      if (!o.answers && !o.accepted) continue; // rejected (e.g. "failed to parse function arguments"): the user never saw it
+      choiceInTurn = true;
+      // request_user_input_async: asked only once the user answers (their next message); an edit before that stays gated
+      if (async) { pendingAsync.push({ id: p.call_id, qs }); continue; }
+      assistant(at, [{ type: 'tool_use', name: 'AskUserQuestion', id: p.call_id, input: { questions: qs } }]);
       const answers = {};
       for (const q of qs) { const v = o.answers?.[q.id]?.answers; if (v?.length) answers[q.question] = v.join(','); }
-      lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: p.call_id, content: 'answered' }] }, toolUseResult: { questions: qs.map((q) => ({ question: q.question, options: q.options || [] })), answers } });
+      lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: p.call_id, content: 'answered' }] }, toolUseResult: { questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
       continue;
     }
     if (d.type === 'event_msg' && p.type === 'token_count' && p.info?.last_token_usage) {
@@ -72,19 +83,26 @@ export function toLines(rows) {
       const text = (it.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       const prompt = { type: 'user', uuid: `${p.turn_id || ''}:${it.id || n}`, timestamp: ts, version, message: { role: 'user', content: text } };
       if (!isPrompt(prompt)) { lines.push(prompt); continue; } // a hook's block reason fed back is not the user answering
-      // every question line of the last message (3c: only the last one counted, so two questions answered = one decision)
-      const questions = !choiceInTurn && lastText ? [...new Set([...lastText.matchAll(QUESTION)].map((m) => m[0].trim()))] : [];
+      const reply = text.replace(/\s+/g, ' ').trim().slice(0, 300);
+      for (const { id, qs } of pendingAsync) { // each question: the options the reply names, else the reply itself
+        assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'async', questions: qs } }]);
+        const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => bare(l) && bare(reply).includes(bare(l))).join(',') || reply]));
+        lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in the next message' }] }, toolUseResult: { source: 'async', questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
+      }
+      // every question line the agent wrote after the turn's last action (3c: a closing summary without "?" hid them)
+      const questions = !choiceInTurn && tail.length ? [...new Set([...tail.join('\n').matchAll(QUESTION)].map((m) => m[0].trim()))] : [];
       if (questions.length) { // the previous turn ended asking in the chat: this message answers it
-        const id = `chat-${n}`, reply = text.replace(/\s+/g, ' ').trim().slice(0, 300);
+        const id = `chat-${n}`;
         assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);
         lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in chat' }] }, toolUseResult: { source: 'chat', questions: questions.map((question) => ({ question, options: [] })), answers: Object.fromEntries(questions.map((q) => [q, reply])) } });
       }
       lines.push(prompt);
-      lastText = null; choiceInTurn = false;
+      tail = []; choiceInTurn = false; pendingAsync = [];
     } else if (it.type === 'AgentMessage') {
       const text = (it.content || []).map((c) => c.text || '').join('\n');
-      if (text.trim()) { assistant(ts, [{ type: 'text', text }]); lastText = text; }
-    } else if (it.type === 'CommandExecution') {
+      if (text.trim()) { assistant(ts, [{ type: 'text', text }]); tail.push(text); }
+    } else if (/^(CommandExecution|FileChange|McpToolCall|WebSearch)$/.test(it.type)) tail = []; // an action: what follows is the turn's final stretch
+    if (it.type === 'CommandExecution') {
       const command = shellOf(it.command), started = new Date((Date.parse(ts) || 0) - ((it.duration?.secs || 0) * 1000)).toISOString();
       const skill = command.match(SKILL)?.[1];
       if (skill) assistant(started, [{ type: 'tool_use', name: 'Skill', id: `${it.id}-skill`, input: { skill } }]);

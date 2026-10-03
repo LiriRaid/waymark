@@ -328,11 +328,32 @@ export function loadSnapshot(session) {
 // Temp/scratch locations: a whole path segment, so project paths such as src/templates/ are not mistaken for temp.
 const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|%TEMP%|\$T\b|mktemp/i;
 const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
+// The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
+// in it is an index in the command): a ">" there is code or text, not a redirect (3c: `node -e "…x=>{…}"` was gated).
+export function shellSkeleton(command) {
+  const c = String(command || ''), out = c.split('');
+  const blank = (from, to) => { for (let i = from; i < to; i++) if (out[i] !== '\n') out[i] = ' '; };
+  for (const m of c.matchAll(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g)) blank(m.index + 2, m.index + m[0].length - 2);
+  for (const m of c.matchAll(/<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1[^\n]*\n/g)) {
+    const start = m.index + m[0].length, end = c.slice(start).search(new RegExp(`^[ \\t]*${m[2]}[ \\t]*$`, 'm'));
+    blank(start, end < 0 ? c.length : start + end);
+  }
+  let quote = '';
+  for (let i = 0; i < c.length; i++) {
+    if (out[i] === ' ' && c[i] !== ' ') continue; // already blanked
+    if (quote) { if (c[i] === '\\' && quote === '"') { out[i] = ' '; if (i + 1 < c.length) out[++i] = ' '; } else if (c[i] === quote) quote = ''; else if (c[i] !== '\n') out[i] = ' '; }
+    else if (c[i] === '"' || c[i] === "'") quote = c[i];
+  }
+  return out.join('');
+}
+
 export function mutatesFiles(command) {
   const c = String(command || '');
   if (MUTATING.test(c)) return true;
-  for (const m of c.matchAll(/(?<![0-9&>])>{1,2}\s*("?)([^\s"&|;]+)\1/g)) {
-    if (!/^(\/dev\/null|\$null|nul|&\d)$/i.test(m[2]) && !TEMP.test(m[2])) return true;
+  const skeleton = shellSkeleton(c);
+  for (const m of skeleton.matchAll(/(?<![0-9&>=-])>{1,2}/g)) { // a redirect outside quotes; its target read from the command
+    const t = c.slice(m.index + m[0].length).match(/^\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;]+))/), target = t && (t[1] ?? t[2] ?? t[3]);
+    if (target && !/^(\/dev\/null|\$null|nul|&\d)$/i.test(target) && !TEMP.test(target)) return true;
   }
   return false;
 }

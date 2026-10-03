@@ -26,7 +26,10 @@ The same test showed six gaps in the chain:
   - a later question that only confirms is `→ confirmada` and passes;
   - `→ preguntada tarde` (passes the block, Decision ✘) is kept for a work decision asked after applying it.
 - **Routing is inherited inside an open task.** A turn with no routing line takes the routing of the task's last routed turn (L1–L3) while that turn has not written its Cierre (the user's pick, over "any turn of the task" and "only Codex chat replies"). An explicit `Waymark → L0` and a Q turn never pass their routing on. `L0|Q` is Q.
-- **Codex:** every question line of the message that ended the turn counts as a decision asked in chat. Each line gets the user's reply as its answer.
+- **Codex:** every question line written after the turn's last action counts as a decision asked in chat. Each line gets the user's reply as its answer.
+  - `request_user_input_async`, the choice window of Codex's default mode, returns `{"accepted":true}`. It counts as asked only once the user's next message answers it; the options that message names are taken as picked.
+  - A call rejected for bad arguments never counts. A replay of the real 3c rollouts found both gaps (2026-10-03 · T2k).
+- **Shell redirects:** a `>` inside quotes, a heredoc body or a PowerShell here-string is not a redirect. Before, `node -e "…x=>{…}"` was gated as a file change.
 - **Quota:** while the model has fewer than 3 pairs (no fit yet), the end-of-turn line asks for the real % with the exact `calibrate.mjs` command (the user's pick).
 - **tasks.md:** `próximo` joins every pending part in order. A marker inside quotes is text, and `NEXT` counts only when followed by a space or a colon. `open.json` keeps the agent ("started in codex").
 

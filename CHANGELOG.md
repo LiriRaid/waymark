@@ -92,6 +92,11 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **Quota:** while a model has fewer than 3 calibration pairs, the end-of-turn line asks for the real % with the exact `calibrate.mjs` command.
   - **Routing:** `Waymark → L0|Q` counts as a question. A reply with no routing line inside a task that has not written its Cierre keeps the task's routing. Before, a Codex reply in the chat opened an L0 turn and skipped the gate.
   - **Codex:** every question line of the last message counts as a decision asked in chat, not only the last one.
+  - **Replay of the real Codex rollouts** found two more gaps, now fixed:
+    - Codex's default-mode choice window, `request_user_input_async`, counts once the user answers, through their next message. The options that message names are taken as picked. A call Codex sent with bad arguments never counts.
+    - Questions written in the chat count from every message after the turn's last action, so a closing summary without "?" no longer hides them.
+    - Before these fixes, the inherited L2 gate would have denied an edit after the user had already decided.
+  - **The gate no longer reads a ">" inside quotes, a heredoc body or a PowerShell here-string as a redirect.** Before, `node -e "…x=>{…}"` was gated as a file change.
   - **tasks.md:** `próximo` keeps every pending part in order (the last `Pendiente:` used to win, and "paso 2" was lost). A marker inside quotes is text. `open.json` records the agent, so a turn shows "started in codex".
 - **Hook tests in the repo:** `node --test tests/*.test.mjs` (no dependencies, temporary `WAYMARK_HOME`).
 - **Fix:** `protocol.md` → *Closing report* was an empty, unclosed code block that turned *When stuck* into code; it now shows a full Cierre and the decision gate.

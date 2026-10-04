@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits } from './testigos.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -55,6 +55,9 @@ const cmdOf = (t) => String(t.input.command || '');
 // The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
 // is not a test or gate run (3e-1 test: it counted as the gate and the slowest step).
 const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
+// A follow-up ID (with a letter) holds only when the turn changes a file its task already changed (user's choice,
+// 2026-10-04 · T1b: the 3e-1b test filed an unrelated task as T4b). Not checked without records or without changes.
+const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFiles || !changed.length || (() => { const own = ctx.taskFiles(id); return changed.some((f) => own.has(norm(f))); })();
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
@@ -208,7 +211,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // Testigo decision (3e-1): the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
   // answered question of the task came before its first change; each answer is recorded with its position, and a later
   // question does not count against it (user's choice, 2026-10-03 · T2q). An edit the gate denied changed nothing.
-  const taskTools = ctx.taskTools?.length ? ctx.taskTools : allTools;
+  // Measured on the stretch since the last close (user's choice, 2026-10-04 · T1b: a follow-up's own question read
+  // "after", measured against its parent's first change); the review still counts across the whole task.
+  const taskTools = ctx.stretchTools?.length ? ctx.stretchTools : ctx.taskTools?.length ? ctx.taskTools : allTools;
   const changedFile = (t) => !t.error && ((EDITS.test(t.name) && !exempt(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
   const firstTaskChange = taskTools.findIndex(changedFile);
   const firstAsk = taskTools.findIndex((t) => ASK(t) && !t.error);
@@ -250,6 +255,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
       if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
       else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
+      else if (!followUpShares(id, changed, ctx)) cierre.push(`${id} is a follow-up of ${id.replace(/[a-z]$/, '')}, but this turn changes none of that task's files: use ${ctx.ids.next} for a new task`);
     }
   }
   const ev = field(reply, 'Evidencia');
@@ -330,7 +336,7 @@ export function branchesOf(files) {
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-  const ok = claimed && validId(claimed, ctx.ids);
+  const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos", 3e-1)
     id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook' }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
     // Never a secret in the chained log (it cannot be edited later, 3c test A): picked labels only, no free-text answer,
@@ -381,21 +387,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // notification's turn (2026-10-03 · T2o).
       if (pendingBackground(lines, since).length) return;
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-      // the task's lines: after this session's last close (a follow-up: after the last close of another task)
-      const task = taskLines(lines, { since: taskStart(readRecords(home.log), h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(task), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
+      // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
+      const records = readRecords(home.log);
+      const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
       ctx.commits = commitsFor(cwd, claimed);
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing (3c)
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
-      ctx.taskTools = sessionTools(task); // the task's tool calls
+      ctx.taskTools = sessionTools(task); // the task's tool calls (review)
+      ctx.stretchTools = sessionTools(stretch); // since the last close (decision)
       // testigos that execute (testigos.mjs, 3e-1): the repo typecheck when the agent ran no gate, secrets in what the task
       // wrote, and the chain as it stands before this record
       ctx.rerun = (files) => rerunGate(files, home);
       ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
-      ctx.chain = verifyChain(readRecords(home.log));
+      ctx.chain = verifyChain(records);
       const gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory

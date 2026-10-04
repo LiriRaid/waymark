@@ -16,7 +16,7 @@ process.env.WAYMARK_AGENTS_HOME = agentsHome;
 process.env.WAYMARK_BACKUPS = path.join(home, 'backups');
 const temps = [home, agentsHome];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
-const { taskIds, validId, decisionsIn, projectSlug, readLog, appendRecord, taskLines, taskStart, verifyChain, turnInputs, commitsFor, gitSnapshot, snapshotDiff, mutatesFiles, changesProject } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { taskIds, validId, decisionsIn, projectSlug, readLog, appendRecord, taskLines, taskStart, taskFiles, verifyChain, turnInputs, commitsFor, gitSnapshot, snapshotDiff, mutatesFiles, changesProject } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { checkDecision } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
 const { checkCierre, cierreGaps, provenanceRecord, branchesOf, evaluate, summaryLine } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { taskLine } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
@@ -1336,6 +1336,27 @@ const { findSecrets, deepMask } = await import(`file://${SCRIPTS}/provenance.mjs
 // Fake secrets built at run time, so this file never holds a strong-format value itself (the testigo reads diffs).
 const FAKE = { gh: 'gh' + 'p_' + 'A1b2'.repeat(9), aws: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP', slack: 'xo' + 'xb-' + '1234567890-abcdef', jwt: 'ey' + 'J' + 'a'.repeat(12) + '.ey' + 'J' + 'b'.repeat(12) + '.' + 'c'.repeat(12) };
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+
+// 3e-1b test (YaloAtiendo-Chat): an unrelated task closed as T4b inherited T4's answers, and T4c's own question read
+// "after" (measured against T4b's first change).
+test('3e-1b follow-up: its ID holds only when it changes a file of its task; its decisions are its own stretch', () => {
+  const D = '2026-10-04', ids = { next: `${D} · T5`, last: `${D} · T4`, followUp: `${D} · T4b`, known: new Set([`${D} · T4`]) };
+  const records = [{ id: `${D} · T4`, files: ['/work/api/prisma/migration.sql'] }, { id: `${D} · T3`, files: [FILE] }];
+  const ctx = { ...ctxFor('/work/none'), ids, taskFiles: (id) => new Set(taskFiles(records, id).map((f) => f.toLowerCase())) };
+  const msg = checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '';
+  assert.match(msg, /2026-10-04 · T4b is a follow-up of 2026-10-04 · T4, but this turn changes none of that task's files: use 2026-10-04 · T5/);
+  assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T5`), undefined, undefined, ctx) || '', /follow-up/, 'a new task ID passes');
+  records.push({ id: `${D} · T4`, files: [FILE] });
+  assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '', /follow-up/, 'sharing a file of its task, it is a follow-up');
+  // the stretch: T4b asked, edited and closed; T4c asks before its own first edit
+  const before = [call('AskUserQuestion'), answered('¿Cómo?', ['A', 'B'], 'A'), call('Edit', { file_path: FILE })];
+  const ask = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }] } };
+  const ans = { ...answered('¿Y ahora?', ['C', 'D'], 'C'), message: { content: [{ type: 'tool_result', tool_use_id: 'q2', content: 'answered' }] } };
+  const stretch = [prompt('ajusta'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), ask, ans, call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' }), MEM()];
+  const decisions = decisionsIn(stretch);
+  const g = cierreGaps(currentTurn(stretch), cierre(`${D} · T4b`), undefined, undefined, { ...ctx, decisions, taskTools: sessionTools([...before, ...stretch]), stretchTools: sessionTools(stretch) });
+  assert.deepEqual([decisions.length, decisions[0].position, g.steps.find((s) => s.id === 'decision').pass], [1, 'before', true]);
+});
 
 // 3e-1 test: `cat >> x.spec.ts <<'EOF'` counted as a gate and a test run, and was the slowest step.
 test('3e-1b a heredoc body is text written to a file, not a gate or a test run', () => {

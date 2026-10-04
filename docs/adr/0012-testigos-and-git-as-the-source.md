@@ -64,6 +64,9 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **Exception lines** count only in the reply after a block (`stop_hook_active`). They left the Cierre template and the instructions block.
 - **Commands** are read with heredoc bodies and here-strings blanked (`shellSkeleton(c, { quotes: false })`); quoted text is kept.
 - Replay of the test: T3 records only its own question, "before". T2 would now block once on "ya existían antes" with no clean-copy check. The 241 s step of T2 was a real `npx vitest run` after the heredoc, not the heredoc.
+- **3e-1b test (2026-10-04, YaloAtiendo-Chat T4/T4b/T4c):** the gate denied B's first edit and B then asked; no Cierre carried a preventive exception line. Two gaps, fixed in 2026-10-04 · T1b (the user's picks):
+  - A follow-up ID holds only when the turn changes a file of its task (`taskFiles`). B, unrelated to T4, was filed as T4b. It now blocks once with "use T5".
+  - The decisions and their positions come from the stretch since the session's last close. The whole task is kept only for the review. T4c's own question read "after"; it now reads "before".
 
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.

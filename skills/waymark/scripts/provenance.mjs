@@ -234,9 +234,15 @@ export function taskLines(lines, { prompts = 3, since } = {}) {
   return lines;
 }
 
-// When the current task started (ms), read from the chained log, never from prose: this session's last task record. A
-// follow-up (an ID with a letter) inherits its task: it starts after the last record of another task (user's choice,
-// 2026-10-04 · T1). 0 when the session has no task record (every line read belongs to the task).
+// Every file a task changed, from its records and those of its follow-ups: what a follow-up must share.
+export function taskFiles(records, id) {
+  const b = base(id);
+  return b ? records.filter((r) => base(String(r.id || '')) === b).flatMap((r) => r.files || []) : [];
+}
+
+// When the current task started (ms), read from the chained log, never from prose: this session's last task record
+// (user's choice, 2026-10-04 · T1). With a follow-up's ID (a letter): after the last record of another task, so the
+// stretch covers its whole task. 0 when the session has no task record (every line read belongs to the task).
 export function taskStart(records, session, id) {
   const own = /[a-z]$/.test(String(id || '').match(ID)?.[0] || '') ? base(id) : null;
   const closes = records.filter((r) => r.session === session && ID.test(String(r.id || '')) && (!own || base(r.id) !== own));

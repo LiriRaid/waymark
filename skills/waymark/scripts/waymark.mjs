@@ -4,6 +4,7 @@
 //   node waymark.mjs [check]            read-only report of what is pending (default)
 //   node waymark.mjs sync               refresh skill-registry.md (sync.mjs) and remember the skills seen here
 //   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks [args]   the existing scripts, args passed on
+//   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
 // agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
@@ -30,7 +31,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);

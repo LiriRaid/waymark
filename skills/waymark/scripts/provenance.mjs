@@ -160,7 +160,9 @@ export function tasksMarkdown(home, now = new Date()) {
   const lastClosed = lastRec ? [`## Last closed: ${cell(lastRec.id)}${who(lastRec)} (${new Date(lastRec.at).toLocaleString('sv').slice(0, 16)}; full record: last line of provenance.jsonl)`,
     // a field runs to the end of its line, or to the next field on the same line ("Resultado: hecho · Decisión: …")
     ...[['Resultado', 'Resultado'], ['Decisión', 'Decisi[oó]n'], ['Sub-decisiones', 'Sub-?decisiones'], ['Evidencia', 'Evidencia'], ['Aprendido', 'Aprendido']]
-      .map(([name, re]) => [name, (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
+      // Decisión: the user's picks as recorded from the choice window (3e-1); older records keep the Cierre's field
+      .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
+        : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
     ...(lastRec.evaluation ? [(() => { const failed = Object.entries(lastRec.evaluation.steps || {}).filter(([, v]) => !v).map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}`; })()] : []), ''] : [];
   const rows = records.slice(-8).reverse()
@@ -232,6 +234,7 @@ export function decisionsIn(lines) {
   for (const d of lines) {
     const r = d.toolUseResult;
     if (d.type !== 'user' || d.isSidechain || !r || !Array.isArray(r.questions) || !r.answers) continue;
+    const callId = (Array.isArray(d.message?.content) ? d.message.content : []).find((c) => c.type === 'tool_result')?.tool_use_id;
     for (const q of r.questions) {
       const chosen = r.answers[q.question];
       if (chosen === undefined) continue;
@@ -241,6 +244,8 @@ export function decisionsIn(lines) {
       const picked = (l) => parts.includes(l) || (l.includes(',') && String(chosen).includes(l));
       const d = { question: q.question, chosen, discarded: (q.options || []).map((o) => o.label).filter((l) => !picked(l)), ...(r.source ? { source: r.source } : {}) }; // source "chat": asked in the chat (agents without a choice window, docs/adr/0009)
       Object.defineProperty(d, 'labels', { value: (q.options || []).map((o) => o.label), enumerable: false }); // for recordedDecisions only
+      // the choice-window call that asked it, to place it before or after the task's first change (testigo decision)
+      Object.defineProperty(d, 'callId', { value: callId, enumerable: false });
       out.push(d);
     }
   }
@@ -259,9 +264,30 @@ export function recordedDecisions(decisions = []) {
   });
 }
 
+// Secret formats that are unambiguous wherever they appear (user's choice, 2026-10-03 · T2q): the testigo "sin secretos"
+// looks for these in the memory, mem_save and the task's diff; "password=…" is only masked in what Waymark writes.
+const SECRET_FORMATS = [
+  ['llave privada', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g],
+  ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
+  ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g],
+  ['API key sk-', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/g],
+  ['Slack token', /\bxox[abposr]-[A-Za-z0-9-]{10,}/g],
+  ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
+  ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/g],
+];
+// → [{ kind, line }] for every strong-format secret in the text; never the value.
+export function findSecrets(text) {
+  const s = String(text ?? ''), out = [];
+  for (const [kind, re] of SECRET_FORMATS) for (const m of s.matchAll(re)) out.push({ kind, line: s.slice(0, m.index).split('\n').length });
+  return out;
+}
+const maskStrong = (text) => SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, '[redactado]'), String(text ?? ''));
+// Every string of a record with the strong formats masked (the chained log cannot be edited later).
+export const deepMask = (v) => (typeof v === 'string' ? maskStrong(v) : Array.isArray(v) ? v.map(deepMask) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepMask(x)])) : v);
+
 // Passwords, tokens, keys and URL credentials masked in text the log keeps (prompt, commands, Cierre).
 export function maskSecrets(text) {
-  return String(text ?? '')
+  return maskStrong(text)
     .replace(/\b(contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|bearer)(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)[^\s"'`,;]+\3/gi, '$1$2[redactado]')
     .replace(/(\/\/[^\s:/@]+:)[^\s@/]+@/g, '$1[redactado]@')
     .replace(/(\s-u\s+[^\s:]+:)\S+/g, '$1[redactado]');

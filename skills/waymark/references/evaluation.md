@@ -1,12 +1,13 @@
 # Self-evaluation (deep audit)
 
-Every closed task is already evaluated automatically: the end-of-turn hook scores it against the routine contract `waymark/routine.json` and writes the result into the task's record in `<project>/.waymark/provenance.jsonl` (`evaluation`: ✔/✘ per step that applied, score, tokens, estimated quota). The user sees it as one line. **The contract is the only rubric:** this guide adds none. When the user asks for **"evalúa tu trabajo"**, do a deeper audit of that record against the transcript.
+Every closed task is already evaluated automatically: the end-of-turn hook judges it with the testigos of the catalog `waymark/routine.json` (each one executes: tool calls, git, a re-run) and writes the result into the task's record in `<project>/.waymark/provenance.jsonl` (`evaluation`: ✔/✘ per testigo that applied, score, tokens, estimated quota). `node <skills-dir>/waymark/scripts/testigos.mjs [<task ID>]` re-runs the ones that execute. The user sees it as one line. **The contract is the only rubric:** this guide adds none. When the user asks for **"evalúa tu trabajo"**, do a deeper audit of that record against the transcript.
 
 ## 1. Start from the record
 - `evaluation.steps`: the ✔/✘ per contract step that applied. Report them as they are; do not re-score with other criteria.
 - `unresolved`: what blocked and stayed missing after the one block. `findings`: recorded steps that failed (not blocking).
 - `observed`: what the hooks computed (memory, procedure read, gates after the last change with time and failure, tests, browser, code-review, docs, branches, time). Cite it instead of re-deriving.
-- **Declared ≠ done:** check the Cierre's own claims (Decisión, Sub-decisiones, Evidencia, Aprendido) against the calls: an "elegida" with no choice-window answer, a sub-decision applied before it was asked, an "inferida de la doc" with no docs call, an Aprendido that is not in the project memory file. Each is a false declaration.
+- `decisions`: the user's answers in the choice window as recorded, each with its `position` (before / after the task's first change). A decision applied without a question in the transcript is a decision taken alone.
+- **Declared ≠ done:** check the Cierre's own claims (Resultado, Evidencia, Aprendido and its exception lines) against the calls: an "inferida de la doc" with no docs call, a "hecho" with a testigo ✘, an Aprendido that is not in the project memory file, a `Secretos: no (…)` on a real value. Each is a false declaration.
 - **User decisions win, per task:** a check the user asked to skip is ✔ when the Cierre quotes their words (`omitido (usuario: "…")`) and those words are in their messages.
 
 ## 2. Right decision: did it get there without guessing?

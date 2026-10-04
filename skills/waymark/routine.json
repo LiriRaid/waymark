@@ -1,20 +1,22 @@
 {
-  "about": "Waymark's routine contract: the single source of what each task must do (block) and what is recorded and scored (record). stop-hook.mjs enforces and scores from this file; the instructions block quotes every block step's `doc`; tests/hooks.test.mjs fails if they drift. Change a step here, nowhere else. Decided by the user on 2026-10-03 (docs/adr/0006). A sub-decision marked 'preguntada tarde' passes the block but fails Decision in the evaluation (user's choice, 2026-10-03 · T2d); 'confirmada' passes. Every step that applies blocks once, except the commit trailer (fixing it rewrites a commit): user's choice, 2026-10-03 · T2j (docs/adr/0010). No browser step: browser verification runs only when the user asks for it (user's choice, 2026-10-03 · T2l, docs/adr/0011).",
+  "about": "Waymark's routine contract and catalog of testigos (docs/adr/0006, 0012): the single source of what each task must do. A testigo answers its `claim` by executing (tool calls, git, a re-run), never by reading the agent's prose, and returns ✔ / ✘ / not applicable with its evidence; `enforce: block` stops the turn once when it fails, `record` only scores it. stop-hook.mjs judges them (the ones that need a process or git live in scripts/testigos.mjs, which also re-runs them by hand); the instructions block quotes every block claim; tests/hooks.test.mjs fails if they drift. Change a testigo here, nowhere else. Decision = the user's answer in the choice window, recorded as is; a question after the first change is recorded with its position and does not count against it (user's choice, 2026-10-03 · T2q). Gate = the exit of the agent's last gate after its last code change, else the repo typecheck re-run by the hook (40 s; never the full build); a failing gate blocks once (user's choice, 2026-10-03 · T2q). Every testigo that applies blocks once, except the commit trailer (fixing it rewrites a commit, 2026-10-03 · T2j) and the chain (Waymark's own file). No browser testigo: browser verification runs only when the user asks (2026-10-03 · T2l).",
   "tokensPerQuotaPct": 1350000,
-  "steps": [
-    { "id": "decision", "label": "Decision", "levels": [1, 2, 3], "enforce": "block", "doc": "the decision backed by the choice window or the user's words, no sub-decision taken alone" },
-    { "id": "gate", "label": "Verificar", "levels": [1, 2, 3], "enforce": "block", "doc": "a gate after the last change" },
-    { "id": "cierre", "label": "Cierre", "levels": [1, 2, 3], "enforce": "block", "doc": "the Cierre complete" },
-    { "id": "learned", "label": "Aprender", "levels": [1, 2, 3], "enforce": "block", "doc": "its Aprendido written to the project memory" },
-    { "id": "memory", "label": "Recordar", "levels": [2, 3], "when": "engram", "enforce": "block", "doc": "L2+: mem_search before the first change" },
-    { "id": "review", "label": "Review", "levels": [2, 3], "when": "code", "enforce": "block", "doc": "L2+ with code: code-review on the task's files" },
-    { "id": "build", "label": "Build", "levels": [2, 3], "when": "code", "enforce": "block", "doc": "L2+ with code: the build once at the end (or Build: no (<why>) when the project has none)" },
-    { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "inferredFromDocs", "enforce": "block", "doc": "an inference from docs backed by consulting them" },
-    { "id": "procedure", "label": "Enrutar", "levels": [1, 2, 3], "enforce": "block", "doc": "the owner's procedures.md section read" },
-    { "id": "spec", "label": "Tests", "levels": [1, 2, 3], "when": "specNear", "enforce": "block", "doc": "a spec next to the changed code added or changed (or Tests: no (<why>))" },
-    { "id": "red", "label": "Tests", "levels": [1, 2, 3], "when": "redClaim", "enforce": "block", "doc": "a red claim (rojo, habría fallado) backed by a test run before the first code change or in a clean worktree, or marked inferida" },
-    { "id": "preexisting", "label": "Previos", "levels": [1, 2, 3], "when": "preClaim", "enforce": "block", "doc": "a pre-existing failure checked in a clean copy (or no comprobado (<why>))" },
-    { "id": "trailer", "label": "Commit", "levels": [1, 2, 3], "when": "commit", "enforce": "record", "doc": "commits with Waymark-Task: <task ID>" },
-    { "id": "index", "label": "Índice", "levels": [1, 2, 3], "when": "engram", "enforce": "block", "doc": "with engram: the task index saved (mem_save, topic_key waymark/tasks/<slug>)" }
+  "testigos": [
+    { "id": "decision", "label": "Decision", "levels": [1, 2, 3], "enforce": "block", "claim": "the user answered in the choice window before the task's first change" },
+    { "id": "gate", "label": "Verificar", "levels": [1, 2, 3], "when": "code", "enforce": "block", "claim": "a gate after the last code change passes (yours, or the repo typecheck the hook re-runs)" },
+    { "id": "cierre", "label": "Cierre", "levels": [1, 2, 3], "enforce": "block", "claim": "the Cierre complete (Resultado · Evidencia · Aprendido)" },
+    { "id": "learned", "label": "Aprender", "levels": [1, 2, 3], "enforce": "block", "claim": "its Aprendido written to the project memory" },
+    { "id": "secrets", "label": "Secretos", "levels": [1, 2, 3], "enforce": "block", "claim": "no secret in the project memory, mem_save or the task's diff and commits (or Secretos: no (<why>) for a fake one)" },
+    { "id": "memory", "label": "Recordar", "levels": [2, 3], "when": "engram", "enforce": "block", "claim": "L2+: mem_search before the first change" },
+    { "id": "review", "label": "Review", "levels": [2, 3], "when": "code", "enforce": "block", "claim": "L2+ with code: code-review on the task's files" },
+    { "id": "build", "label": "Build", "levels": [2, 3], "when": "code", "enforce": "block", "claim": "L2+ with code: the build once at the end (or Build: no (<why>) when the project has none)" },
+    { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "inferredFromDocs", "enforce": "block", "claim": "an inference from docs backed by consulting them" },
+    { "id": "procedure", "label": "Enrutar", "levels": [1, 2, 3], "enforce": "block", "claim": "the owner's procedures.md section read" },
+    { "id": "spec", "label": "Tests", "levels": [1, 2, 3], "when": "specNear", "enforce": "block", "claim": "a spec next to the changed code added or changed (or Tests: no (<why>))" },
+    { "id": "red", "label": "Tests", "levels": [1, 2, 3], "when": "redClaim", "enforce": "block", "claim": "a red claim (rojo, habría fallado) backed by a test run before the first code change or in a clean worktree, or marked inferida" },
+    { "id": "preexisting", "label": "Previos", "levels": [1, 2, 3], "when": "preClaim", "enforce": "block", "claim": "a pre-existing failure checked in a clean copy (or no comprobado (<why>))" },
+    { "id": "trailer", "label": "Commit", "levels": [1, 2, 3], "when": "commit", "enforce": "record", "claim": "the task's commits carry Waymark-Task: <task ID>" },
+    { "id": "chain", "label": "Cadena", "levels": [1, 2, 3], "enforce": "record", "claim": "the provenance chain intact before this record" },
+    { "id": "index", "label": "Índice", "levels": [1, 2, 3], "when": "engram", "enforce": "block", "claim": "with engram: the task index saved (mem_save, topic_key waymark/tasks/<slug>)" }
   ]
 }

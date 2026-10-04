@@ -18,9 +18,9 @@ const temps = [home, agentsHome];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const { taskIds, validId, decisionsIn, projectSlug, readLog, appendRecord, taskLines, verifyChain, turnInputs, commitsFor, gitSnapshot, snapshotDiff, mutatesFiles, changesProject } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { checkDecision } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
-const { checkCierre, cierreGaps, provenanceRecord, splitTop, branchesOf, evaluate, summaryLine } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+const { checkCierre, cierreGaps, provenanceRecord, branchesOf, evaluate, summaryLine } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { taskLine } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
-const { currentTurn, routedLevel, routedDept, readSomething, turnUsage } = await import(`file://${SCRIPTS}/transcript.mjs`);
+const { currentTurn, routedLevel, routedDept, readSomething, turnUsage, sessionTools } = await import(`file://${SCRIPTS}/transcript.mjs`);
 
 const NOW = new Date(2026, 9, 2, 12, 0); // 2026-10-02 local
 const DAY = '2026-10-02';
@@ -154,7 +154,8 @@ test('3c: the gate asks every work-shaping decision first and offers the browser
   assert.match(deny, /every decision that shapes the work/);
   assert.match(deny, /Never offer, recommend or run browser verification[^.]*unless the user asks/, 'T2l: the browser is never offered');
   assert.ok(!/test user|Playwright when/.test(deny));
-  assert.match(deny, /→ confirmada/);
+  assert.match(deny, /Later questions only confirm; the user's answer is recorded as is/);
+  assert.ok(!/→ confirmada|sub-decision/.test(deny), '3e-1: no prose markers left to write');
 });
 
 test('decision gate: shell commands that change project files are gated like edits', () => {
@@ -198,8 +199,9 @@ const l2 = (extra = []) => currentTurn([
   call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
   call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Skill', { skill: 'code-review' }), MEM(), ...extra,
 ]);
-const cierre = (id, decision = 'elegida Backoff · descartadas Cola', resultado = 'Resultado: hecho · ', sub = 'ninguna') =>
-  `## Cierre · ${id}\n${resultado}Decisión: ${decision}\nSub-decisiones: ${sub}\nEvidencia: observada timeouts en el log de pedidos\nAprendido: "backoff ← timeouts"`;
+// The 3e-1 Cierre: Resultado · Evidencia · Aprendido. `decision` and `sub` add the old lines, which the hook no longer reads.
+const cierre = (id, decision = null, resultado = 'Resultado: hecho\n', sub = null) =>
+  `## Cierre · ${id}\n${resultado}${decision ? `Decisión: ${decision}\n` : ''}${sub ? `Sub-decisiones: ${sub}\n` : ''}Evidencia: observada timeouts en el log de pedidos\nAprendido: "backoff ← timeouts"`;
 const ctxFor = (cwd, decisions = [{ question: '¿Cómo?', chosen: 'Backoff', discarded: ['Cola'] }]) => ({ ids: taskIds(cwd), decisions });
 
 test('Cierre: a complete L2 record passes', () => {
@@ -208,18 +210,31 @@ test('Cierre: a complete L2 record passes', () => {
   assert.equal(checkCierre(l2(), cierre(ids.next), undefined, undefined, ctxFor(cwd)), null);
 });
 
-test('2b: a sub-decision asked late passes the block but fails Decision; a late question alone is a finding', () => {
+// A choice-window call and its answer with the ids Claude Code writes (the testigo places each answer by its call).
+const askWithId = (id, question, labels, chosen) => [
+  { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { questions: [] } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: [{ question, options: labels.map((label) => ({ label })) }], answers: { [question]: chosen } } }];
+
+test('3e-1 testigo decision: an answer before the first change passes; a later one is recorded "after" and does not count against it', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd);
-  const decisions = [{ question: '¿Cómo?', chosen: 'Backoff', discarded: ['Cola'] }, { question: '¿Límite?', chosen: '3', discarded: ['5'] }];
-  const turn = l2([call('AskUserQuestion', { questions: [] }), answered('¿Límite?', ['3', '5'], '3')]);
-  const g = cierreGaps(turn, cierre(ids.next, undefined, undefined, 'límite de reintentos → preguntada tarde'), undefined, undefined, { ids, decisions });
-  assert.deepEqual(g.missing, [], 'cannot be undone: not blocked');
-  assert.equal(g.steps.find((s) => s.id === 'decision').pass, false);
-  assert.ok(g.findings.some((f) => /preguntada tarde/.test(f)));
-  const g2 = cierreGaps(turn, cierre(ids.next, undefined, undefined, 'límite de reintentos → preguntada'), undefined, undefined, { ids, decisions });
-  assert.equal(g2.steps.find((s) => s.id === 'decision').pass, true);
-  assert.ok(g2.findings.some((f) => /came after the first change/.test(f)), 'a hint, recorded only');
+  const head = [prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend')];
+  const tail = [call('Bash', { command: 'node --check x && npm run build' }), call('Skill', { skill: 'code-review' }), MEM()];
+  const lines = [...head, ...askWithId('q1', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), ...askWithId('q2', '¿Confirmo 3?', ['Sí', 'Otra cosa'], 'Sí'), ...tail];
+  const ctx = { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines) };
+  const g = cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, ctx);
+  assert.deepEqual(g.missing, []);
+  assert.equal(g.steps.find((s) => s.id === 'decision').pass, true);
+  const rec = provenanceRecord(currentTurn(lines), g, ctx, {});
+  assert.deepEqual(rec.decisions.map((d) => [d.chosen, d.position]), [['Backoff', 'before'], ['Sí', 'after']], 'recorded as is, with its position');
+  const late = [...head, call('Edit', { file_path: FILE }), ...askWithId('q3', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...tail];
+  const g2 = cierreGaps(currentTurn(late), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(late), taskTools: sessionTools(late) });
+  assert.deepEqual(g2.missing, [], 'cannot be undone: not blocked');
+  assert.equal(g2.steps.find((s) => s.id === 'decision').pass, false);
+  assert.ok(g2.findings.some((f) => /first choice-window question came after the task's first change/.test(f)));
+  const denied = [...head, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', id: 'e0', input: { file_path: FILE } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e0', is_error: true, content: 'Waymark: L2 decision gate' }] } }, ...askWithId('q4', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), ...tail];
+  assert.equal(cierreGaps(currentTurn(denied), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(denied), taskTools: sessionTools(denied) }).steps.find((s) => s.id === 'decision').pass, true, 'an edit the gate denied changed nothing');
 });
 
 test('2b: a red claim needs a test run before the code change or in a clean worktree, or "inferida"', () => {
@@ -257,23 +272,21 @@ test('Cierre: task ID missing or reused, Resultado missing', () => {
   assert.match(checkCierre(l2(), cierre(ids.followUp, undefined, ''), undefined, undefined, ctxFor(cwd)), /Resultado:/);
 });
 
-test('Cierre: Decisión must be backed', () => {
+test('3e-1: the decision is the choice window\'s answer, never the Cierre\'s words', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  assert.match(checkCierre(l2(), cierre(id), undefined, undefined, ctxFor(cwd, [])), /no choice-window answer/);
-  assert.match(checkCierre(l2(), cierre(id).replace(/Decisión: [^\n]*\n/, ''), undefined, undefined, ctxFor(cwd)), /Decisión: elegida/);
   const prompts = ['hazlo con backoff exponencial, nada de colas'];
-  assert.equal(checkCierre(l2(), cierre(id, 'del usuario ("hazlo con backoff exponencial")'), undefined, prompts, ctxFor(cwd, [])), null);
-  assert.match(checkCierre(l2(), cierre(id, 'del usuario ("usa una cola")'), undefined, prompts, ctxFor(cwd, [])), /own words/);
-  assert.equal(checkCierre(l2(), cierre(id, 'única (el servicio ya expone retry())'), undefined, prompts, ctxFor(cwd, [])), null);
-  assert.match(checkCierre(l2(), cierre(id, 'única'), undefined, prompts, ctxFor(cwd, [])), /única \(<why/);
+  assert.match(checkCierre(l2(), cierre(id), undefined, prompts, ctxFor(cwd, [])), /no choice-window answer in this task: ask the user now/);
+  assert.match(checkCierre(l2(), cierre(id, 'del usuario ("hazlo con backoff exponencial")'), undefined, prompts, ctxFor(cwd, [])) || '', /no choice-window answer/, 'a quote in the Cierre no longer stands for the window');
+  assert.match(checkCierre(l2(), cierre(id, 'única (el servicio ya expone retry())'), undefined, prompts, ctxFor(cwd, [])) || '', /no choice-window answer/);
+  assert.equal(checkCierre(l2(), cierre(id, 'algo que el hook no lee'), undefined, prompts, ctxFor(cwd)), null, 'with an answer, whatever the old Decisión line says is ignored');
 });
 
-test('Cierre: L1 needs Decisión too; older callers without ctx skip the ID check', () => {
+test('3e-1: an L1 Cierre is Resultado · Evidencia · Aprendido; older callers without ctx skip the ID and decision checks', () => {
   const turn = currentTurn([prompt('typo en el título'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx eslint src/orders.service.mjs' }), MEM()]);
-  const base = '## Cierre\nResultado: hecho\nSub-decisiones: ninguna\nEvidencia: observada el typo en el título\nAprendido: "x ← y"';
-  assert.match(checkCierre(turn, base), /Decisión:/);
-  assert.equal(checkCierre(turn, `${base}\nDecisión: única (un solo texto que corregir)`), null);
+  const base = '## Cierre\nResultado: hecho\nEvidencia: observada el typo en el título\nAprendido: "x ← y"';
+  assert.equal(checkCierre(turn, base), null);
+  assert.match(checkCierre(turn, base.replace(/Evidencia: [^\n]*\n/, '')) || '', /Evidencia: observada/);
 });
 
 test('Cierre: a turn routed Q that changed files is checked as L2 and the routing blocks (Enrutar)', () => {
@@ -294,14 +307,11 @@ test('routing: a routing line quoted mid-sentence does not override the real one
   assert.equal(routedLevel([...texts, 'Waymark → L1 · dept-qa · skills: …']), 1, 'a real re-route still wins');
 });
 
-test('Cierre: Sub-decisiones listed, none taken alone, as many asked as answered', () => {
+test('3e-1: Sub-decisiones are not read any more (no prose markers to parse)', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
-  assert.match(checkCierre(l2(), cierre(id).replace(/Sub-decisiones: ninguna\n/, ''), undefined, undefined, ctx), /Sub-decisiones:/);
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'íconos en modales angostos → no preguntada'), undefined, undefined, ctx), /taken without asking/);
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'textos de botones → preguntada'), undefined, undefined, ctx), /claim 2 decisions asked but the choice window answered 1/);
-  assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, 'textos de botones → del usuario ("que diga Izquierda, Centro, Derecha")'), undefined, ['ok'], ctx), null);
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'íconos'), undefined, undefined, ctx), /each item ends with one marker/);
+  for (const sub of ['íconos en modales angostos → no preguntada', 'íconos', 'a → preguntada · b → no preguntada', 'x → única'])
+    assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, sub), undefined, undefined, ctx), null, sub);
 });
 
 test('Cierre: the routing line\'s department must have been invoked; the record keeps it', () => {
@@ -392,10 +402,6 @@ test('Cierre: an empty field does not take the next line as its value', () => {
   assert.match(checkCierre(l2(), cierre(id, undefined, 'Resultado:\n'), undefined, undefined, ctxFor(cwd)), /Resultado: hecho \| parcial/);
 });
 
-test('Sub-decisiones: a ";" inside parentheses or quotes does not split an item', () => {
-  assert.deepEqual(splitTop('esquema (relación; wamid) → preguntada; estilo → del usuario ("gris; sin borde")'), ['esquema (relación; wamid) → preguntada', 'estilo → del usuario ("gris; sin borde")']);
-});
-
 test('branches: the branch of each repo that holds a changed file', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-git-'));
   temps.push(repo);
@@ -439,7 +445,7 @@ test('block 3: the Aprendido must be written to the project memory', () => {
   assert.match(checkCierre(noMem, cierre(id), undefined, undefined, ctxFor(cwd)), /Aprendido is not in the project memory/);
 });
 
-test('bugs of test 2.0-4: an empty search is not a read; the chosen option counts as the user\'s words; a commit is not a change', () => {
+test('bugs of test 2.0-4: an empty search is not a read; a commit is not a change', () => {
   assert.equal(readSomething({ name: 'Grep', out: 'No matches found' }), false);
   assert.equal(readSomething({ name: 'Grep', out: '19:### Bug fix (L1/L2)' }), true);
   const { cwd } = fresh();
@@ -448,8 +454,6 @@ test('bugs of test 2.0-4: an empty search is not a read; the chosen option count
   const all = [...emptyGrep.tools.slice(0, 1), { name: 'Grep', input: { pattern: '^## Bug fix', path: '/skills/dept-frontend/procedures.md' }, out: 'No matches found' }, ...emptyGrep.tools.slice(1)];
   const g = cierreGaps(emptyGrep, '## Cierre\nResultado: hecho · Decisión: única (uno)\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a"', all, undefined, ctxFor(cwd, []));
   assert.ok(g.missing.some((f) => /procedures\.md never read/.test(f)));
-  assert.equal(checkCierre(l2(), cierre(id, 'del usuario ("Autollenar Puesto (Recomendado)")'), undefined, ['podemos aplicar el fix'], ctxFor(cwd, [{ question: 'q', chosen: 'Autollenar Puesto (Recomendado)', discarded: ['Quitar'] }])), null);
-  assert.match(checkCierre(l2(), cierre(id, 'del usuario ("no tocar el esquema")'), undefined, ['dale'], ctxFor(cwd, [{ question: 'q', chosen: 'No', discarded: ['Sí'] }])) || '', /own words/, 'a short label does not validate any quote');
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-git-'));
   temps.push(repo);
   const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -464,10 +468,10 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
   const ev = evaluate(cierreGaps(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), { total: 2700000 });
-  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Aprender: true, Recordar: false, Review: true, Build: true, Enrutar: true, 'Índice': false });
-  assert.equal(ev.score, '7/9');
+  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Aprender: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true, 'Índice': false });
+  assert.equal(ev.score, '9/11');
   assert.equal(ev.quotaPct, 2);
-  assert.match(summaryLine(id, ev), /Recordar ✘ .* 7\/9 · 2\.70M tokens ≈ 2% de la cuota/);
+  assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/11 · 2\.70M tokens ≈ 2% de la cuota/);
   assert.match(checkCierre(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), /no mem_search before the first change/, 'mem_search blocks at L2+ when engram is there');
 });
 
@@ -512,10 +516,12 @@ test('provenance record: what the transcript proves, the hook assigns an ID when
   assert.ok(rec.unresolved.length > 0);
 });
 
-test('routine contract: the instructions block quotes every step that blocks, and the guide points to the contract', () => {
+test('catalog of testigos: each states its claim; the instructions block quotes every claim that blocks, and the guide points to the catalog', () => {
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
-  for (const st of routine.steps.filter((x) => x.enforce === 'block')) assert.ok(block.includes(st.doc), `instructions.md must quote: "${st.doc}"`);
+  assert.ok(!('steps' in routine) && routine.testigos.every((t) => t.id && t.label && t.claim && t.levels?.length && /^(block|record)$/.test(t.enforce)), 'routine.json is the catalog (3e-1)');
+  for (const id of ['decision', 'gate', 'learned', 'review', 'chain', 'secrets', 'trailer']) assert.ok(routine.testigos.some((t) => t.id === id), `ADR 0012 first testigo: ${id}`);
+  for (const st of routine.testigos.filter((x) => x.enforce === 'block')) assert.ok(block.includes(st.claim.replace(/^the Cierre complete \(.*\)$/, 'the Cierre complete (Resultado · Evidencia · Aprendido)')), `instructions.md must quote: "${st.claim}"`);
   const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'evaluation.md'), 'utf8');
   assert.ok(guide.includes('routine.json'), 'evaluation.md must defer to routine.json');
   assert.ok(!/^\| Check \| ✔ when/m.test(guide), 'evaluation.md must not define its own rubric table');
@@ -541,11 +547,11 @@ const l2Lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymar
 test('stop hook: a backed Cierre is recorded and not blocked', () => {
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const { out, records } = runStop(l2Lines, cierre(id));
-  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 7\/7 · /);
+  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 9\/9 · /);
   assert.equal(records.length, 1);
   assert.equal(records[0].id, id);
   assert.deepEqual(records[0].unresolved, []);
-  assert.equal(records[0].evaluation.score, '7/7');
+  assert.equal(records[0].evaluation.score, '9/9');
   assert.match(records[0].cierre, /^## Cierre · /);
 });
 
@@ -713,7 +719,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-step2', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
-  assert.match(JSON.parse(r.stdout).systemMessage, /· 7\/7 · /, 'Aprendido written to <project>/.waymark/memory.md counts');
+  assert.match(JSON.parse(r.stdout).systemMessage, /· 9\/9 · /, 'Aprendido written to <project>/.waymark/memory.md counts');
   const recs = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
   assert.equal(recs.length, 1);
   assert.deepEqual(recs[0].files, [FILE], 'the memory edit is not a project change');
@@ -1042,18 +1048,15 @@ test('3c: an unrouted reply inside an open task inherits its routing (gate and C
   assert.equal(g.dept.declared, 'dept-backend');
 });
 
-test('3c: "→ confirmada" passes; the branch is never counted as a sub-decision', () => {
+test('3e-1: a later confirmation in the choice window passes and leaves no finding', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd), ctx = ctxFor(cwd);
   const turn = l2([call('AskUserQuestion', { questions: [] }), answered('¿Confirmo 3 reintentos?', ['Sí', 'Otra cosa'], 'Sí')]);
   const decisions = [...ctx.decisions, { question: '¿Confirmo 3 reintentos?', chosen: 'Sí', discarded: ['Otra cosa'] }];
-  const g = cierreGaps(turn, cierre(ids.next, undefined, undefined, '3 reintentos → confirmada'), undefined, undefined, { ids, decisions });
+  const g = cierreGaps(turn, cierre(ids.next), undefined, undefined, { ids, decisions });
   assert.deepEqual(g.missing, []);
   assert.equal(g.steps.find((s) => s.id === 'decision').pass, true);
-  assert.ok(!g.findings.some((f) => /came after the first change/.test(f)), 'a confirmation is not a late decision');
-  assert.equal(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'rama develop → no preguntada'), undefined, undefined, ctx), null, 'the branch is the user\'s: ignored');
-  assert.equal(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'work on branch develop → no preguntada; textos → del usuario ("ok")'), undefined, ['ok'], ctx), null);
-  assert.match(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'error branch del formulario → no preguntada'), undefined, undefined, ctx) || '', /taken without asking/, 'a code branch is still a decision');
+  assert.ok(!g.findings.some((f) => /choice-window/.test(f)), 'a later question is recorded with its position, not scored');
 });
 
 test('3c (T2l): no browser step — a UI change passes with no browser attempt and no offer; the contract has no Navegador', () => {
@@ -1071,7 +1074,7 @@ test('3c (T2l): no browser step — a UI change passes with no browser attempt a
   assert.ok(!g.steps.some((s) => s.id === 'browser'), 'no browser step in the contract');
   assert.ok(!('Navegador' in evaluate(g, { total: 1 }).steps));
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
-  assert.ok(!routine.steps.some((s) => s.id === 'browser'));
+  assert.ok(!routine.testigos.some((s) => s.id === 'browser'));
   const reviewOffered = [...decisions, { question: '¿Corro el code-review?', chosen: 'Sí, con code-review', discarded: ['Sin review'] }];
   assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
 });
@@ -1142,26 +1145,15 @@ test('3c codex: request_user_input_async counts as the choice window, answered b
 const { readTurns } = await import(`file://${SCRIPTS}/transcript.mjs`);
 const { recordedDecisions, maskSecrets } = await import(`file://${SCRIPTS}/provenance.mjs`);
 
-test('T2l Decisión: "del usuario" read across lines, and a quoted multi-select answer counts as the user\'s', () => {
+test('T2l Cierre: a field ending with ":" continues on the next lines; an empty field never takes the next line', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd);
-  const multi = [{ question: '¿Cuáles corrijo?', chosen: '1. Marcador antes del texto, 2. Avisar media perdida, 3. width con %', discarded: ['4. Descargar'] }];
-  const close = (d) => cierre(ids.next, d);
-  assert.equal(checkCierre(l2(), close('del usuario ("1. Marcador antes del texto, 2. Avisar media perdida, 3. width con %")'), undefined, ['haz el commit'], { ids, decisions: multi }), null, 'the whole multi-select answer');
-  const below = `## Cierre · ${ids.next}\nResultado: hecho\nDecisión: del usuario, elegida en el choice window:\n- "Backoff"\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"`;
-  assert.equal(checkCierre(l2(), below, undefined, ['x'], ctxFor(cwd)), null, 'the pick on the line below');
-  const emptyThenNext = `## Cierre · ${ids.next}\nResultado:\nDecisión: elegida Backoff · descartadas Cola\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a"`;
+  const below = `## Cierre · ${ids.next}\nResultado: hecho\nEvidencia:\n- observada x en el log\nAprendido: "a ← b"`;
+  assert.match(checkCierre(l2(), below, undefined, ['x'], ctxFor(cwd)) || '', /Evidencia: observada/, 'an empty Evidencia is still empty');
+  const spread = `## Cierre · ${ids.next}\nResultado: hecho\nEvidencia: observada en el log:\n- timeouts de 30 s\nAprendido: "a ← b"`;
+  assert.equal(checkCierre(l2(), spread, undefined, ['x'], ctxFor(cwd)), null, 'the value on the lines below');
+  const emptyThenNext = `## Cierre · ${ids.next}\nResultado:\nEvidencia: observada x\nAprendido: "a"`;
   assert.match(checkCierre(l2(), emptyThenNext, undefined, undefined, ctxFor(cwd)) || '', /Resultado: hecho/, 'an empty field still never takes the next line');
-});
-
-test('T2l Sub-decisiones: " · " separates items with several "→"; "→ única (<why>)" is a one-way technical step and passes', () => {
-  const { cwd } = fresh();
-  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
-  const sub = 'setNodeAttribute en lugar de setNodeMarkup → única (corrige el bug: el panel se cerraba) · untracked en syncImagePanel → única (corta el bucle infinito) · textos → del usuario ("ok")';
-  assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, sub), undefined, ['ok'], ctx), null);
-  const g = cierreGaps(l2(), cierre(id, undefined, undefined, 'a → preguntada · b → no preguntada'), undefined, undefined, ctx);
-  assert.ok(g.missing.some((m) => /taken without asking \(b → no preguntada\)/.test(m)), 'only the item taken alone is named');
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'x → única'), undefined, undefined, ctx) || '', /each item ends with one marker/, 'única needs its reason');
 });
 
 test('T2l Aprender: memory.md written by any tool counts when it changed in the turn and holds the task ID', () => {
@@ -1229,12 +1221,9 @@ test('T2l turn start: a prompt after the last close starts the turn even when th
   assert.deepEqual(currentTurn(lines, Date.UTC(2026, 9, 4, 4, 0)).tools.map((t) => t.name), ['Edit'], 'the untimestamped tool call stays in the turn');
 });
 
-test('T2m: the block names the honest ways out; the choice window waiting for the user is userWait, not the agent\'s minutes', () => {
+test('T2m: the choice window waiting for the user is userWait, not the agent\'s minutes', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
-  const msg = checkCierre(l2(), cierre(id, undefined, undefined, 'aviso en la esquina → no preguntada'), undefined, undefined, ctx) || '';
-  assert.match(msg, /choice window → preguntada; only one real way \(a technical limit, or the fix of a bug you found\) → única \(<why>\) — never a user rule you cannot cite; named but not applied, left for the user → propuesta \(<what>\); otherwise ask it now/);
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'alcance → del usuario'), undefined, undefined, ctx) || '', /e\.g\. "texto del botón → preguntada; panel en la esquina → única/);
   const at = (min) => new Date(Date.UTC(2026, 9, 4, 6, min)).toISOString();
   const lines = [{ ...prompt('x'), timestamp: new Date(Date.now() - 62 * 60000).toISOString() }, say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
     { type: 'assistant', timestamp: at(0), message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'q1', input: {} }] } },
@@ -1284,15 +1273,11 @@ test('T2o stop hook: no block and no record while the background review runs', (
   assert.ok(!fs.existsSync(log) || !readLog(cwd).length, 'nothing recorded yet');
 });
 
-test('T2o: a quote of the user\'s fragments joined with "…", "Docker" is not docs, "→ propuesta", memory commands are not gates', () => {
+test('T2o: "Docker" is not docs, memory commands are not gates', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd), ctx = ctxFor(cwd);
-  const said = ['pero man podes usar las credenciales del env y hacer la migracion no es necesario esto y otra cosa te doy permiso'];
-  assert.equal(checkCierre(l2(), cierre(ids.next, 'del usuario ("no es necesario esto … te doy permiso")'), undefined, said, ctx), null);
-  assert.match(checkCierre(l2(), cierre(ids.next, 'del usuario ("no es necesario esto … borra la base")'), undefined, said, ctx) || '', /own words/, 'every fragment must be theirs');
   const docker = cierre(ids.next).replace('observada timeouts en el log de pedidos', 'observada Docker falla con dockerDesktopLinuxEngine; inferida que falta la columna (check: GET da 200)');
   assert.ok(!cierreGaps(l2(), docker, undefined, undefined, ctx).steps.find((s) => s.id === 'docs').applies, '"Docker" is not docs');
-  assert.equal(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'pipeline de deploy → propuesta (que corra las migraciones)'), undefined, undefined, ctx), null);
   const memGate = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: "sed -i '7i - [T1] build y tests ok' .waymark/memory.md" }), call('Skill', { skill: 'code-review' }), MEM()]);
   assert.match(checkCierre(memGate, cierre(ids.next), undefined, undefined, ctx) || '', /no typecheck, lint or build ran after the last code change/, 'writing memory is not a gate');
@@ -1318,4 +1303,150 @@ test('T2o: a gate chained with a memory command still counts', () => {
   const chained = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit && npm run build && grep -n T1 .waymark/memory.md' }), call('Skill', { skill: 'code-review' }), MEM()]);
   assert.equal(checkCierre(chained, cierre(id), undefined, undefined, ctxFor(cwd)), null);
+});
+
+// ---- 3e-1 testigos (docs/adr/0012, 2026-10-03 · T2q) ----
+const { gateCommand, runGate, secretSources, secretHits } = await import(`file://${SCRIPTS}/testigos.mjs`);
+const { findSecrets, deepMask } = await import(`file://${SCRIPTS}/provenance.mjs`);
+// Fake secrets built at run time, so this file never holds a strong-format value itself (the testigo reads diffs).
+const FAKE = { gh: 'gh' + 'p_' + 'A1b2'.repeat(9), aws: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP', slack: 'xo' + 'xb-' + '1234567890-abcdef', jwt: 'ey' + 'J' + 'a'.repeat(12) + '.ey' + 'J' + 'b'.repeat(12) + '.' + 'c'.repeat(12) };
+const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+
+test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (<why>)" says it is not this task\'s', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const use = (tid, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name, input }] } });
+  const res = (tid, isError = false) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: tid, content: isError ? 'error TS2322' : 'ok', is_error: isError }] } });
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    use('e', 'Edit', { file_path: FILE }), res('e'), use('t', 'Bash', { command: 'npx vitest run' }), res('t', true), use('d', 'Bash', { command: 'npx tsc --noEmit' }), res('d', true), MEM()]);
+  const g = cierreGaps(turn, cierre(id), undefined, undefined, ctxFor(cwd));
+  assert.ok(g.missing.some((m) => /the gate after the last code change failed \(npx tsc --noEmit\): fix it/.test(m)));
+  assert.deepEqual([g.observed.gate.by, g.observed.gate.ok], ['agent', false]);
+  assert.ok(g.findings.some((f) => /a command after the last change failed: npx vitest run$/.test(f)), 'other failures stay findings; the judged gate is not repeated');
+  assert.equal(checkCierre(turn, `${cierre(id)}\nno comprobado (falla en un archivo que esta tarea no tocó)`, undefined, undefined, ctxFor(cwd)), null);
+});
+
+test('3e-1 testigo gate: with no gate after the last code change, the repo typecheck the hook re-runs decides', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), MEM()]);
+  let asked = null;
+  const withRun = (r) => ({ ...ctxFor(cwd), rerun: (files) => { asked = files; return r; } });
+  const ok = cierreGaps(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', from: 'package.json', ok: true, s: 3, timedOut: false }));
+  assert.deepEqual(ok.missing, []);
+  assert.deepEqual(asked, [FILE], 'the changed code files');
+  assert.deepEqual([ok.observed.gate.by, ok.observed.gate.cmd], ['testigo', 'npm run typecheck']);
+  assert.match(checkCierre(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', ok: false, s: 3, timedOut: false })) || '', /failed \(npm run typecheck, re-run by the hook\)/);
+  assert.match(checkCierre(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', ok: false, s: 40, timedOut: true })) || '', /took over 40 s: run the project's gate yourself/);
+  assert.match(checkCierre(turn, cierre(id), undefined, undefined, withRun(null)) || '', /no typecheck the hook can run \(memory\.md Quality gates, package\.json, tsconfig\)/);
+  const docsOnly = currentTurn([prompt('x'), say('Waymark → L1 · dept-devex'), call('Skill', { skill: 'dept-devex' }), PROC('dept-devex'), call('Edit', { file_path: '/work/proj/README.md' }), MEM()]);
+  assert.equal(cierreGaps(docsOnly, cierre(id), undefined, undefined, withRun(null)).steps.find((s) => s.id === 'gate').applies, false, 'no code changed: not applicable');
+});
+
+test('3e-1 gateCommand: memory.md\'s verified row, then package.json with the lockfile\'s manager, then tsconfig; never a placeholder or the build', () => {
+  const dir = (files) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-gate-')); temps.push(d); for (const [f, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), c); } return d; };
+  const withMem = dir({ 'memory.md': '# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| sync (temp copy) | WAYMARK_HOME=<tmp> node s.mjs | 2026-10-01 |\n| syntax | `node --check a.mjs` | 2026-10-01 |\n\n## Conventions\n' });
+  assert.deepEqual(gateCommand(withMem, path.join(withMem, 'memory.md')), { cmd: 'node --check a.mjs', from: 'memory.md' });
+  const pnpm = dir({ 'package.json': JSON.stringify({ scripts: { build: 'ng build', typecheck: 'tsc -p . --noEmit' } }), 'pnpm-lock.yaml': '' });
+  assert.deepEqual(gateCommand(pnpm, null), { cmd: 'pnpm run typecheck', from: 'package.json' });
+  const ts = dir({ 'tsconfig.json': '{}', 'tsconfig.app.json': '{}', 'node_modules/.bin/tsc': '' });
+  assert.deepEqual(gateCommand(ts, null), { cmd: 'npx --no-install tsc --noEmit -p tsconfig.app.json', from: 'tsconfig' });
+  assert.equal(gateCommand(dir({ 'tsconfig.json': '{}' }), null), null, 'TypeScript not installed: nothing is downloaded');
+  assert.equal(gateCommand(dir({ 'package.json': JSON.stringify({ scripts: { build: 'vite build' } }) }), null), null, 'never the build');
+  const d = dir({});
+  assert.equal(runGate({ cmd: 'node -e "process.exit(3)"', from: 'x' }, d).ok, false);
+  assert.equal(runGate({ cmd: 'node -e ""', from: 'x' }, d).ok, true);
+  assert.equal(runGate({ cmd: 'node -e "setTimeout(() => {}, 4000)"', from: 'x' }, d, 300).timedOut, true);
+});
+
+test('3e-1 testigo secrets: strong formats only, where and kind but never the value; "Secretos: no (<why>)" for a fake one', () => {
+  assert.deepEqual(findSecrets(`a\nconst k = '${FAKE.gh}'`), [{ kind: 'GitHub token', line: 2 }]);
+  assert.deepEqual(findSecrets('password=hunter2 · token de prueba'), [], '"password=" is only masked in what Waymark writes');
+  assert.ok(!maskSecrets(`usa ${FAKE.aws}`).includes(FAKE.aws) && !JSON.stringify(deepMask({ a: [{ b: FAKE.jwt }] })).includes(FAKE.jwt));
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const ctx = { ...ctxFor(cwd), scanSecrets: () => [{ where: 'src/a.ts', text: `const k = '${FAKE.gh}'` }] };
+  const msg = checkCierre(l2(), cierre(id), undefined, undefined, ctx) || '';
+  assert.match(msg, /a secret-like value in src\/a\.ts \(GitHub token\): remove it/);
+  assert.ok(!msg.includes(FAKE.gh), 'never the value');
+  assert.equal(checkCierre(l2(), `${cierre(id)}\nSecretos: no (token falso del fixture de maskSecrets)`, undefined, undefined, ctx), null);
+  const saved = l2([call('mcp__engram__mem_save', { title: 'deploy', content: `key ${FAKE.aws}` })]);
+  assert.match(checkCierre(saved, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /mem_save \(AWS access key\)/);
+  const turn = currentTurn([prompt(`usa ${FAKE.slack} para el bot`), ...l2Lines.slice(1)]);
+  assert.ok(!JSON.stringify(provenanceRecord(turn, cierreGaps(turn, cierre(id), undefined, undefined, ctxFor(cwd)), ctxFor(cwd), {})).includes(FAKE.slack), 'the record masks it');
+});
+
+test('3e-1 secretSources: the lines the task added, untracked files whole, the task\'s commits, memory.md when written; a removed secret is not flagged', () => {
+  const repo = tmpRepo('secrets');
+  fs.writeFileSync(path.join(repo, 'a.ts'), `const old = '${FAKE.jwt}';\n`);
+  gitT(repo, 'add', '.'); gitT(repo, 'commit', '-q', '-m', 'i');
+  fs.writeFileSync(path.join(repo, 'c.ts'), `export const s = '${FAKE.slack}';\n`);
+  gitT(repo, 'add', 'c.ts'); gitT(repo, 'commit', '-q', '-m', 'c');
+  const hash = gitT(repo, 'rev-parse', 'HEAD').stdout.trim();
+  fs.writeFileSync(path.join(repo, 'a.ts'), `const k = '${FAKE.gh}';\n`); // the JWT line removed, a token added
+  fs.writeFileSync(path.join(repo, 'b.env'), `AWS=${FAKE.aws}\n`);
+  const mem = path.join(repo, 'memory.md');
+  fs.writeFileSync(mem, `- nota ${FAKE.gh}\n`);
+  const hits = secretHits(secretSources([path.join(repo, 'a.ts'), path.join(repo, 'b.env')], [hash], repo, mem, 0));
+  const got = hits.map((h) => `${h.where.replace(/^commit \w+ /, 'commit ')}:${h.kind}`).sort();
+  assert.deepEqual(got, ['a.ts:GitHub token', 'b.env:AWS access key', 'commit c.ts:Slack token', 'memory.md:GitHub token'].sort());
+  assert.ok(!hits.some((h) => h.kind === 'JWT'), 'a removed line is not the task\'s');
+  assert.ok(!secretHits(secretSources([], [], repo, mem, Date.now() + 60000)).length, 'memory.md not written in this turn: not read');
+});
+
+test('3e-1 testigo chain: a broken chain is recorded and scored, never blocks', () => {
+  const { cwd } = fresh();
+  const g = cierreGaps(l2(), cierre(taskIds(cwd).next), undefined, undefined, { ...ctxFor(cwd), chain: { ok: false, at: 1 } });
+  assert.deepEqual(g.missing, []);
+  assert.equal(g.steps.find((s) => s.id === 'chain').pass, false);
+  assert.ok(g.findings.some((f) => /chain broken at record 2/.test(f)));
+  assert.equal(g.observed.chain, false);
+});
+
+test('3e-1 tasks.md: the last closed task\'s Decisión is the user\'s recorded picks (older records keep the Cierre\'s field)', () => {
+  const repo = tmpRepo('tasks-dec');
+  fs.mkdirSync(path.join(repo, '.waymark'));
+  fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n');
+  appendRecord(repo, { id: '2026-10-03 · T1', at: '2026-10-03T10:00:00Z', cierre: '## Cierre · 2026-10-03 · T1\nResultado: hecho\nDecisión: elegida A\nEvidencia: x\nAprendido: y' });
+  assert.match(tasksMarkdown(projectHome(repo)), /- Decisión: elegida A/);
+  appendRecord(repo, { id: '2026-10-03 · T2', at: '2026-10-03T11:00:00Z', decisions: [{ question: 'q', chosen: 'Backoff', position: 'before' }, { question: 'q2', chosen: '3', position: 'after' }], cierre: '## Cierre · 2026-10-03 · T2\nResultado: hecho\nEvidencia: x\nAprendido: y' });
+  assert.match(tasksMarkdown(projectHome(repo)), /- Decisión: Backoff; 3/);
+});
+
+test('3e-1 testigos.mjs by hand: chain, commit + trailer, secrets in the commits and the typecheck from memory.md', () => {
+  const repo = tmpRepo('by-hand');
+  fs.mkdirSync(path.join(repo, '.waymark'));
+  fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | node -e "" | 2026-10-04 |\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.waymark/\n');
+  appendRecord(repo, { id: '2026-10-03 · T1', evaluation: { steps: { Decision: true }, score: '1/1' } });
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1;\n');
+  gitT(repo, 'add', '.'); gitT(repo, 'commit', '-q', '-m', 'a\n\nWaymark-Task: 2026-10-03 · T1');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'testigos.mjs')], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /✔ chain: 1 records intact/);
+  assert.match(r.stdout, /✔ commit \+ trailer: [0-9a-f]{8}/);
+  assert.match(r.stdout, /✔ secrets in the task's commits: none/);
+  assert.match(r.stdout, /✔ typecheck now \(memory\.md\): node -e ""/);
+  assert.match(r.stdout, /recorded for 2026-10-03 · T1: Decision ✔ \(1\/1\)/);
+});
+
+test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; the block reason comes from the gaps already judged', async () => {
+  const { blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const use = (tid, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name, input }] } });
+  const res = (tid, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: tid, content: '', is_error: isError }] } });
+  const turn = (cmd) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    use('e', 'Edit', { file_path: FILE }), res('e', false), use('g', 'Bash', { command: cmd }), res('g', true), MEM()]);
+  let runs = 0;
+  const ctx = (r) => ({ ...ctxFor(cwd), rerun: () => { runs++; return r; } });
+  assert.equal(checkCierre(turn('npm run build 2>&1 | grep -i error'), cierre(id), undefined, undefined, ctxFor(cwd)), null, 'no re-run available: not held against it');
+  assert.equal(checkCierre(turn('npm run build 2>&1 | grep -i error'), cierre(id), undefined, undefined, ctx({ cmd: 'npm run typecheck', ok: true, s: 2, timedOut: false })), null, 'the hook\'s typecheck decides');
+  assert.match(checkCierre(turn('npm run build 2>&1 | grep -i error'), cierre(id), undefined, undefined, ctx({ cmd: 'npm run typecheck', ok: false, s: 2, timedOut: false })) || '', /failed \(npm run typecheck, re-run by the hook\)/);
+  assert.match(checkCierre(turn('npx eslint src && npx tsc --noEmit'), cierre(id), undefined, undefined, ctxFor(cwd)) || '', /failed \(npx eslint src && npx tsc --noEmit\)/, 'the gate is the last part: its exit counts');
+  runs = 0;
+  const g = cierreGaps(turn('npm run build 2>&1 | grep -i error'), '## Cierre', undefined, undefined, ctx({ cmd: 'npm run typecheck', ok: false, s: 2, timedOut: false }));
+  assert.equal(runs, 1, 'judged once');
+  assert.match(blockReason(g), /^Waymark: this L1 turn changed files and is missing: 1\) the gate after the last code change failed \(npm run typecheck, re-run by the hook\)/);
+  assert.equal(runs, 1, 'the block reason reuses the gaps: no second re-run');
 });

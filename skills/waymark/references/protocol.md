@@ -54,16 +54,15 @@ The receiving department checks the evidence it relies on (memory and hand-offs 
 3. **Review** (L2+) — `code-review` skill on the diff. L3 — also `simplify` and, if security-relevant, `security-review`.
 4. **Department DoD** — tick the department's Definition of Done.
 5. **Learn** — `references/learning.md`; rewrite project memory → *Work in progress* (or mark it idle).
-6. **Closing report** — the Cierre of the instructions block, headed by the task ID the per-prompt hook offered. It holds only what the agent alone knows; the end-of-turn hook computes the rest from the tool calls (memory, procedure, gates and their order, tests, review, docs, branches, time, tokens), blocks once for the steps the routine contract `waymark/routine.json` marks as `block`, scores every step that applied and appends its record to the hash-chained `~/.waymark/provenance/<slug>.jsonl`, the supply chain of the agent's work (docs/adr/0002, 0004):
+6. **Closing report** — the Cierre of the instructions block, headed by the task ID the per-prompt hook offered. It holds only what the agent alone knows; the end-of-turn hook computes the rest from the tool calls (memory, procedure, gates and their order, tests, review, docs, branches, time, tokens), blocks once for the testigos the catalog `waymark/routine.json` marks as `block`, scores every testigo that applied and appends its record to the hash-chained `<project>/.waymark/provenance.jsonl`, the supply chain of the agent's work (docs/adr/0002, 0004, 0012):
 
 ```
 ## Cierre · 2026-10-02 · T3
-Resultado: hecho · Decisión: elegida modal compartido · descartadas confirm() nativo, deshacer con toast
-Sub-decisiones: texto del botón → del usuario ("que diga Eliminar"); foco inicial en Cancelar → preguntada
+Resultado: hecho
 Evidencia: observada borrado sin confirmar en /contacts (spec en rojo antes del cambio)
 Aprendido: "confirmación con app-modal ← observado: borrado sin confirmar en /contacts"
 ```
-**Decision gate (any level):** the user decides, never the agent. Before changing anything, ask in the choice window: the approach with its optimal options (files, risk, cost; mark the recommended one, which may not be what the user needs) and, in the same call, every decision that shapes the work you can foresee (data design, visual style, behavior, defaults). Never offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it. The branch is the user's, never a sub-decision. Later questions only confirm (`→ confirmada`, passes); a work decision asked after applying it is `→ preguntada tarde` (passes the block, Decision ✘). The Cierre names the chosen and the discarded ones. A choice the user already wrote, or a single real way, is confirmed there too. Commits of the task carry the trailer `Waymark-Task: <task ID>`.
+**Decision gate (any level):** the user decides, never the agent. Before changing anything, ask in the choice window: the approach with its optimal options (files, risk, cost; mark the recommended one, which may not be what the user needs) and, in the same call, every decision that shapes the work you can foresee (data design, visual style, behavior, defaults). Never offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it. The branch is the user's, never asked as a decision. Later questions only confirm. The record keeps the user's answers as they were given, each with its position (before / after the first change); the Cierre does not restate them. A choice the user already wrote, or a single real way, is confirmed there too. Commits of the task carry the trailer `Waymark-Task: <task ID>`.
 
 ## When stuck (two-strike rule)
 

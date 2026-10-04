@@ -99,8 +99,8 @@ export function currentTurn(lines, since = 0) {
 export function sessionTools(lines) {
   const out = [], byId = {};
   for (const d of lines) {
-    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: c.input || {}, out: '' }; out.push(t); byId[c.id] = t; }
-    if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) for (const c of d.message.content) if (c.type === 'tool_result' && byId[c.tool_use_id]) byId[c.tool_use_id].out = (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 200);
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: c.input || {}, out: '', id: c.id }; out.push(t); byId[c.id] = t; }
+    if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) for (const c of d.message.content) if (c.type === 'tool_result' && byId[c.tool_use_id]) Object.assign(byId[c.tool_use_id], { out: (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 200), error: !!c.is_error }); // an edit the gate denied changed nothing
   }
   return out;
 }

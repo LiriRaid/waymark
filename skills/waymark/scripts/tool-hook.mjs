@@ -48,7 +48,7 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   // Strict gate (user's decision 2026-10-02): no change until the user was asked in the choice window in this task.
   if (!askedChoice(taskLines(lines))) {
     return `Waymark: L${level} decision gate — the user decides every real decision, you never decide alone. Before changing files, ask in your choice window (AskUserQuestion): the approach with its optimal options (files, risk, cost; recommended marked, it may not be what the user needs) AND, as more questions in the same call (up to 4), every decision that shapes the work you can foresee — data/schema design, visual style, behavior details, defaults. Never offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it: prove UI work with specs and the build. ` +
-      'Later questions only confirm (→ confirmada). The branch is the user\'s: never a sub-decision. If there is only one real way, or the user already chose in their message, confirm it there (that option + "otra cosa"). This gate stays until the user has been asked in this task.';
+      'Later questions only confirm; the user\'s answer is recorded as is. The branch is the user\'s: never asked as a decision. If there is only one real way, or the user already chose in their message, confirm it there (that option + "otra cosa"). This gate stays until the user has been asked in this task.';
   }
   return null;
 }

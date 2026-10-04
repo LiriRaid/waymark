@@ -4,10 +4,12 @@
 // Runs locally (0 model tokens unless it blocks). Supply chain of the agent's work (docs/adr/0001–0005):
 // - What can be observed is COMPUTED from the transcript and git, never declared by the agent (memory, procedure,
 //   gates after the last change with time and failure, tests, browser, code-review, docs, branches, time, tokens).
-// - The agent writes only `## Cierre · <task ID>`: Resultado · Decisión · Sub-decisiones · Evidencia · Aprendido.
-// - What blocks (once, decision "block") and what is only recorded and scored is defined in ONE place: the routine
-//   contract waymark/routine.json (docs/adr/0006). Each step has the levels and the condition where it applies; this
-//   file only computes whether it passed and why not. The instructions block quotes each block step (tests check it).
+// - The agent writes only `## Cierre · <task ID>`: Resultado · Evidencia · Aprendido (3e-1). The decision is the user's
+//   answer in the choice window, recorded as is with its position (before / after the task's first change).
+// - What blocks (once, decision "block") and what is only recorded and scored is defined in ONE place: the catalog of
+//   testigos waymark/routine.json (docs/adr/0006, 0012). Each testigo has its claim, the levels and the condition where it
+//   applies; this file judges it by executing (tool calls, git, a re-run through testigos.mjs), never by reading prose.
+//   The instructions block quotes each block claim (tests check it).
 // - Then the record is appended to <project>/.waymark/provenance.jsonl (docs/adr/0007; tasks.md regenerated) with an automatic evaluation (routine ✔/✘, score,
 //   tokens, estimated quota) and the user sees a one-line summary (systemMessage, 0 model tokens). The record names
 //   the agent that did the work.
@@ -22,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain } from './provenance.mjs';
+import { rerunGate, secretSources, secretHits } from './testigos.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -38,13 +41,13 @@ const GATE = /\b(tsc|typecheck|type-check|lint|eslint|ng build|build|go vet|mypy
 const PRE = /(pre-?existente|preexist|pre-existing|ya (fallaba|exist[ií]a)|fallos? previos?|en c[oó]digo que no cambi)/i;
 const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i; // <project>/.waymark/memory.md or the pre-0007 ~/.waymark/projects/<slug>.md (tasks.md is generated)
 const BUILD = /\b(ng build|vite build|next build|nuxt build|astro build|(npm|pnpm|yarn|bun)( run)? build|go build|cargo build|dotnet build|mvn (package|verify)|gradle build|tsc -b)\b/i;
-// The routine contract: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006).
-// A missing or invalid contract never disables the hook: a minimal contract keeps the chain (decision, gate, Cierre) and
-// the record says the contract could not be read.
-const FALLBACK = { tokensPerQuotaPct: 1350000, fallback: true, steps: [
-  { id: 'decision', label: 'Decision', levels: [1, 2, 3], enforce: 'block' }, { id: 'gate', label: 'Verificar', levels: [1, 2, 3], enforce: 'block' },
+// The catalog of testigos: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006, 0012).
+// A missing or invalid catalog never disables the hook: a minimal one keeps the chain (decision, gate, Cierre) and
+// the record says the catalog could not be read.
+const FALLBACK = { tokensPerQuotaPct: 1350000, fallback: true, testigos: [
+  { id: 'decision', label: 'Decision', levels: [1, 2, 3], enforce: 'block' }, { id: 'gate', label: 'Verificar', levels: [1, 2, 3], when: 'code', enforce: 'block' },
   { id: 'cierre', label: 'Cierre', levels: [1, 2, 3], enforce: 'block' }, { id: 'learned', label: 'Aprender', levels: [1, 2, 3], enforce: 'block' }] };
-const ROUTINE = (() => { try { return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'routine.json'), 'utf8')); } catch { return FALLBACK; } })();
+const ROUTINE = (() => { try { const r = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'routine.json'), 'utf8')); return Array.isArray(r.testigos) ? r : FALLBACK; } catch { return FALLBACK; } })();
 const DOCS = (t) => (t.name === 'Skill' && /library-docs/.test(String(t.input.skill || ''))) || /^(WebFetch|WebSearch)$/.test(t.name) || /context7|docs?/i.test(t.name) || (t.name === 'Read' && /node_modules|\.d\.ts$/.test(String(t.input.file_path || '')));
 const fileOf = (t) => t.input.file_path || t.input.notebook_path || '';
 const shell = (t) => /^(Bash|PowerShell)$/.test(t.name);
@@ -80,29 +83,10 @@ function userSkip(reply, field, prompts, labels = []) {
   const q = plain(m[1]);
   return prompts.some((p) => plain(p).includes(q)) || labels.some((l) => l === q || l.replace(/\s*\(recomendad[oa]\)$/, '') === q) ? 'ok' : m[1];
 }
-// The git branch is the user's, never an agent sub-decision (3c): an item that starts with it is ignored ("rama develop",
-// "work on branch x"); a code branch ("error branch del formulario") is still a decision.
-const BRANCH = /^\W*(?:(?:la|en la|work on|on|the)\s+)?(?:rama|branch)\b/i;
-
-// Splits on `sep` outside parentheses and quotes ("a (x; y) → preguntada; b → no preguntada" is two items).
-export function splitTop(s, sep = ';') {
-  const out = [];
-  let depth = 0, quote = '', cur = '';
-  for (const ch of String(s || '')) {
-    if (quote) { if (ch === quote || (quote === '“' && ch === '”')) quote = ''; }
-    else if (ch === '"' || ch === '“') quote = ch;
-    else if (ch === '(') depth++;
-    else if (ch === ')') depth = Math.max(0, depth - 1);
-    else if (ch === sep && depth === 0) { out.push(cur.trim()); cur = ''; continue; }
-    cur += ch;
-  }
-  if (cur.trim()) out.push(cur.trim());
-  return out.filter(Boolean);
-}
-
 // A Cierre field: its line; a value that ends with ":" continues on the next lines up to the next field (3c test A:
-// "Decisión: del usuario, elegida en el choice window:" with the picks below it). An empty field never takes the next line.
-const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Tests|Review|Build|Navegador)\s*:/i;
+// "Evidencia:" with what was seen below it). An empty field never takes the next line. Decisión and Sub-decisiones are
+// no longer read (3e-1) but still end a field an older Cierre spreads over several lines.
+const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Tests|Review|Build|Secretos)\s*:/i;
 const field = (reply, name) => {
   const m = reply.match(new RegExp(`${name}:[ \\t]*([^\\n]*)`, 'i'));
   let v = m?.[1]?.trim() || '';
@@ -116,7 +100,10 @@ const field = (reply, name) => {
 
 // The block reason, or null. ctx: { ids, decisions, gitChanged, commits, branches, lacks, agent } (all optional).
 export function checkCierre(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
-  const gaps = cierreGaps(turn, last, allTools, prompts, ctx);
+  return blockReason(cierreGaps(turn, last, allTools, prompts, ctx));
+}
+// From gaps already computed (the hook never judges twice: the gate testigo may have re-run the typecheck).
+export function blockReason(gaps) {
   if (!gaps?.missing.length) return null;
   return `Waymark: this L${gaps.level} turn changed files and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), then reply with the completed Cierre only.`;
 }
@@ -187,7 +174,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
       red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(cmdOf(t)) && ((firstChange >= 0 && i < firstChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
     },
-    asked: { afterFirstChange: firstChange >= 0 && allTools.some((t, i) => i > firstChange && t.name === 'AskUserQuestion') },
+    gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
+    // testigo "sin secretos": the memory, the task's diff and commits (ctx.scanSecrets, testigos.mjs) and its mem_save calls;
+    // where and which kind only, never the value
+    secrets: secretHits([...(ctx.scanSecrets ? ctx.scanSecrets(changed) : []), ...turn.tools.filter((t) => /mem_(save|update)$/.test(t.name)).map((t) => ({ where: 'mem_save', text: `${t.input.title || ''}\n${t.input.content || ''}` }))]),
+    chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     // (user's choice, 2026-10-03 · T2l)
@@ -207,56 +198,42 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     else if (s) extras.push(`${f}: skip quoted as the user's ("${s}") but those words are not in the user's messages nor an option they picked`);
   }
   const hasCierre = CIERRE.test(reply);
-  const d = field(reply, 'Decisi[oó]n');
-  // Every quoted text of "del usuario …" ("del usuario (\"…\")" or "del usuario, elegida …: \"…\"").
-  const quotes = /^del usuario/i.test(d) ? [...d.matchAll(/[“"«]([^”"»]{3,400})[”"»]/g)].map((m) => m[1]) : [];
-  const chosenFull = (ctx.decisions || []).map((x) => plain(x.chosen));
-  // the quote is the user's words, (part of) a picked label, or a whole multi-select answer "A, B, C" (3c test A)
-  // a quote that joins the user's fragments with "…" ("no es necesario esto … te doy permiso") counts when every fragment
-  // is theirs (2026-10-03 · T2o)
-  const fragments = (q) => String(q).split(/\s*(?:…|\.\.\.)\s*/).filter((f) => plain(f).length >= 3);
-  const inPrompts = (s) => prompts.some((p) => plain(p).includes(plain(s)));
-  const usersWords = (q) => {
-    if (!q) return false;
-    if (fragments(q).length > 1) return fragments(q).every(inPrompts);
-    return inPrompts(q) || chosenLabels.some((l) => l.includes(plain(q))) || chosenFull.some((c) => c.includes(plain(q)))
-      || (q.includes(',') && q.split(',').every((part) => plain(part).length < 3 || chosenLabels.some((l) => l.includes(plain(part)))));
-  };
-  const decision = [], late = [];
-  if (hasCierre) {
-    if (!d) decision.push('Decisión: elegida <option> · descartadas <options> (the user\'s pick in the choice window) | del usuario ("<their words>") | única (<why>)');
-    else if (/^elegida/i.test(d) && ctx.decisions && !ctx.decisions.length) decision.push('Decisión says "elegida" but no choice-window answer exists in this task: ask with the optimal options (AskUserQuestion), or write del usuario ("<their words>") / única (<why>)');
-    else if (/^del usuario/i.test(d) && !quotes.some(usersWords)) decision.push('Decisión: del usuario needs the user\'s own words (or the option they picked) in quotes');
-    else if (/^[uú]nica/i.test(d) && !/^[uú]nica \(.{3,}\)/i.test(d)) decision.push('Decisión: única (<why there is only one real option>)');
-    else if (!/^(elegida|del usuario|[uú]nica)/i.test(d)) decision.push('Decisión: elegida … · descartadas … | del usuario ("<their words>") | única (<why>)');
-    const sub = field(reply, 'Sub-?decisiones');
-    if (!sub) decision.push('Sub-decisiones: <each decision taken during the task> → preguntada | del usuario ("<their words>") | no preguntada; … — or "ninguna"');
-    else if (!/^ninguna\b/i.test(sub)) {
-      // items split on ";" — or on " · " when one part holds several "→" (3c test A: six items read as one)
-      const items = splitTop(sub, ';').flatMap((s) => ((s.match(/→/g) || []).length > 1 ? splitTop(s, '·') : [s]))
-        .filter((s) => !BRANCH.test(s.split('→')[0])); // the branch is the user's: not counted (3c)
-      const alone = items.filter((s) => /→\s*no preguntada/i.test(s));
-      // asked after the change it decides: passes, Decision ✘. A later question that only confirms is "confirmada" and passes (3c).
-      late.push(...items.filter((s) => /→\s*preguntada tarde/i.test(s)));
-      // "→ única (<why>)": a technical step with one real way (fixing the bug it found) is not the user's decision (3c test A)
-      // "→ única (<why>)": a technical step with one real way (fixing the bug it found) is not the user's decision (3c test A);
-      // "→ propuesta (<what>)": named but not applied, left for the user to decide later (2026-10-03 · T2o)
-      const single = items.filter((s) => /→\s*([uú]nica|propuesta) \(.{3,}\)/i.test(s));
-      const bad = items.filter((s) => !/→\s*(preguntada|confirmada|del usuario \(|no preguntada|[uú]nica \(.{3,}\)|propuesta \(.{3,}\))/i.test(s));
-      const asked = items.length - alone.length - bad.length - single.length - items.filter((s) => /→\s*del usuario \(/i.test(s)).length + (/^elegida/i.test(d) ? 1 : 0);
-      // The block names the three honest ways out (2026-10-03 · T2m: the agent wrote "→ del usuario" for a choice-window
-      // answer and "no preguntada" for two technical limits).
-      const ways = 'answered by the user in the choice window → preguntada; only one real way (a technical limit, or the fix of a bug you found) → única (<why>) — never a user rule you cannot cite; named but not applied, left for the user → propuesta (<what>); otherwise ask it now with the options (AskUserQuestion), apply the pick and mark it preguntada';
-      if (bad.length) decision.push(`Sub-decisiones: each item ends with one marker — "→ preguntada", "→ confirmada", "→ del usuario (\\"<their words>\\")", "→ única (<why there is one real way>)", "→ propuesta (<what you propose>)" or "→ no preguntada" — e.g. "texto del botón → preguntada; panel en la esquina → única (un widget no entra en el NodeView)". Fix: ${bad.slice(0, 2).join(' | ')}. For each: ${ways}`);
-      if (alone.length) decision.push(`Sub-decisiones taken without asking (${alone.slice(0, 3).join(' | ')}): the user decides every real decision. For each: ${ways}`);
-      if (ctx.decisions && asked > ctx.decisions.length) decision.push(`Sub-decisiones and Decisión claim ${asked} decisions asked but the choice window answered ${ctx.decisions.length} in this task: ask the missing ones or mark them honestly`);
-    }
+  // Testigo decision (3e-1): the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
+  // answered question of the task came before its first change; each answer is recorded with its position, and a later
+  // question does not count against it (user's choice, 2026-10-03 · T2q). An edit the gate denied changed nothing.
+  const taskTools = ctx.taskTools?.length ? ctx.taskTools : allTools;
+  const changedFile = (t) => !t.error && ((EDITS.test(t.name) && !exempt(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
+  const firstTaskChange = taskTools.findIndex(changedFile);
+  const firstAsk = taskTools.findIndex((t) => ASK(t) && !t.error);
+  for (const x of ctx.decisions || []) {
+    const i = x.callId ? taskTools.findIndex((t) => t.id === x.callId) : -1;
+    if (i >= 0) x.position = firstTaskChange >= 0 && i > firstTaskChange ? 'after' : 'before';
   }
+  const decision = [];
+  let lateDecision = false;
+  if (ctx.decisions && !ctx.decisions.length) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick');
+  else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
+  // Testigo gate (3e-1): the exit of the agent's last gate after its last code change; with none, the repo typecheck the
+  // hook re-runs (ctx.rerun, testigos.mjs: 40 s, never the full build). A failing gate blocks once (user's choice,
+  // 2026-10-03 · T2q); "no comprobado (<why>)" says the failure is not this task's.
   const gate = [];
-  if (lastCode >= 0 && !turn.tools.slice(lastCode + 1).some(gateCmd)) gate.push('no typecheck, lint or build ran after the last code change: run the project\'s gate once now (the full one at the end, per repo)');
+  if (lastCode >= 0) {
+    const mine = turn.tools.slice(lastCode + 1).filter(gateCmd).pop();
+    const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
+    // The exit belongs to the gate only when the gate is the command's last part: "build | grep -i error" exits 1 on a
+    // clean build. A failure the gate may not own is decided by the hook's own typecheck (none: not held against it).
+    const tail = (mine ? cmdOf(mine) : '').split(/&&|\|\||[;|\n]/).map((p) => p.trim()).filter(Boolean).pop() || '';
+    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: !result(mine)?.error, s: secs(mine) === null ? null : Math.round(secs(mine)) };
+    const run = !mine ? rerun() : agentRun.ok || GATE.test(tail) ? agentRun : rerun() || { ...agentRun, ok: true, exitNotTheGate: true };
+    observed.gate = run || null;
+    const none = 'no typecheck, lint or build ran after the last code change';
+    if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
+    else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
+    else if (!run.ok && !/no comprobado \(.{3,}\)/i.test(reply)) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+  }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   const cierre = [];
-  if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Decisión · Sub-decisiones · Evidencia · Aprendido)');
+  if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)');
   else {
     if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | parcial (<what is missing>) | bloqueado (<why>)');
     if (!field(reply, 'Evidencia')) cierre.push('Evidencia: observada <what you saw> | inferida de <source> (check: <one line for the user>)');
@@ -298,8 +275,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     red: observed.tests.red ? [] : ['a red claim (rojo / habría fallado) with no test run before the first code change or in a clean worktree: run it there, or write it as inferida'],
     preexisting: observed.worktree || /no comprobado/i.test(reply) ? [] : ['a failure called pre-existing without a clean-copy check: check it now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
+    secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(reply) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
+    chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: an earlier record was edited or deleted (check: node testigos.mjs)`] : [],
   };
-  const steps = ROUTINE.steps.map((s) => {
+  const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked;
     const why = applies ? fails[s.id] || [] : [];
@@ -308,12 +287,13 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const missing = steps.filter((s) => s.applies && s.enforce === 'block').flatMap((s) => s.why);
   const findings = [...steps.filter((s) => s.applies && s.enforce !== 'block').flatMap((s) => s.why), ...extras];
   const dec = steps.find((s) => s.id === 'decision');
-  if (late.length && dec?.applies) { // cannot be undone, so it does not block; the evaluation keeps it
-    const why = `preguntada tarde (asked after the change it decides): ${late.slice(0, 3).join(' | ')}`;
+  if (lateDecision && dec?.applies) { // cannot be undone, so it does not block; the evaluation keeps it
+    const why = 'the first choice-window question came after the task\'s first change';
     dec.pass = false; dec.why = [...dec.why, why]; findings.push(why);
-  } else if (observed.asked.afterFirstChange && hasCierre && !/→\s*confirmada/i.test(field(reply, 'Sub-?decisiones'))) findings.push('a choice-window question came after the first change and no sub-decision says "confirmada" or "preguntada tarde": check it was asked before applying what it decided');
-  if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal contract (decision, gate, Cierre)');
-  if (observed.gates.some((g) => g.error)) findings.push(`a gate after the last change failed: ${observed.gates.filter((g) => g.error).map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
+  }
+  if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
+  const otherFailed = observed.gates.filter((g) => g.error && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
+  if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   return { level, changed, reply, missing, findings, steps, dept, observed };
 }
 
@@ -344,7 +324,7 @@ export function branchesOf(files) {
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids);
-  return {
+  return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos", 3e-1)
     id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook' }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
     // Never a secret in the chained log (it cannot be edited later, 3c test A): picked labels only, no free-text answer,
     // and passwords, tokens and keys masked in what is kept as text.
@@ -358,7 +338,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
-  };
+  });
 }
 
 // The record of a turn routed Q that changed nothing, or null: no task ID, so it never shifts T<n> or the follow-up offered.
@@ -402,6 +382,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
       ctx.taskTools = sessionTools(taskLines(lines)); // the task's tool calls (its prompt and two follow-ups)
+      // testigos that execute (testigos.mjs, 3e-1): the repo typecheck when the agent ran no gate, secrets in what the task
+      // wrote, and the chain as it stands before this record
+      ctx.rerun = (files) => rerunGate(files, home);
+      ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
+      ctx.chain = verifyChain(readRecords(home.log));
       const gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
@@ -411,7 +396,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         return;
       }
       if (gaps.missing.length && !h.stop_hook_active) {
-        process.stdout.write(JSON.stringify(agent.out.block(checkCierre(turn, h.last_assistant_message, all, prompts, ctx))));
+        process.stdout.write(JSON.stringify(agent.out.block(blockReason(gaps))));
         return;
       }
       gaps.observed.branches = branchesOf(gaps.changed);

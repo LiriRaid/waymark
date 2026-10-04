@@ -301,7 +301,7 @@ test('Cierre: Sub-decisiones listed, none taken alone, as many asked as answered
   assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'íconos en modales angostos → no preguntada'), undefined, undefined, ctx), /taken without asking/);
   assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'textos de botones → preguntada'), undefined, undefined, ctx), /claim 2 decisions asked but the choice window answered 1/);
   assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, 'textos de botones → del usuario ("que diga Izquierda, Centro, Derecha")'), undefined, ['ok'], ctx), null);
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'íconos'), undefined, undefined, ctx), /each item needs/);
+  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'íconos'), undefined, undefined, ctx), /each item ends with one marker/);
 });
 
 test('Cierre: the routing line\'s department must have been invoked; the record keeps it', () => {
@@ -1161,7 +1161,7 @@ test('T2l Sub-decisiones: " · " separates items with several "→"; "→ única
   assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, sub), undefined, ['ok'], ctx), null);
   const g = cierreGaps(l2(), cierre(id, undefined, undefined, 'a → preguntada · b → no preguntada'), undefined, undefined, ctx);
   assert.ok(g.missing.some((m) => /taken without asking \(b → no preguntada\)/.test(m)), 'only the item taken alone is named');
-  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'x → única'), undefined, undefined, ctx) || '', /each item needs/, 'única needs its reason');
+  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'x → única'), undefined, undefined, ctx) || '', /each item ends with one marker/, 'única needs its reason');
 });
 
 test('T2l Aprender: memory.md written by any tool counts when it changed in the turn and holds the task ID', () => {
@@ -1227,4 +1227,23 @@ test('T2l turn start: a prompt after the last close starts the turn even when th
   const p = { ...prompt('nueva tarea'), timestamp: new Date(Date.UTC(2026, 9, 4, 5, 0)).toISOString() };
   const lines = [p, call('Edit', { file_path: FILE }), { ...say('hecho'), timestamp: new Date(Date.UTC(2026, 9, 4, 5, 1)).toISOString() }];
   assert.deepEqual(currentTurn(lines, Date.UTC(2026, 9, 4, 4, 0)).tools.map((t) => t.name), ['Edit'], 'the untimestamped tool call stays in the turn');
+});
+
+test('T2m: the block names the honest ways out; the choice window waiting for the user is userWait, not the agent\'s minutes', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const msg = checkCierre(l2(), cierre(id, undefined, undefined, 'aviso en la esquina → no preguntada'), undefined, undefined, ctx) || '';
+  assert.match(msg, /choice window → preguntada; only one real way \(a technical limit, or the fix of a bug you found\) → única \(<why>\); otherwise ask it now/);
+  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'alcance → del usuario'), undefined, undefined, ctx) || '', /e\.g\. "texto del botón → preguntada; panel en la esquina → única/);
+  const at = (min) => new Date(Date.UTC(2026, 9, 4, 6, min)).toISOString();
+  const lines = [{ ...prompt('x'), timestamp: new Date(Date.now() - 62 * 60000).toISOString() }, say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    { type: 'assistant', timestamp: at(0), message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'q1', input: {} }] } },
+    { type: 'user', timestamp: at(60), message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'answered' }] }, toolUseResult: { questions: [{ question: '¿Cómo?', options: [{ label: 'Backoff' }, { label: 'Cola' }] }], answers: { '¿Cómo?': 'Backoff' } } },
+    { type: 'assistant', timestamp: at(60), message: { content: [{ type: 'tool_use', name: 'Bash', id: 'b1', input: { command: 'npm run build' } }] } },
+    { type: 'user', timestamp: at(61), message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ok' }] } },
+    call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()];
+  const t = cierreGaps(currentTurn(lines), cierre(id), undefined, undefined, ctx).observed.time;
+  assert.equal(t.userWait, 60, 'an hour waiting for the answer');
+  assert.ok(t.minutes >= 1.5 && t.minutes <= 2.5, `the agent's time without the wait (${t.minutes})`);
+  assert.equal(t.slowest.tool, 'Bash', 'the wait is not the slowest step');
 });

@@ -157,7 +157,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   const code = changed.filter((f) => !NOT_CODE.test(f));
-  const timed = turn.tools.filter((t) => secs(t) !== null);
+  // The choice window waiting for the user is the user's time, not the agent's (2026-10-03 · T2m: a question left open
+  // overnight made a 2-minute turn read 432 minutes): kept apart as userWait, out of minutes and the slowest step.
+  const ASK = (t) => t.name === 'AskUserQuestion';
+  const timed = turn.tools.filter((t) => secs(t) !== null && !ASK(t));
+  const userWait = turn.tools.filter((t) => ASK(t) && secs(t) !== null).reduce((a, t) => a + secs(t), 0);
   const slowest = [...timed].sort((a, b) => secs(b) - secs(a))[0];
   const observed = {
     memory: {
@@ -184,7 +188,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     docs: turn.tools.filter(DOCS).length,
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
     branches: ctx.branches || {},
-    time: { minutes: turn.startedAt ? Math.round((Date.now() - turn.startedAt) / 6000) / 10 : null, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
+    time: { minutes: turn.startedAt ? Math.round(Math.max(0, Date.now() - turn.startedAt - userWait * 1000) / 6000) / 10 : null, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
   };
 
   // ---- Each step of the routine contract (waymark/routine.json): does it apply, did it pass, why not ----
@@ -223,8 +227,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       const single = items.filter((s) => /→\s*[uú]nica \(.{3,}\)/i.test(s));
       const bad = items.filter((s) => !/→\s*(preguntada|confirmada|del usuario \(|no preguntada|[uú]nica \(.{3,}\))/i.test(s));
       const asked = items.length - alone.length - bad.length - single.length - items.filter((s) => /→\s*del usuario \(/i.test(s)).length + (/^elegida/i.test(d) ? 1 : 0);
-      if (bad.length) decision.push(`Sub-decisiones: each item needs "→ preguntada | confirmada | del usuario (\\"…\\") | única (<why there is one real way>) | no preguntada" (${bad.slice(0, 2).join(' | ')})`);
-      if (alone.length) decision.push(`Sub-decisiones taken without asking (${alone.slice(0, 3).join(' | ')}): the user decides every real decision. Put them to the user now with the options (AskUserQuestion), apply the pick, then mark them preguntada`);
+      // The block names the three honest ways out (2026-10-03 · T2m: the agent wrote "→ del usuario" for a choice-window
+      // answer and "no preguntada" for two technical limits).
+      const ways = 'answered by the user in the choice window → preguntada; only one real way (a technical limit, or the fix of a bug you found) → única (<why>); otherwise ask it now with the options (AskUserQuestion), apply the pick and mark it preguntada';
+      if (bad.length) decision.push(`Sub-decisiones: each item ends with one marker — "→ preguntada", "→ confirmada", "→ del usuario (\\"<their words>\\")", "→ única (<why there is one real way>)" or "→ no preguntada" — e.g. "texto del botón → preguntada; panel en la esquina → única (un widget no entra en el NodeView)". Fix: ${bad.slice(0, 2).join(' | ')}. For each: ${ways}`);
+      if (alone.length) decision.push(`Sub-decisiones taken without asking (${alone.slice(0, 3).join(' | ')}): the user decides every real decision. For each: ${ways}`);
       if (ctx.decisions && asked > ctx.decisions.length) decision.push(`Sub-decisiones and Decisión claim ${asked} decisions asked but the choice window answered ${ctx.decisions.length} in this task: ask the missing ones or mark them honestly`);
     }
   }

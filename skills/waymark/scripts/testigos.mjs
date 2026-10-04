@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Waymark · testigos (docs/adr/0012, step 3e-1). A testigo answers "is it true that…?" by executing, never by reading the
+// Waymark · testigos (docs/adr/0012). A testigo answers "is it true that…?" by executing, never by reading the
 // agent's prose: it states its claim (waymark/routine.json, `claim`), runs a command and returns ✔ / ✘ / not applicable
 // with its evidence. stop-hook.mjs judges every testigo at the end of a turn; the ones that need a process or git live
 // here, so they can also be run again by hand:
@@ -9,15 +9,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readRecords, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords, readNotes, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
 
-const GATE_MS = 40000; // under the agents' default hook timeout (user's choice, 2026-10-03 · T2q)
+const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const top = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? path.resolve(r.stdout.trim()) : null; };
 const same = (a, b) => String(a || '').replace(/\\/g, '/').toLowerCase() === String(b || '').replace(/\\/g, '/').toLowerCase();
 
-// The repo's typecheck, in the user's order (2026-10-03 · T2q): the verified typecheck/syntax row of memory.md's
+// The repo's typecheck, in this order: the verified typecheck/syntax row of memory.md's
 // "Quality gates" table (project root only) → package.json's typecheck script with the lockfile's package manager →
 // `tsc --noEmit` when TypeScript is installed. → { cmd, from } or null. Never the full build.
 export function gateCommand(root, memoryFile) {
@@ -66,7 +66,7 @@ export function rerunGate(codeFiles, home) {
   return null;
 }
 
-// What the testigo "sin secretos" reads besides what Waymark writes (user's choice, 2026-10-03 · T2q): the project memory
+// What the testigo "sin secretos" reads besides what Waymark writes: the project memory
 // when the turn wrote it, the lines the task added to its files (untracked files whole) and the task's commits.
 // → [{ where, text }]
 export function secretSources(files, commits, cwd, memoryFile, since = 0) {
@@ -106,8 +106,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const cwd = process.cwd(), home = projectHome(cwd), records = readRecords(home.log);
   const id = process.argv[2] || records.filter((r) => r.id).pop()?.id;
   const mark = (ok) => (ok === null ? '—' : ok ? '✔' : '✘');
-  const chain = verifyChain(records);
-  console.log(`${mark(chain.ok)} chain: ${records.length} records${chain.ok ? ' intact' : `, broken at record ${chain.at + 1}`} (${home.log})`);
+  const chain = verifyChain(records, records.some((r) => r.note) ? readNotes(cwd) : null); // with the notes, as the hook checks it
+  console.log(`${mark(chain.ok)} chain: ${records.length} records${chain.ok ? ' intact' : `, broken at record ${chain.at + 1}${chain.note ? ' (its git note is missing or was edited)' : ''}`} (${home.log})`);
   if (!id) { console.log('— no task recorded yet'); process.exit(chain.ok ? 0 : 1); }
   const commits = commitsFor(cwd, id);
   console.log(`${commits.length ? '✔' : '—'} commit + trailer: ${commits.length ? commits.map((h) => h.slice(0, 8)).join(', ') : `no commit with Waymark-Task: ${id} in the last 30`}`);
@@ -116,7 +116,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const gate = gateCommand(top(cwd) || cwd, home.memory);
   const run = gate ? runGate(gate, top(cwd) || cwd) : null;
   console.log(run ? `${mark(run.ok)} typecheck now (${run.from}): ${run.cmd} · ${run.timedOut ? `over ${GATE_MS / 1000} s` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
-  const rec = records.find((r) => r.id === id);
+  const rec = readTaskRecords(home).find((r) => r.id === id);
   if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
   process.exit(chain.ok && !hits.length && (!run || run.ok) ? 0 : 1);
 }

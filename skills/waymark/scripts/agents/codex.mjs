@@ -10,8 +10,7 @@
 //   with the user's answers. request_user_input_async (seen in codex 0.160's default mode: {"accepted":true}, the answer
 //   is the user's next message) → AskUserQuestion answered by that message; a rejected call (bad arguments) never counts.
 //   Without either, a turn that ended asking in the chat and the user's next message count as the decisions asked in
-//   chat, one per question line written after the turn's last action (user's choice, 2026-10-03 · T2i, T2j, T2k;
-//   docs/adr/0009, 0010).
+//   chat, one per question line written after the turn's last action (docs/adr/0009, 0010).
 // - token_count → usage per response (cached input apart); turn_context → model; session_meta → Codex version.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -89,7 +88,7 @@ export function toLines(rows) {
         const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => bare(l) && bare(reply).includes(bare(l))).join(',') || reply]));
         lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in the next message' }] }, toolUseResult: { source: 'async', questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
       }
-      // every question line the agent wrote after the turn's last action (3c: a closing summary without "?" hid them)
+      // every question line the agent wrote after the turn's last action (a closing summary without "?" must not hide them)
       const questions = !choiceInTurn && tail.length ? [...new Set([...tail.join('\n').matchAll(QUESTION)].map((m) => m[0].trim()))] : [];
       if (questions.length) { // the previous turn ended asking in the chat: this message answers it
         const id = `chat-${n}`;

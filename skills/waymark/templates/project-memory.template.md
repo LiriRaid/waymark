@@ -4,10 +4,8 @@ Path: <absolute path to project root>
 Updated: <YYYY-MM-DD>
 
 ## Work in progress
-Read first at Recall. **One line per task, headed by its task ID** (tasks.md is generated from these lines; a line without an ID at its head counts as a note). Rewrite only your task's line, after its own milestones (not at session end: sessions can stop without warning, e.g. out of tokens). Any agent can resume from here.
-- [<task ID>] <title in the user's words> (L<n> <dept>): <what is done, files>. Decisión: <what was decided> ← <evidence: file:line, output, observed value>. Pendiente: <the next step>
-- ▶ [<task ID>] <title> (L3 <dept>): plan ✔1 <step> · ▶2 <step> · 3 <step>; next gate: <command>. Descartado: <what was ruled out and why>. NEXT <the next step>
-<!-- ▶ marks the task in progress. A finished task with nothing pending leaves this section (its record stays in provenance.jsonl); none open → "- (idle since <date>)". -->
+Read first at Recall. **One line per task, written by the end-of-turn hook from the Cierre's Aprendido** (≤200 characters); never edit these lines by hand. tasks.md is generated from them; a line without an ID at its head counts as a note. Any agent can resume from here.
+<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) or "- ✔ [<task ID>] <Aprendido>" (hecho; the newest 5 stay). A follow-up replaces its task's line; older ✔ lines and lines over 200 characters move whole to history.md. The whole record: `waymark.mjs tasks <task ID>`. -->
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)

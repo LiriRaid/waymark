@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Waymark · quota calibration from the user's own pairs: a closed task's tokens and the % of the 5-hour quota it used,
-// per model, kept in ~/.waymark/calibration.jsonl (this machine; the user's choice, 2026-10-03 · T2f).
+// per model, kept in ~/.waymark/calibration.jsonl (this machine).
 //   node calibrate.mjs <task ID> <percent> [--project <path>]   adds the pair (tokens and model from the task's record)
 //   node calibrate.mjs --list                                   shows the pairs and the current estimate per model
 // Estimate: WAYMARK_TOKENS_PER_PCT if set; else 3+ pairs of the model with a token split → a weight for new tokens and
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readRecords } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords } from './provenance.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 export const pairsFile = () => path.join(HOME(), 'calibration.jsonl');
@@ -39,7 +39,7 @@ export function estimate(usage, model, perPctDefault = 1350000) {
 
 export function addPair(taskId, pct, cwd = process.cwd(), now = new Date()) {
   const home = projectHome(cwd);
-  const rec = readRecords(home.log).reverse().find((r) => r.id === taskId);
+  const rec = readTaskRecords(home).reverse().find((r) => r.id === taskId); // a committed task: its note
   if (!rec) throw new Error(`task ${taskId} is not in ${home.log}`);
   const u = rec.evaluation?.usage || {};
   const pair = { at: now.toISOString(), task: taskId, project: home.slug, model: rec.inputs?.model || null, agent: rec.inputs?.agent || null, pct: Number(pct),

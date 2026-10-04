@@ -3,10 +3,9 @@
 // as a pre-tool hook (Claude Code: PreToolUse, matcher "Bash|PowerShell|Edit|Write|NotebookEdit"; another agent: same
 // script with `--agent <name>`). Runs locally (0 tokens unless it fires). Every L1–L3 change to project files (edits,
 // and shell commands that change files: git checkout --, sed -i, rm, redirects) is denied until the task has a
-// choice-window question (AskUserQuestion) — strict since test 2.0-2, where a retry let the agent apply two decisions
-// before asking. A turn routed Q is told once to re-route (by tool call: the owner dept-* with args "L<n>"). The
+// choice-window question (AskUserQuestion), so a retry never applies a decision before asking. A turn routed Q is told once to re-route (by tool call: the owner dept-* with args "L<n>"). The
 // message asks for the foreseeable sub-decisions in the same call; browser verification is never offered (only when the
-// user asks, 3c); the branch is the user's, never pushed as a sub-decision (3c). An unrouted reply inside an open task inherits its routing (3c).
+// user asks); the branch is the user's, never pushed as a sub-decision. An unrouted reply inside an open task inherits its routing.
 // Memory and scratch files are exempt; L0 skipped. Procedure and mem_search are recorded and scored by the end-of-turn hook, not denied.
 // Remove the hook from the agent's settings to disable it.
 import fs from 'node:fs';
@@ -26,8 +25,8 @@ const exempt = (file) => {
 };
 
 // Decision gate: deny once per prompt (state keyed by session + prompt uuid), never for L0 or exempt files. A turn routed
-// Q that edits a project file is denied once too: a question that became a change must re-route (test 2.0-1: routed Q,
-// 8 edits, so every check and the record were skipped).
+// Q that edits a project file is denied once too: a question that became a change must re-route, or every check and
+// the record would be skipped.
 export function checkDecision(target, lines, session = 'unknown', stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.decision-gate.json'), cwd = process.cwd()) {
   // target: a file path (an edit) or { command } (a shell command that changes files: git checkout --, sed -i, rm, >).
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
@@ -46,8 +45,8 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   };
   if (q && once('q')) return 'Waymark: this turn was routed as a question (Q) but is about to change project files. A question that becomes a change is a task: re-route with a tool call — invoke the owner dept-* skill with args "L<n>" (e.g. Skill dept-frontend, args "L2"); a routing line written mid-turn is not persisted — then the opener, and put the decision to the user with the optimal options before changing anything.';
   // Strict gate (user's decision 2026-10-02): no change until the user was asked in the choice window in this task.
-  // The task starts after this session's last close: the previous task's question never opens it (user's choice,
-  // 2026-10-04 · T1; the ID is not known yet, so a follow-up asks or confirms again).
+  // The task starts after this session's last close: the previous task's question never opens it (the ID is not known
+  // yet, so a follow-up asks or confirms again).
   let records = [];
   try { records = readRecords(projectHome(cwd).log); } catch {}
   if (!askedChoice(taskLines(lines, { since: taskStart(records, session) }))) {

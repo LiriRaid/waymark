@@ -54,7 +54,7 @@ function digest(cwd) {
   return out.join('\n');
 }
 
-// One line when neither a check nor this pointer happened in the last week (user's choice, 2026-10-03 · T2g).
+// One line when neither a check nor this pointer happened in the last week.
 export function checkPointer(now = Date.now()) {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(CHECK_STATE, 'utf8')); } catch {}

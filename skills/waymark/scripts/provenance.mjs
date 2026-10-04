@@ -1,11 +1,15 @@
 // Waymark · supply chain of the agent's work (docs/adr/0001, 0002), shared by the hooks. Offline, 0 model tokens.
 // - Task IDs `YYYY-MM-DD · T<n>[a-z]`: n per project and local day, a letter per follow-up prompt of the same task.
-// - The log: one JSON line per closed task in <project>/.waymark/provenance.jsonl, written by stop-hook.mjs from what
-//   the transcript proves (prompt, options asked and the user's pick, files, commands, skills), the inputs it was
-//   built with (Waymark and agent version, model, MCP servers, instruction file hashes), its commits (trailer
-//   `Waymark-Task: <id>`) and the Cierre text. Each line holds the hash of the previous one: an edited or deleted
-//   record breaks the chain (verifyChain). Each record names its agent; a question (kind "Q") is a short record with no
-//   task ID (docs/adr/0008).
+// - The record of a closed task, written by stop-hook.mjs from what the transcript proves (prompt, options asked and
+//   the user's pick, files, commands, skills), the inputs it was built with (Waymark and agent version, model, MCP
+//   servers, instruction file hashes), its commits (trailer `Waymark-Task: <id>`) and the Cierre text. Git is the
+//   source of truth (docs/adr/0012): a task with a commit keeps its whole record as a git note on that commit
+//   (notes.mjs) and <project>/.waymark/provenance.jsonl keeps a stub with the note's hash; a task without one keeps the
+//   whole record there. Each line holds the hash of the previous one: an edited or deleted record or note breaks the
+//   chain (verifyChain). Each record names its agent; a question (kind "Q") is a short record with no task ID
+//   (docs/adr/0008).
+// - The live state: one line per task in memory.md → Work in progress, written by the end-of-turn hook from the Cierre
+//   (writeTaskLine), and tasks.md generated from it and the records.
 // Where: <project>/.waymark/ (docs/adr/0007), resolved once by projectHome() for every hook.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +18,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isPrompt } from './transcript.mjs';
+import { addNote, readNotes, noteSha, NOTES_REF } from './notes.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -86,16 +91,16 @@ const README = `# .waymark: this project's Waymark memory (local, not committed)
 Any agent (Claude Code, Codex, Cursor, a new session) resumes the work from this folder:
 
 - \`tasks.md\`: where the work stands: in progress, pending, next step, and the tasks already done. Generated at each task close; do not edit it.
-- \`memory.md\`: the project memory. *Work in progress* has one line per task (edit your task's line), then identity, verified gate commands, conventions and solved problems.
-- \`provenance.jsonl\`: one record per closed task: the request, the user's decisions, files, gates, evidence and the automatic evaluation. Each line holds the hash of the previous one.
+- \`memory.md\`: the project memory. *Work in progress* has one line per task (≤200 characters, written by the end-of-turn hook from the Cierre), then identity, verified gate commands, conventions and solved problems.
+- \`provenance.jsonl\`: one line per closed task, chained (each holds the hash of the previous one). A task with a commit keeps its whole record (the request, the user's decisions, files, gates, evidence, the automatic evaluation) as a git note on that commit (\`git notes --ref=waymark show <commit>\`, \`waymark.mjs tasks\`) and a stub here; one without a commit keeps it here.
 - \`open.json\`: turns that started and have not ended (one per session); shown in tasks.md under *Started, not closed*.
-- \`history.md\` (when present): closed or old *Work in progress* lines moved out of memory.md, never deleted. Read it only for the past.
+- \`history.md\` (when present): *Work in progress* lines moved out of memory.md whole (closed beyond the last 5, or over 200 characters), never deleted. Read it only for the past.
 
 Excluded from git through \`.git/info/exclude\`.
 `;
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
-// entry per session, written by the per-prompt hook and removed when the turn ends (user's choice, 2026-10-03 · T2c).
+// entry per session, written by the per-prompt hook and removed when the turn ends.
 const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
 const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
 
@@ -103,7 +108,7 @@ export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
   const home = projectHome(cwd), file = openFile(home);
   if (!file || !fs.existsSync(home.memory)) return false; // tasks.md exists only with memory in the project
   const ids = taskIds(cwd, now), open = readOpen(home);
-  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex" (3c)
+  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex"
   ensureLocal(home);
   fs.writeFileSync(file, JSON.stringify(open, null, 1));
   refreshTasks(home, true);
@@ -121,31 +126,119 @@ export function closeOpen(home, session, closedId) {
   return true;
 }
 
-const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file (user's choice): the detail stays in memory.md
+const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
+const LINE_CHARS = 200, DONE_KEPT = 5; // a Work in progress line, and the closed (✔) lines kept there
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
-// One Work in progress line with a task ID → "ID · status · step · next" (status: ▶ in progress, else pending).
+// The pending parts of a line, in order: every NEXT / Next: / Pendiente: / Pending: marker. A marker inside quotes is
+// text, not a marker; "Next.js" is not one. None → the text after the first ":".
+function nextOf(text) {
+  const masked = text.replace(/"[^"]*"|“[^”]*”/g, (q) => ' '.repeat(q.length));
+  const marks = [...masked.matchAll(/\b(?:NEXT(?=[\s:]):?|(?:Next|Pendiente|Pending):)\s*/g)];
+  return marks.map((m, i) => text.slice(m.index + m[0].length, marks[i + 1]?.index ?? text.length).trim().replace(/[\s·;.,]+$/, '')).filter(Boolean).join(' · ')
+    || text.slice(text.indexOf(':') + 1).trim();
+}
+// A line written by the hook: "- ▶|✔ [<task ID>] <Aprendido>", at most LINE_CHARS.
+const HOOK_LINE = new RegExp(`^\\s*-\\s*([▶✔])\\s*\\[(${ID.source})\\]\\s*(.*)$`);
+
+// One Work in progress line with a task ID → "ID · status · …". A hook line → "ID · en curso|hecho · <Aprendido>"; an
+// older free-form line → "ID · status · step · next" (status: ▶ in progress, else pending).
 export function taskSummary(line) {
+  const hook = line.length <= LINE_CHARS && line.match(HOOK_LINE);
+  if (hook) return clip(`- ${hook[2]} · ${hook[1] === '✔' ? 'hecho' : 'en curso'} · ${hook[hook.length - 1].trim()}`, TASK_CHARS);
   const text = line.replace(/^\s*-\s*/, '').replace(/\s+/g, ' ');
   const id = text.match(ID)[0];
   const status = /^▶/.test(text) ? 'en curso' : 'pendiente';
   const step = text.match(/▶(\S+)/)?.[1];
-  // Every pending part is kept, in order (3c: the last "Pendiente:" used to win and "paso 2" was lost). A marker inside
-  // quotes is text, not a marker; "Next.js" is not one.
-  const masked = text.replace(/"[^"]*"|“[^”]*”/g, (q) => ' '.repeat(q.length));
-  const marks = [...masked.matchAll(/\b(?:NEXT(?=[\s:]):?|(?:Next|Pendiente|Pending):)\s*/g)];
-  const next = marks.map((m, i) => text.slice(m.index + m[0].length, marks[i + 1]?.index ?? text.length).trim().replace(/[\s·;.,]+$/, '')).filter(Boolean).join(' · ')
-    || text.slice(text.indexOf(':') + 1).trim();
+  const next = nextOf(text);
   return clip(['- ' + id, status, step && `paso ${step}`, next && `próximo: ${next}`].filter(Boolean).join(' · '), TASK_CHARS);
 }
 
-// tasks.md from memory.md (Work in progress) and the log (done tasks). The agent never edits it (docs/adr/0007).
+const WIP = /(\n## Work in progress[^\n]*\n)([\s\S]*?)(?=\n## |$)/;
+// The task ID that heads a line: a hook line's, else one before the line's first ":"; one quoted later is a note.
+const headId = (l) => l.match(HOOK_LINE)?.[2] || l.slice(0, l.indexOf(':') + 1 || undefined).match(ID)?.[0] || null;
+// The Aprendido of a Cierre: its line, or, when the value ends with ":" or is empty, the lines below it up to a blank
+// line, the next field or a heading.
+function aprendidoOf(cierre) {
+  const m = cierre.match(/Aprendido:[ \t]*([^\n]*)/i);
+  if (!m) return '';
+  let v = m[1].trim();
+  if (!v || v.endsWith(':')) {
+    for (const l of cierre.slice(m.index + m[0].length).split('\n').slice(1)) {
+      if (!l.trim() || /^\s*#|^\s*(?:[-*]\s*)?(?:Resultado|Evidencia|Tests|Review|Build|Secretos)\s*:/i.test(l)) break;
+      v += ' ' + l.trim().replace(/^[-*]\s+/, '');
+    }
+  }
+  return v.trim().replace(/^["“«]\s*|\s*["”»]$/g, '').replace(/\s+/g, ' ');
+}
+const idOrder = (id) => { const m = String(id).match(ID); return m ? `${m[1]}·${String(m[2]).padStart(4, '0')}${m[3]}` : ''; };
+
+// Writes the task's Work in progress line from its Cierre: "- ✔ [<id>] <Aprendido>" when Resultado is hecho, else
+// "- ▶ …", at most 200 characters (the whole Aprendido stays in the record). It replaces the line of the same task (a
+// follow-up replaces its task's line; a replaced line not written by the hook moves to history.md). Lines over 200
+// characters and the closed (✔) lines beyond the newest 5 move whole to history.md; a long task line stays as
+// "- ▶ [<id>] <its next step>". → true when written.
+export function writeTaskLine(home, rec) {
+  if (!home?.dir || home.legacy || !rec?.id || !fs.existsSync(home.memory)) return false;
+  const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
+  const learned = aprendidoOf(cierre);
+  if (!learned || /^ninguno/i.test(learned)) return false;
+  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '');
+  const mine = clip(`- ${done ? '✔' : '▶'} [${rec.id}] ${learned}`, LINE_CHARS);
+  const text = fs.readFileSync(home.memory, 'utf8');
+  const m = ('\n' + text).match(WIP);
+  const body = m ? m[2].split('\n') : [];
+  const moved = [];
+  let at = -1;
+  const kept = [];
+  for (const l of body) {
+    const id = /^\s*-/.test(l) ? headId(l) : null;
+    if (id && base(id) === base(rec.id)) {
+      if (at < 0) at = kept.length;
+      if (l.length > LINE_CHARS || !HOOK_LINE.test(l)) moved.push(l); // a hand-written line keeps its detail in history.md
+      continue;
+    }
+    if (/^\s*-/.test(l) && l.length > LINE_CHARS) {
+      moved.push(l);
+      const t = l.replace(/^\s*-\s*/, '');
+      kept.push(clip(id ? `- ${/^\s*-\s*✔/.test(l) ? '✔' : '▶'} [${id}] ${nextOf(t)}` : `- ${clip(t, 150)} (whole: history.md)`, LINE_CHARS));
+    } else kept.push(l);
+  }
+  if (at < 0) { at = kept.length; while (at > 0 && !kept[at - 1].trim()) at--; }
+  kept.splice(at, 0, mine);
+  const closed = kept.filter((l) => /^\s*-\s*✔/.test(l) && headId(l)).sort((a, b) => idOrder(headId(b)).localeCompare(idOrder(headId(a))));
+  for (const l of closed.slice(DONE_KEPT)) { kept.splice(kept.indexOf(l), 1); moved.push(l); }
+  const section = kept.join('\n').replace(/\n*$/, '\n');
+  const next = m ? ('\n' + text).replace(WIP, (_, head) => head + section).slice(1) : text.replace(/\n*$/, '\n') + `\n## Work in progress\n${section}`;
+  fs.writeFileSync(home.memory, next);
+  if (moved.length) {
+    const hist = path.join(home.dir, 'history.md');
+    const head = fs.existsSync(hist) ? '' : `# History · ${home.slug}\n\nWork in progress lines moved out of memory.md whole (not deleted). Newest batch last.\n`;
+    fs.appendFileSync(hist, `${head}\n## Moved ${new Date().toISOString().slice(0, 16).replace('T', ' ')} (closing ${rec.id})\n${moved.join('\n')}\n`);
+  }
+  return true;
+}
+
+// Every record of the log with its note read back: a stub becomes the whole record (note fields, then the stub's).
+// With `last`: only the last N task records are read back (the others stay stubs).
+export function readTaskRecords(home, { last = Infinity } = {}) {
+  const records = readRecords(home.log);
+  const tasks = records.filter((r) => r.id), wanted = new Set(tasks.slice(Math.max(0, tasks.length - last)).filter((r) => r.note));
+  if (!wanted.size) return records;
+  const notes = readNotes(home.root, [...wanted].map((r) => r.note.commit));
+  return records.map((r) => {
+    if (!wanted.has(r)) return r;
+    try { return { ...JSON.parse(notes.get(r.note.commit)), ...r }; } catch { return { ...r, noteMissing: true }; }
+  });
+}
+
+// tasks.md from memory.md (Work in progress) and the records (done tasks). The agent never edits it (docs/adr/0007).
 // Only lines with a task ID are tasks; a memory without IDs (old format) shows its Task/Next lines.
 export function tasksMarkdown(home, now = new Date()) {
   let mem = '';
   try { mem = fs.readFileSync(home.memory, 'utf8'); } catch {}
   const wip = (('\n' + mem).match(/\n## Work in progress[^\n]*\n([\s\S]*?)(?=\n## |$)/)?.[1] || '').split('\n').filter((l) => /^\s*-/.test(l));
-  const withId = wip.filter((l) => ID.test(l.slice(0, l.indexOf(':') + 1 || undefined))); // the ID heads the line; one quoted later is a note
+  const withId = wip.filter(headId); // the ID heads the line; one quoted later is a note
   const tasks = withId.length ? withId.map(taskSummary)
     : wip.filter((l) => /^\s*-\s*(Task|Next)\b[^:]*:/i.test(l)).map((l) => clip(l.trim().replace(/\s+/g, ' '), TASK_CHARS));
   const notes = wip.length - (withId.length || tasks.length);
@@ -153,14 +246,15 @@ export function tasksMarkdown(home, now = new Date()) {
   const result = (r) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length ? ` · ${r.unresolved.length} sin resolver` : '');
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
-  const all = readRecords(home.log), records = all.filter((r) => r.id), lastRec = records[records.length - 1];
+  const all = readTaskRecords(home, { last: 8 }), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
   const questions = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q').length; // since the last close
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
-  // The last closed task with what another agent needs to continue (user's choice, 2026-10-03 · T2d): ~220 ch per field.
-  const lastClosed = lastRec ? [`## Last closed: ${cell(lastRec.id)}${who(lastRec)} (${new Date(lastRec.at).toLocaleString('sv').slice(0, 16)}; full record: last line of provenance.jsonl)`,
+  const source = (r) => (r.note ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
+  // The last closed task with what another agent needs to continue: ~220 ch per field.
+  const lastClosed = lastRec ? [`## Last closed: ${cell(lastRec.id)}${who(lastRec)} (${new Date(lastRec.at).toLocaleString('sv').slice(0, 16)}; full record: ${source(lastRec)})`,
     // a field runs to the end of its line, or to the next field on the same line ("Resultado: hecho · Decisión: …")
     ...[['Resultado', 'Resultado'], ['Decisión', 'Decisi[oó]n'], ['Sub-decisiones', 'Sub-?decisiones'], ['Evidencia', 'Evidencia'], ['Aprendido', 'Aprendido']]
-      // Decisión: the user's picks as recorded from the choice window (3e-1); older records keep the Cierre's field
+      // Decisión: the user's picks as recorded from the choice window; older records keep the Cierre's field
       .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
@@ -168,7 +262,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const rows = records.slice(-8).reverse()
     .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
-    `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and \`provenance.jsonl\`.`, '',
+    `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (\`waymark.mjs tasks [<task ID>]\`: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
     ...(started.length ? ['## Started, not closed (the turn never ended: quota, crash, or still running)', ...started, ''] : []),
     ...(questions ? [`Preguntas (Q) desde el último cierre: ${questions} (provenance.jsonl, kind "Q")`, ''] : []),
@@ -222,8 +316,7 @@ export function validId(id, ids) {
 }
 
 // Lines of the current task. With `since` (ms, taskStart): every line after it, so a new task never carries the
-// previous one's answers or first change (3e-1 test: T3 passed Decision on T2's question). Without it: from the
-// `prompts`-th last prompt.
+// previous one's answers or first change. Without it: from the `prompts`-th last prompt.
 export function taskLines(lines, { prompts = 3, since } = {}) {
   if (typeof since === 'number' && since > 0) {
     const i = lines.findIndex((d) => (Date.parse(d.timestamp || '') || 0) > since);
@@ -240,9 +333,9 @@ export function taskFiles(records, id) {
   return b ? records.filter((r) => base(String(r.id || '')) === b).flatMap((r) => r.files || []) : [];
 }
 
-// When the current task started (ms), read from the chained log, never from prose: this session's last task record
-// (user's choice, 2026-10-04 · T1). With a follow-up's ID (a letter): after the last record of another task, so the
-// stretch covers its whole task. 0 when the session has no task record (every line read belongs to the task).
+// When the current task started (ms), read from the chained log, never from prose: this session's last task record.
+// With a follow-up's ID (a letter): after the last record of another task, so the stretch covers its whole task. 0
+// when the session has no task record (every line read belongs to the task).
 export function taskStart(records, session, id) {
   const own = /[a-z]$/.test(String(id || '').match(ID)?.[0] || '') ? base(id) : null;
   const closes = records.filter((r) => r.session === session && ID.test(String(r.id || '')) && (!own || base(r.id) !== own));
@@ -274,7 +367,7 @@ export function decisionsIn(lines) {
 }
 
 // Decisions as the chained log keeps them: the picked labels, never a free-text answer — it may hold a password or a
-// token, and a chained record cannot be edited (3c test A: a test account's password typed in "Other").
+// token, and a chained record cannot be edited.
 export function recordedDecisions(decisions = []) {
   return (decisions || []).map((d) => {
     if (!d.labels) return d; // built by hand (tests, older callers): no options known; decisionsIn always sets them
@@ -285,7 +378,7 @@ export function recordedDecisions(decisions = []) {
   });
 }
 
-// Secret formats that are unambiguous wherever they appear (user's choice, 2026-10-03 · T2q): the testigo "sin secretos"
+// Secret formats that are unambiguous wherever they appear: the testigo "sin secretos"
 // looks for these in the memory, mem_save and the task's diff; "password=…" is only masked in what Waymark writes.
 const SECRET_FORMATS = [
   ['llave privada', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g],
@@ -345,8 +438,8 @@ export function commitsFor(cwd, id) {
 
 // Working-tree snapshot of the repo at cwd: { root, head, files: { <absolute path>: <content hash | "deleted"> } } for every
 // path git reports as changed or untracked; null without git or a repo. Two snapshots (prompt → end of turn) give the
-// files the turn really changed, whatever tool changed them (test 2.0-2: the modal files changed via `git checkout`,
-// the record listed only the spec written with Write).
+// files the turn really changed, whatever tool changed them (`git checkout`, a script, a formatter), not only the
+// files written with Edit/Write.
 export function gitSnapshot(cwd) {
   const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 1500, maxBuffer: 8 * 1024 * 1024 });
   const top = git('rev-parse', '--show-toplevel');
@@ -398,9 +491,9 @@ export function loadSnapshot(session) {
 const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|%TEMP%|\$T\b|mktemp/i;
 const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
 // The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
-// in it is an index in the command): a ">" there is code or text, not a redirect (3c: `node -e "…x=>{…}"` was gated).
+// in it is an index in the command): a ">" there is code or text, not a redirect (`node -e "…x=>{…}"`).
 // quotes: false keeps the quoted text — `bash -c "npm test"` still runs a test — and blanks only the bodies (a spec
-// written through `cat > x.spec.ts <<'EOF'` is not a test run, 3e-1 test).
+// written through `cat > x.spec.ts <<'EOF'` is not a test run).
 export function shellSkeleton(command, { quotes = true } = {}) {
   const c = String(command || ''), out = c.split('');
   const blank = (from, to) => { for (let i = from; i < to; i++) if (out[i] !== '\n') out[i] = ' '; };
@@ -431,24 +524,39 @@ export function mutatesFiles(command) {
 // A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory.
 export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(String(command || '')) && !/(\.waymark[\\/]|\.claude[\\/]projects)/i.test(String(command || ''));
 
-// Appends the record with `prev` (hash of the last line) and `hash` (of this record without it).
+// Appends the record with `prev` (hash of the last line) and `hash` (of this line without it). A task with commits
+// (newest first, as commitsFor returns them) is written whole as a git note on its newest commit and the line is a stub
+// that holds the note's sha256; a commit that already has a note, or a failed write, keeps the whole record here.
 export function appendRecord(cwd, record) {
   const file = logFile(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let prev = null;
   try { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); if (lines.length) prev = JSON.parse(lines[lines.length - 1]).hash || sha(lines[lines.length - 1]); } catch {}
-  const body = { ...record, prev };
+  let line = record;
+  const commit = record.id && record.commits?.[0];
+  if (commit) {
+    const text = JSON.stringify(record);
+    if (addNote(cwd, commit, text)) {
+      const { id, kind, agent, at, session, cwd: where, files, commits } = record;
+      line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits }).filter(([, v]) => v !== undefined));
+      line.note = { commit, sha: noteSha(text) };
+    }
+  }
+  const body = { ...line, prev };
   fs.appendFileSync(file, JSON.stringify({ ...body, hash: sha(JSON.stringify(body)) }) + '\n');
   return file;
 }
 
-// → { ok: true } or { ok: false, at: <index of the first record whose hash or link does not match> }.
-export function verifyChain(records) {
+// → { ok: true } or { ok: false, at: <index of the first line whose hash or link does not match> }. With the notes
+// (readNotes): a stub whose note is missing or does not match its sha256 breaks the chain too ({ note: true }).
+export function verifyChain(records, notes = null) {
   let prev = null;
   for (let i = 0; i < records.length; i++) {
     const { hash, ...body } = records[i];
     if (body.prev !== prev || sha(JSON.stringify(body)) !== hash) return { ok: false, at: i };
+    if (notes && body.note && (!notes.has(body.note.commit) || noteSha(notes.get(body.note.commit)) !== body.note.sha)) return { ok: false, at: i, note: true };
     prev = hash;
   }
   return { ok: true };
 }
+export { readNotes };

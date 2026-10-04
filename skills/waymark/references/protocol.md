@@ -25,9 +25,9 @@ At L2+ add the *Qué · Para qué · Dónde* line; at L1 the opening lines are e
 
 Long tasks fail when the conversation is compacted and the agent loses what was done, what is next and what was ruled out; it then fills the gaps by guessing. Keep that state on disk, not in the conversation:
 1. Plan first (`Plan` agent or plan mode) and split it into steps that are each an L1/L2 change with its own gate.
-2. Write the steps into the task's *Work in progress* entry: `Plan: ✔1 <step> · ▶2 <step> · 3 <step> — next gate: <command>`.
-3. Mark a step ✔ only after its gate passed; add what was ruled out to the entry (`Descartado: …`).
-4. After a compaction or a new session, the session hook re-injects the entry: resume from `▶`, re-run its gate before continuing.
+2. Write the steps into the Cierre's Aprendido (≤200 characters; the end-of-turn hook makes it the task's *Work in progress* line): `✔1 <step> · ▶2 <step> · 3 <step> — next gate: <command>`.
+3. Mark a step ✔ only after its gate passed; what was ruled out goes in the ADR or the commit (the whole Cierre stays in the task's record).
+4. After a compaction or a new session, the session hook re-injects the line: resume from `▶`, re-run its gate before continuing (`waymark.mjs tasks <task ID>` shows the whole record).
 5. Delegate only broad searches (an exploration agent returns the conclusion, not files); the main agent keeps the plan and the edits.
 
 ## Token economy

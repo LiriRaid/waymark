@@ -33,7 +33,7 @@ export const isPrompt = (d) => {
 
 // Reads the transcript tail, doubling it until it holds `prompts` user prompts or the whole file (max 64 MB): a pasted
 // image is a line of megabytes, and a turn whose prompt fell out of the tail was read as "no turn" — the gate skipped it
-// and the record counted the whole tail (3c test A: 17.4M tokens recorded for a ~2% turn). read(bytes) → lines.
+// and the record counted the whole tail. read(bytes) → lines.
 export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024) {
   let lines = read(start);
   for (let bytes = start * 2; bytes <= max && lines.filter(isPrompt).length < prompts; bytes *= 2) {
@@ -45,8 +45,8 @@ export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 102
 }
 
 // The index where the current turn starts: after its last prompt, or after `since` (ms) when that is later — a turn
-// that a background notification started after a close has no prompt of its own (3c test A: the code-review agent's
-// notification resumed the closed task and the record counted the previous task again).
+// that a background notification started after a close has no prompt of its own (counting from the prompt would record
+// the closed task again).
 const turnStart = (lines, since = 0) => {
   let i = lines.length - 1;
   while (i >= 0 && !isPrompt(lines[i])) i--;
@@ -58,7 +58,7 @@ const turnStart = (lines, since = 0) => {
 
 // A skill or agent the turn launched in the background that has not notified yet (Claude Code: its tool result has
 // toolUseResult.background, its end is a <task-notification> naming the tool-use id). The turn is not over: the agent
-// waits for it and closes in the notification's turn (2026-10-03 · T2o: the hook judged T1 while its code-review ran).
+// waits for it and closes in the notification's turn, so a task is never judged while its code-review runs.
 // Background shell commands are not waited for: a dev server never notifies.
 export function pendingBackground(lines, since = 0) {
   const { from } = turnStart(lines, since);
@@ -171,12 +171,12 @@ export function sessionState(lines) {
 }
 
 // Level declared in the turn's routing line ("Waymark → L2 · …"): 0 when there is none, 'Q' for questions. The LAST
-// routing line wins: a question that turns into a change re-routes mid-turn (test 2.0-1: a turn routed Q edited 8 files).
+// routing line wins: a question that turns into a change re-routes mid-turn.
 // Only a line that starts with "Waymark →" routes; one quoted mid-sentence (evidence, an example) does not.
 // Text written after a thinking block is not persisted (checked again 2026-10-02: a mid-turn re-route line was lost), so
 // a re-route is also a tool call: the owner dept-* skill invoked with args "L<n>", which always comes after the
 // turn's first text and therefore wins.
-// "Waymark → L0|Q" (the template's "L<n>|Q" with L0 kept) is a question (3c).
+// "Waymark → L0|Q" (the template's "L<n>|Q" with L0 kept) is a question.
 const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*\|\s*Q)?|Q)\b(?:\s*·\s*(dept-[a-z-]+))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
 const reroute = (tools = []) => {
@@ -191,12 +191,12 @@ export function routedLevel(texts, tools) {
 }
 
 // The Cierre heading: "## Cierre" at the start of a line. A mention inside a sentence ("until it writes its `## Cierre`")
-// is not one (2026-10-03 · T2n: a Q answer that named it was checked as a closed task).
+// is not one (a Q answer that names it is not a closed task).
 export const CIERRE = /^[ \t]*##\s*Cierre\b/m;
 
 // A turn with no routing at all inherits the routing of the task's last routed turn (L1–L3) while that turn has not
-// written its Cierre (user's choice, 2026-10-03 · T2j): a reply to a question asked in the chat (Codex) opened a new
-// unrouted turn, read as L0, and skipped the gate. Looks back within the task (the two prompts before this one); an
+// written its Cierre: a reply to a question asked in the chat (Codex) opens a new unrouted turn, which would read as L0
+// and skip the gate. Looks back within the task (the two prompts before this one); an
 // explicit "Waymark → L0" or a Q turn never passes its routing on. → { level, dept } or null.
 export function inheritedRoute(lines, prompts = 2) {
   const starts = [];

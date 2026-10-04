@@ -1,6 +1,6 @@
 # 0012 · Testigos, one decision, git as the source of truth, and a fixed context card (step 3e)
 
-**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1 landed (2026-10-04 · T2q, below).
+**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1, 3e-1b and 3e-2 landed (below).
 
 ## Context
 The 3c tests (Claude with Opus and Sonnet, Codex rollouts) kept producing false ✘. Almost all of them came from the hook reading prose the agent writes:
@@ -67,6 +67,13 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **3e-1b test (2026-10-04, YaloAtiendo-Chat T4/T4b/T4c):** the gate denied B's first edit and B then asked; no Cierre carried a preventive exception line. Two gaps, fixed in 2026-10-04 · T1b (the user's picks):
   - A follow-up ID holds only when the turn changes a file of its task (`taskFiles`). B, unrelated to T4, was filed as T4b. It now blocks once with "use T5".
   - The decisions and their positions come from the stretch since the session's last close. The whole task is kept only for the review. T4c's own question read "after"; it now reads "before".
+
+### 3e-2 as built (2026-10-04 · T2, the user's picks)
+- **Record:** a task with a commit is written whole as a git note on its newest commit (`refs/notes/waymark`, `scripts/notes.mjs`). The log line is a stub with `note: { commit, sha }`. `verifyChain(records, readNotes())` also fails on a missing or edited note. A commit that already has a note, or a failed write, keeps the whole record in the log. Old records stay as they are; readers accept both forms.
+- **Index:** the notes. `waymark.mjs tasks [<id>]`; the engram index testigo was removed. Push is manual (`waymark.mjs notes push`); no refspec is added to git's config.
+- **Live state:** the hook writes the task's Work in progress line from the Aprendido (`writeTaskLine`): `- ✔|▶ [<id>] …`, ≤200 characters, clipped. A follow-up replaces its task's line. ✔ lines beyond the newest 5 and lines over 200 move whole to `history.md`; a long task line stays as its ID and next step. The testigo *Aprender* was removed.
+- **Comments:** no task history in the scripts' comments (a test checks it); the rule is in `dept-architecture` and the instructions block.
+- **Known limit:** a note belongs to a commit sha. A rebase, amend or squash of a recorded commit leaves the note on the old sha, and the chain reports that record broken ("its git note is missing or was edited"). Git's `notes.rewriteRef` would carry notes across rewrites, but it changes git's config, which this step does not do. Open for 3e-3.
 
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.

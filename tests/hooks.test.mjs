@@ -354,7 +354,7 @@ test('observed: memory, procedure and review are computed from the tool calls, n
   assert.deepEqual(g.missing, []);
   assert.deepEqual(g.observed.memory, { searched: true, opened: true, written: true, saved: true, indexed: true });
   const noIndex = { ...opened, tools: opened.tools.filter((t) => t.name !== 'mcp__engram__mem_save') };
-  assert.match(checkCierre(noIndex, cierre(id), undefined, undefined, { ...ctx, engram: true }) || '', /engram task index not saved/, '3c: the index blocks once');
+  assert.equal(checkCierre(noIndex, cierre(id), undefined, undefined, { ...ctx, engram: true }), null, '3e-2: one index, the git notes; no engram index required');
   assert.deepEqual(g.observed.procedure, { owner: 'dept-backend', read: ['dept-backend/procedures.md'], readBeforeChange: true });
   assert.equal(g.observed.review, true);
   assert.equal(g.observed.gates[0].cmd, 'node --check src/orders.service.mjs && npm run build');
@@ -463,11 +463,11 @@ test('findings: a commit made in the turn without the Waymark-Task trailer', () 
   assert.ok(!trailer(l2(), []), 'no commit, no trailer needed');
 });
 
-test('block 3: the Aprendido must be written to the project memory', () => {
+test('3e-2: the Aprendido is not the agent\'s memory edit any more: the hook writes the line', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
   const noMem = currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check x' })]);
-  assert.match(checkCierre(noMem, cierre(id), undefined, undefined, ctxFor(cwd)), /Aprendido is not in the project memory/);
+  assert.doesNotMatch(checkCierre(noMem, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /project memory/);
 });
 
 test('bugs of test 2.0-4: an empty search is not a read; a commit is not a change', () => {
@@ -493,10 +493,10 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
   const ev = evaluate(cierreGaps(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), { total: 2700000 });
-  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Aprender: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true, 'Índice': false });
-  assert.equal(ev.score, '9/11');
+  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
+  assert.equal(ev.score, '8/9');
   assert.equal(ev.quotaPct, 2);
-  assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/11 · 2\.70M tokens ≈ 2% de la cuota/);
+  assert.match(summaryLine(id, ev), /Recordar ✘ .* 8\/9 · 2\.70M tokens ≈ 2% de la cuota/);
   assert.match(checkCierre(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), /no mem_search before the first change/, 'mem_search blocks at L2+ when engram is there');
 });
 
@@ -545,7 +545,7 @@ test('catalog of testigos: each states its claim; the instructions block quotes 
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
   assert.ok(!('steps' in routine) && routine.testigos.every((t) => t.id && t.label && t.claim && t.levels?.length && /^(block|record)$/.test(t.enforce)), 'routine.json is the catalog (3e-1)');
-  for (const id of ['decision', 'gate', 'learned', 'review', 'chain', 'secrets', 'trailer']) assert.ok(routine.testigos.some((t) => t.id === id), `ADR 0012 first testigo: ${id}`);
+  for (const id of ['decision', 'gate', 'review', 'chain', 'secrets', 'trailer']) assert.ok(routine.testigos.some((t) => t.id === id), `ADR 0012 first testigo: ${id}`);
   for (const st of routine.testigos.filter((x) => x.enforce === 'block')) assert.ok(block.includes(st.claim.replace(/^the Cierre complete \(.*\)$/, 'the Cierre complete (Resultado · Evidencia · Aprendido)')), `instructions.md must quote: "${st.claim}"`);
   const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'evaluation.md'), 'utf8');
   assert.ok(guide.includes('routine.json'), 'evaluation.md must defer to routine.json');
@@ -572,11 +572,11 @@ const l2Lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymar
 test('stop hook: a backed Cierre is recorded and not blocked', () => {
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const { out, records } = runStop(l2Lines, cierre(id));
-  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 9\/9 · /);
+  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 8\/8 · /);
   assert.equal(records.length, 1);
   assert.equal(records[0].id, id);
   assert.deepEqual(records[0].unresolved, []);
-  assert.equal(records[0].evaluation.score, '9/9');
+  assert.equal(records[0].evaluation.score, '8/8');
   assert.match(records[0].cierre, /^## Cierre · /);
 });
 
@@ -603,7 +603,7 @@ test('stop hook: without project memory, a Q turn leaves no record (with memory:
 });
 
 // ---- Step 2: project memory in <project>/.waymark/ (docs/adr/0007) ----
-const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { planFor, apply } = await import(`file://${SCRIPTS}/migrate-memory.mjs`);
 const tmpRepo = (name) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), `waymark-${name}-`));
@@ -744,7 +744,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-step2', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
-  assert.match(JSON.parse(r.stdout).systemMessage, /· 9\/9 · /, 'Aprendido written to <project>/.waymark/memory.md counts');
+  assert.match(JSON.parse(r.stdout).systemMessage, /· 8\/8 · /);
   const recs = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
   assert.equal(recs.length, 1);
   assert.deepEqual(recs[0].files, [FILE], 'the memory edit is not a project change');
@@ -1181,7 +1181,7 @@ test('T2l Cierre: a field ending with ":" continues on the next lines; an empty 
   assert.match(checkCierre(l2(), emptyThenNext, undefined, undefined, ctxFor(cwd)) || '', /Resultado: hecho/, 'an empty field still never takes the next line');
 });
 
-test('T2l Aprender: memory.md written by any tool counts when it changed in the turn and holds the task ID', () => {
+test('T2l memory written: memory.md changed by any tool in the turn and holding the task ID is observed (no longer a testigo)', () => {
   const dir = fs.mkdtempSync(path.join(home, 'mem-')), mem = path.join(dir, 'memory.md');
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
@@ -1191,7 +1191,7 @@ test('T2l Aprender: memory.md written by any tool counts when it changed in the 
   const ctx = { ...ctxFor(cwd), memoryFile: mem };
   assert.equal(cierreGaps(noEdit, cierre(id), undefined, undefined, ctx).observed.memory.written, true, 'written by a script through the shell');
   fs.writeFileSync(mem, '## Work in progress\n- [otra tarea] x\n');
-  assert.match(checkCierre(noEdit, cierre(id), undefined, undefined, ctx) || '', /Aprendido is not in the project memory/, 'without the task ID it was not this task');
+  assert.equal(cierreGaps(noEdit, cierre(id), undefined, undefined, ctx).observed.memory.written, false, 'without the task ID it was not this task');
 });
 
 test('T2l outside the project: a turn with a Cierre and no project change is still recorded (install, cleanup)', () => {
@@ -1510,4 +1510,116 @@ test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; t
   assert.equal(runs, 1, 'judged once');
   assert.match(blockReason(g), /^Waymark: this L1 turn changed files and is missing: 1\) the gate after the last code change failed \(npm run typecheck, re-run by the hook\)/);
   assert.equal(runs, 1, 'the block reason reuses the gaps: no second re-run');
+});
+
+// ---- 3e-2: git as the source of truth (docs/adr/0012) ----
+const P = { readTaskRecords, writeTaskLine, taskSummary };
+const commitTask = (repo, id, file = 'a.ts') => {
+  fs.writeFileSync(path.join(repo, file), `export const x = ${Math.random()};\n`);
+  gitT(repo, 'add', file); gitT(repo, 'commit', '-q', '-m', `x\n\nWaymark-Task: ${id}`);
+  return gitT(repo, 'rev-parse', 'HEAD').stdout.trim();
+};
+const memRepo = (name, wip = '') => {
+  const repo = tmpRepo(name);
+  fs.mkdirSync(path.join(repo, '.waymark'));
+  fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), `# P\n\n## Work in progress\n${wip}\n## Identity\n- Stack: test\n`);
+  fs.writeFileSync(path.join(repo, '.git', 'info', 'exclude'), '.waymark/\n');
+  return repo;
+};
+
+test('3e-2 notes: a committed task\'s record is a git note; the log keeps a chained stub with the note\'s hash', async () => {
+  const { addPair } = await import(`file://${SCRIPTS}/calibrate.mjs`);
+  const repo = memRepo('notes'), h = projectHome(repo), id = '2026-10-05 · T1';
+  const sha = commitTask(repo, id);
+  appendRecord(repo, { id, agent: 'claude', at: '2026-10-05T10:00:00Z', session: 's', files: ['a.ts'], commits: [sha], prompt: 'p', cierre: '## Cierre · x\nResultado: hecho', evaluation: { score: '8/8', steps: {}, tokens: 5000000 } });
+  assert.equal(addPair(id, 4, repo).total, 5000000, 'calibration reads the tokens from the note');
+  const raw = readRecords(h.log);
+  assert.equal(raw.length, 1);
+  assert.deepEqual([raw[0].id, raw[0].session, raw[0].files, raw[0].commits, raw[0].note.commit], [id, 's', ['a.ts'], [sha], sha]);
+  assert.equal(raw[0].cierre, undefined, 'the heavy part lives in the note');
+  const note = JSON.parse(gitT(repo, 'notes', '--ref=waymark', 'show', sha).stdout);
+  assert.equal(note.cierre, '## Cierre · x\nResultado: hecho');
+  const full = P.readTaskRecords(h);
+  assert.deepEqual([full[0].cierre, full[0].evaluation.score, full[0].note.commit], ['## Cierre · x\nResultado: hecho', '8/8', sha], 'read back whole');
+  assert.equal(verifyChain(raw, readNotes(repo)).ok, true);
+  appendRecord(repo, { id: '2026-10-05 · T2', at: '2026-10-05T11:00:00Z', commits: [], cierre: 'sin commit' });
+  appendRecord(repo, { id: '2026-10-05 · T3', at: '2026-10-05T12:00:00Z', commits: [sha], cierre: 'mismo commit' });
+  const all = readRecords(h.log);
+  assert.deepEqual(all.slice(1).map((r) => r.cierre), ['sin commit', 'mismo commit'], 'no commit, or a commit that already has a note: the whole record stays in the log');
+  assert.equal(verifyChain(all, readNotes(repo)).ok, true);
+  const byHand = () => spawnSync(process.execPath, [path.join(SCRIPTS, 'testigos.mjs'), id], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;
+  assert.match(byHand(), /✔ chain: 3 records intact[\s\S]*recorded for 2026-10-05 · T1: .*\(8\/8\)/, 'by hand: the evaluation is read from the note');
+  gitT(repo, 'notes', '--ref=waymark', 'add', '-f', '-m', '{"cierre":"editada"}', sha);
+  assert.deepEqual(verifyChain(all, readNotes(repo)), { ok: false, at: 0, note: true }, 'an edited note breaks the chain');
+  assert.equal(verifyChain(all).ok, true, 'without the notes: the log alone');
+  assert.match(byHand(), /✘ chain: 3 records, broken at record 1 \(its git note is missing or was edited\)/, 'by hand: the notes are checked too');
+});
+
+test('3e-2 memory line: the hook writes the task\'s line (≤200) from its Cierre; ✔ beyond 5 and long lines move whole to history.md', () => {
+  const long = `- ▶ [2026-10-03 · T2] Big step: plan ✔a · ▶b. ${'detail '.repeat(60)}NEXT run the gate`;
+  const spec = `- STEP SPEC (2026-10-03): ${'notes '.repeat(60)}`;
+  const done = [1, 2, 3, 4, 5].map((n) => `- ✔ [2026-10-04 · T${n}] done ${n}`).join('\n');
+  const note = '- PLAN: next session as 2026-10-05 · T1c';
+  const repo = memRepo('wip', `${long}\n${spec}\n${note}\n- [2026-10-05 · T1] hand-written: Pendiente: x\n${done}\n`), h = projectHome(repo);
+  const at = (id, res, apr) => P.writeTaskLine(h, { id, cierre: `## Cierre · ${id}\nResultado: ${res}\nEvidencia: e\nAprendido: "${apr}"` });
+  at('2026-10-05 · T1', 'hecho', 'backoff ← timeouts');
+  const wip = () => (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
+  let lines = wip();
+  assert.ok(lines.includes('- ✔ [2026-10-05 · T1] backoff ← timeouts'), lines.join('\n'));
+  assert.ok(lines.every((l) => l.length <= 200), 'every line ≤200');
+  assert.ok(lines.some((l) => /^- ▶ \[2026-10-03 · T2\] .*run the gate/.test(l)), 'a long task line keeps its ID, status and next step');
+  assert.equal(lines.filter((l) => l.startsWith('- ✔')).length, 5, 'the newest 5 ✔ stay');
+  assert.ok(!lines.some((l) => l.includes('2026-10-04 · T1]')), 'the oldest ✔ moved');
+  const hist = fs.readFileSync(path.join(h.dir, 'history.md'), 'utf8');
+  for (const l of [long, spec, '- ✔ [2026-10-04 · T1] done 1', '- [2026-10-05 · T1] hand-written: Pendiente: x']) assert.ok(hist.includes(l), `moved whole: ${l.slice(0, 40)}`);
+  assert.ok(lines.includes(note), 'a note that quotes an ID after its head is not the task\'s line');
+  at('2026-10-05 · T1b', 'parcial (falta el deploy)', 'x'.repeat(300));
+  lines = wip();
+  assert.ok(!lines.some((l) => l.includes('[2026-10-05 · T1]')), 'a follow-up replaces its task\'s line');
+  const t1b = lines.find((l) => l.startsWith('- ▶ [2026-10-05 · T1b] '));
+  assert.ok(t1b && t1b.length === 200 && t1b.endsWith('…'), 'parcial → ▶, Aprendido clipped to 200');
+  assert.equal(P.taskSummary('- ✔ [2026-10-05 · T1] backoff ← timeouts'), '- 2026-10-05 · T1 · hecho · backoff ← timeouts');
+  assert.equal(P.taskSummary(t1b).startsWith('- 2026-10-05 · T1b · en curso · xxx'), true);
+  P.writeTaskLine(h, { id: '2026-10-05 · T2', cierre: '## Cierre · 2026-10-05 · T2\nResultado: hecho\nEvidencia: e\nAprendido:\n- retries ← timeouts\n- next: deploy\n\nnot this' });
+  assert.ok(wip().includes('- ✔ [2026-10-05 · T2] retries ← timeouts next: deploy'), 'an Aprendido on the lines below its field');
+});
+
+test('3e-2 stop hook: Aprender and Índice are no longer testigos; the hook writes the memory line and the record goes to a note', () => {
+  const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
+  assert.ok(!routine.testigos.some((t) => ['learned', 'index'].includes(t.id)), 'one index: the git notes; the hook writes the memory line');
+  const repo = memRepo('stop-notes'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  commitTask(repo, id);
+  const transcript = path.join(home, 't-3e2.jsonl');
+  fs.writeFileSync(transcript, l2Lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-3e2', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  assert.doesNotMatch(JSON.parse(r.stdout).systemMessage || '', /Aprender|Índice/);
+  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'memory.md'), 'utf8'), new RegExp(`- ✔ \\[${id}\\] backoff ← timeouts`));
+  const raw = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
+  assert.ok(raw[0].note && !raw[0].observed, 'stub in the log, record in the note');
+  const md = fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8');
+  assert.match(md, new RegExp(`- ${id} · hecho · backoff ← timeouts`));
+  assert.match(md, /## Last closed: .*full record: git notes --ref=waymark show [0-9a-f]{8}\)\n- Resultado: hecho/);
+});
+
+test('3e-2 waymark.mjs: tasks lists the records from git; notes push sends refs/notes/waymark to origin', () => {
+  const repo = memRepo('push'), id = '2026-10-05 · T1', remote = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-remote-'));
+  temps.push(remote);
+  spawnSync('git', ['init', '-q', '--bare'], { cwd: remote });
+  gitT(repo, 'remote', 'add', 'origin', remote);
+  const sha = commitTask(repo, id);
+  appendRecord(repo, { id, agent: 'claude', at: '2026-10-05T10:00:00Z', commits: [sha], prompt: 'agrega reintentos', cierre: '## Cierre\nResultado: hecho', evaluation: { score: '8/8', steps: {} } });
+  const run = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(run('tasks').stdout, /2026-10-05 · T1 · claude · hecho · 8\/8 · agrega reintentos/);
+  assert.match(run('tasks', id).stdout, /"cierre": "## Cierre\\nResultado: hecho"/);
+  const p = run('notes', 'push');
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  assert.match(spawnSync('git', ['ls-remote', remote], { encoding: 'utf8' }).stdout, /refs\/notes\/waymark/);
+});
+
+test('3e-2 code comments say how the code works, never task history', () => {
+  const dir = SCRIPTS, files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).map((f) => path.join(dir, f)), ...fs.readdirSync(path.join(dir, 'agents')).map((f) => path.join(dir, 'agents', f))];
+  const HISTORY = /\b20\d\d-\d\d-\d\d · T\d+[a-z]?\b|user's choice|\b3[a-e](?:-\d[a-z]?)?\b|\b2\.0-\d\b|\btest [A-D]\b|\bT\d+[a-z]\b/;
+  const hits = files.flatMap((f) => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => [l, i]).filter(([l]) => /(^|\s)\/\/\s/.test(l) && HISTORY.test(l.slice(l.indexOf('// '))))
+    .map(([l, i]) => `${path.basename(f)}:${i + 1}: ${l.trim().slice(0, 90)}`));
+  assert.deepEqual(hits, []);
 });

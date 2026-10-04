@@ -61,6 +61,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - **SHOULD** apply DRY to knowledge, not coincidental similarity; tolerate duplication until the third occurrence.
 - **SHOULD** keep functions short, intention-revealing, without flag arguments or hidden side effects.
 - **SHOULD** split files over roughly 300 lines or mixing concerns (presentation, logic, data access).
+- **MUST** write code comments that say how the code works and what it is for, never task history (task IDs, dates, who chose it, which test found it): that lives in the task record, the ADR and the CHANGELOG.
 - **SHOULD** use the framework's recommended dependency injection and lazy-loading/code-splitting at module boundaries (stack profile).
 - **SHOULD** keep configuration in the environment (Twelve-Factor).
 - **MUST NOT** add abstractions, wrappers or patterns "just in case".

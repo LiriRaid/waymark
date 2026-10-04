@@ -5,6 +5,8 @@
 //   node waymark.mjs sync               refresh skill-registry.md (sync.mjs) and remember the skills seen here
 //   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks [args]   the existing scripts, args passed on
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
+//   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
+//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
 // agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
@@ -16,7 +18,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome } from './provenance.mjs';
+import { projectHome, readTaskRecords } from './provenance.mjs';
+import { pushNotes } from './notes.mjs';
 import { found } from './connect-agents.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -161,11 +164,26 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   return items;
 }
 
+// One line per task record, newest first: "<id> · <agent> · <result> · <score> · <request>"; with an ID, its whole record.
+export function tasks(cwd = process.cwd(), id = null) {
+  const records = readTaskRecords(projectHome(cwd)).filter((r) => r.id);
+  if (id) { const r = records.filter((x) => x.id === id).pop(); return r ? JSON.stringify(r, null, 2) : `no record for ${id}`; }
+  const cell = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+  return records.reverse().map((r) => [r.id, r.agent || '?', cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1]) || '?', r.evaluation?.score || '—', cell(r.prompt).slice(0, 80)]
+    .join(' · ') + (r.noteMissing ? ' · (note missing)' : '')).join('\n') || 'no task recorded yet';
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [sub = 'check', ...rest] = process.argv.slice(2).filter((a, i, all) => a !== '--agent' && all[i - 1] !== '--agent');
   if (sub === 'check') {
     const items = await check(process.cwd());
     console.log(items.length ? `Waymark check · ${items.length} pending (offer each with the choice window; run its command only after the user's yes):\n${items.map((t) => `- ${t}`).join('\n')}` : 'Waymark check: nothing pending.');
+  } else if (sub === 'tasks') {
+    console.log(tasks(process.cwd(), rest[0] || null));
+  } else if (sub === 'notes' && rest[0] === 'push') {
+    const r = pushNotes(process.cwd(), rest[1] || 'origin');
+    console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
+    process.exitCode = r.ok ? 0 : 1;
   } else if (COMMANDS[sub]) {
     const r = spawnSync(process.execPath, [path.join(SCRIPTS, COMMANDS[sub]), ...rest], { stdio: 'inherit' });
     if (sub === 'sync' && r.status === 0 && !rest.includes('--dry-run')) { // remember the skills seen from this folder
@@ -175,7 +193,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

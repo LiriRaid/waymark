@@ -1233,7 +1233,7 @@ test('T2m: the block names the honest ways out; the choice window waiting for th
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
   const msg = checkCierre(l2(), cierre(id, undefined, undefined, 'aviso en la esquina → no preguntada'), undefined, undefined, ctx) || '';
-  assert.match(msg, /choice window → preguntada; only one real way \(a technical limit, or the fix of a bug you found\) → única \(<why>\); otherwise ask it now/);
+  assert.match(msg, /choice window → preguntada; only one real way \(a technical limit, or the fix of a bug you found\) → única \(<why>\) — never a user rule you cannot cite; named but not applied, left for the user → propuesta \(<what>\); otherwise ask it now/);
   assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'alcance → del usuario'), undefined, undefined, ctx) || '', /e\.g\. "texto del botón → preguntada; panel en la esquina → única/);
   const at = (min) => new Date(Date.UTC(2026, 9, 4, 6, min)).toISOString();
   const lines = [{ ...prompt('x'), timestamp: new Date(Date.now() - 62 * 60000).toISOString() }, say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
@@ -1257,4 +1257,65 @@ test('T2n: "## Cierre" named inside a sentence is not a Cierre; a Q turn is neve
   assert.equal(cierreGaps(q, qHeading, undefined, undefined, { ...ctxFor(cwd), outside: true }), null, 'even a real heading in a Q turn');
   const mention = `${cierre(taskIds(cwd).next)}`.replace('## Cierre', 'Arriba dije que el `## Cierre` va al final.\n## Cierre');
   assert.equal(checkCierre(l2(), mention, undefined, undefined, ctxFor(cwd)), null, 'fields are read from the real heading, not from the mention');
+});
+
+// ---- Sonnet test fixes (2026-10-03 · T2o) ----
+const { pendingBackground, subagentUsage, withSubagents } = await import(`file://${SCRIPTS}/transcript.mjs`);
+
+test('T2o background: a skill still running in the background holds the close; its notification releases it', () => {
+  const launch = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_bg1', content: 'Running in the background as @code-review' }] }, toolUseResult: { background: true, status: 'forked' } };
+  const turn = [prompt('agrega el progreso'), say('Waymark → L2 · dept-frontend'), call('Skill', { skill: 'code-review' }), launch, say('La revisión corre en segundo plano.')];
+  assert.deepEqual(pendingBackground(turn), ['toolu_bg1']);
+  const notified = [...turn, { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_bg1</tool-use-id>\n</task-notification>' } }, say('## Cierre · x')];
+  assert.deepEqual(pendingBackground(notified), []);
+  const bash = [prompt('x'), { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'Command running in background with ID: b1' }] } }];
+  assert.deepEqual(pendingBackground(bash), [], 'a background shell command (a dev server) is never waited for');
+});
+
+test('T2o stop hook: no block and no record while the background review runs', () => {
+  const { cwd, log } = fresh();
+  const transcript = path.join(home, `t-bg-${n}.jsonl`);
+  const lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymark → L2 · dept-backend · skills: code-review'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Skill', { skill: 'code-review' }),
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_bg2', content: 'Running in the background' }] }, toolUseResult: { background: true } }, say('Espero el code-review.')];
+  fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: `bg-${n}`, last_assistant_message: 'Espero el code-review.' }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), '', 'silent: not blocked');
+  assert.ok(!fs.existsSync(log) || !readLog(cwd).length, 'nothing recorded yet');
+});
+
+test('T2o: a quote of the user\'s fragments joined with "…", "Docker" is not docs, "→ propuesta", memory commands are not gates', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), ctx = ctxFor(cwd);
+  const said = ['pero man podes usar las credenciales del env y hacer la migracion no es necesario esto y otra cosa te doy permiso'];
+  assert.equal(checkCierre(l2(), cierre(ids.next, 'del usuario ("no es necesario esto … te doy permiso")'), undefined, said, ctx), null);
+  assert.match(checkCierre(l2(), cierre(ids.next, 'del usuario ("no es necesario esto … borra la base")'), undefined, said, ctx) || '', /own words/, 'every fragment must be theirs');
+  const docker = cierre(ids.next).replace('observada timeouts en el log de pedidos', 'observada Docker falla con dockerDesktopLinuxEngine; inferida que falta la columna (check: GET da 200)');
+  assert.ok(!cierreGaps(l2(), docker, undefined, undefined, ctx).steps.find((s) => s.id === 'docs').applies, '"Docker" is not docs');
+  assert.equal(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'pipeline de deploy → propuesta (que corra las migraciones)'), undefined, undefined, ctx), null);
+  const memGate = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    call('Edit', { file_path: FILE }), call('Bash', { command: "sed -i '7i - [T1] build y tests ok' .waymark/memory.md" }), call('Skill', { skill: 'code-review' }), MEM()]);
+  assert.match(checkCierre(memGate, cierre(ids.next), undefined, undefined, ctx) || '', /no typecheck, lint or build ran after the last code change/, 'writing memory is not a gate');
+});
+
+test('T2o: the tokens of the subagents a turn launched are added', () => {
+  const dir = fs.mkdtempSync(path.join(home, 'sess-')), tp = path.join(dir, 'abc.jsonl');
+  fs.mkdirSync(path.join(dir, 'abc', 'subagents'), { recursive: true });
+  const resp = (id, ts, u) => JSON.stringify({ type: 'assistant', timestamp: ts, message: { id, usage: u } });
+  fs.writeFileSync(path.join(dir, 'abc', 'subagents', 'agent-1.jsonl'), [resp('s1', '2026-10-04T15:24:20Z', { input_tokens: 10, cache_read_input_tokens: 200000, cache_creation_input_tokens: 5000, output_tokens: 1000 }), resp('s1', '2026-10-04T15:24:21Z', { input_tokens: 10, cache_read_input_tokens: 200000, cache_creation_input_tokens: 5000, output_tokens: 1000 })].join('\n'));
+  fs.writeFileSync(path.join(dir, 'abc', 'subagents', 'old.jsonl'), resp('o1', '2026-10-01T10:00:00Z', { input_tokens: 9, cache_read_input_tokens: 9e6, output_tokens: 9 }));
+  const sub = subagentUsage(tp, Date.parse('2026-10-04T15:00:00Z'));
+  assert.deepEqual([sub.cacheRead, sub.files], [200000, 1], 'once per response, only this turn\'s subagents');
+  const sum = withSubagents({ input: 1, cacheWrite: 0, cacheRead: 100, output: 1, fresh: 2, total: 102, responses: 1 }, sub);
+  assert.equal(sum.total, 102 + 206010);
+  assert.equal(sum.subagents, 206010);
+  assert.equal(subagentUsage('/nope/x.jsonl').files, 0);
+});
+
+test('T2o: a gate chained with a memory command still counts', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const chained = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit && npm run build && grep -n T1 .waymark/memory.md' }), call('Skill', { skill: 'code-review' }), MEM()]);
+  assert.equal(checkCierre(chained, cierre(id), undefined, undefined, ctxFor(cwd)), null);
 });

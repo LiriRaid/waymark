@@ -56,6 +56,22 @@ const turnStart = (lines, since = 0) => {
   return { i, from: j < 0 ? lines.length : j };
 };
 
+// A skill or agent the turn launched in the background that has not notified yet (Claude Code: its tool result has
+// toolUseResult.background, its end is a <task-notification> naming the tool-use id). The turn is not over: the agent
+// waits for it and closes in the notification's turn (2026-10-03 · T2o: the hook judged T1 while its code-review ran).
+// Background shell commands are not waited for: a dev server never notifies.
+export function pendingBackground(lines, since = 0) {
+  const { from } = turnStart(lines, since);
+  const launched = [];
+  for (const d of lines.slice(from)) {
+    if (d.type !== 'user' || d.isSidechain || !d.toolUseResult?.background) continue;
+    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push(c.tool_use_id);
+  }
+  if (!launched.length) return [];
+  const notified = lines.filter((d) => d.type === 'user' && /<task-notification>/.test(promptText(d))).map(promptText).join('\n');
+  return launched.filter((id) => !notified.includes(`<tool-use-id>${id}</tool-use-id>`));
+}
+
 // The current turn: everything after the last prompt (and after `since`). Returns its assistant texts and tool calls
 // (main agent only).
 export function currentTurn(lines, since = 0) {
@@ -106,6 +122,35 @@ export function turnUsage(lines, since = 0) {
   }
   const fresh = s.input + s.cacheWrite + s.output;
   return { total: fresh + s.cacheRead, fresh, ...s, responses: seen.size };
+}
+
+// Tokens of the subagents a turn launched (Claude Code writes each one to <session>/subagents/*.jsonl, next to the
+// session's transcript): every file with a response at or after `since`. Another agent's layout → zeros.
+export function subagentUsage(transcriptPath, since = 0) {
+  const s = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, files: 0 };
+  if (!transcriptPath) return s;
+  const dir = transcriptPath.replace(/\.jsonl$/i, '') + '/subagents';
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { return s; }
+  for (const n of names) {
+    const seen = new Set();
+    let counted = false;
+    for (const d of parseLines(fs.readFileSync(`${dir}/${n}`, 'utf8'))) {
+      const u = d.type === 'assistant' ? d.message?.usage : null;
+      if (!u || seen.has(d.message.id) || (Date.parse(d.timestamp || '') || 0) < since) continue;
+      seen.add(d.message.id); counted = true;
+      s.input += u.input_tokens || 0; s.cacheWrite += u.cache_creation_input_tokens || 0; s.cacheRead += u.cache_read_input_tokens || 0; s.output += u.output_tokens || 0;
+    }
+    if (counted) s.files++;
+  }
+  return s;
+}
+
+// A turn's usage plus its subagents' (same shape as turnUsage; `subagents` keeps their total apart).
+export function withSubagents(usage, sub) {
+  const fresh = sub.input + sub.cacheWrite + sub.output, total = fresh + sub.cacheRead;
+  if (!total) return usage;
+  return { ...usage, input: usage.input + sub.input, cacheWrite: usage.cacheWrite + sub.cacheWrite, cacheRead: usage.cacheRead + sub.cacheRead, output: usage.output + sub.output, fresh: usage.fresh + fresh, total: usage.total + total, subagents: total };
 }
 
 // Context size and time of the last main-agent response, and whether the last answered turn opened with "Waymark →".

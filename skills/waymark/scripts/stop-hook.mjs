@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions } from './provenance.mjs';
@@ -156,7 +156,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const lastChange = lastIdx(isChange);
   const result = (t) => turn.results?.[t.id];
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
-  const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => shell(t) && (GATE.test(cmdOf(t)) || TEST.test(cmdOf(t))));
+  // A command that writes Waymark's own memory is not a gate, even when its text says "build" or "tests" (2026-10-03 · T2o).
+  // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
+  const parts = (t) => cmdOf(t).split(/&&|\|\||[;|\n]/).filter((p) => !/\.waymark[\\/]/.test(p));
+  const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
+  const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   const code = changed.filter((f) => !NOT_CODE.test(f));
@@ -208,8 +212,16 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const quotes = /^del usuario/i.test(d) ? [...d.matchAll(/[“"«]([^”"»]{3,400})[”"»]/g)].map((m) => m[1]) : [];
   const chosenFull = (ctx.decisions || []).map((x) => plain(x.chosen));
   // the quote is the user's words, (part of) a picked label, or a whole multi-select answer "A, B, C" (3c test A)
-  const usersWords = (q) => q && (prompts.some((p) => plain(p).includes(plain(q))) || chosenLabels.some((l) => l.includes(plain(q))) || chosenFull.some((c) => c.includes(plain(q)))
-    || (q.includes(',') && q.split(',').every((part) => plain(part).length < 3 || chosenLabels.some((l) => l.includes(plain(part))))));
+  // a quote that joins the user's fragments with "…" ("no es necesario esto … te doy permiso") counts when every fragment
+  // is theirs (2026-10-03 · T2o)
+  const fragments = (q) => String(q).split(/\s*(?:…|\.\.\.)\s*/).filter((f) => plain(f).length >= 3);
+  const inPrompts = (s) => prompts.some((p) => plain(p).includes(plain(s)));
+  const usersWords = (q) => {
+    if (!q) return false;
+    if (fragments(q).length > 1) return fragments(q).every(inPrompts);
+    return inPrompts(q) || chosenLabels.some((l) => l.includes(plain(q))) || chosenFull.some((c) => c.includes(plain(q)))
+      || (q.includes(',') && q.split(',').every((part) => plain(part).length < 3 || chosenLabels.some((l) => l.includes(plain(part)))));
+  };
   const decision = [], late = [];
   if (hasCierre) {
     if (!d) decision.push('Decisión: elegida <option> · descartadas <options> (the user\'s pick in the choice window) | del usuario ("<their words>") | única (<why>)');
@@ -227,19 +239,21 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       // asked after the change it decides: passes, Decision ✘. A later question that only confirms is "confirmada" and passes (3c).
       late.push(...items.filter((s) => /→\s*preguntada tarde/i.test(s)));
       // "→ única (<why>)": a technical step with one real way (fixing the bug it found) is not the user's decision (3c test A)
-      const single = items.filter((s) => /→\s*[uú]nica \(.{3,}\)/i.test(s));
-      const bad = items.filter((s) => !/→\s*(preguntada|confirmada|del usuario \(|no preguntada|[uú]nica \(.{3,}\))/i.test(s));
+      // "→ única (<why>)": a technical step with one real way (fixing the bug it found) is not the user's decision (3c test A);
+      // "→ propuesta (<what>)": named but not applied, left for the user to decide later (2026-10-03 · T2o)
+      const single = items.filter((s) => /→\s*([uú]nica|propuesta) \(.{3,}\)/i.test(s));
+      const bad = items.filter((s) => !/→\s*(preguntada|confirmada|del usuario \(|no preguntada|[uú]nica \(.{3,}\)|propuesta \(.{3,}\))/i.test(s));
       const asked = items.length - alone.length - bad.length - single.length - items.filter((s) => /→\s*del usuario \(/i.test(s)).length + (/^elegida/i.test(d) ? 1 : 0);
       // The block names the three honest ways out (2026-10-03 · T2m: the agent wrote "→ del usuario" for a choice-window
       // answer and "no preguntada" for two technical limits).
-      const ways = 'answered by the user in the choice window → preguntada; only one real way (a technical limit, or the fix of a bug you found) → única (<why>); otherwise ask it now with the options (AskUserQuestion), apply the pick and mark it preguntada';
-      if (bad.length) decision.push(`Sub-decisiones: each item ends with one marker — "→ preguntada", "→ confirmada", "→ del usuario (\\"<their words>\\")", "→ única (<why there is one real way>)" or "→ no preguntada" — e.g. "texto del botón → preguntada; panel en la esquina → única (un widget no entra en el NodeView)". Fix: ${bad.slice(0, 2).join(' | ')}. For each: ${ways}`);
+      const ways = 'answered by the user in the choice window → preguntada; only one real way (a technical limit, or the fix of a bug you found) → única (<why>) — never a user rule you cannot cite; named but not applied, left for the user → propuesta (<what>); otherwise ask it now with the options (AskUserQuestion), apply the pick and mark it preguntada';
+      if (bad.length) decision.push(`Sub-decisiones: each item ends with one marker — "→ preguntada", "→ confirmada", "→ del usuario (\\"<their words>\\")", "→ única (<why there is one real way>)", "→ propuesta (<what you propose>)" or "→ no preguntada" — e.g. "texto del botón → preguntada; panel en la esquina → única (un widget no entra en el NodeView)". Fix: ${bad.slice(0, 2).join(' | ')}. For each: ${ways}`);
       if (alone.length) decision.push(`Sub-decisiones taken without asking (${alone.slice(0, 3).join(' | ')}): the user decides every real decision. For each: ${ways}`);
       if (ctx.decisions && asked > ctx.decisions.length) decision.push(`Sub-decisiones and Decisión claim ${asked} decisions asked but the choice window answered ${ctx.decisions.length} in this task: ask the missing ones or mark them honestly`);
     }
   }
   const gate = [];
-  if (lastCode >= 0 && !turn.tools.slice(lastCode + 1).some((t) => shell(t) && GATE.test(cmdOf(t)))) gate.push('no typecheck, lint or build ran after the last code change: run the project\'s gate once now (the full one at the end, per repo)');
+  if (lastCode >= 0 && !turn.tools.slice(lastCode + 1).some(gateCmd)) gate.push('no typecheck, lint or build ran after the last code change: run the project\'s gate once now (the full one at the end, per repo)');
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   const cierre = [];
   if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Decisión · Sub-decisiones · Evidencia · Aprendido)');
@@ -263,7 +277,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(cmdOf(t)));
   const when = {
     engram: !!ctx.engram, code: code.length > 0, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
-    inferredFromDocs: /inferida/i.test(ev) && /(doc|documentaci|documentation|oficial|official|specification|especificaci|spec de)/i.test(ev), preClaim: PRE.test(reply), redClaim,
+    // whole words: "Docker" is not "docs" (2026-10-03 · T2o)
+    inferredFromDocs: /inferida/i.test(ev) && /\b(docs?|documentaci[oó]n|documentation|oficial|official|specification|especificaci[oó]n|spec de)\b/i.test(ev), preClaim: PRE.test(reply), redClaim,
   };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
@@ -375,6 +390,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // A turn counts from its prompt, or from this session's last close when that is later (a background notification
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
+      // A skill or agent still running in the background: the turn is not over (no block, no record); it closes in the
+      // notification's turn (2026-10-03 · T2o).
+      if (pendingBackground(lines, since).length) return;
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(taskLines(lines)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true };
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       ctx.commits = commitsFor(cwd, claimed);
@@ -397,7 +415,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         return;
       }
       gaps.observed.branches = branchesOf(gaps.changed);
-      const evaluation = evaluate(gaps, turnUsage(lines, since), ctx.inputs?.model || null);
+      // the turn's tokens plus those of the subagents it launched (a background code-review, 2026-10-03 · T2o)
+      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); } catch {}

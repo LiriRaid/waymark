@@ -145,6 +145,10 @@ export function routedLevel(texts, tools) {
   return !m ? 0 : m[1] === 'Q' || /^L0\s*\|\s*Q$/.test(m[1]) ? 'Q' : Number(m[2]);
 }
 
+// The Cierre heading: "## Cierre" at the start of a line. A mention inside a sentence ("until it writes its `## Cierre`")
+// is not one (2026-10-03 · T2n: a Q answer that named it was checked as a closed task).
+export const CIERRE = /^[ \t]*##\s*Cierre\b/m;
+
 // A turn with no routing at all inherits the routing of the task's last routed turn (L1–L3) while that turn has not
 // written its Cierre (user's choice, 2026-10-03 · T2j): a reply to a question asked in the chat (Codex) opened a new
 // unrouted turn, read as L0, and skipped the gate. Looks back within the task (the two prompts before this one); an
@@ -158,7 +162,7 @@ export function inheritedRoute(lines, prompts = 2) {
   if (routes(now.texts).length || reroute(now.tools)) return null;
   for (let k = 1; k < starts.length; k++) {
     const t = turnAt(k);
-    if (t.texts.some((x) => /##\s*Cierre/.test(x.replace(/\*\*|__/g, '')))) return null; // the task closed
+    if (t.texts.some((x) => CIERRE.test(x.replace(/\*\*|__/g, '')))) return null; // the task closed
     if (!routes(t.texts).length && !reroute(t.tools)) continue; // another unrouted reply: keep looking back
     const level = routedLevel(t.texts, t.tools);
     return typeof level === 'number' && level > 0 ? { level, dept: routedDept(t.texts, t.tools) } : null;

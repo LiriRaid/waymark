@@ -1247,3 +1247,14 @@ test('T2m: the block names the honest ways out; the choice window waiting for th
   assert.ok(t.minutes >= 1.5 && t.minutes <= 2.5, `the agent's time without the wait (${t.minutes})`);
   assert.equal(t.slowest.tool, 'Bash', 'the wait is not the slowest step');
 });
+
+test('T2n: "## Cierre" named inside a sentence is not a Cierre; a Q turn is never recorded as an outside task', () => {
+  const { cwd } = fresh();
+  const q = currentTurn([prompt('¿qué le digo a Claude?'), say('Waymark → Q · dept-qa · skills: ninguna')]);
+  const answer = 'Waymark → Q · dept-qa · skills: ninguna\n\n7. Deja que termine solo hasta que escriba su `## Cierre`.';
+  assert.equal(cierreGaps(q, answer, undefined, undefined, { ...ctxFor(cwd), outside: true }), null, 'a mention mid-sentence');
+  const qHeading = `Waymark → Q · dept-qa\n\n## Cierre · ${taskIds(cwd).next}\nResultado: hecho`;
+  assert.equal(cierreGaps(q, qHeading, undefined, undefined, { ...ctxFor(cwd), outside: true }), null, 'even a real heading in a Q turn');
+  const mention = `${cierre(taskIds(cwd).next)}`.replace('## Cierre', 'Arriba dije que el `## Cierre` va al final.\n## Cierre');
+  assert.equal(checkCierre(l2(), mention, undefined, undefined, ctxFor(cwd)), null, 'fields are read from the real heading, not from the mention');
+});

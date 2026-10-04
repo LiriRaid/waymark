@@ -110,6 +110,7 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
     - **Tasks outside the project** (install, cleanup) are recorded in the session's project.
   - **Re-test A:** the task scored 9/10 at ~5% (T2d was ~17%), and its follow-up 7/7 at ~1.4%. The browser was never offered and the branch never asked. Two fixes came out of it:
     - The sub-decision block names the honest ways out, with an example: answered in the choice window → `preguntada`; one real way → `única (<why>)`; otherwise ask now.
+    - A Cierre counts only as a heading at the start of a line, and a turn with no project change is recorded only when it was routed L1–L3. Before, a Q answer that named `## Cierre` inside a sentence was checked as a closed task.
     - The time the choice window waits for the user is recorded as `userWait`, outside the agent's minutes and the slowest step. A question left open overnight made a 2-minute turn read 432 minutes.
   - **tasks.md:** `próximo` keeps every pending part in order (the last `Pendiente:` used to win, and "paso 2" was lost). A marker inside quotes is text. `open.json` records the agent, so a turn shows "started in codex".
 - **Hook tests in the repo:** `node --test tests/*.test.mjs` (no dependencies, temporary `WAYMARK_HOME`).

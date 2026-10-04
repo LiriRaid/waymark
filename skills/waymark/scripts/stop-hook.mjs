@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
+import { CIERRE, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions } from './provenance.mjs';
@@ -126,14 +126,17 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const byKey = new Map();
   for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
   const changed = [...byKey.values()];
-  // A task with a Cierre whose changes are all outside the project (install, cleanup) is recorded too (ctx.outside, 3c).
-  if (!changed.length && !(ctx.outside && /##\s*Cierre/.test(String(last || '').replace(/\*\*|__/g, '')))) return null;
+  // A task with a Cierre whose changes are all outside the project (install, cleanup) is recorded too (ctx.outside, 3c):
+  // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn (2026-10-03 · T2n).
+  const lastText = String(last || '').replace(/\*\*|__/g, '');
+  const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
+  if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
   const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
   // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
   // is not a field (found when the hook read a bullet of the reply as Decisión).
-  const reply = full.match(/##\s*Cierre[\s\S]*/)?.[0] || full;
+  const reply = full.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || full;
   const routed = routedLevel([...turn.texts, full], turn.tools) || ctx.inherited?.level || 0; // an unrouted reply inside an open task (3c)
-  const level = routed === 'Q' ? 2 : routed || (/##\s*Cierre/.test(reply) ? 1 : 0);
+  const level = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
   if (!level) return null;
 
   // ---- Observed (computed, never declared) ----
@@ -169,7 +172,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell, 3c test A): memory.md changed during the turn and
       // holds the task ID of the Cierre heading
-      written: turn.tools.some((t) => EDITS.test(t.name) && MEMORY_FILE.test(fileOf(t))) || memoryHolds(ctx.memoryFile, turn.startedAt, reply.match(/##\s*Cierre\s*·\s*(.+)/)?.[1]?.match(ID)?.[0]),
+      written: turn.tools.some((t) => EDITS.test(t.name) && MEMORY_FILE.test(fileOf(t))) || memoryHolds(ctx.memoryFile, turn.startedAt, reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0]),
       saved: turn.tools.some((t) => /mem_(save|update|session_summary)/.test(t.name)),
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
@@ -199,7 +202,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     if (s === 'ok') skip[f] = true;
     else if (s) extras.push(`${f}: skip quoted as the user's ("${s}") but those words are not in the user's messages nor an option they picked`);
   }
-  const hasCierre = /##\s*Cierre/.test(reply);
+  const hasCierre = CIERRE.test(reply);
   const d = field(reply, 'Decisi[oó]n');
   // Every quoted text of "del usuario …" ("del usuario (\"…\")" or "del usuario, elegida …: \"…\"").
   const quotes = /^del usuario/i.test(d) ? [...d.matchAll(/[“"«]([^”"»]{3,400})[”"»]/g)].map((m) => m[1]) : [];
@@ -245,7 +248,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     if (!field(reply, 'Evidencia')) cierre.push('Evidencia: observada <what you saw> | inferida de <source> (check: <one line for the user>)');
     if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <your rewritten Work in progress line> (never "ninguno")');
     if (ctx.ids) {
-      const id = reply.match(/##\s*Cierre\s*·\s*(.+)/)?.[1]?.match(ID)?.[0];
+      const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
       if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
       else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
@@ -324,7 +327,7 @@ export function branchesOf(files) {
 
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
-  const claimed = gaps.reply.match(/##\s*Cierre\s*·\s*(.+)/)?.[1]?.match(ID)?.[0];
+  const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids);
   return {
     id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook' }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
@@ -337,7 +340,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     commands: turn.tools.filter(shell).map((t) => maskSecrets(cmdOf(t).slice(0, 200))).slice(0, 30),
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
-    cierre: maskSecrets((gaps.reply.match(/##\s*Cierre[\s\S]*/)?.[0] || '').slice(0, 2000)),
+    cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   };
@@ -373,7 +376,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(taskLines(lines)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true };
-      const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/##\s*Cierre\s*·\s*(.+)/)?.[1]?.match(ID)?.[0];
+      const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       ctx.commits = commitsFor(cwd, claimed);
       ctx.inputs = turnInputs(taskLines(lines, 1), cwd, agent.instructions);
       ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook

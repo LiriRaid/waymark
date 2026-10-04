@@ -103,7 +103,7 @@ export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
   const home = projectHome(cwd), file = openFile(home);
   if (!file || !fs.existsSync(home.memory)) return false; // tasks.md exists only with memory in the project
   const ids = taskIds(cwd, now), open = readOpen(home);
-  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120) }; // the agent: "started in codex" (3c)
+  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex" (3c)
   ensureLocal(home);
   fs.writeFileSync(file, JSON.stringify(open, null, 1));
   refreshTasks(home, true);
@@ -239,10 +239,32 @@ export function decisionsIn(lines) {
       // itself holds a comma falls back to a substring match.
       const parts = String(chosen).split(',').map((s) => s.trim());
       const picked = (l) => parts.includes(l) || (l.includes(',') && String(chosen).includes(l));
-      out.push({ question: q.question, chosen, discarded: (q.options || []).map((o) => o.label).filter((l) => !picked(l)), ...(r.source ? { source: r.source } : {}) }); // source "chat": asked in the chat (agents without a choice window, docs/adr/0009)
+      const d = { question: q.question, chosen, discarded: (q.options || []).map((o) => o.label).filter((l) => !picked(l)), ...(r.source ? { source: r.source } : {}) }; // source "chat": asked in the chat (agents without a choice window, docs/adr/0009)
+      Object.defineProperty(d, 'labels', { value: (q.options || []).map((o) => o.label), enumerable: false }); // for recordedDecisions only
+      out.push(d);
     }
   }
   return out;
+}
+
+// Decisions as the chained log keeps them: the picked labels, never a free-text answer — it may hold a password or a
+// token, and a chained record cannot be edited (3c test A: a test account's password typed in "Other").
+export function recordedDecisions(decisions = []) {
+  return (decisions || []).map((d) => {
+    if (!d.labels) return d; // built by hand (tests, older callers): no options known; decisionsIn always sets them
+    const labels = d.labels, chosen = String(d.chosen ?? '');
+    const kept = labels.includes(chosen) ? chosen
+      : chosen.split(',').map((p) => p.trim()).filter(Boolean).map((p) => (labels.includes(p) ? p : `(respuesta escrita, ${p.length} caracteres)`)).join(', ');
+    return { ...d, chosen: kept };
+  });
+}
+
+// Passwords, tokens, keys and URL credentials masked in text the log keeps (prompt, commands, Cierre).
+export function maskSecrets(text) {
+  return String(text ?? '')
+    .replace(/\b(contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|bearer)(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)[^\s"'`,;]+\3/gi, '$1$2[redactado]')
+    .replace(/(\/\/[^\s:/@]+:)[^\s@/]+@/g, '$1[redactado]@')
+    .replace(/(\s-u\s+[^\s:]+:)\S+/g, '$1[redactado]');
 }
 
 export const askedChoice = (lines) => lines.some((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some?.((c) => c.type === 'tool_use' && c.name === 'AskUserQuestion'));

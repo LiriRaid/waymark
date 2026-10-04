@@ -14,7 +14,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### Test pyramid — choose the level
 1. **Unit** (most): pure logic, services, state, mappers. No network, DB or browser.
 2. **Integration** (fewer): component + template, endpoint + DB, repository + real store. Test the seam.
-3. **End-to-end** (fewest): critical journeys only (login, checkout, main CRUD) with `browser-verify`.
+3. **End-to-end** (fewest): critical journeys only (login, checkout, main CRUD), with `browser-verify` only when the user asks.
 4. Put each assertion at the lowest level that can prove it.
 
 ### New feature or behavior (TDD: red / green / refactor)
@@ -26,7 +26,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 6. Run the gates for the level (below).
 
 ### Bug fix
-1. **Reproduce:** exact steps, input, observed vs expected. UI: reproduce with `run` + `browser-verify`.
+1. **Reproduce:** exact steps, input, observed vs expected. UI: reproduce with a failing spec (`run` / `browser-verify` only when the user asks).
 2. **Root cause:** hypothesis, confirm with logs, debugger or a minimal test. Do not patch the symptom.
 3. **Failing regression test** at the lowest pyramid level. Run it; it MUST fail.
 4. **Fix:** smallest change that addresses the root cause. The regression test MUST now pass.
@@ -48,7 +48,8 @@ Commands come from project memory → *Quality gates* (`<project>/.waymark/memor
 4. Never skip, comment out or loosen a test or lint rule to get green.
 5. After 3 honest attempts, stop and report the remaining failures verbatim; do not claim done.
 
-### Browser verification (any UI change)
+### Browser verification (only when the user asks)
+Never offer or recommend it, and never choose it on your own: it spends many tokens and misreads screens. When the user asks:
 1. Start the app with `run` (dev command from project memory or the stack profile).
 2. With `browser-verify`: golden path, then at least two edge cases (empty, error, long content, slow network).
 3. Console and network: no new errors or failed requests.

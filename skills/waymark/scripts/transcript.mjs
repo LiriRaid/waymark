@@ -31,12 +31,37 @@ export const isPrompt = (d) => {
   return !!text.trim() && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
 };
 
-// The current turn: everything after the last prompt. Returns its assistant texts and tool calls (main agent only).
-export function currentTurn(lines) {
+// Reads the transcript tail, doubling it until it holds `prompts` user prompts or the whole file (max 64 MB): a pasted
+// image is a line of megabytes, and a turn whose prompt fell out of the tail was read as "no turn" — the gate skipped it
+// and the record counted the whole tail (3c test A: 17.4M tokens recorded for a ~2% turn). read(bytes) → lines.
+export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024) {
+  let lines = read(start);
+  for (let bytes = start * 2; bytes <= max && lines.filter(isPrompt).length < prompts; bytes *= 2) {
+    const more = read(bytes);
+    if (more.length <= lines.length) break; // the whole file was already read
+    lines = more;
+  }
+  return lines;
+}
+
+// The index where the current turn starts: after its last prompt, or after `since` (ms) when that is later — a turn
+// that a background notification started after a close has no prompt of its own (3c test A: the code-review agent's
+// notification resumed the closed task and the record counted the previous task again).
+const turnStart = (lines, since = 0) => {
   let i = lines.length - 1;
   while (i >= 0 && !isPrompt(lines[i])) i--;
+  const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
+  if (!since || promptAt > since) return { i, from: i + 1 }; // a prompt after the close starts the turn, as always
+  const j = lines.findIndex((d, k) => k > i && (Date.parse(d.timestamp || '') || 0) > since);
+  return { i, from: j < 0 ? lines.length : j };
+};
+
+// The current turn: everything after the last prompt (and after `since`). Returns its assistant texts and tool calls
+// (main agent only).
+export function currentTurn(lines, since = 0) {
+  const { i, from } = turnStart(lines, since);
   const texts = [], tools = [], results = {};
-  for (const d of lines.slice(i + 1)) {
+  for (const d of lines.slice(from)) {
     const cmd = d.type === 'user' && promptText(d).match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
@@ -49,7 +74,8 @@ export function currentTurn(lines) {
       if (c.type === 'tool_use') tools.push({ name: c.name, input: c.input || {}, id: c.id, at });
     }
   }
-  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0, texts, tools, results };
+  const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
+  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: Math.max(promptAt, since > promptAt ? since : 0), texts, tools, results };
 }
 
 // Every tool call of the main agent in the readable part of the session (for reads done in an earlier turn), with the
@@ -68,12 +94,11 @@ export const readSomething = (t) => t.name === 'Read' || !/^\s*(\[\])?\s*$|^No (
 
 // Tokens of the turn's main-agent responses, each message counted once (a streamed response is written as several
 // lines that share message.id and usage; measure.mjs counts the same way).
-export function turnUsage(lines) {
-  let i = lines.length - 1;
-  while (i >= 0 && !isPrompt(lines[i])) i--;
+export function turnUsage(lines, since = 0) {
+  const { from } = turnStart(lines, since);
   const seen = new Set();
   const s = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }; // split: the quota does not weigh a cache read like a new token
-  for (const d of lines.slice(i + 1)) {
+  for (const d of lines.slice(from)) {
     const u = d.type === 'assistant' && !d.isSidechain ? d.message?.usage : null;
     if (!u || seen.has(d.message.id)) continue;
     seen.add(d.message.id);

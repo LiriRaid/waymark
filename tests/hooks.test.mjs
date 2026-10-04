@@ -152,7 +152,8 @@ test('3c: the gate asks every work-shaping decision first and offers the browser
   const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`));
   assert.ok(!/feat\/other-work|include where the work goes/.test(deny), 'no branch option pushed');
   assert.match(deny, /every decision that shapes the work/);
-  assert.match(deny, /verify it in the browser[^.]*Playwright/);
+  assert.match(deny, /Never offer, recommend or run browser verification[^.]*unless the user asks/, 'T2l: the browser is never offered');
+  assert.ok(!/test user|Playwright when/.test(deny));
   assert.match(deny, /→ confirmada/);
 });
 
@@ -1055,7 +1056,7 @@ test('3c: "→ confirmada" passes; the branch is never counted as a sub-decision
   assert.match(checkCierre(l2(), cierre(ids.next, undefined, undefined, 'error branch del formulario → no preguntada'), undefined, undefined, ctx) || '', /taken without asking/, 'a code branch is still a decision');
 });
 
-test('3c: the browser is the user\'s call: never offered ✘, declined in the choice window ✔, accepted and not done ✘', () => {
+test('3c (T2l): no browser step — a UI change passes with no browser attempt and no offer; the contract has no Navegador', () => {
   const dir = fs.mkdtempSync(path.join(os.homedir(), '.wm-ui-')); // outside temp so it is not exempt
   temps.push(dir);
   const ui = path.join(dir, 'modal.component.html');
@@ -1064,13 +1065,15 @@ test('3c: the browser is the user\'s call: never offered ✘, declined in the ch
   const turn = (extra = []) => currentTurn([prompt('mueve el modal'), say('Waymark → L2 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), call('AskUserQuestion'), answered('¿Cómo?', ['A', 'B'], 'A'),
     call('Edit', { file_path: ui }), call('Bash', { command: 'npx ng build' }), call('Skill', { skill: 'code-review' }), MEM(), ...extra]);
   const close = (extra = '') => `## Cierre · ${ids.next}\nResultado: hecho · Decisión: elegida A · descartadas B\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"${extra}`;
-  const offered = [{ question: '¿Cómo?', chosen: 'A', discarded: ['B'] }, { question: '¿Verifico en el navegador?', chosen: 'Sin navegador', discarded: ['Sí, con browser-verify'] }];
-  assert.match(checkCierre(turn(), close(), undefined, undefined, { ids, decisions: offered.slice(0, 1) }) || '', /browser check was never offered/);
-  assert.equal(checkCierre(turn(), close('\nNavegador: omitido (usuario: "Sin navegador")'), undefined, undefined, { ids, decisions: offered }), null, 'declined: the picked option counts as the user\'s words');
-  assert.match(checkCierre(turn(), close(), undefined, undefined, { ids, decisions: offered }) || '', /was offered the browser check/);
-  const accepted = [offered[0], { question: '¿Verifico en el navegador?', chosen: 'Sí, con browser-verify', discarded: ['Sin navegador'] }];
-  assert.match(checkCierre(turn(), close('\nNavegador: omitido (usuario: "browser-verify")'), undefined, undefined, { ids, decisions: accepted }) || '', /was offered the browser check/, 'a fragment of the accepted option is not a skip');
-  assert.equal(checkCierre(turn([call('Skill', { skill: 'browser-verify' })]), close(), undefined, undefined, { ids, decisions: offered.slice(0, 1) }), null, 'done');
+  const decisions = [{ question: '¿Cómo?', chosen: 'A', discarded: ['B'] }];
+  const g = cierreGaps(turn(), close(), undefined, undefined, { ids, decisions });
+  assert.deepEqual(g.missing, [], 'nothing about the browser blocks');
+  assert.ok(!g.steps.some((s) => s.id === 'browser'), 'no browser step in the contract');
+  assert.ok(!('Navegador' in evaluate(g, { total: 1 }).steps));
+  const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
+  assert.ok(!routine.steps.some((s) => s.id === 'browser'));
+  const reviewOffered = [...decisions, { question: '¿Corro el code-review?', chosen: 'Sí, con code-review', discarded: ['Sin review'] }];
+  assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
 });
 
 test('3c: the end-of-turn line asks the real quota % while the model has fewer than 3 pairs', () => {
@@ -1133,4 +1136,95 @@ test('3c codex: request_user_input_async counts as the choice window, answered b
   assert.equal(decisionsIn(taskLines(noAsync)).length, 2, 'chat questions written after the last action, even with a summary after them');
   const narration = cx.toLines([rows[0], rows[1], cxSay('t1', '¿Qué hace este servicio? Lo reviso.'), cxCmd('t1', 'npm test'), cxSay('t1', 'Listo, apliqué el cambio.'), cxUser('t2', 'i2', 'gracias')]);
   assert.equal(decisionsIn(taskLines(narration)).length, 0, 'a question before the last action is narration');
+});
+
+// ---- 3c test A fixes (2026-10-03 · T2l; docs/adr/0011) ----
+const { readTurns } = await import(`file://${SCRIPTS}/transcript.mjs`);
+const { recordedDecisions, maskSecrets } = await import(`file://${SCRIPTS}/provenance.mjs`);
+
+test('T2l Decisión: "del usuario" read across lines, and a quoted multi-select answer counts as the user\'s', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const multi = [{ question: '¿Cuáles corrijo?', chosen: '1. Marcador antes del texto, 2. Avisar media perdida, 3. width con %', discarded: ['4. Descargar'] }];
+  const close = (d) => cierre(ids.next, d);
+  assert.equal(checkCierre(l2(), close('del usuario ("1. Marcador antes del texto, 2. Avisar media perdida, 3. width con %")'), undefined, ['haz el commit'], { ids, decisions: multi }), null, 'the whole multi-select answer');
+  const below = `## Cierre · ${ids.next}\nResultado: hecho\nDecisión: del usuario, elegida en el choice window:\n- "Backoff"\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"`;
+  assert.equal(checkCierre(l2(), below, undefined, ['x'], ctxFor(cwd)), null, 'the pick on the line below');
+  const emptyThenNext = `## Cierre · ${ids.next}\nResultado:\nDecisión: elegida Backoff · descartadas Cola\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a"`;
+  assert.match(checkCierre(l2(), emptyThenNext, undefined, undefined, ctxFor(cwd)) || '', /Resultado: hecho/, 'an empty field still never takes the next line');
+});
+
+test('T2l Sub-decisiones: " · " separates items with several "→"; "→ única (<why>)" is a one-way technical step and passes', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const sub = 'setNodeAttribute en lugar de setNodeMarkup → única (corrige el bug: el panel se cerraba) · untracked en syncImagePanel → única (corta el bucle infinito) · textos → del usuario ("ok")';
+  assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, sub), undefined, ['ok'], ctx), null);
+  const g = cierreGaps(l2(), cierre(id, undefined, undefined, 'a → preguntada · b → no preguntada'), undefined, undefined, ctx);
+  assert.ok(g.missing.some((m) => /taken without asking \(b → no preguntada\)/.test(m)), 'only the item taken alone is named');
+  assert.match(checkCierre(l2(), cierre(id, undefined, undefined, 'x → única'), undefined, undefined, ctx) || '', /each item needs/, 'única needs its reason');
+});
+
+test('T2l Aprender: memory.md written by any tool counts when it changed in the turn and holds the task ID', () => {
+  const dir = fs.mkdtempSync(path.join(home, 'mem-')), mem = path.join(dir, 'memory.md');
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const noEdit = currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    call('Edit', { file_path: FILE }), call('Bash', { command: `node "$TEMP/mem.js"` }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' })]);
+  fs.writeFileSync(mem, `## Work in progress\n- [${id}] backoff ← timeouts\n`);
+  const ctx = { ...ctxFor(cwd), memoryFile: mem };
+  assert.equal(cierreGaps(noEdit, cierre(id), undefined, undefined, ctx).observed.memory.written, true, 'written by a script through the shell');
+  fs.writeFileSync(mem, '## Work in progress\n- [otra tarea] x\n');
+  assert.match(checkCierre(noEdit, cierre(id), undefined, undefined, ctx) || '', /Aprendido is not in the project memory/, 'without the task ID it was not this task');
+});
+
+test('T2l outside the project: a turn with a Cierre and no project change is still recorded (install, cleanup)', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const turn = currentTurn([prompt('instala aquí'), say('Waymark → L2 · dept-devops'), call('Skill', { skill: 'dept-devops' }), PROC('dept-devops'), call('AskUserQuestion'), answered('¿Cómo?', ['Push + instalar', 'Solo instalar'], 'Push + instalar'), call('Bash', { command: 'cp a ~/.claude/skills/x' }), MEM()]);
+  const reply = `## Cierre · ${id}\nResultado: hecho · Decisión: elegida Push + instalar · descartadas Solo instalar\nSub-decisiones: ninguna\nEvidencia: observada sync OK\nAprendido: "instalado ← sync"`;
+  assert.equal(cierreGaps(turn, reply, undefined, undefined, ctxFor(cwd, [{ question: '¿Cómo?', chosen: 'Push + instalar', discarded: ['Solo instalar'] }])), null, 'without ctx.outside: nothing, as before');
+  const g = cierreGaps(turn, reply, undefined, undefined, { ...ctxFor(cwd, [{ question: '¿Cómo?', chosen: 'Push + instalar', discarded: ['Solo instalar'] }]), outside: true });
+  assert.equal(g.level, 2);
+  assert.deepEqual(g.missing, []);
+  assert.equal(cierreGaps(currentTurn([prompt('¿qué hace?'), say('Waymark → Q · dept-qa')]), 'Respuesta', undefined, undefined, { ...ctxFor(cwd), outside: true }), null, 'no Cierre: no record');
+});
+
+test('T2l turn counting: a prompt far back (a pasted image) is found; a turn resumed by a notification counts from the last close', () => {
+  const lines = [prompt('tarea con imagen', 'big'), ...Array.from({ length: 50 }, (_, i) => ({ type: 'assistant', timestamp: new Date(Date.UTC(2026, 9, 4, 3, i)).toISOString(), message: { id: `m${i}`, content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 1 } } }))];
+  const tail = (n) => lines.slice(-n);
+  let reads = 0;
+  const got = readTurns((bytes) => { reads++; return tail(Math.min(lines.length, Math.floor(bytes / (1024 * 1024)))); }, 1, 2 * 1024 * 1024, 64 * 1024 * 1024);
+  assert.ok(got.some((d) => d.uuid === 'big') && reads > 1, 'read further back until the prompt');
+  const since = Date.UTC(2026, 9, 4, 3, 39, 30); // the previous close
+  assert.equal(turnUsage(lines).responses, 50);
+  assert.equal(turnUsage(lines, since).responses, 10, 'only what came after the close');
+  assert.equal(currentTurn(lines, since).texts.length, 10);
+  assert.equal(currentTurn(lines, since).startedAt, since);
+});
+
+test('T2l secrets: the record keeps picked labels only, never a free-text answer; passwords and tokens masked in text', () => {
+  const lines = [prompt('x'), answered('¿Usuario de prueba?', ['Crear uno', 'Sin login'], 'te paso uno: ana@example.com y la contraseña es S3cr3t-Pass!')];
+  const raw = decisionsIn(lines);
+  assert.match(raw[0].chosen, /S3cr3t/, 'the hook still sees the answer live');
+  const kept = recordedDecisions(raw);
+  assert.ok(!/S3cr3t|ana@/.test(JSON.stringify(kept)), 'never in the record');
+  assert.match(kept[0].chosen, /^\(respuesta escrita, \d+ caracteres\)$/);
+  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff')]))[0].chosen, 'Backoff');
+  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cuáles?', ['A', 'B', 'C'], 'A,mi texto')]))[0].chosen, 'A, (respuesta escrita, 8 caracteres)');
+  for (const [s, leak] of [['la contraseña es S3cr3t-Pass!', 'S3cr3t'], ['password: hunter22', 'hunter22'], ['curl -u admin:pw123 https://x', 'pw123'], ['https://bob:pw456@host/x', 'pw456'], ['token=abc.def.ghi', 'abc.def'], ['Authorization: Bearer eyJhbGci', 'eyJhb']]) assert.ok(!maskSecrets(s).includes(leak), s);
+  assert.equal(maskSecrets('npm run build'), 'npm run build');
+});
+
+test('T2l Review: a follow-up that applies the review findings passes with the code-review run earlier in the task', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const noReview = currentTurn([prompt('corrige los hallazgos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), MEM()]);
+  assert.match(checkCierre(noReview, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /code-review did not run/);
+  assert.equal(checkCierre(noReview, cierre(id), undefined, undefined, { ...ctxFor(cwd), taskTools: [{ name: 'Skill', input: { skill: 'code-review' } }] }), null);
+});
+
+test('T2l turn start: a prompt after the last close starts the turn even when the next line has no timestamp', () => {
+  const p = { ...prompt('nueva tarea'), timestamp: new Date(Date.UTC(2026, 9, 4, 5, 0)).toISOString() };
+  const lines = [p, call('Edit', { file_path: FILE }), { ...say('hecho'), timestamp: new Date(Date.UTC(2026, 9, 4, 5, 1)).toISOString() }];
+  assert.deepEqual(currentTurn(lines, Date.UTC(2026, 9, 4, 4, 0)).tools.map((t) => t.name), ['Edit'], 'the untimestamped tool call stays in the turn');
 });

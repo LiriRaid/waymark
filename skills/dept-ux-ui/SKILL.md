@@ -8,7 +8,7 @@ description: "Waymark · UX/UI department. Use FIRST, before ui-system/ui-refine
 ## Quick ref
 **Mission:** Make interfaces accessible (WCAG 2.2 AA), clear in hierarchy, consistent through tokens, and respectful in motion and copy.
 **Must:** WCAG 2.2 AA minimum · visible focus and full keyboard access · reduced-motion respected for every non-essential animation · tokens only, contrast checked in every theme · every state designed (loading, empty, error, success)
-**Skills by default:** `ui-system` · `ui-audit` · `ui-refine` · `browser-verify`
+**Skills by default:** `ui-system` · `ui-audit` · `ui-refine` (`browser-verify` only when the user asks)
 **DoD:** Audit passes AA, states and copy complete, tokens consistent, motion reduced-safe, gates green.
 
 ## Entry
@@ -83,7 +83,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `ui.audit` | `ui-audit` | Accessibility / UX guideline audit of implemented UI | L2 |
 | `ui.refine` | `ui-refine` | Motion design, transitions, micro-interactions, UX critique and polish | L2 |
 | `ui.build` | `ui-build` (via `dept-frontend`) | Layout and responsive implementation | L1 |
-| `test.browser` | `browser-verify` | Evidence: keyboard pass, screenshots, responsive checks | L2 |
+| `test.browser` | `browser-verify` | Evidence: keyboard pass, screenshots, responsive checks, only when the user asks | — |
 | `ui.library` | the UI library's MCP, if the user has one (e.g. `primeng`); else `library-docs` | Component a11y and theming tokens | L1 |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | WCAG, ARIA APG, styling-system docs | Q |
 | `contrast.check` | none yet → waymark `references/skills.md` | Automated contrast and color-blindness checks | — |

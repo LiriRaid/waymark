@@ -1,14 +1,14 @@
 ---
 name: dept-qa
-description: "Waymark · QA department. Use FIRST, before browser-verify or code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\", \"verifica que funcione\", unit, e2e, TDD. Closes every L1+ task."
+description: "Waymark · QA department. Use FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\", \"verifica que funcione\", unit, e2e, TDD. Closes every L1+ task."
 ---
 
 # Quality Assurance & Testing
 
 ## Quick ref
 **Mission:** Prove every change works, keeps working and meets the Definition of Done before anyone says "done".
-**Must:** failing test before the fix or feature (TDD) · every bug fix ships a regression test · gates run by you, green or failure proven pre-existing · UI changes verified in a real browser · `code-review` on the diff at L2+
-**Skills by default:** `browser-verify` · `run` · `code-review` · `simplify` (L3) · `library-docs`
+**Must:** failing test before the fix or feature (TDD) · every bug fix ships a regression test · gates run by you, green or failure proven pre-existing · browser checks (browser-verify, Playwright) only when the user asks, never offered or recommended · `code-review` on the diff at L2+
+**Skills by default:** `code-review` · `simplify` (L3) · `library-docs` (`run` / `browser-verify` only when the user asks)
 **DoD:** gates green, tests cover the change, behavior observed running, diff reviewed, report honest about anything not verified.
 
 ## Entry
@@ -23,11 +23,11 @@ Run the *Waymark protocol → Entry* from the instructions file (already in cont
 3. **Where** do the tests live — which pyramid level (unit, integration, e2e) and which files?
 4. **How** is it reproduced or exercised — exact steps, inputs, data, viewport?
 5. Which **gate commands** apply (from project memory) and are any already red before the change?
-6. Is UI affected, so browser verification is required?
+6. Is UI affected? Prove it with specs and the build; the browser only if the user asks for it.
 7. **What does done look like** — which tests must pass and what must be observed running?
 
 ## Scope
-- Owns: test strategy and pyramid, TDD, regression tests, running and interpreting quality gates, browser verification, code review of the diff, the quality score, the Definition of Done every department inherits.
+- Owns: test strategy and pyramid, TDD, regression tests, running and interpreting quality gates, browser verification (only when the user asks), code review of the diff, the quality score, the Definition of Done every department inherits.
 - Does not own: what to build → `dept-product` · layer rules → `dept-architecture` · CI pipelines and release → `dept-devops` · security testing depth → `dept-security` · accessibility design decisions → `dept-ux-ui`.
 
 ## Procedures
@@ -38,7 +38,7 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 - New feature or behavior (TDD: red / green / refactor)
 - Bug fix
 - Run the quality gates yourself
-- Browser verification (any UI change)
+- Browser verification (only when the user asks)
 - Code review (L2+, before done or a PR)
 - Quality score (L3 or explicit request only)
 
@@ -46,7 +46,7 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 - **MUST** write or update a test for every behavior change; a bug fix without a regression test is not done.
 - **MUST** see a new test fail before making it pass.
 - **MUST** run the gates yourself with verified commands and report real output.
-- **MUST** verify UI changes in a browser; "tests pass" is not "feature works".
+- **MUST NOT** offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it: it costs many tokens and misreads screens. Prove UI behavior with specs and the build, and give the user a one-line check.
 - **MUST** state in the report anything not verified and why.
 - **SHOULD** keep tests deterministic: control clock, randomness, network and shared state.
 - **SHOULD** test public behavior, not private implementation details.
@@ -57,7 +57,7 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| test.browser | `browser-verify` | Any UI change, e2e journeys, visual regressions | L1+ when UI changed |
+| test.browser | `browser-verify` | e2e journeys or visual checks, only when the user asks | — |
 | app.run | `run` | Reproduce a bug or observe the change running | L2 |
 | review.diff | `code-review` | Before done or opening a PR | L2 |
 | review.simplify | `simplify` | Clean-up after green, behavior-preserving | L3 |
@@ -71,7 +71,7 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 - [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Every new or changed behavior has a test; bug fixes have a regression test that failed first
 - [ ] Edge cases and error paths covered
-- [ ] UI verified in the browser (golden path + edge cases, console clean, mobile + desktop)
+- [ ] UI behavior covered by specs; verified in the browser only if the user asked for it
 - [ ] `code-review` findings resolved or justified (L2+)
 - [ ] Pre-existing failures proven in a clean copy of HEAD (`git worktree`) and quoted, or "no comprobado (sin permiso …)"
 - [ ] Quality score with fixes for areas < 8 (L3 or on request)

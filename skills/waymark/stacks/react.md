@@ -49,8 +49,8 @@ Only what is specific to React. General rules live in the `dept-*` department sk
 - Vitest (Vite and modern Next.js) or Jest (older or `next/jest`), plus Testing Library (`@testing-library/react`, `user-event`, `jest-dom`).
 - Query by role and accessible name (`getByRole`), not by test id or class. Use `userEvent` not `fireEvent`. Prefer `findBy` / `waitFor` over arbitrary timeouts.
 - Mock the network (MSW) rather than component internals. Do not assert on implementation details such as state values or hook calls.
-- Async Server Components are not unit-testable with Testing Library; cover them with e2e (Playwright) or test the extracted logic.
-- TDD for logic; regression test for every bug fix. UI changes: confirm in the browser (`test.browser`, `app.run`).
+- Async Server Components are not unit-testable with Testing Library; test the extracted logic (e2e with Playwright only when the user asks).
+- TDD for logic; regression test for every bug fix. UI changes: specs and the build; the browser (`test.browser`, `app.run`) only when the user asks.
 
 ### Data & state
 - Server state in TanStack Query / SWR / Server Components, not copied into global client stores. Local state with `useState` / `useReducer`; lift only as needed; context for low-frequency values. Global client state (Zustand, Redux Toolkit) only when the project already uses it.

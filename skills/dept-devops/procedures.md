@@ -42,7 +42,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### SSR / prerender deploy concerns
 1. Server-rendered routes must not touch browser-only globals; guard them per the stack profile.
 2. Decide per route: static prerender, server render on request, or client-only. Record it in project memory; do not change it at deploy time.
-3. Verify hydration in the browser with `browser-verify`: no mismatch warnings, no content flash, no duplicate requests.
+3. Verify hydration with the build's prerender/SSR output and the server-render tests (in the browser with `browser-verify` only when the user asks): no mismatch warnings, no content flash, no duplicate requests.
 4. Caching headers and CDN rules consistent with the rendering mode.
 5. Never disable SSR or hydration to hide an error; find the root cause.
 
@@ -50,7 +50,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 1. Deploy only artifacts that passed CI. Tag releases with semantic versions when the project versions releases.
 2. Prefer progressive strategies (blue/green, canary, feature flags) for risky changes.
 3. Migrations backward-compatible first (expand → migrate → contract) with `dept-data`.
-4. Smoke test after deploy with `browser-verify` or a health endpoint.
+4. Smoke test after deploy with a health endpoint (`browser-verify` only when the user asks).
 5. Know the rollback before deploying: previous artifact, revert commit or flag off.
 
 ### Observability

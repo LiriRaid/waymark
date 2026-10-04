@@ -48,7 +48,7 @@ Only what is specific to Node/TypeScript. General rules live in the `dept-*` dep
 - Match the existing runner: Vitest (preferred for new TS projects), Jest, or `node:test`. Co-locate unit specs (`*.test.ts` / `*.spec.ts`); integration tests may live in `test/`.
 - Test behavior through the public API. Mock only true boundaries (network, clock, filesystem); prefer in-memory fakes. For HTTP servers use `supertest` or the framework's inject (`fastify.inject`).
 - Deterministic tests: fake timers for time, no reliance on ordering or on external services. TDD for logic; every bug fix gets a regression test.
-- Vue/Svelte fallback: use the framework's Testing Library package (`@testing-library/vue`, `@testing-library/svelte`) and query by role; confirm UI changes in the browser (`test.browser`).
+- Vue/Svelte fallback: use the framework's Testing Library package (`@testing-library/vue`, `@testing-library/svelte`) and query by role; the browser (`test.browser`) only when the user asks.
 
 ### Data & state
 - Database access through one layer (Prisma, Drizzle, Kysely, or a driver wrapper). Parameterized queries only. Migrations immutable after merge. Timeouts and pool limits set explicitly. Cache keys prefixed, with TTLs and invalidation.

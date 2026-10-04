@@ -13,7 +13,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 8. Run `ui-audit` on the implemented code; fix every AA failure.
 
 ### Visual improvement ("se ve feo", "más profesional")
-1. Capture the current screen (`browser-verify` screenshot) and name the concrete problems.
+1. Start from the user's screenshot or the component files and name the concrete problems (`browser-verify` screenshots only when the user asks).
 2. Fix hierarchy, spacing rhythm and contrast before adding decoration.
 3. Invoke `ui-system`; use `ui-refine` for critique and polish. Preserve behavior and interactions.
 4. Capture after and compare.
@@ -21,7 +21,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### Accessibility audit
 1. Invoke `ui-audit` on the target screens/components.
 2. Check manually: keyboard-only pass (tab order, focus visible, no traps except modals), screen reader names/roles, contrast in all themes, zoom to 200%, reflow at 320px, reduced motion.
-3. Use `browser-verify` to capture evidence (screenshots, focus order).
+3. Evidence from the code (focus order, contrast tokens); `browser-verify` screenshots only when the user asks.
 4. Report findings by WCAG success criterion, severity and file:line; fix or hand off.
 
 ### Theming / tokens change

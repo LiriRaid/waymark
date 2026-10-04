@@ -24,7 +24,7 @@ Before the first edit, write a short **keep list** for the target: hover, focus 
 | Brief | the `dept-ux-ui` brief (what is wrong today, for whom) |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Frontend* (styling, motion library, SSR guards) |
 | Project context | `<project>/.waymark/memory.md` → `## Design system`, *Conventions*, UI language |
-| Current state | screenshot(s) via `browser-verify` or `run`, plus the component files |
+| Current state | the user's screenshot(s) and the component files (`browser-verify` / `run` only when the user asks) |
 | Detail references | `references/` in this skill (load only for the active mode) |
 | Known patterns | `patterns/` in this skill (generic) + project skills (project-specific) |
 

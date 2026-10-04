@@ -9,7 +9,7 @@ description: "Waymark · Frontend department. Use FIRST, before any ui-* skill, 
 **Mission:** Build client-side UI (web or mobile) that is correct, accessible, performant and consistent with the stack's conventions.
 **Must:** reactive state primitive and render optimization per stack profile · styling system first, tokens only · guard platform-only APIs when server-rendering · clean up subscriptions, listeners and animations · every UI state (loading, empty, error, success)
 **UX musts:** match the existing screens (spacing, density, components) · visible focus and full keyboard path · labels on every control · loading / empty / error states that look like the project's own
-**Skills by default:** `ui-build` · `browser-verify` · `run` · `library-docs` (+ the stack's framework / UI-library MCP when the user has one)
+**Skills by default:** `ui-build` · `library-docs` (+ the stack's framework / UI-library MCP when the user has one; `run` / `browser-verify` only when the user asks)
 **DoD:** Works in the running app, a11y basics pass, all states handled, tests cover criteria, gates green.
 
 ## Entry
@@ -27,7 +27,7 @@ The brief must answer:
 5. **States** — loading, empty, error, success, disabled, plus hover/focus/active?
 6. **Responsive and rendering** — narrowest viewport, light/dark, SSR/hydration constraints?
 7. **Accessibility** — keyboard path, focus management, labels, live regions?
-8. **How and done** — procedure, skills/MCP (`ui-build`, `ui-refine`, `browser-verify`, `library-docs`, library MCP) and the tests and screen checks that prove it?
+8. **How and done** — procedure, skills/MCP (`ui-build`, `ui-refine`, `library-docs`, library MCP) and the tests that prove it? (The browser only if the user asks.)
 
 ## Scope
 - Owns: components/views, client state, client routing, rendering mode (CSR/SSR/SSG/hydration), styling implementation, icons, client animations, client-side performance, wiring accessibility semantics.
@@ -77,7 +77,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `ui.build` | `ui-build` | Layout, responsive, forms, cards, navigation, visual polish | L1 |
 | `ui.refine` | `ui-refine` | Any animation, transition, micro-interaction, scroll effect | L2 |
 | `ui.system` | `ui-system` | Premium polish, hierarchy, dashboards, landing pages (when requested) | L2 |
-| `test.browser` | `browser-verify` | Flows, responsive regressions, console errors, screenshots | L2 |
+| `test.browser` | `browser-verify` | Flows, responsive checks, screenshots, only when the user asks | — |
 | `app.run` | `run` | See the change working in the real app | L2 (L1 for visible changes) |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Framework, styling or UI library API not verified this session | Q |
 | `framework.cli` | the stack's framework CLI/docs MCP, if the user has one (e.g. `angular-cli` for Angular); none → `library-docs` | Generators, best practices, migrations | L1 |

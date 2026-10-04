@@ -97,6 +97,17 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
     - Questions written in the chat count from every message after the turn's last action, so a closing summary without "?" no longer hides them.
     - Before these fixes, the inherited L2 gate would have denied an edit after the user had already decided.
   - **The gate no longer reads a ">" inside quotes, a heredoc body or a PowerShell here-string as a redirect.** Before, `node -e "…x=>{…}"` was gated as a file change.
+  - **Test A fixes** (`docs/adr/0011`):
+    - **Browser verification runs only when the user asks.** Waymark never offers or recommends it, there is no Navegador step, and the departments, stacks and UI skills say so. It cost many tokens and misread screens.
+    - **No secrets in the chained log.** A record keeps only the picked option labels; a typed answer is stored as `(respuesta escrita, N caracteres)`. Passwords, tokens and keys are masked in prompts, commands and the Cierre. A test password that reached a record was removed, and the chain was recomputed.
+    - **False ✘ removed:**
+      - `Decisión` continues on the next lines, and a quoted multi-select answer counts.
+      - Sub-decisions split on ` · `.
+      - `→ única (<why>)` marks a technical step with one real way.
+      - `memory.md` written by any tool counts.
+      - A follow-up that applies the review's findings needs no second review.
+    - **Turns counted right.** The hooks read back until the turn's prompt is in view; a pasted image of megabytes pushed it out before. A turn resumed by a background notification counts from the last close. A recorded 22% turn was really ~2%.
+    - **Tasks outside the project** (install, cleanup) are recorded in the session's project.
   - **tasks.md:** `próximo` keeps every pending part in order (the last `Pendiente:` used to win, and "paso 2" was lost). A marker inside quotes is text. `open.json` records the agent, so a turn shows "started in codex".
 - **Hook tests in the repo:** `node --test tests/*.test.mjs` (no dependencies, temporary `WAYMARK_HOME`).
 - **Fix:** `protocol.md` → *Closing report* was an empty, unclosed code block that turned *When stuck* into code; it now shows a full Cierre and the decision gate.

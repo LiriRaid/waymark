@@ -57,7 +57,7 @@ Only what is specific to Angular. General rules live in the `dept-*` department 
 - Vitest is the default (v4 era) with `@analogjs/vitest-angular` or Angular's `@angular/build:unit-test` builder; JSDOM environment, setup in `src/test-setup.ts`, specs co-located as `<file>.spec.ts`. Older projects may still use Karma/Jasmine: keep their runner, do not migrate unasked.
 - TDD for services and logic: failing spec first, minimal implementation, refactor green.
 - Prefer `TestBed` with real providers; mock only HTTP (`provideHttpClientTesting`) and true boundaries. Zoneless tests use `await fixture.whenStable()` instead of `fixture.detectChanges()` loops.
-- A passing test is not proof a UI works: confirm in the browser (`test.browser`, `app.run`) for UI changes.
+- Prove UI behavior with component specs and the build; the browser (`test.browser`, `app.run`) only when the user asks.
 
 ### Data & state
 - Signals first; services `providedIn: 'root'` when singleton. `localStorage` only for UI preferences, never tokens, always SSR-guarded.

@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits } from './testigos.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -52,6 +52,9 @@ const DOCS = (t) => (t.name === 'Skill' && /library-docs/.test(String(t.input.sk
 const fileOf = (t) => t.input.file_path || t.input.notebook_path || '';
 const shell = (t) => /^(Bash|PowerShell)$/.test(t.name);
 const cmdOf = (t) => String(t.input.command || '');
+// The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
+// is not a test or gate run (3e-1 test: it counted as the gate and the slowest step).
+const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
@@ -145,7 +148,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
   // A command that writes Waymark's own memory is not a gate, even when its text says "build" or "tests" (2026-10-03 · T2o).
   // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
-  const parts = (t) => cmdOf(t).split(/&&|\|\||[;|\n]/).filter((p) => !/\.waymark[\\/]/.test(p));
+  const parts = (t) => bare(t).split(/&&|\|\||[;|\n]/).filter((p) => !/\.waymark[\\/]/.test(p));
   const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
@@ -170,9 +173,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: before((t) => procRe.test(where(t)) && readSomething(t)) },
     gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error })),
     tests: {
-      specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(cmdOf(t))),
+      specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(bare(t))),
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
-      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(cmdOf(t)) && ((firstChange >= 0 && i < firstChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
+      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && ((firstChange >= 0 && i < firstChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
     },
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
     // testigo "sin secretos": the memory, the task's diff and commits (ctx.scanSecrets, testigos.mjs) and its mem_save calls;
@@ -198,6 +201,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     else if (s) extras.push(`${f}: skip quoted as the user's ("${s}") but those words are not in the user's messages nor an option they picked`);
   }
   const hasCierre = CIERRE.test(reply);
+  // The exception lines (Tests: no, Build: no, no comprobado, Secretos: no) answer a block: written before the hook
+  // blocked, they would cancel a real one (3e-1 test: "Secretos: no" and a preventive "no comprobado" in both Cierres).
+  // Read only in the reply that follows the block (stop_hook_active; user's choice, 2026-10-04 · T1).
+  const exc = ctx.blocked ? reply : '';
   // Testigo decision (3e-1): the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
   // answered question of the task came before its first change; each answer is recorded with its position, and a later
   // question does not count against it (user's choice, 2026-10-03 · T2q). An edit the gate denied changed nothing.
@@ -222,14 +229,14 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
     // The exit belongs to the gate only when the gate is the command's last part: "build | grep -i error" exits 1 on a
     // clean build. A failure the gate may not own is decided by the hook's own typecheck (none: not held against it).
-    const tail = (mine ? cmdOf(mine) : '').split(/&&|\|\||[;|\n]/).map((p) => p.trim()).filter(Boolean).pop() || '';
+    const tail = (mine ? bare(mine) : '').split(/&&|\|\||[;|\n]/).map((p) => p.trim()).filter(Boolean).pop() || '';
     const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: !result(mine)?.error, s: secs(mine) === null ? null : Math.round(secs(mine)) };
     const run = !mine ? rerun() : agentRun.ok || GATE.test(tail) ? agentRun : rerun() || { ...agentRun, ok: true, exitNotTheGate: true };
     observed.gate = run || null;
     const none = 'no typecheck, lint or build ran after the last code change';
     if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
-    else if (!run.ok && !/no comprobado \(.{3,}\)/i.test(reply)) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    else if (!run.ok && !/no comprobado \(.{3,}\)/i.test(exc)) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
   }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   const cierre = [];
@@ -250,8 +257,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // about a spec only ("spec en rojo", "rojo→verde", "el test habría fallado"), not a red button
   const redClaim = /\b(specs?|tests?|prueba|suite)\b[^.;\n]{0,80}(\brojo\b|habr[ií]a fallado|\bfallaba\b)|\brojo\s*(→|->|a|y luego)\s*verde/i.test(redText) && !/inferid[ao]/i.test(redText);
   const near = code.length ? specsNear(code) : null;
-  const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(cmdOf(t)));
-  const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(cmdOf(t)));
+  const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
+  const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(bare(t)));
   const when = {
     engram: !!ctx.engram, code: code.length > 0, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // whole words: "Docker" is not "docs" (2026-10-03 · T2o)
@@ -268,14 +275,14 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     memory: observed.memory.searched ? [] : ['L2+: no mem_search before the first change: search engram for past decisions and rejected paths of this area now'],
     index: observed.memory.indexed ? [] : [`engram task index not saved: mem_save the task's line with topic_key waymark/tasks/${ctx.slug || '<slug>'}`],
     review: skip.Review || observed.review ? [] : [`code changed and code-review did not run: run it on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
-    build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(reply) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
+    build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(exc) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
     docs: observed.docs ? [] : ['Evidencia is inferred from docs but no docs were consulted: consult them (library-docs, or the installed package\'s types/source) and confirm or correct the change'],
     procedure,
-    spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(reply) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
+    spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
     red: observed.tests.red ? [] : ['a red claim (rojo / habría fallado) with no test run before the first code change or in a clean worktree: run it there, or write it as inferida'],
-    preexisting: observed.worktree || /no comprobado/i.test(reply) ? [] : ['a failure called pre-existing without a clean-copy check: check it now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
+    preexisting: observed.worktree || /no comprobado/i.test(exc) ? [] : ['a failure called pre-existing without a clean-copy check: check it now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
-    secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(reply) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
+    secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
     chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: an earlier record was edited or deleted (check: node testigos.mjs)`] : [],
   };
   const steps = ROUTINE.testigos.map((s) => {
@@ -373,15 +380,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // A skill or agent still running in the background: the turn is not over (no block, no record); it closes in the
       // notification's turn (2026-10-03 · T2o).
       if (pendingBackground(lines, since).length) return;
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(taskLines(lines)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true };
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
+      // the task's lines: after this session's last close (a follow-up: after the last close of another task)
+      const task = taskLines(lines, { since: taskStart(readRecords(home.log), h.session_id, claimed) });
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(task), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
       ctx.commits = commitsFor(cwd, claimed);
-      ctx.inputs = turnInputs(taskLines(lines, 1), cwd, agent.instructions);
+      ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing (3c)
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
-      ctx.taskTools = sessionTools(taskLines(lines)); // the task's tool calls (its prompt and two follow-ups)
+      ctx.taskTools = sessionTools(task); // the task's tool calls
       // testigos that execute (testigos.mjs, 3e-1): the repo typecheck when the agent ran no gate, secrets in what the task
       // wrote, and the chain as it stands before this record
       ctx.rerun = (files) => rerunGate(files, home);

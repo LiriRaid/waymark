@@ -59,6 +59,12 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **Gate:** the agent's last gate after its last code change, else the repo typecheck: memory.md *Quality gates* → package.json → tsconfig. The limit is 40 s and the process tree is killed on timeout. A failing gate blocks once. Not applicable when no code changed.
 - **Secrets:** strong formats only, in memory.md, mem_save, the lines the task added and its commits. `password=` is masked only in what Waymark writes.
 
+### 3e-1b (2026-10-04 · T1, the user's picks, from the 3e-1 test in YaloAtiendo-Chat)
+- **Task boundary:** a task starts after this session's last task record (`taskStart`). A follow-up starts after the last record of another task, so it inherits its task's answers. The decision gate uses the same boundary, so a follow-up asks or confirms again after a close. A Q record does not close a task.
+- **Exception lines** count only in the reply after a block (`stop_hook_active`). They left the Cierre template and the instructions block.
+- **Commands** are read with heredoc bodies and here-strings blanked (`shellSkeleton(c, { quotes: false })`); quoted text is kept.
+- Replay of the test: T3 records only its own question, "before". T2 would now block once on "ya existían antes" with no clean-copy check. The 241 s step of T2 was a real `npx vitest run` after the heredoc, not the heredoc.
+
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.
 - **The hook always runs the full gate:** strongest, but each close could take minutes. In a real project one eslint run took 7 minutes.

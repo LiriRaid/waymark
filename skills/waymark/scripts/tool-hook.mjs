@@ -14,7 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
-import { taskLines, askedChoice, changesProject } from './provenance.mjs';
+import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -46,7 +46,11 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   };
   if (q && once('q')) return 'Waymark: this turn was routed as a question (Q) but is about to change project files. A question that becomes a change is a task: re-route with a tool call — invoke the owner dept-* skill with args "L<n>" (e.g. Skill dept-frontend, args "L2"); a routing line written mid-turn is not persisted — then the opener, and put the decision to the user with the optimal options before changing anything.';
   // Strict gate (user's decision 2026-10-02): no change until the user was asked in the choice window in this task.
-  if (!askedChoice(taskLines(lines))) {
+  // The task starts after this session's last close: the previous task's question never opens it (user's choice,
+  // 2026-10-04 · T1; the ID is not known yet, so a follow-up asks or confirms again).
+  let records = [];
+  try { records = readRecords(projectHome(cwd).log); } catch {}
+  if (!askedChoice(taskLines(lines, { since: taskStart(records, session) }))) {
     return `Waymark: L${level} decision gate — the user decides every real decision, you never decide alone. Before changing files, ask in your choice window (AskUserQuestion): the approach with its optimal options (files, risk, cost; recommended marked, it may not be what the user needs) AND, as more questions in the same call (up to 4), every decision that shapes the work you can foresee — data/schema design, visual style, behavior details, defaults. Never offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it: prove UI work with specs and the build. ` +
       'Later questions only confirm; the user\'s answer is recorded as is. The branch is the user\'s: never asked as a decision. If there is only one real way, or the user already chose in their message, confirm it there (that option + "otra cosa"). This gate stays until the user has been asked in this task.';
   }

@@ -221,11 +221,26 @@ export function validId(id, ids) {
   return !!m[3] && [...ids.known].some((k) => base(k) === base(m[0]));
 }
 
-// Lines of the current task: from the third-last prompt (the task's prompt and two follow-ups), as stop-hook reads them.
-export function taskLines(lines, prompts = 3) {
+// Lines of the current task. With `since` (ms, taskStart): every line after it, so a new task never carries the
+// previous one's answers or first change (3e-1 test: T3 passed Decision on T2's question). Without it: from the
+// `prompts`-th last prompt.
+export function taskLines(lines, { prompts = 3, since } = {}) {
+  if (typeof since === 'number' && since > 0) {
+    const i = lines.findIndex((d) => (Date.parse(d.timestamp || '') || 0) > since);
+    return i < 0 ? [] : lines.slice(i);
+  }
   let seen = 0;
   for (let i = lines.length - 1; i >= 0; i--) if (isPrompt(lines[i]) && ++seen === prompts) return lines.slice(i);
   return lines;
+}
+
+// When the current task started (ms), read from the chained log, never from prose: this session's last task record. A
+// follow-up (an ID with a letter) inherits its task: it starts after the last record of another task (user's choice,
+// 2026-10-04 · T1). 0 when the session has no task record (every line read belongs to the task).
+export function taskStart(records, session, id) {
+  const own = /[a-z]$/.test(String(id || '').match(ID)?.[0] || '') ? base(id) : null;
+  const closes = records.filter((r) => r.session === session && ID.test(String(r.id || '')) && (!own || base(r.id) !== own));
+  return Date.parse(closes.pop()?.at || '') || 0;
 }
 
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
@@ -378,7 +393,9 @@ const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Tem
 const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
 // The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
 // in it is an index in the command): a ">" there is code or text, not a redirect (3c: `node -e "…x=>{…}"` was gated).
-export function shellSkeleton(command) {
+// quotes: false keeps the quoted text — `bash -c "npm test"` still runs a test — and blanks only the bodies (a spec
+// written through `cat > x.spec.ts <<'EOF'` is not a test run, 3e-1 test).
+export function shellSkeleton(command, { quotes = true } = {}) {
   const c = String(command || ''), out = c.split('');
   const blank = (from, to) => { for (let i = from; i < to; i++) if (out[i] !== '\n') out[i] = ' '; };
   for (const m of c.matchAll(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g)) blank(m.index + 2, m.index + m[0].length - 2);
@@ -387,7 +404,7 @@ export function shellSkeleton(command) {
     blank(start, end < 0 ? c.length : start + end);
   }
   let quote = '';
-  for (let i = 0; i < c.length; i++) {
+  for (let i = 0; quotes && i < c.length; i++) {
     if (out[i] === ' ' && c[i] !== ' ') continue; // already blanked
     if (quote) { if (c[i] === '\\' && quote === '"') { out[i] = ' '; if (i + 1 < c.length) out[++i] = ' '; } else if (c[i] === quote) quote = ''; else if (c[i] !== '\n') out[i] = ' '; }
     else if (c[i] === '"' || c[i] === "'") quote = c[i];

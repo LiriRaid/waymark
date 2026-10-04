@@ -16,7 +16,7 @@ process.env.WAYMARK_AGENTS_HOME = agentsHome;
 process.env.WAYMARK_BACKUPS = path.join(home, 'backups');
 const temps = [home, agentsHome];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
-const { taskIds, validId, decisionsIn, projectSlug, readLog, appendRecord, taskLines, verifyChain, turnInputs, commitsFor, gitSnapshot, snapshotDiff, mutatesFiles, changesProject } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { taskIds, validId, decisionsIn, projectSlug, readLog, appendRecord, taskLines, taskStart, verifyChain, turnInputs, commitsFor, gitSnapshot, snapshotDiff, mutatesFiles, changesProject } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { checkDecision } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
 const { checkCierre, cierreGaps, provenanceRecord, branchesOf, evaluate, summaryLine } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { taskLine } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
@@ -110,6 +110,29 @@ test('commits: found by their Waymark-Task trailer', () => {
 test('task lines: from the third-last prompt', () => {
   const lines = [prompt('a'), say('x'), prompt('b'), prompt('c'), say('y'), prompt('d')];
   assert.equal(taskLines(lines).length, 4);
+});
+
+// 3e-1 test (YaloAtiendo-Chat T3): a new task carried T2's answers and read its own question as "after" T2's first change.
+test('3e-1b task lines: a new task starts after the session\'s last close; a follow-up inherits its task', () => {
+  const t = (d, s) => ({ ...d, timestamp: `2026-10-04T10:${String(s).padStart(2, '0')}:00.000Z` });
+  const lines = [t(prompt('haz T2'), 1), t(call('AskUserQuestion'), 2), t(answered('¿Cómo?', ['A', 'B'], 'A'), 3), t(call('Edit', { file_path: FILE }), 4), t(say('## Cierre · x'), 5),
+    t(prompt('haz otra cosa'), 10), t(call('Edit', { file_path: FILE }), 11)];
+  const records = [{ id: '2026-10-04 · T2', session: 's', at: '2026-10-04T10:06:00.000Z' }, { kind: 'Q', session: 's', at: '2026-10-04T10:08:00.000Z' }, { id: '2026-10-04 · T1', session: 'other', at: '2026-10-04T10:09:00.000Z' }];
+  const fresh3 = taskLines(lines, { since: taskStart(records, 's', '2026-10-04 · T3') });
+  assert.deepEqual([fresh3.length, decisionsIn(fresh3).length], [2, 0], 'a new task: after T2\'s close (a Q record and another session do not close it)');
+  assert.equal(taskStart(records, 's'), Date.parse('2026-10-04T10:06:00.000Z'), 'no ID yet (the gate): the last close');
+  assert.equal(decisionsIn(taskLines(lines, { since: taskStart(records, 's', '2026-10-04 · T2b') })).length, 1, 'a follow-up of T2 reads back to its task');
+  assert.equal(taskLines(lines, { since: taskStart([], 's') }).length, lines.length, 'no close in this session: every line read');
+});
+
+test('3e-1b decision gate: the previous task\'s question does not open a new task after its close', () => {
+  const { cwd } = fresh();
+  const ts = (d, s) => ({ ...d, timestamp: `2026-10-04T11:${String(s).padStart(2, '0')}:00.000Z` });
+  const lines = [ts(prompt('haz T2', 'g1'), 1), ts(say('Waymark → L2 · dept-backend'), 2), ts(call('AskUserQuestion'), 3), ts(answered('¿Cómo?', ['A', 'B'], 'A'), 4), ts(say('## Cierre · x'), 5),
+    ts(prompt('ahora otra cosa', 'g2'), 10), ts(say('Waymark → L1 · dept-backend'), 11)];
+  assert.equal(checkDecision(FILE, lines, 's-close', path.join(home, `gate-${n++}.json`), cwd), null, 'no close recorded: the 3e-1 window still sees the question');
+  appendRecord(cwd, { id: `${DAY} · T2`, session: 's-close', at: '2026-10-04T11:06:00.000Z' });
+  assert.match(checkDecision(FILE, lines, 's-close', path.join(home, `gate-${n++}.json`), cwd) || '', /L1 decision gate/);
 });
 
 test('decision gate (strict): denies every change until the user was asked in the choice window', () => {
@@ -371,7 +394,8 @@ test('blocks: an inference from docs without docs, a pre-existing failure withou
   assert.ok(has(l2(), pre, /pre-existing/));
   assert.ok(!has(l2([call('Bash', { command: 'git worktree add ../clean HEAD && cd ../clean && npx vitest run x' })]), pre, /pre-existing/));
   assert.match(checkCierre(l2(), pre, undefined, undefined, ctx) || '', /git worktree add <tmp> HEAD/, 'the block says how to check it now');
-  assert.equal(checkCierre(l2(), `${pre} (no comprobado (sin permiso para correr la suite))`, undefined, undefined, ctx), null, 'or says it was not checked');
+  assert.equal(checkCierre(l2(), `${pre} (no comprobado (sin permiso para correr la suite))`, undefined, undefined, { ...ctx, blocked: true }), null, 'or says it was not checked, after the block');
+  assert.ok(has(l2(), `${pre} (no comprobado (preventivo))`, /pre-existing/), 'written before the hook blocked, it does not count');
 });
 
 test('blocks: a spec next to the changed code untouched, unless Tests: no (<why>)', () => {
@@ -381,9 +405,10 @@ test('blocks: a spec next to the changed code untouched, unless Tests: no (<why>
   const code = path.join(dir, 'orders.ts');
   const lines = (extra = []) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('Edit', { file_path: code }), ...extra, call('Bash', { command: 'npx eslint src' }), MEM()]);
   const close = '## Cierre\nResultado: hecho · Decisión: única (un solo cambio)\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"';
-  const near = (turn, reply) => cierreGaps(turn, reply).missing.some((f) => /sits next to the changed code/.test(f));
+  const near = (turn, reply, blocked = false) => cierreGaps(turn, reply, undefined, undefined, { blocked }).missing.some((f) => /sits next to the changed code/.test(f));
   assert.ok(near(lines(), close));
-  assert.ok(!near(lines(), `${close}\nTests: no (solo cambia un texto de log)`));
+  assert.ok(!near(lines(), `${close}\nTests: no (solo cambia un texto de log)`, true));
+  assert.ok(near(lines(), `${close}\nTests: no (solo cambia un texto de log)`), 'only in the reply after the block');
   assert.ok(!near(lines([call('Edit', { file_path: path.join(dir, 'orders.spec.ts') }), call('Bash', { command: 'npx vitest related orders.ts --run' })]), close));
 });
 
@@ -956,7 +981,7 @@ test('codex adapter: the rollout becomes core lines (prompts, routing, skills re
   assert.equal(turn.results[turn.tools[4].id].error, true, 'a non-zero exit code is a failed result');
   assert.deepEqual(decisionsIn(taskLines(lines)), [{ question: '¿Cómo reintento?', chosen: 'Backoff', discarded: ['Cola'] }]);
   assert.deepEqual([turnUsage(lines).responses, turnUsage(lines).cacheRead, turnUsage(lines).input], [2, 900, 400], 'a repeated count is not a new response; cached input apart');
-  const inputs = turnInputs(taskLines(lines, 1), '/work/none', cx.instructions);
+  const inputs = turnInputs(taskLines(lines, { prompts: 1 }), '/work/none', cx.instructions);
   assert.deepEqual([inputs.agent, inputs.model], ['0.160.0', 'gpt-5.5']);
 });
 
@@ -1312,6 +1337,19 @@ const { findSecrets, deepMask } = await import(`file://${SCRIPTS}/provenance.mjs
 const FAKE = { gh: 'gh' + 'p_' + 'A1b2'.repeat(9), aws: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP', slack: 'xo' + 'xb-' + '1234567890-abcdef', jwt: 'ey' + 'J' + 'a'.repeat(12) + '.ey' + 'J' + 'b'.repeat(12) + '.' + 'c'.repeat(12) };
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
 
+// 3e-1 test: `cat >> x.spec.ts <<'EOF'` counted as a gate and a test run, and was the slowest step.
+test('3e-1b a heredoc body is text written to a file, not a gate or a test run', () => {
+  const { cwd } = fresh();
+  const spec = "cat >> src/orders.spec.ts <<'EOF'\ntest('retries', () => { expect(run('npx tsc --noEmit')).toBe(0) }) // lint\nEOF";
+  const after = (cmd) => currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), cmd, MEM()]);
+  const g = cierreGaps(after(call('Bash', { command: spec })), cierre(taskIds(cwd).next), undefined, undefined, ctxFor(cwd));
+  assert.deepEqual(g.observed.gates, [], 'nothing ran');
+  assert.ok(g.missing.some((m) => /no typecheck, lint or build ran after the last code change/.test(m)));
+  const ps = "@'\nnpm run build\n'@ | Set-Content notes.txt";
+  assert.deepEqual(cierreGaps(after(call('PowerShell', { command: ps })), cierre(taskIds(cwd).next), undefined, undefined, ctxFor(cwd)).observed.gates, [], 'a here-string body neither');
+  assert.equal(cierreGaps(after(call('Bash', { command: 'bash -c "npx tsc --noEmit"' })), cierre(taskIds(cwd).next), undefined, undefined, ctxFor(cwd)).observed.gates.length, 1, 'a quoted command still runs');
+});
+
 test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (<why>)" says it is not this task\'s', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
@@ -1323,7 +1361,8 @@ test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (
   assert.ok(g.missing.some((m) => /the gate after the last code change failed \(npx tsc --noEmit\): fix it/.test(m)));
   assert.deepEqual([g.observed.gate.by, g.observed.gate.ok], ['agent', false]);
   assert.ok(g.findings.some((f) => /a command after the last change failed: npx vitest run$/.test(f)), 'other failures stay findings; the judged gate is not repeated');
-  assert.equal(checkCierre(turn, `${cierre(id)}\nno comprobado (falla en un archivo que esta tarea no tocó)`, undefined, undefined, ctxFor(cwd)), null);
+  assert.equal(checkCierre(turn, `${cierre(id)}\nno comprobado (falla en un archivo que esta tarea no tocó)`, undefined, undefined, { ...ctxFor(cwd), blocked: true }), null);
+  assert.ok(checkCierre(turn, `${cierre(id)}\nno comprobado (falla en un archivo que esta tarea no tocó)`, undefined, undefined, ctxFor(cwd)), 'before the block it does not cancel it');
 });
 
 test('3e-1 testigo gate: with no gate after the last code change, the repo typecheck the hook re-runs decides', () => {
@@ -1369,7 +1408,8 @@ test('3e-1 testigo secrets: strong formats only, where and kind but never the va
   const msg = checkCierre(l2(), cierre(id), undefined, undefined, ctx) || '';
   assert.match(msg, /a secret-like value in src\/a\.ts \(GitHub token\): remove it/);
   assert.ok(!msg.includes(FAKE.gh), 'never the value');
-  assert.equal(checkCierre(l2(), `${cierre(id)}\nSecretos: no (token falso del fixture de maskSecrets)`, undefined, undefined, ctx), null);
+  assert.equal(checkCierre(l2(), `${cierre(id)}\nSecretos: no (token falso del fixture de maskSecrets)`, undefined, undefined, { ...ctx, blocked: true }), null);
+  assert.match(checkCierre(l2(), `${cierre(id)}\nSecretos: no (no hay valores sensibles)`, undefined, undefined, ctx) || '', /secret-like value/, '3e-1 test: a preventive line never cancels a real block');
   const saved = l2([call('mcp__engram__mem_save', { title: 'deploy', content: `key ${FAKE.aws}` })]);
   assert.match(checkCierre(saved, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /mem_save \(AWS access key\)/);
   const turn = currentTurn([prompt(`usa ${FAKE.slack} para el bot`), ...l2Lines.slice(1)]);

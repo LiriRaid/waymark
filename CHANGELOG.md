@@ -128,6 +128,10 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **Secrets testigo:** looks for unambiguous formats (PEM private key, AWS, GitHub, `sk-`, Slack, JWT, Google) in memory.md when the turn wrote it, in `mem_save`, in the lines the task added (untracked files whole) and in its commits. It blocks once and names where and the kind, never the value. Every string of the record is masked for those formats too.
   - `tasks.md` → *Last closed*: `Decisión` shows the user's recorded picks.
   - Replayed on three real tasks of the earlier tests, the false Decision ✘ from prose parsing are gone.
+- **Step 3e-1b: fixes from the 3e-1 test** (`docs/adr/0012`, the user's picks):
+  - **A new task starts after the session's last close**, read from `provenance.jsonl`, never from prose. The test's T3 carried T2's four answers and read its own question as "after". A follow-up (an ID with a letter) reads back to its task. The decision gate uses the same boundary: after each close the choice window is asked again.
+  - **Exception lines answer a block:** `Tests: no`, `Build: no`, `no comprobado` and `Secretos: no` count only in the reply that follows the hook's block. Written beforehand they no longer cancel a real one (both test Cierres had a preventive `Secretos: no`). They left the Cierre template; the block message names the way out.
+  - **Heredoc bodies and here-strings are text, not commands:** a word such as `test` or `tsc` inside a file written with `cat > x <<'EOF'` no longer counts as a gate or a test run. A quoted command (`bash -c "npm test"`) still does.
 - **Hook tests in the repo:** `node --test tests/*.test.mjs` (no dependencies, temporary `WAYMARK_HOME`).
 - **Fix:** `protocol.md` → *Closing report* was an empty, unclosed code block that turned *When stuck* into code; it now shows a full Cierre and the decision gate.
 - **Fix:** a multi-select answer in the choice window joins labels with "," (no space); the record no longer lists chosen options as discarded.

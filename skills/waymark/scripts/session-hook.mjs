@@ -30,7 +30,8 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 
-function digest(cwd) {
+export const CARD_HEAD = 'Waymark context card (already recalled). Pointers, not facts: verify in the code; the code wins, fix the entry.\n';
+export function digest(cwd) {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
   if (env.length) out.push('Environment (this machine): ' + env.map((l) => l.replace(/^- \[[^\]]*\]\s*/, '')).join(' | '));
@@ -109,7 +110,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     try { cwd = JSON.parse(input).cwd || cwd; } catch {}
     let text = '';
     try {
-      text = 'Waymark session memory (already recalled, cite it in "Memoria:"). Pointers, not facts: verify against the code before relying on them; if the code disagrees, the code wins and you fix or remove the entry.\n' + digest(cwd);
+      text = CARD_HEAD + digest(cwd);
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
     try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}

@@ -7,12 +7,12 @@ description: "Waymark · QA department. Use FIRST, before code-review, for tests
 
 ## Quick ref
 **Mission:** Prove every change works, keeps working and meets the Definition of Done before anyone says "done".
-**Must:** failing test before the fix or feature (TDD) · every bug fix ships a regression test · gates run by you, green or failure proven pre-existing · browser checks (browser-verify, Playwright) only when the user asks, never offered or recommended · `code-review` on the diff at L2+
+**Rules:** failing test before the fix or feature (TDD) · every bug fix ships a regression test · deterministic tests of public behavior · never weaken tests or lint to get green
 **Skills by default:** `code-review` · `simplify` (L3) · `library-docs` (`run` / `browser-verify` only when the user asks)
-**DoD:** gates green, tests cover the change, behavior observed running, diff reviewed, report honest about anything not verified.
+**DoD:** tests cover the change, edge and error paths included, review findings resolved or justified.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-qa.md` if it exists.
 - Stack profile: *Commands* + *Testing*.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -43,16 +43,12 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 - Quality score (L3 or explicit request only)
 
 ## Rules
-- **MUST** write or update a test for every behavior change; a bug fix without a regression test is not done.
-- **MUST** see a new test fail before making it pass.
-- **MUST** run the gates yourself with verified commands and report real output.
-- **MUST NOT** offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it: it costs many tokens and misreads screens. Prove UI behavior with specs and the build, and give the user a one-line check.
-- **MUST** state in the report anything not verified and why.
-- **SHOULD** keep tests deterministic: control clock, randomness, network and shared state.
-- **SHOULD** test public behavior, not private implementation details.
-- **MUST NOT** weaken, skip or delete tests or lint rules to get green.
-- **MUST NOT** mock the unit under test or mock so much the test proves nothing.
-- **MUST NOT** run the quality score on L0/L1 work unless asked.
+- See a new test fail before making it pass.
+- Prefer: keep tests deterministic: control clock, randomness, network and shared state.
+- Prefer: test public behavior, not private implementation details.
+- Never weaken, skip or delete tests or lint rules to get green.
+- Never mock the unit under test or mock so much the test proves nothing.
+- Never run the quality score on L0/L1 work unless asked.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -68,12 +64,9 @@ Detailed steps live in `procedures.md` (same folder). Fast diagnosis of a report
 | mutation / load testing | none yet → waymark `references/skills.md` | Critical logic or performance budgets | L3 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
-- [ ] Every new or changed behavior has a test; bug fixes have a regression test that failed first
+- [ ] Bug fixes have a regression test that failed first
 - [ ] Edge cases and error paths covered
-- [ ] UI behavior covered by specs; verified in the browser only if the user asked for it
 - [ ] `code-review` findings resolved or justified (L2+)
-- [ ] Pre-existing failures proven in a clean copy of HEAD (`git worktree`) and quoted, or "no comprobado (sin permiso …)"
 - [ ] Quality score with fixes for areas < 8 (L3 or on request)
 
 ## Hand-offs

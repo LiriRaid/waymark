@@ -7,12 +7,12 @@ description: "Waymark · Architecture department. Use FIRST for structure and de
 
 ## Quick ref
 **Mission:** Keep every change inside the project's declared architecture and apply design principles that keep code changeable.
-**Must:** identify the architecture before placing code · follow the architecture profile's dependency rules (a violation is a bug) · cross-module access only through public contracts · plan + ADR for every L3 decision · no speculative abstraction
+**Rules:** identify the architecture before placing code · follow the architecture profile's dependency rules (a violation is a bug) · cross-module access only through public contracts · plan + ADR for every L3 decision · no speculative abstraction
 **Skills by default:** `Explore` · `Plan` · `library-docs` · `engram` · `simplify`
-**DoD:** Conformance checklist passed with file:line evidence, ADR written at L3, gates green.
+**DoD:** Conformance checklist passed with file:line evidence, ADR written at L3.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-architecture.md` if it exists.
 - Stack profile: L1 *Commands*. Architecture profile: L1 *Quick ref* + *Placement rules*, L2+ full. Also existing ADRs (`docs/adr/` or equivalent).
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -45,27 +45,26 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 ## Rules
 
 ### Architecture conformance
-- **MUST** identify the architecture before placing or moving code.
-- **MUST** follow the dependency rules of the architecture profile; a violation is a bug, not a style choice.
-- **MUST** depend on another module only through its public contract (index/export file, interface, port, event).
-- **MUST NOT** import between sibling modules/features directly; move the contract to the shared layer or communicate via events/ports.
-- **MUST NOT** let inner or core layers depend on outer, UI or feature layers.
-- **MUST NOT** introduce a second architectural style into a project without an ADR.
+- Identify the architecture before placing or moving code.
+- Follow the dependency rules of the architecture profile; a violation is a bug, not a style choice.
+- Depend on another module only through its public contract (index/export file, interface, port, event).
+- Never import between sibling modules/features directly; move the contract to the shared layer or communicate via events/ports.
+- Never let inner or core layers depend on outer, UI or feature layers.
+- Never introduce a second architectural style into a project without an ADR.
 
 ### Design system principles (all architectures)
-- **MUST** apply Single Responsibility: one reason to change per module, class or component.
-- **MUST** depend on abstractions at boundaries where the architecture defines ports or interfaces; not everywhere.
-- **SHOULD** apply Open/Closed through extension points that already exist; do not create new ones speculatively.
-- **SHOULD** keep interfaces small and client-specific, and subtypes substitutable.
-- **SHOULD** prefer composition over inheritance; apply YAGNI and KISS.
-- **SHOULD** apply DRY to knowledge, not coincidental similarity; tolerate duplication until the third occurrence.
-- **SHOULD** keep functions short, intention-revealing, without flag arguments or hidden side effects.
-- **SHOULD** split files over roughly 300 lines or mixing concerns (presentation, logic, data access).
-- **MUST** write code comments that say how the code works and what it is for, never task history (task IDs, dates, who chose it, which test found it): that lives in the task record, the ADR and the CHANGELOG.
-- **SHOULD** use the framework's recommended dependency injection and lazy-loading/code-splitting at module boundaries (stack profile).
-- **SHOULD** keep configuration in the environment (Twelve-Factor).
-- **MUST NOT** add abstractions, wrappers or patterns "just in case".
-- **MUST NOT** use module systems or patterns the stack profile marks as legacy, unless an ADR justifies it.
+- Apply Single Responsibility: one reason to change per module, class or component.
+- Depend on abstractions at boundaries where the architecture defines ports or interfaces; not everywhere.
+- Prefer: apply Open/Closed through extension points that already exist; do not create new ones speculatively.
+- Prefer: keep interfaces small and client-specific, and subtypes substitutable.
+- Prefer composition over inheritance; apply YAGNI and KISS.
+- Prefer: apply DRY to knowledge, not coincidental similarity; tolerate duplication until the third occurrence.
+- Prefer: keep functions short, intention-revealing, without flag arguments or hidden side effects.
+- Prefer: split files over roughly 300 lines or mixing concerns (presentation, logic, data access).
+- Prefer the framework's recommended dependency injection and lazy-loading/code-splitting at module boundaries (stack profile).
+- Prefer: keep configuration in the environment (Twelve-Factor).
+- Never add abstractions, wrappers or patterns "just in case".
+- Never use module systems or patterns the stack profile marks as legacy, unless an ADR justifies it.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -79,7 +78,6 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `adr.tooling` | none yet → waymark `references/skills.md` | ADR scaffolding or architecture lint | — |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Architecture identified and named in the brief; recorded in project memory
 - [ ] New code placed per *Placement rules*; imports respect *Dependency rules*
 - [ ] Conformance checklist reported ✔/✘ with file:line for any failure

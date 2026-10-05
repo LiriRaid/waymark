@@ -7,12 +7,12 @@ description: "Waymark · Backend department. Use FIRST to build or change server
 
 ## Quick ref
 **Mission:** Ship server logic and APIs that are correct, validated at the boundary, observable and backward compatible.
-**Must:** validate input at the boundary · thin handlers, logic in services · paginate lists, no N+1 · uniform error envelope · request/integration test per endpoint
+**Rules:** validate input at the boundary · thin handlers, logic in services · paginate lists, no N+1 · uniform error envelope · request/integration test per endpoint
 **Skills by default:** library-docs · code-review · run · Explore · engram (MCP)
-**DoD:** gates green · request test per endpoint · contract unchanged or versioned · no N+1 · jobs idempotent · no secret in diff
+**DoD:** request test per endpoint · contract unchanged or versioned · no N+1 · jobs idempotent
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-backend.md` if it exists.
 - Stack profile: L1 *Commands* + *Backend*, L2+ full.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -44,26 +44,26 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - Refactor
 
 ## Rules
-- **MUST** validate and type every external input (body, query, params, headers, webhook payloads) at the boundary with an allowlist.
-- **MUST** keep handlers thin: parse, authorize, delegate, respond.
-- **MUST** return a uniform error envelope (e.g. `{ "error": { "code", "message", "details" } }`) with correct HTTP status codes.
-- **MUST** paginate any list that can grow, with a server-enforced maximum page size.
-- **MUST** avoid N+1 queries; eager-load or batch.
-- **MUST** wrap multi-write operations in a transaction; keep external calls outside it.
-- **MUST** make jobs, webhook handlers and retryable POSTs idempotent.
-- **MUST** set timeouts on every outbound HTTP/DB/queue call.
-- **MUST** version breaking contract changes (path or header); only additive changes within a version.
-- **MUST** enforce authorization on the server for every protected resource and channel.
-- **SHOULD** follow REST semantics: GET safe and idempotent, PUT/DELETE idempotent, POST for creation.
-- **SHOULD** return `201` with location on create, `204` on empty success, `409` on conflict, `429` on rate limit.
-- **SHOULD** log with correlation/request IDs and structured fields; no PII.
-- **SHOULD** move slow work (>~200 ms, external calls, fan-out) out of the request cycle.
-- **SHOULD** keep functions short and single-purpose; no God services.
-- **MUST NOT** mutate state in GET handlers.
-- **MUST NOT** swallow exceptions with catch-alls; catch specific errors or re-raise.
-- **MUST NOT** build SQL or shell commands by concatenating input.
-- **MUST NOT** hardcode secrets, URLs or credentials; read from configuration.
-- **MUST NOT** change a published response shape without versioning.
+- Validate and type every external input (body, query, params, headers, webhook payloads) at the boundary with an allowlist.
+- Keep handlers thin: parse, authorize, delegate, respond.
+- Return a uniform error envelope (e.g. `{ "error": { "code", "message", "details" } }`) with correct HTTP status codes.
+- Paginate any list that can grow, with a server-enforced maximum page size.
+- Avoid N+1 queries; eager-load or batch.
+- Wrap multi-write operations in a transaction; keep external calls outside it.
+- Make jobs, webhook handlers and retryable POSTs idempotent.
+- Set timeouts on every outbound HTTP/DB/queue call.
+- Version breaking contract changes (path or header); only additive changes within a version.
+- Enforce authorization on the server for every protected resource and channel.
+- Prefer: follow REST semantics: GET safe and idempotent, PUT/DELETE idempotent, POST for creation.
+- Prefer: return `201` with location on create, `204` on empty success, `409` on conflict, `429` on rate limit.
+- Prefer: log with correlation/request IDs and structured fields; no PII.
+- Prefer: move slow work (>~200 ms, external calls, fan-out) out of the request cycle.
+- Prefer: keep functions short and single-purpose; no God services.
+- Never mutate state in GET handlers.
+- Never swallow exceptions with catch-alls; catch specific errors or re-raise.
+- Never build SQL or shell commands by concatenating input.
+- Never hardcode secrets, URLs or credentials; read from configuration.
+- Never change a published response shape without versioning.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -78,7 +78,6 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | contract.testing / API spec lint | none yet → waymark `references/skills.md` | OpenAPI/GraphQL schema validation | L2 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Every new/changed endpoint has a request/integration test (success + 4xx paths)
 - [ ] Input validated at the boundary; unknown fields rejected
 - [ ] Contract unchanged, additive or versioned; consumers informed (`dept-frontend`)

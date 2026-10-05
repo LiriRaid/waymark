@@ -112,7 +112,7 @@ test('task lines: from the third-last prompt', () => {
   assert.equal(taskLines(lines).length, 4);
 });
 
-// 3e-1 test (YaloAtiendo-Chat T3): a new task carried T2's answers and read its own question as "after" T2's first change.
+// 3e-1 test (a real project, T3): a new task carried T2's answers and read its own question as "after" T2's first change.
 test('3e-1b task lines: a new task starts after the session\'s last close; a follow-up inherits its task', () => {
   const t = (d, s) => ({ ...d, timestamp: `2026-10-04T10:${String(s).padStart(2, '0')}:00.000Z` });
   const lines = [t(prompt('haz T2'), 1), t(call('AskUserQuestion'), 2), t(answered('¿Cómo?', ['A', 'B'], 'A'), 3), t(call('Edit', { file_path: FILE }), 4), t(say('## Cierre · x'), 5),
@@ -1342,7 +1342,7 @@ const { findSecrets, deepMask } = await import(`file://${SCRIPTS}/provenance.mjs
 const FAKE = { gh: 'gh' + 'p_' + 'A1b2'.repeat(9), aws: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP', slack: 'xo' + 'xb-' + '1234567890-abcdef', jwt: 'ey' + 'J' + 'a'.repeat(12) + '.ey' + 'J' + 'b'.repeat(12) + '.' + 'c'.repeat(12) };
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
 
-// 3e-1b test (YaloAtiendo-Chat): an unrelated task closed as T4b inherited T4's answers, and T4c's own question read
+// 3e-1b test (a real project): an unrelated task closed as T4b inherited T4's answers, and T4c's own question read
 // "after" (measured against T4b's first change).
 test('3e-1b follow-up: its ID holds only when it changes a file of its task; its decisions are its own stretch', () => {
   const D = '2026-10-04', ids = { next: `${D} · T5`, last: `${D} · T4`, followUp: `${D} · T4b`, known: new Set([`${D} · T4`]) };
@@ -1818,6 +1818,30 @@ test('incidents: a testigo ✘ stays open until it passes in a later task; 3 fai
   assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
   assert.equal(incidentsLine(found), 'Incidents: open Commit ✘×3 (T4), Enrutar ✘ (T4); suggested rule: Commit failed 3× (waymark.mjs incidents)');
   assert.equal(incidentsLine(incidents([])), '');
+});
+
+test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {
+  const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
+  const rows = Object.fromEntries(sizes(process.cwd()).map((r) => [r.name, r]));
+  assert.ok(rows['instructions block'].chars <= 6500, `instructions block: ${rows['instructions block'].chars} chars`);
+  assert.ok(rows['reminder (full)'].chars <= 800 && rows['reminder (short)'].chars <= 300, 'reminder');
+  assert.ok(rows['context card'].chars > 0 && rows['context card'].chars <= 2700, 'context card');
+  const SKILLS = path.join(SCRIPTS, '..', '..');
+  for (const d of fs.readdirSync(SKILLS).filter((x) => x.startsWith('dept-'))) {
+    const text = fs.readFileSync(path.join(SKILLS, d, 'SKILL.md'), 'utf8');
+    assert.ok(rows[d].group === 'department' && text.length <= 8000, `${d}: ${text.length} chars`);
+    assert.doesNotMatch(text, /\*\*(MUST|SHOULD)\b|\bExit protocol\b|protocol → Entry/, `${d} keeps a MUST or a stale protocol pointer`);
+  }
+});
+
+test('incidents by window: a suggested rule counts only the failures within the last 10 evaluated tasks', async () => {
+  const { incidents } = await import(`file://${SCRIPTS}/incidents.mjs`);
+  const r = (id, steps) => ({ id, evaluation: { steps } });
+  const old = ['T1', 'T2', 'T3', 'T4'].map((id) => r(id, { Commit: false }));
+  const later = Array.from({ length: 9 }, (_, i) => r(`T${i + 5}`, { Commit: true }));
+  assert.deepEqual(incidents([...old, ...later]).rules, [], 'T1–T3 fell out of the window; only T4 is inside');
+  assert.deepEqual(incidents([...old, ...later.slice(0, 7)]).rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
+  assert.deepEqual(incidents([...old, { id: 'Q' }, { kind: 'confirm' }, ...later.slice(0, 6)]).rules[0].failures, 4, 'records without an evaluation do not take a place in the window');
 });
 
 test('new session notice: past 200k tokens of context the end-of-turn line says the next task goes in a new session', () => {

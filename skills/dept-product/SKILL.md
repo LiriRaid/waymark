@@ -7,12 +7,12 @@ description: "Waymark · Product department. Use FIRST when an idea must become 
 
 ## Quick ref
 **Mission:** Turn a request into verifiable requirements, acceptance criteria and a scoped breakdown before code is written.
-**Must:** Given/When/Then criteria for every L2+ change · ask when ambiguity changes the outcome, assume and state it otherwise · explicit out-of-scope · smallest scope that delivers the value · plan before coding at L3
+**Rules:** Given/When/Then criteria for every L2+ change · explicit out-of-scope · smallest scope that delivers the value · plan before coding at L3
 **Skills by default:** `engram` (mem_search) · `Explore` · `Plan` · `library-docs`
-**DoD:** Requirements unambiguous and testable, criteria mapped to tests, scope and out-of-scope written, gates green.
+**DoD:** Requirements unambiguous and testable, criteria mapped to tests, scope and out-of-scope written.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-product.md` if it exists.
 - Stack profile: L1 *Commands*, L2+ full.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -43,18 +43,16 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - Ask vs assume
 
 ## Rules
-- **MUST** have written acceptance criteria in Given/When/Then for every L2+ task before the first edit.
-- **MUST** write an explicit out-of-scope list for every L2+ task.
-- **MUST** convert relative dates ("next sprint", "tomorrow") to absolute dates when writing plans or saving memory.
-- **MUST** use the `Plan` agent or plan mode before coding at L3 and for any change touching shared/core layers.
-- **MUST** preserve existing behavior unless the requirement explicitly changes it; list preserved behavior as criteria.
-- **MUST** escalate the level as soon as the breakdown exceeds the current level's scope.
-- **SHOULD** express requirements in the domain language used by the codebase (entity and feature names).
-- **SHOULD** include the non-functional constraints the stack profile flags (rendering mode, platform targets).
-- **SHOULD** keep each task independently verifiable and mergeable.
-- **MUST NOT** accept ambiguous requirements that change outcomes; ask first.
-- **MUST NOT** plan speculative abstractions or features for a hypothetical future.
-- **MUST NOT** jump to code when the change touches more than 3 files without a written plan.
+- Have written acceptance criteria in Given/When/Then for every L2+ task before the first edit.
+- Write an explicit out-of-scope list for every L2+ task.
+- Convert relative dates ("next sprint", "tomorrow") to absolute dates when writing plans or saving memory.
+- Use the `Plan` agent or plan mode before coding at L3 and for any change touching shared/core layers.
+- Escalate the level as soon as the breakdown exceeds the current level's scope.
+- Prefer: express requirements in the domain language used by the codebase (entity and feature names).
+- Prefer: include the non-functional constraints the stack profile flags (rendering mode, platform targets).
+- Prefer: keep each task independently verifiable and mergeable.
+- Never plan speculative abstractions or features for a hypothetical future.
+- Never jump to code when the change touches more than 3 files without a written plan.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -67,7 +65,6 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `requirements.authoring` | none yet → waymark `references/skills.md` | Story mapping / backlog tooling | — |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Requirements numbered, singular, verifiable; assumptions listed
 - [ ] Acceptance criteria in Given/When/Then cover happy, error and boundary paths
 - [ ] Out-of-scope list written

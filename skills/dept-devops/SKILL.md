@@ -7,12 +7,12 @@ description: "Waymark · DevOps department. Use FIRST for build, CI/CD, git and 
 
 ## Quick ref
 **Mission:** Keep changes flowing safely from commit to production: reproducible builds, clean git history, reliable CI, observable and reversible deploys.
-**Must:** commit, push or deploy only when the user asks · commands only from project memory or the stack profile · never force-push the default branch, never `--no-verify` · build green locally before any push · every deploy has a rollback path
+**Rules:** commit, push or deploy only when the user asks · commands only from the "Repo (read now)" line, project memory or the stack profile · never force-push the default branch, never `--no-verify` · every deploy has a rollback path
 **Skills by default:** `code-review` · `library-docs` (`run` / `browser-verify` only when the user asks)
-**DoD:** build green, lockfile consistent, conventional commits, CI valid, config externalized, rollback stated.
+**DoD:** lockfile consistent, conventional commits, CI valid, config externalized, rollback stated.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-devops.md` if it exists.
 - Stack profile: *Commands*. L2+: also the existing CI files and build config.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -44,16 +44,15 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - Observability
 
 ## Rules
-- **MUST** commit, push, open PRs or deploy only when the user explicitly asks.
-- **MUST** take every install/build/run command from project memory or the stack profile.
-- **MUST** keep the build green locally before pushing.
-- **MUST** keep config out of code and document required environment variables.
-- **MUST NOT** use `--no-verify`, skip signing or force-push the default branch unless explicitly asked.
-- **MUST NOT** commit secrets, build output, dependency folders or local env files.
-- **SHOULD** use Conventional Commits and branch prefixes matching commit types.
-- **SHOULD** use isolated worktrees for large or risky changes.
-- **SHOULD** track DORA metrics: deployment frequency, lead time, change failure rate, time to restore.
-- **SHOULD** keep migrations and config changes backward-compatible with the previous release.
+- Commit, push, open PRs or deploy only when the user explicitly asks.
+- Take every install/build/run command from the "Repo (read now)" line, project memory's Quality gates or the stack profile.
+- Keep config out of code and document required environment variables.
+- Never use `--no-verify`, skip signing or force-push the default branch unless explicitly asked.
+- Never commit build output, dependency folders or local env files.
+- Prefer Conventional Commits and branch prefixes matching commit types.
+- Prefer isolated worktrees for large or risky changes.
+- Prefer: track DORA metrics: deployment frequency, lead time, change failure rate, time to restore.
+- Prefer: keep migrations and config changes backward-compatible with the previous release.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -67,8 +66,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | ci.authoring / containers / IaC | none yet → waymark `references/skills.md` | Dedicated CI, Docker or Terraform skill | L2 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
-- [ ] Build passes with the verified command; no new warnings or budget overruns
+- [ ] No new build warnings or budget overruns
 - [ ] Lockfile consistent with dependency changes
 - [ ] Commits follow Conventional Commits; nothing unrelated or generated staged
 - [ ] CI config mirrors local gates and is valid

@@ -7,12 +7,12 @@ description: "Waymark · Data & State department. Use FIRST for schema, queries 
 
 ## Quick ref
 **Mission:** Keep data correct, consistent and fast, from the database schema to the client-side store.
-**Must:** migrations reversible and zero-downtime · index foreign keys and filtered columns · every cache has a key scheme, TTL and invalidation · single source of truth for client state · no secrets in client storage
+**Rules:** migrations reversible and zero-downtime · index foreign keys and filtered columns · every cache has a key scheme, TTL and invalidation · single source of truth for client state · no secrets in client storage
 **Skills by default:** library-docs · code-review · Explore · engram (MCP)
-**DoD:** gates green · migration rollback tested · query plan checked · cache invalidation defined · state derived, not duplicated
+**DoD:** migration rollback tested · query plan checked · cache invalidation defined · state derived, not duplicated
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-data.md` if it exists.
 - Stack profile: L1 *Commands* + *Data/State*, L2+ full.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -44,22 +44,22 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - Refactor
 
 ## Rules
-- **MUST** make every migration reversible, or document why it is irreversible and how to restore.
-- **MUST** keep migrations zero-downtime: old code must run against the new schema during deploy.
-- **MUST** index foreign keys and frequently filtered/sorted columns; add unique constraints for business uniqueness.
-- **MUST** enforce integrity in the database (constraints) in addition to application validation.
-- **MUST** use parameterized queries; no string-built SQL with input.
-- **MUST** scope every query on multi-tenant or user-owned data by tenant/owner, via row-level policies or a mandatory query scope.
-- **MUST** give every cache entry a namespaced key, explicit TTL and an invalidation trigger.
-- **MUST** keep one source of truth per piece of client state; derive, do not duplicate.
-- **SHOULD** follow the stack's naming convention (e.g. `snake_case` columns) and singular/plural consistently.
-- **SHOULD** prefer the simplest reactive primitive; use stream libraries only for real event streams (sockets, debounced input, cancellation).
-- **SHOULD** use soft delete or archival only when a requirement asks for it.
-- **SHOULD** measure (EXPLAIN, profiler) before optimizing.
-- **MUST NOT** edit or delete a migration already applied in a shared environment.
-- **MUST NOT** store tokens, secrets or PII in browser storage.
-- **MUST NOT** use loose types (`any`-like) in models; use precise types and narrow unknown input.
-- **MUST NOT** run long data backfills inside a schema migration on large tables; use a batched job.
+- Make every migration reversible, or document why it is irreversible and how to restore.
+- Keep migrations zero-downtime: old code must run against the new schema during deploy.
+- Index foreign keys and frequently filtered/sorted columns; add unique constraints for business uniqueness.
+- Enforce integrity in the database (constraints) in addition to application validation.
+- Use parameterized queries; no string-built SQL with input.
+- Scope every query on multi-tenant or user-owned data by tenant/owner, via row-level policies or a mandatory query scope.
+- Give every cache entry a namespaced key, explicit TTL and an invalidation trigger.
+- Keep one source of truth per piece of client state; derive, do not duplicate.
+- Prefer: follow the stack's naming convention (e.g. `snake_case` columns) and singular/plural consistently.
+- Prefer the simplest reactive primitive; use stream libraries only for real event streams (sockets, debounced input, cancellation).
+- Prefer soft delete or archival only when a requirement asks for it.
+- Prefer: measure (EXPLAIN, profiler) before optimizing.
+- Never edit or delete a migration already applied in a shared environment.
+- Never store tokens, secrets or PII in browser storage.
+- Never use loose types (`any`-like) in models; use precise types and narrow unknown input.
+- Never run long data backfills inside a schema migration on large tables; use a batched job.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -72,7 +72,6 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | db.inspect (live schema, EXPLAIN) | none yet → waymark `references/skills.md` | Inspect the real database or query plan | L2 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Migration applied, rolled back and re-applied locally
 - [ ] Destructive change split into expand/contract steps
 - [ ] Indexes on new foreign keys and filtered columns; EXPLAIN checked for new heavy queries

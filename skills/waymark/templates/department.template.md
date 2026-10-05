@@ -7,12 +7,12 @@ description: "Waymark · <Department name> department. Use FIRST, before any too
 
 ## Quick ref
 **Mission:** <one line>
-**Must:** <3–5 rules separated by ·>
+**Rules:** <3–5 rules separated by ·>
 **Skills by default:** <skills from skill-registry.md, separated by ·>
 **DoD:** <one line>
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-<department>.md` if it exists.
 - Stack profile: <which sections at L1, full at L2+>.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -30,16 +30,17 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - <Task type>
 
 ## Rules
-- **MUST** …
-- **SHOULD** …
-- **MUST NOT** …
+- <domain rule, imperative, one line> …
+- Never …
+- Prefer: …
+
+(Process steps a testigo checks — gates, review, spec, secrets, the decision — are not repeated here: `waymark/routine.json`.)
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 
 ## Definition of Done
-- [ ] Exit protocol (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`)
 - [ ] …
 
 ## Hand-offs

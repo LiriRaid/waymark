@@ -1,6 +1,6 @@
 # 0012 · Testigos, one decision, git as the source of truth, and a fixed context card (step 3e)
 
-**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1, 3e-1b and 3e-2 landed (below).
+**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1, 3e-1b, 3e-2, 3e-3 and 3e-4 landed (below).
 
 ## Context
 The 3c tests (Claude with Opus and Sonnet, Codex rollouts) kept producing false ✘. Almost all of them came from the hook reading prose the agent writes:
@@ -59,12 +59,12 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **Gate:** the agent's last gate after its last code change, else the repo typecheck: memory.md *Quality gates* → package.json → tsconfig. The limit is 40 s and the process tree is killed on timeout. A failing gate blocks once. Not applicable when no code changed.
 - **Secrets:** strong formats only, in memory.md, mem_save, the lines the task added and its commits. `password=` is masked only in what Waymark writes.
 
-### 3e-1b (2026-10-04 · T1, the user's picks, from the 3e-1 test in YaloAtiendo-Chat)
+### 3e-1b (2026-10-04 · T1, the user's picks, from the 3e-1 test in a real project)
 - **Task boundary:** a task starts after this session's last task record (`taskStart`). A follow-up starts after the last record of another task, so it inherits its task's answers. The decision gate uses the same boundary, so a follow-up asks or confirms again after a close. A Q record does not close a task.
 - **Exception lines** count only in the reply after a block (`stop_hook_active`). They left the Cierre template and the instructions block.
 - **Commands** are read with heredoc bodies and here-strings blanked (`shellSkeleton(c, { quotes: false })`); quoted text is kept.
 - Replay of the test: T3 records only its own question, "before". T2 would now block once on "ya existían antes" with no clean-copy check. The 241 s step of T2 was a real `npx vitest run` after the heredoc, not the heredoc.
-- **3e-1b test (2026-10-04, YaloAtiendo-Chat T4/T4b/T4c):** the gate denied B's first edit and B then asked; no Cierre carried a preventive exception line. Two gaps, fixed in 2026-10-04 · T1b (the user's picks):
+- **3e-1b test (2026-10-04, a real project, T4/T4b/T4c):** the gate denied B's first edit and B then asked; no Cierre carried a preventive exception line. Two gaps, fixed in 2026-10-04 · T1b (the user's picks):
   - A follow-up ID holds only when the turn changes a file of its task (`taskFiles`). B, unrelated to T4, was filed as T4b. It now blocks once with "use T5".
   - The decisions and their positions come from the stretch since the session's last close. The whole task is kept only for the review. T4c's own question read "after"; it now reads "before".
 
@@ -81,6 +81,26 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **Pack by files:** `waymark.mjs pack <files…>` lists per file the last 3 tasks that changed it (`git log -- <file>` + notes, stubs and no-commit records) and commits no task recorded. The card tells the agent to run it before its first change; no fifth hook.
 - **New session notice:** past 200k tokens of context, the end-of-turn line says the next task goes in a new session.
 - **Incidents:** derived from the chained records, never stored apart: a testigo ✘ stays open until it passes in a later task; 3 failures make a suggested rule that `waymark.mjs check` offers for the department or stack. Testigos removed from the catalog are ignored.
+
+### 3e-4 as built (2026-10-05 · T3, the user's picks)
+- **Scope:** the instructions block, the per-prompt reminder and the 11 departments. Procedures, tool skills and references are unchanged.
+- **Instructions block:** it keeps what no testigo checks (the routing line, Pedido/Captura, Reutiliza, how to ask, Evidencia, memory, the general rules) and quotes once each testigo that blocks. The explanation around the testigos is gone. The quoted list stays (the user's pick over a bare pointer to `routine.json`), so the block is 6.1k characters, not 5k. The agent knows in advance what is checked, and each block it avoids saves one more response.
+- **Reminder:** it only points at the steps a new session skips most; the rules live in the block. The context card no longer asks to cite it in "Memoria:", a field that left the opener in 3e-1.
+- **Departments:**
+  - A process step a testigo checks, or one the block already states, is removed: spec, gate, secrets, build, browser, preserved behavior, asking on ambiguity, comments, and the stale "Exit protocol" and "protocol → Entry" pointers.
+  - A domain rule stays, one line, without MUST: MUST becomes an imperative, MUST NOT becomes "Never …", SHOULD becomes "Prefer …".
+  - The Quick ref's **Must:** becomes **Rules:**. The department template says the same.
+- **Incidents by window:** a suggested rule needs 3 failures of one testigo within the project's last 10 evaluated tasks. A failure already outgrown (Commit 4× here) stops being suggested. Open incidents are unchanged.
+- **Measured** (`waymark.mjs size`, characters; tokens ≈ characters / 4):
+
+  | Part | Before | After |
+  |---|---|---|
+  | Instructions block (every session) | 10,258 | 6,133 |
+  | Context card (every session, this repo) | 1,855 | 1,762 |
+  | Reminder, full / short (every prompt) | 2,385 / 241 | 613 / 241 |
+  | A department when invoked (average of 10) | 7,039 | 6,587 |
+
+  Every session goes from 12,113 to 7,895 characters (≈3.0k → ≈2.0k tokens). The fixed context at the start of a Claude Code session, measured with `measure.mjs` on this repo, was 67.2k tokens; almost all of it is the agent's own system prompt and tools.
 
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.

@@ -7,13 +7,13 @@ description: "Waymark · Frontend department. Use FIRST, before any ui-* skill, 
 
 ## Quick ref
 **Mission:** Build client-side UI (web or mobile) that is correct, accessible, performant and consistent with the stack's conventions.
-**Must:** reactive state primitive and render optimization per stack profile · styling system first, tokens only · guard platform-only APIs when server-rendering · clean up subscriptions, listeners and animations · every UI state (loading, empty, error, success)
+**Rules:** reactive state primitive and render optimization per stack profile · styling system first, tokens only · guard platform-only APIs when server-rendering · clean up subscriptions, listeners and animations · every UI state (loading, empty, error, success)
 **UX musts:** match the existing screens (spacing, density, components) · visible focus and full keyboard path · labels on every control · loading / empty / error states that look like the project's own
 **Skills by default:** `ui-build` · `library-docs` (+ the stack's framework / UI-library MCP when the user has one; `run` / `browser-verify` only when the user asks)
-**DoD:** Works in the running app, a11y basics pass, all states handled, tests cover criteria, gates green.
+**DoD:** Works in the running app, a11y basics pass, all states handled, tests cover criteria.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
 - Learnings: `~/.waymark/learnings/dept-frontend.md` if it exists.
 - Stack profile: L1 *Commands* + *Conventions by department → Frontend*, L2+ full. UI work: also the *Quick ref* of `dept-ux-ui`.
 - Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
@@ -45,31 +45,31 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 ## Rules
 
 ### Components and state
-- **MUST** follow the stack's component model; no legacy module systems the stack profile marks as deprecated.
-- **MUST** use the framework's recommended reactive state primitive for local state; streams only for event sequences.
-- **MUST** use the framework's change-detection or render optimization by default.
-- **MUST** update state immutably or through the primitive's setter API; never mutate shared state in place.
-- **MUST** clean up subscriptions, timers, listeners, observers and animations on destroy/unmount.
-- **MUST** provide stable keys/tracking for every rendered list.
-- **SHOULD** keep components presentational; move data access and orchestration to services/stores per the architecture.
-- **SHOULD** use the framework's recommended dependency injection or context mechanism.
+- Follow the stack's component model; no legacy module systems the stack profile marks as deprecated.
+- Use the framework's recommended reactive state primitive for local state; streams only for event sequences.
+- Use the framework's change-detection or render optimization by default.
+- Update state immutably or through the primitive's setter API; never mutate shared state in place.
+- Clean up subscriptions, timers, listeners, observers and animations on destroy/unmount.
+- Provide stable keys/tracking for every rendered list.
+- Prefer: keep components presentational; move data access and orchestration to services/stores per the architecture.
+- Prefer the framework's recommended dependency injection or context mechanism.
 
 ### Rendering, SSR and hydration
-- **MUST** guard browser/platform-only APIs (window, document, storage, device APIs) when code runs on the server or multiple platforms.
-- **MUST** make every new public route renderable in the project's rendering mode; decide prerender/SSR/CSR during planning.
-- **SHOULD** defer or lazily hydrate heavy, below-the-fold blocks when the framework supports it.
-- **MUST NOT** introduce hydration mismatches (non-deterministic values, time, random IDs in server output).
+- Guard browser/platform-only APIs (window, document, storage, device APIs) when code runs on the server or multiple platforms.
+- Make every new public route renderable in the project's rendering mode; decide prerender/SSR/CSR during planning.
+- Prefer: defer or lazily hydrate heavy, below-the-fold blocks when the framework supports it.
+- Never introduce hydration mismatches (non-deterministic values, time, random IDs in server output).
 
 ### Styling and assets
-- **MUST** use the project's styling system first; custom CSS only when it cannot express the need.
-- **MUST** use design tokens (color, spacing, radius, typography, motion); no hard-coded values.
-- **MUST NOT** use inline styles except for justified dynamic bindings.
-- **MUST** import UI library components and icons individually (tree-shakeable).
-- **SHOULD** keep custom icons/SVGs where the stack profile defines.
+- Use the project's styling system first; custom CSS only when it cannot express the need.
+- Use design tokens (color, spacing, radius, typography, motion); no hard-coded values.
+- Never use inline styles except for justified dynamic bindings.
+- Import UI library components and icons individually (tree-shakeable).
+- Prefer: keep custom icons/SVGs where the stack profile defines.
 
 ### Accessibility wiring
-- **MUST** use native semantic elements before ARIA; every interactive element keyboard reachable with visible focus.
-- **MUST** label icon-only controls and form fields.
+- Use native semantic elements before ARIA; every interactive element keyboard reachable with visible focus.
+- Label icon-only controls and form fields.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
@@ -84,7 +84,6 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `ui.library` | the UI library's MCP, if the user has one (e.g. `primeng`); else `library-docs` | Component API, props, examples, theming tokens | L1 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Acceptance criteria verified in the running app (`run`) and covered by tests
 - [ ] Loading, empty, error, success and disabled states implemented
 - [ ] Keyboard navigation, visible focus and labels verified

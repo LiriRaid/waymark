@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readRecords, readTaskRecords, readNotes, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
@@ -119,7 +119,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const cwd = process.cwd(), home = projectHome(cwd), records = readRecords(home.log);
   const id = process.argv[2] || records.filter((r) => r.id).pop()?.id;
   const mark = (ok) => (ok === null ? '—' : ok ? '✔' : '✘');
-  const chain = verifyChain(records, records.some((r) => r.note) ? readNotes(cwd) : null); // with the notes, as the hook checks it
+  const chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null); // with the notes, as the hook checks it
   console.log(`${mark(chain.ok)} chain: ${records.length} records${chain.ok ? ' intact' : `, broken at record ${chain.at + 1}${chain.note ? ' (its git note is missing or was edited)' : ''}`} (${home.log})`);
   if (!id) { console.log('— no task recorded yet'); process.exit(chain.ok ? 0 : 1); }
   const commits = commitsFor(cwd, id);

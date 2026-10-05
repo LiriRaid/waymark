@@ -1694,8 +1694,10 @@ test('done: the user confirms tasks that work: ✔ in Work in progress, a chaine
   const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
   assert.deepEqual(lines, ['- ✔ [2026-10-04 · T4c] confirmada por el usuario (2026-10-05): ya las vi, funcionan; que el usuario recargue y confirme', '- ✔ [2026-10-04 · T3] confirmada por el usuario (2026-10-05): ya las vi, funcionan; skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta']);
   const rec = readRecords(h.log).pop();
-  assert.deepEqual([rec.kind, rec.confirmed, rec.note], ['confirm', ['2026-10-04 · T4c', '2026-10-04 · T3'], 'ya las vi, funcionan']);
-  assert.equal(verifyChain(readRecords(h.log)).ok, true);
+  assert.deepEqual([rec.kind, rec.confirmed, rec.said, rec.note], ['confirm', ['2026-10-04 · T4c', '2026-10-04 · T3'], 'ya las vi, funcionan', undefined]);
+  assert.equal(verifyChain(readRecords(h.log), new Map()).ok, true, 'checked with the notes too: its words are not a git note');
+  appendRecord(repo, { kind: 'confirm', confirmed: ['x'], note: 'written by an older version' });
+  assert.equal(verifyChain(readRecords(h.log), new Map()).ok, true, 'a text note (older confirm records) is not a git note either');
   assert.equal(taskIds(repo).known.has(undefined), false, 'a confirm record takes no task ID');
   fs.writeFileSync(h.memory, fs.readFileSync(h.memory, 'utf8').replace('- Gotcha: una nota', '- Gotcha: una nota\n- [2026-10-03 · T1] `prisma migrate deploy` pendiente'));
   P.confirmTasks(h, ['2026-10-03 · T1'], { now: NOW });

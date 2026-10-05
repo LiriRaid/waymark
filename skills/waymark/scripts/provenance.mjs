@@ -10,6 +10,7 @@
 //   (docs/adr/0008).
 // - The live state: one line per task in memory.md → Work in progress, written by the end-of-turn hook from the Cierre
 //   (writeTaskLine), and tasks.md generated from it and the records.
+// - `note` on a log line is always the git-note pointer { commit, sha } (gitNote() reads it); other text uses other fields.
 // Where: <project>/.waymark/ (docs/adr/0007), resolved once by projectHome() for every hook.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -210,7 +211,7 @@ export function confirmTasks(home, ids, { note = '', now = new Date(), agent = n
   if (!done.length) return [];
   fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
   rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
-  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed: done, ...(say ? { note: say.slice(0, 300) } : {}) });
+  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed: done, ...(say ? { said: say.slice(0, 300) } : {}) });
   return done;
 }
 
@@ -273,11 +274,14 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   return true;
 }
 
+// The git note a log line points to ({ commit, sha }), or null: only an object with a commit counts.
+export const gitNote = (r) => (r?.note && typeof r.note === 'object' && typeof r.note.commit === 'string' ? r.note : null);
+
 // Every record of the log with its note read back: a stub becomes the whole record (note fields, then the stub's).
 // With `last`: only the last N task records are read back (the others stay stubs).
 export function readTaskRecords(home, { last = Infinity } = {}) {
   const records = readRecords(home.log);
-  const tasks = records.filter((r) => r.id), wanted = new Set(tasks.slice(Math.max(0, tasks.length - last)).filter((r) => r.note));
+  const tasks = records.filter((r) => r.id), wanted = new Set(tasks.slice(Math.max(0, tasks.length - last)).filter(gitNote));
   if (!wanted.size) return records;
   const notes = readNotes(home.root, [...wanted].map((r) => r.note.commit));
   return records.map((r) => {
@@ -304,7 +308,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const all = readTaskRecords(home, { last: 8 }), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
   const questions = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q').length; // since the last close
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
-  const source = (r) => (r.note ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
+  const source = (r) => (gitNote(r) ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
   // The last closed task with what another agent needs to continue: ~220 ch per field.
   const lastClosed = lastRec ? [`## Last closed: ${cell(lastRec.id)}${who(lastRec)} (${new Date(lastRec.at).toLocaleString('sv').slice(0, 16)}; full record: ${source(lastRec)})`,
     // a field runs to the end of its line, or to the next field on the same line ("Resultado: hecho · Decisión: …")
@@ -623,7 +627,8 @@ export function verifyChain(records, notes = null) {
   for (let i = 0; i < records.length; i++) {
     const { hash, ...body } = records[i];
     if (body.prev !== prev || sha(JSON.stringify(body)) !== hash) return { ok: false, at: i };
-    if (notes && body.note && (!notes.has(body.note.commit) || noteSha(notes.get(body.note.commit)) !== body.note.sha)) return { ok: false, at: i, note: true };
+    const gn = gitNote(body);
+    if (notes && gn && (!notes.has(gn.commit) || noteSha(notes.get(gn.commit)) !== gn.sha)) return { ok: false, at: i, note: true };
     prev = hash;
   }
   return { ok: true };

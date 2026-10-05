@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -406,7 +406,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       ctx.noBuild = buildNone(home.memory);
       ctx.root = home.root;
       ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
-      ctx.chain = verifyChain(records, records.some((r) => r.note) ? readNotes(cwd) : null);
+      ctx.chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null);
       const gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory

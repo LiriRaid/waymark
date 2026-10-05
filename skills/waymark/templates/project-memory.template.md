@@ -37,6 +37,7 @@ Filled by the minimal project scan (waymark `references/project-detection.md`); 
 | test (related) | | |
 | test (full) | | |
 | build | | |
+<!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. -->
 
 ## Design system
 Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refine.

@@ -17,13 +17,26 @@ const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return 
 const top = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? path.resolve(r.stdout.trim()) : null; };
 const same = (a, b) => String(a || '').replace(/\\/g, '/').toLowerCase() === String(b || '').replace(/\\/g, '/').toLowerCase();
 
+// The rows of memory.md's "Quality gates" table → [gate, command] (backticks dropped). Only lines that start with "|":
+// a comment that shows the format is not a row.
+const gateRows = (memoryFile) => (read(memoryFile).match(/\n## Quality gates[^\n]*\n([\s\S]*?)(?=\n## |$)/)?.[1] || '').split('\n')
+  .filter((row) => row.trim().startsWith('|')).map((row) => row.split('|').slice(1, 3).map((c) => String(c || '').replace(/`/g, '').trim()));
+
+// A project with no build declares it in memory.md's "Quality gates": `| build | none (<why>) | <date> |`. → the why,
+// or null (no row, a real command, or "none" without a why). The Build testigo does not apply there.
+export function buildNone(memoryFile) {
+  for (const [gate, cmd] of gateRows(memoryFile)) {
+    const why = /^build$/i.test(gate || '') && String(cmd || '').match(/^none\s*\(([^<>]{3,})\)\s*$/i)?.[1].trim(); // a <placeholder> is not a why
+    if (why) return why;
+  }
+  return null;
+}
+
 // The repo's typecheck, in this order: the verified typecheck/syntax row of memory.md's
 // "Quality gates" table (project root only) → package.json's typecheck script with the lockfile's package manager →
 // `tsc --noEmit` when TypeScript is installed. → { cmd, from } or null. Never the full build.
 export function gateCommand(root, memoryFile) {
-  const table = (read(memoryFile).match(/\n## Quality gates[^\n]*\n([\s\S]*?)(?=\n## |$)/)?.[1] || '').split('\n');
-  for (const row of table) {
-    const [gate, cmd] = row.split('|').slice(1, 3).map((c) => String(c || '').replace(/`/g, '').trim());
+  for (const [gate, cmd] of gateRows(memoryFile)) {
     if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd, from: 'memory.md' };
   }
   let pkg = null;

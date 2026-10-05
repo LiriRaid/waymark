@@ -1331,7 +1331,7 @@ test('T2o: a gate chained with a memory command still counts', () => {
 });
 
 // ---- 3e-1 testigos (docs/adr/0012, 2026-10-03 · T2q) ----
-const { gateCommand, runGate, secretSources, secretHits } = await import(`file://${SCRIPTS}/testigos.mjs`);
+const { gateCommand, runGate, secretSources, secretHits, buildNone } = await import(`file://${SCRIPTS}/testigos.mjs`);
 const { findSecrets, deepMask } = await import(`file://${SCRIPTS}/provenance.mjs`);
 // Fake secrets built at run time, so this file never holds a strong-format value itself (the testigo reads diffs).
 const FAKE = { gh: 'gh' + 'p_' + 'A1b2'.repeat(9), aws: 'AK' + 'IA' + 'ABCDEFGHIJKLMNOP', slack: 'xo' + 'xb-' + '1234567890-abcdef', jwt: 'ey' + 'J' + 'a'.repeat(12) + '.ey' + 'J' + 'b'.repeat(12) + '.' + 'c'.repeat(12) };
@@ -1622,4 +1622,30 @@ test('3e-2 code comments say how the code works, never task history', () => {
   const hits = files.flatMap((f) => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => [l, i]).filter(([l]) => /(^|\s)\/\/\s/.test(l) && HISTORY.test(l.slice(l.indexOf('// '))))
     .map(([l, i]) => `${path.basename(f)}:${i + 1}: ${l.trim().slice(0, 90)}`));
   assert.deepEqual(hits, []);
+});
+
+test('build none: a "build | none (<why>)" row in memory.md\'s Quality gates makes the Build testigo not applicable', () => {
+  const dir = fs.mkdtempSync(path.join(home, 'build-none-')), mem = path.join(dir, 'memory.md');
+  const table = (row) => `# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| syntax | node --check x.mjs | 2026-10-04 |\n${row}\n\n## Conventions\n`;
+  fs.writeFileSync(mem, table('| build | none (scripts Node sin paso de build) | 2026-10-04 |'));
+  assert.equal(buildNone(mem), 'scripts Node sin paso de build');
+  for (const row of ['| build | npm run build | 2026-10-04 |', '| build | none | 2026-10-04 |', '| lint | none (x) | 2026-10-04 |', '| build | none (<why>) | <date> |', '<!-- write it as `| build | none (no build here) | <date> |` -->']) {
+    fs.writeFileSync(mem, table(row));
+    assert.equal(buildNone(mem), null, `not a build-none row: ${row}`);
+  }
+  assert.equal(buildNone(path.join(dir, 'missing.md')), null);
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const noBuild = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs' }), call('Skill', { skill: 'code-review' })]);
+  assert.match(checkCierre(noBuild, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /run the build once now/, 'without the row: Build blocks');
+  const g = cierreGaps(noBuild, cierre(id), undefined, undefined, { ...ctxFor(cwd), noBuild: 'scripts Node sin paso de build' });
+  assert.deepEqual(g.missing, []);
+  assert.equal(g.steps.find((s) => s.id === 'build').applies, false);
+  assert.deepEqual(g.observed.build, { none: 'scripts Node sin paso de build' }, 'the record says why');
+  const other = cierreGaps(noBuild, cierre(id), undefined, undefined, { ...ctxFor(cwd), noBuild: 'x y z', root: '/work/other-repo' });
+  assert.equal(other.steps.find((s) => s.id === 'build').applies, true, 'code in another repo still needs its build');
+  const tpl = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'project-memory.template.md'), 'utf8');
+  fs.writeFileSync(mem, tpl);
+  assert.equal(buildNone(mem), null, 'a memory made from the template declares no build-none');
 });

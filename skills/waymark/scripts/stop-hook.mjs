@@ -27,7 +27,7 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine } from './provenance.mjs';
-import { rerunGate, secretSources, secretHits } from './testigos.mjs';
+import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -159,6 +159,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   const code = changed.filter((f) => !NOT_CODE.test(f));
+  // "build | none" holds for the project that declares it: code changed in another repo still needs its build
+  const noBuild = !!ctx.noBuild && (!ctx.root || code.every((f) => norm(f).startsWith(norm(ctx.root).replace(/\/$/, '') + '/')));
   // The choice window waiting for the user is the user's time, not the agent's (a question left open overnight would
   // make a 2-minute turn read hours): kept apart as userWait, out of minutes and the slowest step.
   const ASK = (t) => t.name === 'AskUserQuestion';
@@ -182,6 +184,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
       red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && ((firstChange >= 0 && i < firstChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
     },
+    build: noBuild ? { none: ctx.noBuild } : null, // the project declares no build (memory.md Quality gates)
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
     // testigo "sin secretos": the memory, the task's diff and commits (ctx.scanSecrets, testigos.mjs) and its mem_save calls;
     // where and which kind only, never the value
@@ -266,7 +269,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
   const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(bare(t)));
   const when = {
-    engram: !!ctx.engram, code: code.length > 0, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
+    engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // whole words: "Docker" is not "docs"
     inferredFromDocs: /inferida/i.test(ev) && /\b(docs?|documentaci[oó]n|documentation|oficial|official|specification|especificaci[oó]n|spec de)\b/i.test(ev), preClaim: PRE.test(reply), redClaim,
   };
@@ -400,6 +403,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // testigos that execute (testigos.mjs): the repo typecheck when the agent ran no gate, secrets in what the task
       // wrote, and the chain (with its notes) as it stands before this record
       ctx.rerun = (files) => rerunGate(files, home);
+      ctx.noBuild = buildNone(home.memory);
+      ctx.root = home.root;
       ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
       ctx.chain = verifyChain(records, records.some((r) => r.note) ? readNotes(cwd) : null);
       const gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);

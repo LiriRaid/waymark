@@ -603,7 +603,7 @@ test('stop hook: without project memory, a Q turn leaves no record (with memory:
 });
 
 // ---- Step 2: project memory in <project>/.waymark/ (docs/adr/0007) ----
-const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { planFor, apply } = await import(`file://${SCRIPTS}/migrate-memory.mjs`);
 const tmpRepo = (name) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), `waymark-${name}-`));
@@ -722,7 +722,7 @@ test('tasks.md: generated from memory and the log, never for the bridge', () => 
   assert.match(tasksMarkdown(h), /- Task 3: Clientes multiselect\n- Next: probar en navegador\n- \(2 more notes/, 'no IDs (old format): its Task/Next lines');
 });
 
-test('tasks.md: stays within ~3,000 characters by dropping the oldest done rows', () => {
+test('tasks.md: stays within ~3,000 characters: done rows down to 3, then the oldest in-progress lines (+n more)', () => {
   const repo = tmpRepo('tasks-budget');
   fs.mkdirSync(path.join(repo, '.waymark'));
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n'
@@ -730,8 +730,11 @@ test('tasks.md: stays within ~3,000 characters by dropping the oldest done rows'
   const h = projectHome(repo);
   fs.writeFileSync(h.log, [1, 2, 3, 4, 5, 6, 7, 8].map((n) => JSON.stringify({ id: `2026-10-02 · T${n}`, cierre: `Resultado: hecho ${'z'.repeat(80)}`, prompt: 'p'.repeat(200) })).join('\n') + '\n');
   const md = tasksMarkdown(h);
-  assert.equal(md.split('\n').filter((l) => l.startsWith('- 2026-10-03')).length, 9, 'every task is kept');
-  assert.match(md, /## Done \(last 1, newest first\)\n[^\n]*\n[^\n]*\n\| 2026-10-02 · T8 \|/, 'oldest rows dropped first, at least one kept');
+  assert.ok(md.length <= 3000, `${md.length}`);
+  assert.match(md, /## Done \(last 3, newest first\)\n[^\n]*\n[^\n]*\n\| 2026-10-02 · T8 \|/, 'three done rows kept');
+  const shown = md.split('\n').filter((l) => l.startsWith('- 2026-10-03'));
+  assert.ok(shown.length < 9 && shown.some((l) => l.startsWith('- 2026-10-03 · T9 ')) && !shown.some((l) => l.startsWith('- 2026-10-03 · T1 ')), 'the oldest task lines leave first');
+  assert.match(md, new RegExp(`- \\(\\+${9 - shown.length} more tasks in memory\\.md\\)`));
 });
 
 test('stop hook: with memory in the project, the record and tasks.md go to <project>/.waymark/ and memory edits are not changes', () => {
@@ -1513,7 +1516,7 @@ test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; t
 });
 
 // ---- 3e-2: git as the source of truth (docs/adr/0012) ----
-const P = { readTaskRecords, writeTaskLine, taskSummary };
+const P = { readTaskRecords, writeTaskLine, taskSummary, tidyWip };
 const commitTask = (repo, id, file = 'a.ts') => {
   fs.writeFileSync(path.join(repo, file), `export const x = ${Math.random()};\n`);
   gitT(repo, 'add', file); gitT(repo, 'commit', '-q', '-m', `x\n\nWaymark-Task: ${id}`);
@@ -1561,7 +1564,8 @@ test('3e-2 memory line: the hook writes the task\'s line (≤200) from its Cierr
   const done = [1, 2, 3, 4, 5].map((n) => `- ✔ [2026-10-04 · T${n}] done ${n}`).join('\n');
   const note = '- PLAN: next session as 2026-10-05 · T1c';
   const repo = memRepo('wip', `${long}\n${spec}\n${note}\n- [2026-10-05 · T1] hand-written: Pendiente: x\n${done}\n`), h = projectHome(repo);
-  const at = (id, res, apr) => P.writeTaskLine(h, { id, cierre: `## Cierre · ${id}\nResultado: ${res}\nEvidencia: e\nAprendido: "${apr}"` });
+  const NOW5 = new Date(2026, 9, 5, 12, 0);
+  const at = (id, res, apr) => P.writeTaskLine(h, { id, cierre: `## Cierre · ${id}\nResultado: ${res}\nEvidencia: e\nAprendido: "${apr}"` }, NOW5);
   at('2026-10-05 · T1', 'hecho', 'backoff ← timeouts');
   const wip = () => (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
   let lines = wip();
@@ -1580,7 +1584,7 @@ test('3e-2 memory line: the hook writes the task\'s line (≤200) from its Cierr
   assert.ok(t1b && t1b.length === 200 && t1b.endsWith('…'), 'parcial → ▶, Aprendido clipped to 200');
   assert.equal(P.taskSummary('- ✔ [2026-10-05 · T1] backoff ← timeouts'), '- 2026-10-05 · T1 · hecho · backoff ← timeouts');
   assert.equal(P.taskSummary(t1b).startsWith('- 2026-10-05 · T1b · en curso · xxx'), true);
-  P.writeTaskLine(h, { id: '2026-10-05 · T2', cierre: '## Cierre · 2026-10-05 · T2\nResultado: hecho\nEvidencia: e\nAprendido:\n- retries ← timeouts\n- next: deploy\n\nnot this' });
+  P.writeTaskLine(h, { id: '2026-10-05 · T2', cierre: '## Cierre · 2026-10-05 · T2\nResultado: hecho\nEvidencia: e\nAprendido:\n- retries ← timeouts\n- next: deploy\n\nnot this' }, NOW5);
   assert.ok(wip().includes('- ✔ [2026-10-05 · T2] retries ← timeouts next: deploy'), 'an Aprendido on the lines below its field');
 });
 
@@ -1648,4 +1652,33 @@ test('build none: a "build | none (<why>)" row in memory.md\'s Quality gates mak
   const tpl = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'project-memory.template.md'), 'utf8');
   fs.writeFileSync(mem, tpl);
   assert.equal(buildNone(mem), null, 'a memory made from the template declares no build-none');
+});
+
+test('tidy: one line per task (the newest of a task and its follow-ups), open lines older than 14 days and the extra ✔ move whole to history.md', () => {
+  const wip = [
+    '- ▶ [2026-10-04 · T1b] confirm categories', '- ▶ [2026-10-04 · T1c] confirm categories again', '- ▶ [2026-10-04 · T1] old head',
+    '- ▶ [2026-09-10 · T3] paused long ago', '- [2026-09-12 · T4] pending, old free-form: Pendiente: x', '- ✔ [2026-09-01 · T9] closed long ago',
+    '- Gotcha: FE trata parentId ausente como null (2026-09-01 · T2 is quoted, not a head)', '- ▶ [2026-10-03 · T2] recent',
+  ].join('\n');
+  const repo = memRepo('tidy', wip + '\n'), h = projectHome(repo), NOW = new Date(2026, 9, 5, 12, 0);
+  assert.equal(P.tidyWip(h, NOW), true);
+  const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
+  assert.deepEqual(lines, ['- ▶ [2026-10-04 · T1c] confirm categories again', '- ✔ [2026-09-01 · T9] closed long ago', '- Gotcha: FE trata parentId ausente como null (2026-09-01 · T2 is quoted, not a head)', '- ▶ [2026-10-03 · T2] recent']);
+  const hist = fs.readFileSync(path.join(h.dir, 'history.md'), 'utf8');
+  for (const l of ['- ▶ [2026-10-04 · T1b] confirm categories', '- ▶ [2026-10-04 · T1] old head', '- ▶ [2026-09-10 · T3] paused long ago', '- [2026-09-12 · T4] pending, old free-form: Pendiente: x']) assert.ok(hist.includes(l), l);
+  assert.match(hist, /## Moved 2026-10-05 \d\d:\d\d \(tidy\)/);
+  assert.equal(P.tidyWip(h, NOW), false, 'nothing left to tidy');
+  const t = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'tidy'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(t.stdout, /nothing to tidy/);
+});
+
+test('commit trailer: Waymark-Task counts anywhere in the message, also when a blank line separates it from Co-Authored-By', () => {
+  const repo = tmpRepo('trailer-para'), id = '2026-10-04 · T6';
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1;\n');
+  gitT(repo, 'add', '.'); gitT(repo, 'commit', '-q', '-m', `feat: x\n\nWaymark-Task: ${id}\n\nCo-Authored-By: A <a@a>`);
+  assert.equal(gitT(repo, 'log', '-1', '--format=%(trailers:key=Waymark-Task,valueonly)').stdout.trim(), '', 'git does not read it as a trailer');
+  assert.equal(commitsFor(repo, id).length, 1, 'commitsFor still finds it');
+  assert.equal(commitsFor(repo, '2026-10-04 · T6b').length, 0, 'another ID does not match');
+  const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
+  assert.match(block, /Waymark-Task: <task ID>` in the message's last paragraph, next to Co-Authored-By/);
 });

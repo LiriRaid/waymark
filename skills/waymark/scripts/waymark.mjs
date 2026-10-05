@@ -7,6 +7,7 @@
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
 //   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
+//   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
 // agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
@@ -18,7 +19,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, readTaskRecords } from './provenance.mjs';
+import { projectHome, readTaskRecords, tidyWip, refreshTasks } from './provenance.mjs';
 import { pushNotes } from './notes.mjs';
 import { found } from './connect-agents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -180,6 +181,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(items.length ? `Waymark check · ${items.length} pending (offer each with the choice window; run its command only after the user's yes):\n${items.map((t) => `- ${t}`).join('\n')}` : 'Waymark check: nothing pending.');
   } else if (sub === 'tasks') {
     console.log(tasks(process.cwd(), rest[0] || null));
+  } else if (sub === 'tidy') {
+    const home = projectHome(process.cwd());
+    const changed = tidyWip(home);
+    if (changed) refreshTasks(home, true);
+    console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'notes' && rest[0] === 'push') {
     const r = pushNotes(process.cwd(), rest[1] || 'origin');
     console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
@@ -193,7 +199,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

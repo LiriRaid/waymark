@@ -127,6 +127,7 @@ export function closeOpen(home, session, closedId) {
 }
 
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
+const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
 const LINE_CHARS = 200, DONE_KEPT = 5; // a Work in progress line, and the closed (✔) lines kept there
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
@@ -173,27 +174,42 @@ function aprendidoOf(cierre) {
 }
 const idOrder = (id) => { const m = String(id).match(ID); return m ? `${m[1]}·${String(m[2]).padStart(4, '0')}${m[3]}` : ''; };
 
+const STALE_DAYS = 14; // an open (▶) line whose task ID is older leaves Work in progress (the session hook flags it at 14 too)
+
 // Writes the task's Work in progress line from its Cierre: "- ✔ [<id>] <Aprendido>" when Resultado is hecho, else
 // "- ▶ …", at most 200 characters (the whole Aprendido stays in the record). It replaces the line of the same task (a
-// follow-up replaces its task's line; a replaced line not written by the hook moves to history.md). Lines over 200
-// characters and the closed (✔) lines beyond the newest 5 move whole to history.md; a long task line stays as
-// "- ▶ [<id>] <its next step>". → true when written.
-export function writeTaskLine(home, rec) {
+// follow-up replaces its task's line; a replaced line not written by the hook moves to history.md), then tidies the
+// section (tidyWip). → true when written.
+export function writeTaskLine(home, rec, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || !fs.existsSync(home.memory)) return false;
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
   const learned = aprendidoOf(cierre);
   if (!learned || /^ninguno/i.test(learned)) return false;
   const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '');
-  const mine = clip(`- ${done ? '✔' : '▶'} [${rec.id}] ${learned}`, LINE_CHARS);
+  return rewriteWip(home, { id: rec.id, line: clip(`- ${done ? '✔' : '▶'} [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
+}
+
+// Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). → true when it changed.
+export function tidyWip(home, now = new Date()) {
+  if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return false;
+  return rewriteWip(home, { now, label: 'tidy' });
+}
+
+// The section, rewritten: the task's line (when given) in place of its task's lines, then every line moved whole to
+// history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
+// that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
+// closed (✔) lines beyond the newest 5. A note (no ID at its head) is never moved except when over 200 characters.
+function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
+  if (!m && !line) return false;
   const body = m ? m[2].split('\n') : [];
   const moved = [];
   let at = -1;
   const kept = [];
   for (const l of body) {
-    const id = /^\s*-/.test(l) ? headId(l) : null;
-    if (id && base(id) === base(rec.id)) {
+    const hid = /^\s*-/.test(l) ? headId(l) : null;
+    if (id && hid && base(hid) === base(id)) {
       if (at < 0) at = kept.length;
       if (l.length > LINE_CHARS || !HOOK_LINE.test(l)) moved.push(l); // a hand-written line keeps its detail in history.md
       continue;
@@ -201,20 +217,33 @@ export function writeTaskLine(home, rec) {
     if (/^\s*-/.test(l) && l.length > LINE_CHARS) {
       moved.push(l);
       const t = l.replace(/^\s*-\s*/, '');
-      kept.push(clip(id ? `- ${/^\s*-\s*✔/.test(l) ? '✔' : '▶'} [${id}] ${nextOf(t)}` : `- ${clip(t, 150)} (whole: history.md)`, LINE_CHARS));
+      kept.push(clip(hid ? `- ${/^\s*-\s*✔/.test(l) ? '✔' : '▶'} [${hid}] ${nextOf(t)}` : `- ${clip(t, 150)} (whole: history.md)`, LINE_CHARS));
     } else kept.push(l);
   }
-  if (at < 0) { at = kept.length; while (at > 0 && !kept[at - 1].trim()) at--; }
-  kept.splice(at, 0, mine);
+  if (line) {
+    if (at < 0) { at = kept.length; while (at > 0 && !kept[at - 1].trim()) at--; }
+    kept.splice(at, 0, line);
+  }
+  const drop = (l) => { kept.splice(kept.indexOf(l), 1); moved.push(l); };
+  const tasks = kept.filter((l) => /^\s*-/.test(l) && headId(l));
+  const newest = new Map();
+  for (const l of tasks) { const b = base(headId(l)); if (!newest.has(b) || idOrder(headId(l)) > idOrder(headId(newest.get(b)))) newest.set(b, l); }
+  for (const l of tasks) if (newest.get(base(headId(l))) !== l) drop(l);
+  const cutoff = now.getTime() - STALE_DAYS * 86400000;
+  for (const l of kept.filter((x) => x !== line && /^\s*-/.test(x) && headId(x) && !/^\s*-\s*✔/.test(x))) {
+    const day = Date.parse(`${headId(l).match(ID)[1]}T00:00:00`);
+    if (day < cutoff) drop(l);
+  }
   const closed = kept.filter((l) => /^\s*-\s*✔/.test(l) && headId(l)).sort((a, b) => idOrder(headId(b)).localeCompare(idOrder(headId(a))));
-  for (const l of closed.slice(DONE_KEPT)) { kept.splice(kept.indexOf(l), 1); moved.push(l); }
+  for (const l of closed.slice(DONE_KEPT)) drop(l);
+  if (!line && !moved.length) return false;
   const section = kept.join('\n').replace(/\n*$/, '\n');
   const next = m ? ('\n' + text).replace(WIP, (_, head) => head + section).slice(1) : text.replace(/\n*$/, '\n') + `\n## Work in progress\n${section}`;
   fs.writeFileSync(home.memory, next);
   if (moved.length) {
     const hist = path.join(home.dir, 'history.md');
     const head = fs.existsSync(hist) ? '' : `# History · ${home.slug}\n\nWork in progress lines moved out of memory.md whole (not deleted). Newest batch last.\n`;
-    fs.appendFileSync(hist, `${head}\n## Moved ${new Date().toISOString().slice(0, 16).replace('T', ' ')} (closing ${rec.id})\n${moved.join('\n')}\n`);
+    fs.appendFileSync(hist, `${head}\n## Moved ${now.toISOString().slice(0, 16).replace('T', ' ')} (${label})\n${moved.join('\n')}\n`);
   }
   return true;
 }
@@ -242,6 +271,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const tasks = withId.length ? withId.map(taskSummary)
     : wip.filter((l) => /^\s*-\s*(Task|Next)\b[^:]*:/i.test(l)).map((l) => clip(l.trim().replace(/\s+/g, ' '), TASK_CHARS));
   const notes = wip.length - (withId.length || tasks.length);
+  let hidden = 0; // in-progress lines left out of tasks.md by the budget
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   const result = (r) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length ? ` · ${r.unresolved.length} sin resolver` : '');
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
@@ -263,13 +293,22 @@ export function tasksMarkdown(home, now = new Date()) {
     .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (\`waymark.mjs tasks [<task ID>]\`: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
-    '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
+    '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
     ...(started.length ? ['## Started, not closed (the turn never ended: quota, crash, or still running)', ...started, ''] : []),
     ...(questions ? [`Preguntas (Q) desde el último cierre: ${questions} (provenance.jsonl, kind "Q")`, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,
     '| Task | Result | Routine | Request |', '|---|---|---|---|', ...rows, ''].join('\n');
+  // Over budget: the oldest done rows go first down to DONE_MIN, then the in-progress lines with the oldest task IDs
+  // (counted as "+n more"), then the remaining done rows.
   let out = render();
+  while (out.length > TASKS_CHARS && rows.length > DONE_MIN) { rows.pop(); out = render(); }
+  const order = withId.length ? withId.map((l) => idOrder(headId(l))) : tasks.map((_, i) => String(i).padStart(6, '0'));
+  while (out.length > TASKS_CHARS && tasks.length > 1) {
+    const i = order.indexOf([...order].sort()[0]);
+    tasks.splice(i, 1); order.splice(i, 1); hidden++;
+    out = render();
+  }
   while (out.length > TASKS_CHARS && rows.length > 1) { rows.pop(); out = render(); }
   return out;
 }
@@ -428,12 +467,15 @@ export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir()
   return { waymark, agent, model, mcp: [...mcp], instructions: { user: fileSha(userInstructions), project: project ? fileSha(project) : null } };
 }
 
-// Commits that carry `Waymark-Task: <id>` among the last 30 of the repo at cwd (git missing or no repo → []).
+// Commits that carry `Waymark-Task: <id>` among the last 30 of the repo at cwd (git missing or no repo → []). The line
+// counts anywhere in the message, not only as a git trailer: one separated from Co-Authored-By by a blank line is not
+// in the last paragraph, so git does not read it as a trailer.
 export function commitsFor(cwd, id) {
   if (!id) return [];
-  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%(trailers:key=Waymark-Task,valueonly,separator=%x1e)'], { cwd, encoding: 'utf8', timeout: 1500 });
+  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%B%x1e'], { cwd, encoding: 'utf8', timeout: 1500 });
   if (r.status !== 0) return [];
-  return r.stdout.split('\n').map((l) => l.split('\x1f')).filter(([h, t]) => h && String(t || '').split('\x1e').some((v) => v.trim() === id)).map(([h]) => h);
+  return r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))
+    .filter(([h, msg]) => h && String(msg || '').split(/\r?\n/).some((l) => l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1] === id)).map(([h]) => h);
 }
 
 // Working-tree snapshot of the repo at cwd: { root, head, files: { <absolute path>: <content hash | "deleted"> } } for every

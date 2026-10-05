@@ -21,8 +21,8 @@ const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getH
 // Global instructions file per agent (official docs: Codex AGENTS.md under CODEX_HOME, Gemini CLI GEMINI.md, OpenCode AGENTS.md).
 export const AGENTS = () => [
   { name: 'Codex', dir: process.env.CODEX_HOME || path.join(USER(), '.codex'), file: 'AGENTS.md', hooks: 'hooks.json' },
-  { name: 'Gemini CLI', dir: path.join(USER(), '.gemini'), file: 'GEMINI.md' },
-  { name: 'OpenCode', dir: path.join(USER(), '.config', 'opencode'), file: 'AGENTS.md' },
+  { name: 'Gemini CLI', dir: process.env.GEMINI_CLI_HOME || path.join(USER(), '.gemini'), file: 'GEMINI.md', hooks: 'settings.json' },
+  { name: 'OpenCode', dir: path.join(USER(), '.config', 'opencode'), file: 'AGENTS.md', hooks: path.join('plugins', 'waymark.js') },
 ];
 export const POINTER = '<!-- waymark:pointer -->\nSi el proyecto tiene .waymark/, lee .waymark/tasks.md primero.\n<!-- /waymark:pointer -->';
 const REGISTRY = '## Connected agents (pointer only)';
@@ -34,7 +34,11 @@ const POINTER_RE = /\n*<!-- waymark:pointer -->[\s\S]*?<!-- \/waymark:pointer --
 // The Rule 0 block, as the installer writes it into CLAUDE.md.
 export const instructionsBlock = () => read(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'instructions.md')).trim();
 // The agent's hooks run Waymark's scripts (its hooks file names them).
-const hooked = (a) => !!a.hooks && /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(read(path.join(a.dir, a.hooks)));
+// (a settings file names each script's path; the OpenCode plugin names the folder and the scripts apart)
+const hooked = (a) => {
+  const text = a.hooks ? read(path.join(a.dir, a.hooks)) : '';
+  return /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(text) || (/waymark[\\/]+scripts/.test(text) && /['"`]stop-hook\.mjs['"`]/.test(text));
+};
 
 // Another framework's marked blocks (`<!-- gentle-ai:persona -->`): an orchestrator already governs that agent.
 export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s*([\w.-]+):[\w.-]+/g)].map((m) => m[1]).filter((n) => n !== 'waymark'))];

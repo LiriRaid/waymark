@@ -276,7 +276,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const home = projectHome(process.cwd());
     const done = ids.length ? confirmTasks(home, ids, { note }) : [];
     if (done.length) refreshTasks(home, true);
-    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (✔ in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
+    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
     process.exitCode = done.length ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
     const r = pushNotes(process.cwd(), rest[1] || 'origin');

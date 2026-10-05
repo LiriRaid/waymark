@@ -133,7 +133,7 @@ export function closeOpen(home, session, closedId) {
 
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
 const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
-const LINE_CHARS = 200, DONE_KEPT = 5; // a Work in progress line, and the closed (✔) lines kept there
+const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
 // The pending parts of a line, in order: every NEXT / Next: / Pendiente: / Pending: marker. A marker inside quotes is
@@ -191,12 +191,13 @@ export function writeTaskLine(home, rec, now = new Date()) {
   const learned = aprendidoOf(cierre);
   if (!learned || /^ninguno/i.test(learned)) return false;
   const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '');
-  return rewriteWip(home, { id: rec.id, line: clip(`- ${done ? '✔' : '▶'} [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
+  // a task done leaves Work in progress (its Aprendido is in its record); one still open keeps its line
+  return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
-// The user confirmed that these tasks work (`waymark.mjs done <ID…>`): each one's line becomes "- ✔ [<id>] confirmada
-// por el usuario (<day>)[: <note>]; <its text>", the section is tidied, and a short chained record {kind: "confirm"}
-// keeps the IDs and the note. → the IDs that had a line (others are ignored).
+// The user confirmed that these tasks work (`waymark.mjs done <ID…>`): their lines leave Work in progress (a task done
+// lives in its record), and a short chained record {kind: "confirm"} keeps the IDs and the note. → the IDs that had a
+// line (others are ignored).
 export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null } = {}) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return [];
   const text = fs.readFileSync(home.memory, 'utf8'), m = ('\n' + text).match(WIP);
@@ -208,10 +209,8 @@ export function confirmTasks(home, ids, { note = '', now = new Date(), agent = n
     const hid = /^\s*-/.test(l) ? headId(l) : null;
     if (!hid || !wanted.has(base(hid))) return l;
     done.push(hid);
-    const hook = l.match(HOOK_LINE);
-    const rest = hook ? hook[hook.length - 1] : l.replace(/^\s*-\s*[▶✔]?\s*/, '').replace(/^\[[^\]]*\]\s*/, ''); // its ID is already in the new head
-    return clip(`- ✔ [${hid}] confirmada por el usuario (${now.toLocaleDateString('sv')})${say ? `: ${say}` : ''}; ${rest.trim()}`, LINE_CHARS);
-  });
+    return null;
+  }).filter((l) => l !== null);
   if (!done.length) return [];
   fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
   rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
@@ -235,12 +234,13 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   if (!m && !line) return false;
   const body = m ? m[2].split('\n') : [];
   const moved = [];
-  let at = -1;
+  let at = -1, removed = 0;
   const kept = [];
   for (const l of body) {
     const hid = /^\s*-/.test(l) ? headId(l) : null;
     if (id && hid && base(hid) === base(id)) {
       if (at < 0) at = kept.length;
+      removed++;
       if (l.length > LINE_CHARS || !HOOK_LINE.test(l)) moved.push(l); // a hand-written line keeps its detail in history.md
       continue;
     }
@@ -266,7 +266,7 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   }
   const closed = kept.filter((l) => /^\s*-\s*✔/.test(l) && headId(l)).sort((a, b) => idOrder(headId(b)).localeCompare(idOrder(headId(a))));
   for (const l of closed.slice(DONE_KEPT)) drop(l);
-  if (!line && !moved.length) return false;
+  if (!line && !moved.length && !removed) return false;
   const section = kept.join('\n').replace(/\n*$/, '\n');
   const next = m ? ('\n' + text).replace(WIP, (_, head) => head + section).slice(1) : text.replace(/\n*$/, '\n') + `\n## Work in progress\n${section}`;
   fs.writeFileSync(home.memory, next);

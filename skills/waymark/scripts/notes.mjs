@@ -1,6 +1,7 @@
 // Waymark · task records as git notes (docs/adr/0012). A committed task's whole record is a note on its last commit under
 // refs/notes/waymark; provenance.jsonl keeps a chained stub with the note's sha256, so an edited or lost note shows up in
-// verifyChain. Notes travel only with an explicit push (`waymark.mjs notes push`); git's config is never changed.
+// verifyChain. Notes travel when the agent pushes the task (the end-of-turn hook pushes the notes ref to the same remote)
+// or with `waymark.mjs notes push`, and follow a rebased or amended commit (repairNotes); git's config is never changed.
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
@@ -40,6 +41,33 @@ export function readNotes(cwd, commits = null) {
     at = nl + 1 + size + 1;
   }
   return out;
+}
+
+// A note left on a commit the branch no longer has (a rebase or amend rewrote it) is copied to the commit of the branch
+// that carries the same "Waymark-Task: <id>" and has no note yet; the old note stays, so the chained stub still matches.
+// One git log (the last 500 commits of HEAD) and one notes list. → the task IDs whose note was copied.
+export function repairNotes(cwd, records) {
+  const stubs = (records || []).filter((r) => r.id && r.note?.commit);
+  if (!stubs.length) return [];
+  const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
+  if (log.status !== 0) return [];
+  const inHead = new Set(), byTask = new Map();
+  for (const entry of log.stdout.split('\x1e')) {
+    const [commit, body = ''] = entry.trim().split('\x00');
+    if (!commit) continue;
+    inHead.add(commit);
+    for (const m of body.matchAll(/^Waymark-Task:\s*(.+?)\s*$/gm)) if (!byTask.has(m[1])) byTask.set(m[1], commit); // newest first
+  }
+  const notes = readNotes(cwd), copied = [];
+  for (const r of stubs) {
+    const now = byTask.get(r.id);
+    if (inHead.has(r.note.commit) || !now || now === r.note.commit || notes.has(now) || !notes.has(r.note.commit)) continue;
+    const copy = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${NOTES_REF}`, 'copy', r.note.commit, now], { encoding: 'utf8' });
+    let c = copy();
+    if (c.status !== 0 && /identity|who you are|empty ident/i.test(c.stderr || '')) c = copy(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']);
+    if (c.status === 0) copied.push(r.id);
+  }
+  return copied;
 }
 
 // Pushes the notes ref to a remote (default origin). → { ok, output }

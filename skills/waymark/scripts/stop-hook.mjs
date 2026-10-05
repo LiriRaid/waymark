@@ -29,6 +29,7 @@ import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
+import { pushNotes } from './notes.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -226,7 +227,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const slowest = [...timed].sort((a, b) => secs(b) - secs(a))[0];
   const observed = {
     memory: {
-      searched: before((t) => /mcp__engram__mem_(search|context)/.test(t.name)),
+      // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
+      searched: before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || (shell(t) && /waymark\.mjs["']?\s+(pack|memory|tasks)\b/.test(cmdOf(t))) || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading
@@ -337,7 +339,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
-    memory: observed.memory.searched ? [] : ['L2+: no mem_search before the first change: search engram for past decisions and rejected paths of this area now'],
+    memory: observed.memory.searched ? [] : ['L2+: the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
     review: skip.Review || observed.review ? [] : [`code changed and code-review did not run: run it on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
     build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(exc) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
@@ -458,6 +460,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // A skill or agent still running in the background: the turn is not over (no block, no record); it closes in the
       // notification's turn.
       if (pendingBackground(lines, since).length) return;
+      h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
@@ -501,6 +504,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); } catch {}
+      // the agent pushed the task (the user asked): its note goes to the same remote, now that it exists
+      let pushed = '';
+      try {
+        const push = turn.tools.filter((t) => shell(t) && /\bgit\b[^|;&\n]*\spush\b/.test(bare(t)) && !turn.results?.[t.id]?.error && !/refs\/notes/.test(cmdOf(t))).pop();
+        if (push && (rec.commits || []).length) {
+          const remote = cmdOf(push).match(/\bpush\s+(?:-{1,2}[\w-]+\s+)*([\w.-]+)/)?.[1] || 'origin';
+          const r = pushNotes(home.root, remote);
+          pushed = r.ok ? ` · notas subidas a ${remote}` : ` · notas sin subir (${(r.output.split('\n').pop() || 'error').slice(0, 80)}): waymark.mjs notes push`;
+        }
+      } catch {}
       try { writeTaskLine(home, rec); } catch {} // the task's Work in progress line, from its Aprendido
       try { if (home.dir && !home.legacy) syncIdentity(home.memory, stackOf(home.root)); } catch {} // Identity names the repo's package manager
       try { saveSnapshot(h.session_id, cwd); } catch {} // a turn resumed without a prompt diffs from this close, not the last prompt
@@ -509,7 +522,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
-      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context) + moved)));
+      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context) + moved + pushed)));
     } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });

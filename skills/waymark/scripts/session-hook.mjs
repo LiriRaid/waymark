@@ -11,7 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, aprendidoOf } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf } from './provenance.mjs';
+import { repairNotes } from './notes.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -112,6 +113,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     let text = '';
     try {
       text = CARD_HEAD + digest(cwd, agent.name);
+      // a note a rebase or amend left on the old commit follows the task to its new commit
+      try { const home = projectHome(cwd), moved = home.dir && !home.legacy ? repairNotes(home.root, readRecords(home.log)) : []; if (moved.length) text += `\nNotes: moved to their rebased commits: ${moved.join(', ')}`; } catch {}
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
     try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}

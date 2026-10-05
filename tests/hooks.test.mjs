@@ -1820,6 +1820,24 @@ test('incidents: a testigo ✘ stays open until it passes in a later task; 3 fai
   assert.equal(incidentsLine(incidents([])), '');
 });
 
+test('3e-4 testigo procedure with position: read after the first change is ✘ (not blocked); read after a denied edit still counts as first', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const head = [prompt('ajusta el skeleton'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' })];
+  const ask = askWithId('q1', '¿Altura?', ['3.5rem', 'Otra'], '3.5rem');
+  const tail = [call('Bash', { command: 'npx tsc --noEmit' })];
+  const judge = (lines) => cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines) });
+  const late = judge([...head, ...ask, call('Edit', { file_path: FILE }), ...tail, PROC('dept-frontend')]);
+  const step = late.steps.find((s) => s.id === 'procedure');
+  assert.deepEqual([late.missing, step.pass, late.observed.procedure.readBeforeChange], [[], false, false], 'too late to undo: recorded, not blocked');
+  assert.ok(late.findings.includes('the owner\'s procedures.md section was read after the task\'s first change'));
+  const denied = [...head, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', id: 'e0', input: { file_path: FILE } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e0', is_error: true, content: 'Waymark: L1 decision gate' }] } }, PROC('dept-frontend'), ...ask, call('Edit', { file_path: FILE }), ...tail];
+  assert.equal(judge(denied).steps.find((s) => s.id === 'procedure').pass, true, 'an edit the gate denied changed nothing');
+  assert.equal(judge([...head, PROC('dept-frontend'), ...ask, call('Edit', { file_path: FILE }), ...tail]).steps.find((s) => s.id === 'procedure').pass, true);
+  assert.ok(judge([...head, ...ask, call('Edit', { file_path: FILE }), ...tail]).missing.some((m) => /procedures\.md never read/.test(m)), 'never read still blocks once');
+});
+
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {
   const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
   const rows = Object.fromEntries(sizes(process.cwd()).map((r) => [r.name, r]));

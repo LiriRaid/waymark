@@ -10,7 +10,7 @@
     { "id": "review", "label": "Review", "levels": [2, 3], "when": "code", "enforce": "block", "claim": "L2+ with code: code-review on the task's files" },
     { "id": "build", "label": "Build", "levels": [2, 3], "when": "build", "enforce": "block", "claim": "L2+ with code: the build once at the end (not when memory.md's Quality gates has `build | none (<why>)`)" },
     { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "inferredFromDocs", "enforce": "block", "claim": "an inference from docs backed by consulting them" },
-    { "id": "procedure", "label": "Enrutar", "levels": [1, 2, 3], "enforce": "block", "claim": "the owner's procedures.md section read" },
+    { "id": "procedure", "label": "Enrutar", "levels": [1, 2, 3], "enforce": "block", "claim": "the owner's procedures.md section read before the first change" },
     { "id": "spec", "label": "Tests", "levels": [1, 2, 3], "when": "specNear", "enforce": "block", "claim": "a spec next to the changed code added or changed" },
     { "id": "red", "label": "Tests", "levels": [1, 2, 3], "when": "redClaim", "enforce": "block", "claim": "a red claim (rojo, habría fallado) backed by a test run before the first code change or in a clean worktree, or marked inferida" },
     { "id": "preexisting", "label": "Previos", "levels": [1, 2, 3], "when": "preClaim", "enforce": "block", "claim": "a pre-existing failure checked in a clean copy" },

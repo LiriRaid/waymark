@@ -91,6 +91,7 @@ The routine contract becomes the list of testigos that apply at each level. Step
   - A domain rule stays, one line, without MUST: MUST becomes an imperative, MUST NOT becomes "Never …", SHOULD becomes "Prefer …".
   - The Quick ref's **Must:** becomes **Rules:**. The department template says the same.
 - **Incidents by window:** a suggested rule needs 3 failures of one testigo within the project's last 10 evaluated tasks. A failure already outgrown (Commit 4× here) stops being suggested. Open incidents are unchanged.
+- **Procedure with position (3e-4b, from the 3e-4 test):** the agent read `procedures.md` only after the end-of-turn block, in 3 of 3 sessions of the same project, and Enrutar still passed. Now a section read after the task's first real change (an edit the gate denied does not count) makes Enrutar ✘ with a finding. Like a late decision, it is too late to undo, so it does not block; never reading it still blocks once. The claim reads "…read before the first change".
 - **Measured** (`waymark.mjs size`, characters; tokens ≈ characters / 4):
 
   | Part | Before | After |

@@ -151,6 +151,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const lastSpec = lastIdx((t) => EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t))));
   const lastChange = lastIdx(isChange);
   const result = (t) => turn.results?.[t.id];
+  // the procedure counts as read first only before the first change that happened (an edit the gate denied changed nothing)
+  const firstRealChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !(result(t)?.error || t.error));
+  const procBeforeChange = allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
   // A command that writes Waymark's own memory is not a gate, even when its text says "build" or "tests".
   // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
@@ -178,7 +181,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       saved: turn.tools.some((t) => /mem_(save|update|session_summary)/.test(t.name)),
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
-    procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: before((t) => procRe.test(where(t)) && readSomething(t)) },
+    procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
     gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(bare(t))),
@@ -305,6 +308,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (lateDecision && dec?.applies) { // cannot be undone, so it does not block; the evaluation keeps it
     const why = 'the first choice-window question came after the task\'s first change';
     dec.pass = false; dec.why = [...dec.why, why]; findings.push(why);
+  }
+  const proc = steps.find((s) => s.id === 'procedure');
+  if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change
+    const why = 'the owner\'s procedures.md section was read after the task\'s first change';
+    proc.pass = false; proc.why = [why]; findings.push(why);
   }
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's

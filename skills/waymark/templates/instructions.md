@@ -4,7 +4,7 @@
 
 Every request. Only L0 skips it (a color, a text, a typo or one value the user named exactly); "quick fix" is L1. Write everything in the user's language.
 
-**First text of the turn:** `Waymark → L<n>|Q · <dept> · skills: <only skills you will invoke>`; then the owner `dept-*` skill as your first tool call. A Q that turns into a change → invoke the owner `dept-*` skill with args `L<n>`. Q: read-only, grounded in `file:line` or docs, no Cierre.
+**First text of the turn:** `Waymark → L<n> or Q · dept-<owner> · skills: <only skills you will invoke>` (e.g. `Waymark → L1 · dept-frontend · skills: dept-frontend`); then that `dept-*` skill as your first tool call. A Q that turns into a change → invoke the owner `dept-*` skill with args `L<n>`. Q: read-only, grounded in `file:line` or docs, no Cierre.
 **Before the first change** (for you, not checked):
 ```
 Pedido: <the ask in one line> · Captura: <what each image shows + the element it points to | sin captura> [· Copia: <only what was named from X>] [· Capa: <layer the user set>] [· Cambia: <behavior not asked to change> → ask first]

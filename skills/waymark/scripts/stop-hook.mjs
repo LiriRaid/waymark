@@ -47,7 +47,7 @@ const BUILD = /\b(ng build|vite build|next build|nuxt build|astro build|(npm|pnp
 // The catalog of testigos: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006, 0012).
 // A missing or invalid catalog never disables the hook: a minimal one keeps the chain (decision, gate, Cierre) and
 // the record says the catalog could not be read.
-const FALLBACK = { tokensPerQuotaPct: 1350000, fallback: true, testigos: [
+const FALLBACK = { fallback: true, testigos: [
   { id: 'decision', label: 'Decision', levels: [1, 2, 3], enforce: 'block' }, { id: 'gate', label: 'Verificar', levels: [1, 2, 3], when: 'code', enforce: 'block' },
   { id: 'cierre', label: 'Cierre', levels: [1, 2, 3], enforce: 'block' }] };
 const ROUTINE = (() => { try { const r = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'routine.json'), 'utf8')); return Array.isArray(r.testigos) ? r : FALLBACK; } catch { return FALLBACK; } })();
@@ -326,7 +326,7 @@ export function evaluate(gaps, usage, model = null) {
   const steps = {};
   for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = (steps[s.label] ?? true) && s.pass;
   const ok = Object.values(steps).filter(Boolean).length;
-  const est = estimate(usage, model, ROUTINE.tokensPerQuotaPct || 1350000); // the user's own pairs per model (calibrate.mjs)
+  const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
   return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, quotaPct: est.pct, quotaBy: est.by };
 }
@@ -377,10 +377,10 @@ export function questionRecord(turn, meta = {}) {
 export const NEW_SESSION = 200000;
 export function summaryLine(id, ev, context = 0) {
   const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ');
-  const ask = ev.quotaPct !== null && /^(default|pairs:[12])$/.test(String(ev.quotaBy || ''))
+  const ask = /^(none|default|pairs:[12])$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
-  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota de 5 h (estimado)` : ''}${fresh}${ask}`;
+  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (estimado)` : ''}${fresh}${ask}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

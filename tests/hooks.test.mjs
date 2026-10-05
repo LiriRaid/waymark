@@ -495,8 +495,8 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   const ev = evaluate(cierreGaps(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), { total: 2700000 });
   assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
   assert.equal(ev.score, '8/9');
-  assert.equal(ev.quotaPct, 2);
-  assert.match(summaryLine(id, ev), /Recordar ✘ .* 8\/9 · 2\.70M tokens ≈ 2% de la cuota/);
+  assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
+  assert.match(summaryLine(id, ev), /Recordar ✘ .* 8\/9 · 2\.70M tokens · ¿qué % marcó tu cuota/);
   assert.match(checkCierre(l2(), cierre(id), undefined, undefined, { ...ctx, engram: true }), /no mem_search before the first change/, 'mem_search blocks at L2+ when engram is there');
 });
 
@@ -509,7 +509,7 @@ test('turn usage: each streamed message counted once', () => {
 test('calibration: the user\'s pairs per model drive the quota estimate (mean, then a fit of new vs cached tokens)', async () => {
   const { estimate, addPair, pairsFile } = await import(`file://${SCRIPTS}/calibrate.mjs`);
   const M = 'claude-test-model';
-  assert.deepEqual(estimate({ total: 2700000 }, M, 1350000), { pct: 2, by: 'default' });
+  assert.deepEqual(estimate({ total: 2700000 }, M), { pct: null, by: 'none' }, 'no pairs for the model: no scale, no %');
   const repo = tmpRepo('calib');
   fs.mkdirSync(path.join(repo, '.waymark'));
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n');
@@ -519,7 +519,7 @@ test('calibration: the user\'s pairs per model drive the quota estimate (mean, t
   ].map((r) => JSON.stringify(r)).join('\n') + '\n');
   assert.equal(addPair('2026-10-03 · T1', 9, repo).total, 7200000);
   assert.deepEqual(estimate({ total: 1600000 }, M), { pct: 2, by: 'pairs:1' }, '800k per 1% from the pair');
-  assert.deepEqual(estimate({ total: 1600000 }, 'other-model', 1350000).by, 'default', 'per model');
+  assert.deepEqual(estimate({ total: 1600000 }, 'other-model'), { pct: null, by: 'none' }, 'per model: another model (another agent\'s quota window) borrows no scale');
   const p2 = addPair('2026-10-03 · T2', 3, repo);
   assert.deepEqual([p2.fresh, p2.cacheRead], [1000000, 2000000]);
   fs.appendFileSync(pairsFile(), [{ model: M, pct: 2, total: 3000000, fresh: 500000, cacheRead: 2500000 }, { model: M, pct: 4, total: 4000000, fresh: 1500000, cacheRead: 2500000 }].map((p) => JSON.stringify(p)).join('\n') + '\n');
@@ -1114,6 +1114,9 @@ test('3c: the end-of-turn line asks the real quota % while the model has fewer t
   assert.ok(!/marcó tu cuota/.test(summaryLine('x', { ...base, quotaBy: 'pairs:3' })));
   assert.ok(!/marcó tu cuota/.test(summaryLine('x', { ...base, quotaBy: 'fit:4' })));
   assert.ok(!/marcó tu cuota/.test(summaryLine('x', { ...base, quotaPct: null, quotaBy: null })));
+  const none = summaryLine('x', { ...base, quotaPct: null, quotaBy: 'none' });
+  assert.match(none, /1.00M tokens · ¿qué % marcó tu cuota/, 'a model without pairs: tokens only, and the % is asked');
+  assert.ok(!/≈|5 h/.test(none));
 });
 
 test('3c: open.json records the agent, and tasks.md shows where the turn started', () => {
@@ -1836,6 +1839,16 @@ test('3e-4 testigo procedure with position: read after the first change is ✘ (
   assert.equal(judge(denied).steps.find((s) => s.id === 'procedure').pass, true, 'an edit the gate denied changed nothing');
   assert.equal(judge([...head, PROC('dept-frontend'), ...ask, call('Edit', { file_path: FILE }), ...tail]).steps.find((s) => s.id === 'procedure').pass, true);
   assert.ok(judge([...head, ...ask, call('Edit', { file_path: FILE }), ...tail]).missing.some((m) => /procedures\.md never read/.test(m)), 'never read still blocks once');
+});
+
+test('routing line: a department without its prefix counts ("· frontend" → dept-frontend); "L<n> or Q" copied as is reads as its level', () => {
+  assert.equal(routedDept(['Waymark → L2 · frontend'], []), 'dept-frontend');
+  assert.equal(routedDept(['Waymark → L2|Q · ux-ui · skills: ui-build'], []), 'dept-ux-ui');
+  assert.equal(routedDept(['Waymark → L1 · dept-frontend · skills: dept-frontend'], []), 'dept-frontend');
+  assert.equal(routedDept(['Waymark → L2 · frontend-team'], []), null, 'only the ten department names');
+  assert.equal(routedDept(['Waymark → L1 · waymark'], []), null);
+  assert.deepEqual([routedLevel(['Waymark → L2 or Q · dept-qa'], []), routedDept(['Waymark → L2 or Q · dept-qa'], [])], [2, 'dept-qa']);
+  assert.equal(routedLevel(['Waymark → L0 or Q · dept-qa'], []), 'Q');
 });
 
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {

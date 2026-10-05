@@ -92,6 +92,11 @@ The routine contract becomes the list of testigos that apply at each level. Step
   - The Quick ref's **Must:** becomes **Rules:**. The department template says the same.
 - **Incidents by window:** a suggested rule needs 3 failures of one testigo within the project's last 10 evaluated tasks. A failure already outgrown (Commit 4× here) stops being suggested. Open incidents are unchanged.
 - **Procedure with position (3e-4b, from the 3e-4 test):** the agent read `procedures.md` only after the end-of-turn block, in 3 of 3 sessions of the same project, and Enrutar still passed. Now a section read after the task's first real change (an edit the gate denied does not count) makes Enrutar ✘ with a finding. Like a late decision, it is too late to undo, so it does not block; never reading it still blocks once. The claim reads "…read before the first change".
+- **Codex test (3e-4c, GPT-6-Luna medium, 8/9):** the user's picks from it:
+  - **Routing line:** Codex wrote `Waymark → L2 · frontend`, so Enrutar failed with "names no owner department". The hook now reads a bare name of the ten departments as `dept-<name>`, and "L<n> or Q" copied as is. The block and the reminder show a real example.
+  - **Quota:** a model without calibration pairs gets no % (only its tokens, and the % is asked). The default factor came from Claude's 5-hour window, and Codex's quota is weekly. Each model's pairs are in its own agent's window.
+  - **`pnpm exec`** fails inside Codex's Windows sandbox (the `.CMD` launchers are not resolved; it works outside). This goes in the machine's Environment, not in code.
+  - **The spec testigo stays from L1.**
 - **Measured** (`waymark.mjs size`, characters; tokens ≈ characters / 4):
 
   | Part | Before | After |

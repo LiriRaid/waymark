@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Waymark · quota calibration from the user's own pairs: a closed task's tokens and the % of the 5-hour quota it used,
-// per model, kept in ~/.waymark/calibration.jsonl (this machine).
+// Waymark · quota calibration from the user's own pairs: a closed task's tokens and the % of the quota it used (the
+// agent's own window: Claude's 5 hours, Codex's week), per model, kept in ~/.waymark/calibration.jsonl (this machine).
 //   node calibrate.mjs <task ID> <percent> [--project <path>]   adds the pair (tokens and model from the task's record)
 //   node calibrate.mjs --list                                   shows the pairs and the current estimate per model
 // Estimate: WAYMARK_TOKENS_PER_PCT if set; else 3+ pairs of the model with a token split → a weight for new tokens and
-// one for cache reads (least squares); else 1+ pairs → their mean tokens per 1%; else the contract's default.
+// one for cache reads (least squares); else 1+ pairs → their mean tokens per 1%; else no estimate (a model without
+// pairs has no known scale: another agent's quota is not the same window).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ export const pairsFile = () => path.join(HOME(), 'calibration.jsonl');
 export const readPairs = (model) => readRecords(pairsFile()).filter((p) => p.pct > 0 && p.total > 0 && (!model || p.model === model));
 
 // → { pct, by } for one task's usage ({ total, fresh?, cacheRead? }) and model.
-export function estimate(usage, model, perPctDefault = 1350000) {
+export function estimate(usage, model) {
   const total = usage?.total || 0;
   if (!total) return { pct: null, by: null };
   const round = (x) => Math.round(x * 10) / 10;
@@ -34,7 +35,7 @@ export function estimate(usage, model, perPctDefault = 1350000) {
     const perPct = pairs.reduce((s, p) => s + p.total / p.pct, 0) / pairs.length;
     return { pct: round(total / perPct), by: `pairs:${pairs.length}` };
   }
-  return { pct: round(total / perPctDefault), by: 'default' };
+  return { pct: null, by: 'none' };
 }
 
 export function addPair(taskId, pct, cwd = process.cwd(), now = new Date()) {

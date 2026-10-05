@@ -177,7 +177,8 @@ export function sessionState(lines) {
 // a re-route is also a tool call: the owner dept-* skill invoked with args "L<n>", which always comes after the
 // turn's first text and therefore wins.
 // "Waymark → L0|Q" (the template's "L<n>|Q" with L0 kept) is a question.
-const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*\|\s*Q)?|Q)\b(?:\s*·\s*(dept-[a-z-]+))?/gm;
+// The department may come without its prefix ("· frontend"): only the ten department names count as one.
+const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*(?:\||or)\s*Q)?|Q)\b(?:\s*·\s*((?:dept-)?(?:architecture|backend|data|devex|devops|frontend|product|qa|security|ux-ui))\b(?!-))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
 const reroute = (tools = []) => {
   const r = tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
@@ -187,7 +188,7 @@ export function routedLevel(texts, tools) {
   const t = reroute(tools);
   if (t) return t.level;
   const all = routes(texts), m = all[all.length - 1];
-  return !m ? 0 : m[1] === 'Q' || /^L0\s*\|\s*Q$/.test(m[1]) ? 'Q' : Number(m[2]);
+  return !m ? 0 : m[1] === 'Q' || /^L0\s*(?:\||or)\s*Q$/.test(m[1]) ? 'Q' : Number(m[2]);
 }
 
 // The Cierre heading: "## Cierre" at the start of a line. A mention inside a sentence ("until it writes its `## Cierre`")
@@ -220,5 +221,6 @@ export function routedDept(texts, tools) {
   const t = reroute(tools);
   if (t) return t.dept;
   const all = routes(texts);
-  return all.length ? all[all.length - 1][3] || null : null;
+  const dept = all.length ? all[all.length - 1][3] : null;
+  return dept ? (dept.startsWith('dept-') ? dept : `dept-${dept}`) : null;
 }

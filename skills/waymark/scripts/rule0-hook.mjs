@@ -27,7 +27,7 @@ try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
 // The rules themselves live in the instructions block; this only points at the steps a new session skips most.
 const full =
-  'Waymark Rule 0 (the instructions block) — first text: "Waymark → L<n>|Q · <dept> · skills: …"; first tool call: the owner dept-* skill. ' +
+  'Waymark Rule 0 (the instructions block) — first text: "Waymark → L<n> or Q · dept-<owner> · skills: …" (e.g. "Waymark → L1 · dept-frontend"); first tool call: that dept-* skill. ' +
   'Before the first change: its procedures.md section, L2+ mem_search, git status --short, then one choice-window call with the options and every decision that shapes the work (the user decides; never offer browser verification). ' +
   'Close changes with "## Cierre · <task ID>" (Resultado · Evidencia · Aprendido ≤200 characters). The end-of-turn hook blocks once per testigo of waymark/routine.json that applies. Independent tool calls in one response. User\'s language. Only L0 skips.';
 const short = 'Waymark Rule 0 as in your last reply: routing line + owner dept-* skill first; opener before the first edit; the user decides every real decision (options first); "## Cierre · <task ID>" after changes. Independent tool calls in one response.';

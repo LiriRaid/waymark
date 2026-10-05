@@ -35,15 +35,32 @@ export function stackOf(root) {
   return { pm, pmVersion: declared?.[2] || null, from: declared ? 'package.json packageManager' : lock ? lock[1] : 'default', ...RUNNERS[pm], deps };
 }
 
+// Codex's Windows sandbox does not resolve the .CMD launchers in node_modules/.bin, so `pnpm exec` / `npx` fail there
+// ("not recognized") while `pnpm run` works: for that agent a package binary runs with node.
+export const directBins = (agent, platform = process.platform) => agent === 'codex' && platform === 'win32';
+
+// The JS file a node_modules/.bin launcher runs, as a path from the repo root: the shell launcher names it
+// ("$basedir/../.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc" → node_modules/typescript/bin/tsc). null if none.
+export function binEntry(root, bin) {
+  const target = read(path.join(root, 'node_modules', '.bin', bin)).match(/"\$basedir\/\.\.\/([^"]+)"/)?.[1];
+  if (!target) return null;
+  const linked = target.replace(/^\.pnpm\/[^/]+\/node_modules\//, ''); // the top-level link, stable across versions
+  return `node_modules/${fs.existsSync(path.join(root, 'node_modules', linked)) ? linked : target}`;
+}
+
 // One line for the agent's context, e.g. "pnpm 11.5.0 · @angular/core 21.0.3 · vitest 4.0.8 · run with `pnpm exec <bin>` /
-// `pnpm run <script>`". '' when there is no manifest.
-export function stackLine(root) {
+// `pnpm run <script>`". With { direct } (directBins), binaries run with node. '' when there is no manifest.
+export function stackLine(root, { direct = false } = {}) {
   const s = stackOf(root);
   if (!s) return '';
   const deps = s.deps.slice(0, 6).map(([n, v]) => `${n} ${v}`);
   if (!s.pm) return [s.other, ...deps].join(' · ');
   if (s.from === 'default') return [`package manager unknown (no packageManager, no lockfile): ask the user before installing`, ...deps].join(' · ');
-  return [`${s.pm}${s.pmVersion ? ` ${s.pmVersion}` : ''}`, ...deps].join(' · ') + ` · run with \`${s.exec} <bin>\` / \`${s.run} <script>\``;
+  const tsc = direct && binEntry(root, 'tsc');
+  const run = direct
+    ? ` · run binaries with \`node node_modules/<package>/<bin>\` (\`${s.exec}\` fails in this agent's sandbox${tsc ? `; tsc → \`node ${tsc}\`` : ''}) / \`${s.run} <script>\``
+    : ` · run with \`${s.exec} <bin>\` / \`${s.run} <script>\``;
+  return [`${s.pm}${s.pmVersion ? ` ${s.pmVersion}` : ''}`, ...deps].join(' · ') + run;
 }
 
 // memory.md's Identity line "Package manager…: <name>" set to the repo's manager when it names another. → true when
@@ -58,11 +75,18 @@ export function syncIdentity(memoryFile, stack) {
 }
 
 // A command written for one package manager, rewritten for the repo's: `npx tsc` → `pnpm exec tsc`, `npm run build` →
-// `pnpm run build`, and back. Commands that name no package manager are returned as they are.
-export function translate(cmd, stack) {
+// `pnpm run build`, and back. Commands that name no package manager are returned as they are. With { root, direct }
+// (directBins), a binary whose launcher is found runs with node: `pnpm exec tsc` → `node node_modules/typescript/bin/tsc`.
+export function translate(cmd, stack, { root = null, direct = false } = {}) {
   const to = stack?.pm && RUNNERS[stack.pm];
   if (!to) return cmd;
-  return String(cmd)
+  const viaNode = direct && root
+    ? (c) => c.replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npx(?:\s+--no-install)?|pnpm\s+exec|pnpm\s+dlx|yarn\s+dlx|bunx)\s+([\w@./-]+)/g, (all, p, bin) => {
+      const entry = binEntry(root, bin);
+      return entry ? `${p}node ${entry}` : all;
+    })
+    : (c) => c;
+  return viaNode(String(cmd))
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npx(?:\s+--no-install)?|pnpm\s+exec|pnpm\s+dlx|yarn\s+dlx|bunx)(?=\s)/g, (_, p) => p + to.exec)
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npm|pnpm|yarn|bun)\s+run(?=\s)/g, (_, p) => p + to.run)
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npm|pnpm|yarn|bun)\s+(test|start)\b/g, (_, p, s) => `${p}${stack.pm} ${s}`);

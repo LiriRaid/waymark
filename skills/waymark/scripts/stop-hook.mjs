@@ -252,6 +252,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   const cierre = [];
+  let renamed = null;
   if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)');
   else {
     if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | parcial (<what is missing>) | bloqueado (<why>)');
@@ -262,7 +263,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
       if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
       else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
-      else if (!followUpShares(id, changed, ctx)) cierre.push(`${id} is a follow-up of ${id.replace(/[a-z]$/, '')}, but this turn changes none of that task's files: use ${ctx.ids.next} for a new task`);
+      // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
+      else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
     }
   }
   const ev = field(reply, 'Evidencia');
@@ -317,7 +319,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
-  return { level, changed, reply, missing, findings, steps, dept, observed };
+  return { level, changed, reply, missing, findings, steps, dept, observed, renamed };
 }
 
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
@@ -348,7 +350,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos")
-    id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook' }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
+    id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook', ...(claimed ? { claimed } : {}) }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
     // Never a secret in the chained record (it cannot be edited later): picked labels only, no free-text answer, and
     // passwords, tokens and keys masked in what is kept as text.
     level: gaps.level, department: gaps.dept, prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), decisions: recordedDecisions(ctx.decisions),
@@ -415,12 +417,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       ctx.stretchTools = sessionTools(stretch); // since the last close (decision)
       // testigos that execute (testigos.mjs): the repo typecheck when the agent ran no gate, secrets in what the task
       // wrote, and the chain (with its notes) as it stands before this record
-      ctx.rerun = (files) => rerunGate(files, home);
+      let rerun = null;
+      ctx.rerun = (files) => (rerun ??= rerunGate(files, home)); // once per close, even when the turn is judged twice
       ctx.noBuild = buildNone(home.memory);
       ctx.root = home.root;
       ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
       ctx.chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null);
-      const gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
+      let gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
+      if (gaps?.renamed) { // a new task after all: judged over its own stretch, not the claimed task's
+        ctx.taskTools = ctx.stretchTools;
+        gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
+      }
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
         const q = fs.existsSync(home.memory) ? questionRecord(turn, meta) : null;
@@ -445,7 +452,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       try { refreshTasks(home, true); } catch {} // tasks.md: where the work stands, for any agent (docs/adr/0007)
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
-      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context))));
+      const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
+      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context) + moved)));
     } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });

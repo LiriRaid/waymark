@@ -1351,11 +1351,17 @@ test('3e-1b follow-up: its ID holds only when it changes a file of its task; its
   const D = '2026-10-04', ids = { next: `${D} · T5`, last: `${D} · T4`, followUp: `${D} · T4b`, known: new Set([`${D} · T4`]) };
   const records = [{ id: `${D} · T4`, files: ['/work/api/prisma/migration.sql'] }, { id: `${D} · T3`, files: [FILE] }];
   const ctx = { ...ctxFor('/work/none'), ids, taskFiles: (id) => new Set(taskFiles(records, id).map((f) => f.toLowerCase())) };
-  const msg = checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '';
-  assert.match(msg, /2026-10-04 · T4b is a follow-up of 2026-10-04 · T4, but this turn changes none of that task's files: use 2026-10-04 · T5/);
-  assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T5`), undefined, undefined, ctx) || '', /follow-up/, 'a new task ID passes');
+  // a follow-up ID that touches none of its task's files is a new task: recorded under the new ID, never blocked (the
+  // Codex re-test wrote its Cierre twice for it)
+  assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '', /follow-up|T4b/, 'not blocked');
+  const moved = cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx);
+  assert.deepEqual(moved.renamed, { from: `${D} · T4b`, to: `${D} · T5` });
+  const rec = provenanceRecord(l2(), moved, ctx, {});
+  assert.deepEqual([rec.id, rec.idBy, rec.claimed], [`${D} · T5`, 'hook', `${D} · T4b`], 'the record keeps what the agent wrote');
+  assert.equal(cierreGaps(l2(), cierre(`${D} · T5`), undefined, undefined, ctx).renamed, null, 'a new task ID passes as is');
   records.push({ id: `${D} · T4`, files: [FILE] });
-  assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '', /follow-up/, 'sharing a file of its task, it is a follow-up');
+  const shared = cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx);
+  assert.deepEqual([shared.renamed, provenanceRecord(l2(), shared, ctx, {}).id], [null, `${D} · T4b`], 'sharing a file of its task, it is a follow-up');
   // the stretch: T4b asked, edited and closed; T4c asks before its own first edit
   const before = [call('AskUserQuestion'), answered('¿Cómo?', ['A', 'B'], 'A'), call('Edit', { file_path: FILE })];
   const ask = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }] } };
@@ -1849,6 +1855,29 @@ test('routing line: a department without its prefix counts ("· frontend" → de
   assert.equal(routedDept(['Waymark → L1 · waymark'], []), null);
   assert.deepEqual([routedLevel(['Waymark → L2 or Q · dept-qa'], []), routedDept(['Waymark → L2 or Q · dept-qa'], [])], [2, 'dept-qa']);
   assert.equal(routedLevel(['Waymark → L0 or Q · dept-qa'], []), 'Q');
+});
+
+test('Codex on Windows: binaries run with node (its sandbox cannot run pnpm exec); other agents keep the manager', async () => {
+  const { stackLine, translate, binEntry, directBins, stackOf } = await import(`file://${SCRIPTS}/stack.mjs`);
+  const repo = tmpRepo('direct');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0', devDependencies: { typescript: '5.9.3' } }));
+  fs.writeFileSync(path.join(repo, 'pnpm-lock.yaml'), '');
+  const bin = path.join(repo, 'node_modules', '.bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(path.join(repo, 'node_modules', 'typescript', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', 'typescript', 'bin', 'tsc'), '');
+  fs.writeFileSync(path.join(bin, 'tsc'), '#!/bin/sh\nexec node  "$basedir/../.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc" "$@"\n');
+  fs.writeFileSync(path.join(bin, 'vitest'), '#!/bin/sh\nexec node  "$basedir/../.pnpm/vitest@4.1.7/node_modules/vitest/vitest.mjs" "$@"\n');
+  assert.equal(binEntry(repo, 'tsc'), 'node_modules/typescript/bin/tsc', 'the top-level link when it exists');
+  assert.equal(binEntry(repo, 'vitest'), 'node_modules/.pnpm/vitest@4.1.7/node_modules/vitest/vitest.mjs', 'else the launcher\'s own path');
+  assert.equal(binEntry(repo, 'nope'), null);
+  assert.deepEqual([directBins('codex', 'win32'), directBins('codex', 'linux'), directBins('claude', 'win32')], [true, false, false]);
+  const s = stackOf(repo);
+  assert.equal(translate('pnpm exec tsc -p tsconfig.app.json --noEmit', s, { root: repo, direct: true }), 'node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit');
+  assert.equal(translate('npx eslint src && pnpm exec tsc', s, { root: repo, direct: true }), 'pnpm exec eslint src && node node_modules/typescript/bin/tsc', 'no launcher: the manager stays');
+  assert.equal(translate('pnpm exec tsc', s), 'pnpm exec tsc', 'not direct: as before');
+  assert.match(stackLine(repo, { direct: true }), /run binaries with `node node_modules\/<package>\/<bin>` \(`pnpm exec` fails in this agent's sandbox; tsc → `node node_modules\/typescript\/bin\/tsc`\) \/ `pnpm run <script>`$/);
+  assert.match(stackLine(repo), /run with `pnpm exec <bin>` \/ `pnpm run <script>`$/);
 });
 
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {

@@ -12,7 +12,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, aprendidoOf } from './provenance.mjs';
-import { stackOf, stackLine, translate } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -31,7 +31,7 @@ const section = (text, title) => {
 };
 
 export const CARD_HEAD = 'Waymark context card (already recalled). Pointers, not facts: verify in the code; the code wins, fix the entry.\n';
-export function digest(cwd) {
+export function digest(cwd, agentName = 'claude') {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
   if (env.length) out.push('Environment (this machine): ' + env.map((l) => l.replace(/^- \[[^\]]*\]\s*/, '')).join(' | '));
@@ -59,10 +59,11 @@ export function digest(cwd) {
   const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
   if (notes.length) out.push('Notes:\n' + notes.join('\n'));
   const stack = stackOf(home.root);
-  const line = stackLine(home.root);
+  const direct = directBins(agentName); // Codex on Windows: binaries with node, not pnpm exec
+  const line = stackLine(home.root, { direct });
   if (line) out.push(`Repo (read now): ${line}`);
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
-    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack)}`);
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   const solved = section('\n' + best.text, 'Solved problems').filter((l) => l.startsWith('-')).length;
@@ -110,7 +111,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     try { cwd = JSON.parse(input).cwd || cwd; } catch {}
     let text = '';
     try {
-      text = CARD_HEAD + digest(cwd);
+      text = CARD_HEAD + digest(cwd, agent.name);
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
     try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}

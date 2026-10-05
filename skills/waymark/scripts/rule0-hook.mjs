@@ -14,7 +14,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { sessionState } from './transcript.mjs';
 import { taskIds, saveSnapshot, markOpen, projectHome } from './provenance.mjs';
-import { stackLine } from './stack.mjs';
+import { stackLine, directBins } from './stack.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -50,7 +50,7 @@ export function reminder(hook, agent) {
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
-  try { const line = stackLine(projectHome(cwd).root); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
+  try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
   return agent.out.context('UserPromptSubmit', (st.openedWithWaymark ? short : full) + ids + repo + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR));
 }
 

@@ -97,6 +97,9 @@ The routine contract becomes the list of testigos that apply at each level. Step
   - **Quota:** a model without calibration pairs gets no % (only its tokens, and the % is asked). The default factor came from Claude's 5-hour window, and Codex's quota is weekly. Each model's pairs are in its own agent's window.
   - **`pnpm exec`** fails inside Codex's Windows sandbox (the `.CMD` launchers are not resolved; it works outside). This goes in the machine's Environment, not in code.
   - **The spec testigo stays from L1.**
+- **Codex re-test (3e-4d, 6/6, 0.28M tokens):** the routing example worked: `dept-frontend`, and the procedure was read before the change. The user's picks from it:
+  - **A follow-up ID that touches none of its task's files is renamed, not blocked.** Codex picked the offered follow-up (T4b) for a new task in both tests and wrote its Cierre twice. The hook now records the task under the new ID (`idBy: "hook"`, `claimed` keeps what the agent wrote), judges it over its own stretch, and says so in the end-of-turn line.
+  - **No two opposite instructions about binaries.** The card's Repo line and Gates still said `pnpm exec` beside the Environment note, and Codex followed them. For Codex on Windows, both now name the JS file the `node_modules/.bin` launcher runs (`node node_modules/typescript/bin/tsc`). Other agents keep the manager.
 - **Measured** (`waymark.mjs size`, characters; tokens ≈ characters / 4):
 
   | Part | Before | After |

@@ -23,11 +23,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
+import { stackOf, syncIdentity } from './stack.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -362,12 +363,16 @@ export function questionRecord(turn, meta = {}) {
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
-// While the model has fewer than 3 calibration pairs (no fit yet), it asks the user for the real %.
-export function summaryLine(id, ev) {
+// While the model has fewer than 3 calibration pairs (no fit yet), it asks the user for the real %. Past NEW_SESSION
+// tokens of context, it says the next task is cheaper in a new session: every response re-reads the whole context, and
+// the context card resumes the work there.
+export const NEW_SESSION = 200000;
+export function summaryLine(id, ev, context = 0) {
   const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ');
   const ask = ev.quotaPct !== null && /^(default|pairs:[12])$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
-  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota de 5 h (estimado)` : ''}${ask}`;
+  const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
+  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota de 5 h (estimado)` : ''}${fresh}${ask}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -426,10 +431,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); } catch {}
       try { writeTaskLine(home, rec); } catch {} // the task's Work in progress line, from its Aprendido
+      try { if (home.dir && !home.legacy) syncIdentity(home.memory, stackOf(home.root)); } catch {} // Identity names the repo's package manager
       try { saveSnapshot(h.session_id, cwd); } catch {} // a turn resumed without a prompt diffs from this close, not the last prompt
       try { closeOpen(home, h.session_id, rec.id); } catch {}
       try { refreshTasks(home, true); } catch {} // tasks.md: where the work stands, for any agent (docs/adr/0007)
-      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation))));
+      let context = 0;
+      try { context = sessionState(lines).context; } catch {}
+      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context))));
     } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });

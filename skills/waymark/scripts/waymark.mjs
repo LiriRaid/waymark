@@ -9,6 +9,9 @@
 //   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
+//   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
+//   node waymark.mjs memory [<section>]     one section of the project memory (Solved problems, Conventions, Identity…); none → the section names
+//   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
 // agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
@@ -20,8 +23,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, readTaskRecords, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
+import { incidentsAt } from './incidents.mjs';
 import { pushNotes } from './notes.mjs';
+import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -158,6 +163,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(skillFit);
   await add(() => migration(cwd));
   await add(() => packageManager(cwd));
+  await add(() => suggestedRules(cwd));
   await add(agents);
   await add(frameworks);
   await add(() => session(cwd, agent));
@@ -173,17 +179,67 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
 // else the lockfile. → the pending line, or '' when they agree or either is unknown.
 export function packageManager(cwd) {
   const home = projectHome(cwd), root = home.root;
-  let pkg = null;
-  try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}
-  if (!pkg) return '';
-  const locks = [['pnpm', 'pnpm-lock.yaml'], ['yarn', 'yarn.lock'], ['bun', 'bun.lockb'], ['bun', 'bun.lock'], ['npm', 'package-lock.json']];
-  const real = String(pkg.packageManager || '').match(/^(pnpm|yarn|bun|npm)@/)?.[1] || locks.find(([, f]) => fs.existsSync(path.join(root, f)))?.[0];
+  const s = stackOf(root);
+  if (!s?.pm || s.from === 'default') return '';
+  const real = s.pm;
   const mem = read(home.memory);
   const said = mem.match(/Package manager[^:\n]*:\s*([a-z]+)/i)?.[1]?.toLowerCase();
   const gates = section('\n' + mem, 'Quality gates').filter((l) => l.startsWith('|')).map((l) => l.split('|')[2] || '').join(' ');
   const used = [...new Set([...gates.matchAll(/(?:^|[\s`])(npx|npm|pnpm|yarn|bunx?)\b/g)].map((m) => m[1].replace(/^npx$/, 'npm').replace(/^bunx$/, 'bun')))];
   const off = [said && said !== real ? `Identity says ${said}` : '', used.some((u) => u !== real) ? `Quality gates use ${used.filter((u) => u !== real).join(', ')}` : ''].filter(Boolean);
-  return real && off.length ? `package manager: this repo uses ${real} (${pkg.packageManager ? 'package.json packageManager' : 'its lockfile'}) but ${home.memory.replace(/\\/g, '/')} ${off.join(' and ')}. Offer to correct Identity and the Quality gates rows to ${real} (each gate re-run once and marked verified).` : '';
+  return off.length ? `package manager: this repo uses ${real} (${s.from === 'package.json packageManager' ? s.from : 'its lockfile'}) but ${home.memory.replace(/\\/g, '/')} ${off.join(' and ')}. Offer to correct Identity and the Quality gates rows to ${real} (each gate re-run once and marked verified).` : '';
+}
+
+// A testigo that failed 3 times or more in this project: offer to turn its lesson into a department or stack rule.
+export function suggestedRules(cwd) {
+  const { rules } = incidentsAt(cwd);
+  return rules.length ? `rule: ${rules.map((r) => `${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]})`).join('; ')} in this project. Offer to add the lesson as a rule of the owner department or the stack profile (${script('waymark.mjs')} incidents shows the causes); write it only after the user's yes.` : '';
+}
+
+// Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a
+// note, or a stub's commits), plus the records of tasks without a commit that list the file. A commit no task recorded
+// is shown too (a change made by hand). → text.
+export function pack(cwd, files, per = 3) {
+  const home = projectHome(cwd), root = home.root;
+  const git = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', timeout: 5000 });
+  const records = readRecords(home.log).filter((r) => r.id);
+  const out = [];
+  for (const file of files) {
+    const abs = path.resolve(cwd, file), rel = path.relative(root, abs).replace(/\\/g, '/');
+    const log = git('log', '-n', '20', '--format=%H%x1f%ct%x1f%s', '--', rel).stdout.trim().split('\n').filter(Boolean).map((l) => l.split('\x1f'));
+    const notes = readNotes(root, log.map(([h]) => h));
+    const byCommit = new Map(records.flatMap((r) => (r.commits || []).map((c) => [c, r])));
+    const seen = new Set(), rows = [];
+    const learnedOf = (r) => clipTo(aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')) || r.prompt || '', 120);
+    for (const [h, ct, subject] of log) {
+      const stub = byCommit.get(h);
+      let rec = stub;
+      const n = gitNote(stub) && notes.get(gitNote(stub).commit);
+      if (n) { try { rec = { ...JSON.parse(n), ...stub }; } catch {} }
+      else if (gitNote(stub)) rec = { ...stub, prompt: '(its git note is missing: a rebase or amend?)' };
+      if (rec && seen.has(rec.id)) continue;
+      if (rec) seen.add(rec.id);
+      rows.push({ at: Number(ct) * 1000, text: rec ? `${rec.id} · ${rec.agent || '?'} · ${learnedOf(rec)} · ${h.slice(0, 8)}` : `${h.slice(0, 8)} · ${clipTo(subject, 100)} (no task record)` });
+    }
+    // tasks with no commit that changed this file
+    for (const r of records.filter((x) => !x.commits?.length && !seen.has(x.id) && (x.files || []).some((p) => path.resolve(p).toLowerCase() === abs.toLowerCase()))) {
+      seen.add(r.id);
+      rows.push({ at: Date.parse(r.at) || 0, text: `${r.id} · ${r.agent || '?'} · ${learnedOf(r)} · (no commit)` });
+    }
+    const shown = rows.sort((x, y) => y.at - x.at).slice(0, per).map((x) => x.text);
+    out.push(`${rel}:${shown.length ? shown.map((x) => `\n  - ${x}`).join('') : ' no earlier task or commit'}`);
+  }
+  return out.join('\n');
+}
+const clipTo = (s, n) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+
+// One section of the project memory, or the list of its sections.
+export function memorySection(cwd, name) {
+  const text = read(projectHome(cwd).memory);
+  const names = [...text.matchAll(/^## (.+)$/gm)].map((m) => m[1].trim());
+  if (!name) return `sections: ${names.join(' · ')}`;
+  const hit = names.find((n) => n.toLowerCase().startsWith(name.toLowerCase()));
+  return hit ? `## ${hit}\n${section('\n' + text, hit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\n')}` : `no section "${name}" (sections: ${names.join(' · ')})`;
 }
 
 // One line per task record, newest first: "<id> · <agent> · <result> · <score> · <request>"; with an ID, its whole record.
@@ -207,6 +263,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const changed = tidyWip(home);
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
+  } else if (sub === 'pack') {
+    console.log(rest.length ? pack(process.cwd(), rest) : 'Usage: node waymark.mjs pack <file…>');
+  } else if (sub === 'memory') {
+    console.log(memorySection(process.cwd(), rest.join(' ')));
+  } else if (sub === 'incidents') {
+    const { open, rules } = incidentsAt(process.cwd());
+    console.log([...open.map((o) => `open: ${o.label} ✘${o.count > 1 ? `×${o.count}` : ''} since ${o.since}, last ${o.last}${o.cause ? ` · ${o.cause}` : ''}`), ...rules.map((r) => `suggested rule: ${r.label} failed ${r.failures}× (${r.ids.slice(-3).join(', ')})`)].join('\n') || 'no incidents');
   } else if (sub === 'done') {
     const at = rest.indexOf('--note'), note = at >= 0 ? rest.slice(at + 1).join(' ') : '';
     const ids = (at >= 0 ? rest.slice(0, at) : rest).join(' ').match(new RegExp(ID.source, 'g')) || [];
@@ -228,7 +291,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | pack <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

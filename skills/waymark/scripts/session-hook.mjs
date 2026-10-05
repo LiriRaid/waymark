@@ -11,7 +11,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome } from './provenance.mjs';
+import { projectHome, readTaskRecords, aprendidoOf } from './provenance.mjs';
+import { stackOf, stackLine, translate } from './stack.mjs';
+import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -21,6 +23,7 @@ const STALE_DAYS = 14; // Work in progress entries older than this are flagged f
 const MAX_COEXIST = 1800; // characters of injected coexistence rules, hard cap
 const WEEK = 7 * 86400000;
 export const CHECK_STATE = path.join(HOME, '.check.json'); // { checkedAt } written by waymark.mjs check, { pointedAt } here
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const section = (text, title) => {
   const m = text.match(new RegExp(`\\n## ${title}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
@@ -40,21 +43,30 @@ function digest(cwd) {
     return out.join('\n');
   }
   out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; \`waymark.mjs check\` offers the move).` : `Project memory: ${where} (read; full file there). Where the work stands: ${home.root.replace(/\\/g, '/')}/.waymark/tasks.md.`);
-  const solved = section('\n' + best.text, 'Solved problems').filter((l) => l.startsWith('-'))
-    .map((l) => '- ' + (l.match(/Symptom:\s*([^·]+)/)?.[1] || l.slice(2, 120)).trim());
-  if (solved.length) out.push('Solved problems (symptoms; details in the file):\n' + solved.slice(-10).join('\n'));
-  const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l));
-  if (gates.length) out.push('Gates: ' + gates.map((l) => l.split('|').slice(1, 3).map((s) => s.trim()).join(': ')).join(' · '));
-  const wip = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-')).map((l) => {
-    const date = Date.parse(l.match(/\b(20\d\d-\d\d-\d\d)\b/)?.[1] || '');
-    const stale = date && Date.now() - date > STALE_DAYS * 86400000 ? ` [>${STALE_DAYS} d old: confirm it still applies before acting on it]` : '';
-    return (l.length > 300 ? l.slice(0, 297) + '…' : l) + stale;
-  });
-  // Open lines wait for the user (a check in the browser, a migration they run): ask once, close what already works.
-  // Before the lines themselves: the digest is clipped at its end.
-  const open = wip.filter((l) => /^-\s*▶/.test(l)).map((l) => l.match(/\[([^\]]+)\]/)?.[1]).filter(Boolean);
+  // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.
+  const all = readTaskRecords(home), last = all.filter((r) => r.id).pop(); // read once: the last close and the incidents
+  if (last) {
+    const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
+    const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 180)}` : ''} (whole record: waymark.mjs tasks "${last.id}")`);
+  }
+  const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
+  // open: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]"
+  const open = wipAll.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
   if (open.length) out.push(`Open tasks (▶): ${open.join(', ')}. In your first reply ask the user once, in the choice window (multi-select), which of them already work; close those with node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}" done "<ID>"… --note "<their words>".`);
-  if (wip.length) out.push('Work in progress:\n' + wip.join('\n'));
+  // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
+  const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
+  if (notes.length) out.push('Notes:\n' + notes.join('\n'));
+  const stack = stackOf(home.root);
+  const line = stackLine(home.root);
+  if (line) out.push(`Repo (read now): ${line}`);
+  const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack)}`);
+  if (gates.length) out.push('Gates: ' + gates.join(' · '));
+  try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
+  const solved = section('\n' + best.text, 'Solved problems').filter((l) => l.startsWith('-')).length;
+  const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
+  out.push(`Commands (W = ${cmd}): before your first change to a file, W pack <files…> (what earlier tasks did there, from git); on demand, W memory <section> (${solved ? `Solved problems: ${solved} · ` : ''}Conventions · Identity) and W tasks.`);
   return out.join('\n');
 }
 

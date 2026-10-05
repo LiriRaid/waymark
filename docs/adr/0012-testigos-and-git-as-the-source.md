@@ -75,6 +75,13 @@ The routine contract becomes the list of testigos that apply at each level. Step
 - **Comments:** no task history in the scripts' comments (a test checks it); the rule is in `dept-architecture` and the instructions block.
 - **Known limit:** a note belongs to a commit sha. A rebase, amend or squash of a recorded commit leaves the note on the old sha, and the chain reports that record broken ("its git note is missing or was edited"). Git's `notes.rewriteRef` would carry notes across rewrites, but it changes git's config, which this step does not do. Open for 3e-3.
 
+### 3e-3 as built (2026-10-05 · T2, the user's picks)
+- **Stack from the repo:** `scripts/stack.mjs` reads the package manager (`packageManager`, else the lockfile) and the installed versions of the main frameworks on every prompt; the per-prompt hook adds one "Repo (read now)" line. The hook's typecheck re-run translates a memory row to that manager (`npx tsc` → `pnpm exec tsc`), and each close corrects memory.md's Identity line. Memory is no longer the source of the stack.
+- **Context card:** the session hook injects a card in place of the digest: last closed (ID · agent · Aprendido), open ▶ IDs with the confirm question, notes, the repo stack, gates in the repo's manager, incidents, and the commands. The rest is pulled on demand: `waymark.mjs memory <section>`, `tasks`.
+- **Pack by files:** `waymark.mjs pack <files…>` lists per file the last 3 tasks that changed it (`git log -- <file>` + notes, stubs and no-commit records) and commits no task recorded. The card tells the agent to run it before its first change; no fifth hook.
+- **New session notice:** past 200k tokens of context, the end-of-turn line says the next task goes in a new session.
+- **Incidents:** derived from the chained records, never stored apart: a testigo ✘ stays open until it passes in a later task; 3 failures make a suggested rule that `waymark.mjs check` offers for the department or stack. Testigos removed from the catalog are ignored.
+
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.
 - **The hook always runs the full gate:** strongest, but each close could take minutes. In a real project one eslint run took 7 minutes.

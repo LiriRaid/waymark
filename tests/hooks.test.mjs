@@ -1745,3 +1745,83 @@ test('connect-agents: an agent whose hooks run Waymark gets the Rule 0 block in 
   assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), text, 'replaced in place, never twice');
   fs.rmSync(path.join(dir, 'hooks.json'));
 });
+
+// ---- the stack read from the repo, the context card, pack, incidents, the new-session notice ----
+test('stack: the package manager and versions come from the repo (packageManager, else the lockfile); commands are translated to it', async () => {
+  const { stackOf, stackLine, translate, syncIdentity } = await import(`file://${SCRIPTS}/stack.mjs`);
+  const repo = memRepo('stack');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0+sha512.x', dependencies: { '@angular/core': '^21.0.0' }, devDependencies: { vitest: '^4.1.0', typescript: '~5.9.3' } }));
+  fs.mkdirSync(path.join(repo, 'node_modules', '@angular', 'core'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', '@angular', 'core', 'package.json'), JSON.stringify({ version: '21.2.15' }));
+  const s = stackOf(repo);
+  assert.deepEqual([s.pm, s.pmVersion, s.from, s.exec, s.run], ['pnpm', '11.5.0', 'package.json packageManager', 'pnpm exec', 'pnpm run']);
+  assert.deepEqual(s.deps, [['@angular/core', '21.2.15'], ['vitest', '4.1.0'], ['typescript', '5.9.3']], 'installed version first, else the declared range');
+  assert.equal(stackLine(repo), 'pnpm 11.5.0 · @angular/core 21.2.15 · vitest 4.1.0 · typescript 5.9.3 · run with `pnpm exec <bin>` / `pnpm run <script>`');
+  assert.equal(translate('npx tsc -p tsconfig.app.json --noEmit && npm run build', s), 'pnpm exec tsc -p tsconfig.app.json --noEmit && pnpm run build');
+  assert.equal(translate('npx --no-install vitest run a.spec.ts', s), 'pnpm exec vitest run a.spec.ts');
+  assert.equal(translate('pnpm exec tsc && pnpm run build && pnpm test', { pm: 'npm' }), 'npx tsc && npm run build && npm test', 'and back, for an npm project');
+  assert.equal(translate('node --check x.mjs', s), 'node --check x.mjs');
+  const npm = memRepo('stack-npm');
+  fs.writeFileSync(path.join(npm, 'package.json'), '{}');
+  fs.writeFileSync(path.join(npm, 'package-lock.json'), '{}');
+  assert.deepEqual([stackOf(npm).pm, stackOf(npm).from], ['npm', 'package-lock.json']);
+  assert.equal(stackOf(memRepo('stack-none')), null, 'no manifest: no stack');
+  const bare = memRepo('stack-bare');
+  fs.writeFileSync(path.join(bare, 'package.json'), '{}');
+  assert.match(stackLine(bare), /^package manager unknown \(no packageManager, no lockfile\): ask the user before installing/, 'never a guess stated as read');
+  const mem = path.join(repo, '.waymark', 'memory.md');
+  fs.writeFileSync(mem, '# P\n\n## Identity\n- Package manager / build tool: npm\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | npx tsc --noEmit | x |\n\n## Conventions\n');
+  assert.equal(syncIdentity(mem, s), true);
+  assert.match(fs.readFileSync(mem, 'utf8'), /- Package manager \/ build tool: pnpm \(read from the repo: package\.json packageManager\)/);
+  assert.equal(syncIdentity(mem, s), false, 'already right');
+  assert.deepEqual(gateCommand(repo, mem), { cmd: 'pnpm exec tsc --noEmit', from: 'memory.md' }, 'the hook re-runs a memory row with the repo manager');
+  const line = spawnSync(process.execPath, [path.join(SCRIPTS, 'rule0-hook.mjs')], { input: JSON.stringify({ cwd: repo, session_id: 's-stack', prompt: 'x' }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo \(read now\): pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
+});
+
+test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
+  const repo = memRepo('card', '- ▶ [2026-10-04 · T3] waiting for the user\n- [2026-10-04 · T2] older pending: Pendiente: x\n- Gotcha: a note\n- ✔ [2026-10-05 · T1] done thing\n');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));
+  fs.appendFileSync(path.join(repo, '.waymark', 'memory.md'), '\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| build | npm run build | x |\n\n## Solved problems\n- a\n- b\n');
+  appendRecord(repo, { id: '2026-10-05 · T1', agent: 'codex', at: '2026-10-05T10:00:00Z', commits: [], cierre: '## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: tooltips ← user; next: spec', evaluation: { steps: { Decision: true, Enrutar: false }, score: '1/2' }, unresolved: ['the routing line names no owner department'] });
+  const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
+  assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: waymark\.mjs tasks "2026-10-05 · T1"\)/);
+  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2\./, 'an older pending line is open too');
+  assert.match(card, /Notes:\n- Gotcha: a note/);
+  assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
+  assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
+  assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
+  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): before your first change to a file, W pack <files…>.*W memory <section> \(Solved problems: 2 · /);
+  assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
+});
+
+test('pack: per file, the last tasks that changed it (note, stub, no-commit record) and commits no task recorded, newest first', () => {
+  const repo = memRepo('pack'), id = '2026-10-05 · T1';
+  const W = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;
+  fs.writeFileSync(path.join(repo, 'a.ts'), '1\n'); gitT(repo, 'add', 'a.ts'); gitT(repo, 'commit', '-q', '-m', 'by hand');
+  const sha = commitTask(repo, id, 'a.ts');
+  appendRecord(repo, { id, agent: 'codex', at: new Date().toISOString(), files: [path.join(repo, 'a.ts')], commits: [sha], cierre: 'Aprendido: tooltip text ← user' });
+  appendRecord(repo, { id: '2026-10-05 · T2', agent: 'claude', at: new Date(Date.now() + 60000).toISOString(), files: [path.join(repo, 'a.ts')], commits: [], cierre: 'Aprendido: spec mock ← tests' });
+  const out = W('pack', 'a.ts', 'b.ts');
+  assert.match(out, /^a\.ts:\n  - 2026-10-05 · T2 · claude · spec mock ← tests · \(no commit\)\n  - 2026-10-05 · T1 · codex · tooltip text ← user · [0-9a-f]{8}\n  - [0-9a-f]{8} · by hand \(no task record\)\nb\.ts: no earlier task or commit$/m);
+  assert.match(W('memory'), /^sections: Work in progress · Identity/);
+  assert.match(W('memory', 'ident'), /^## Identity\n- Stack: test/);
+});
+
+test('incidents: a testigo ✘ stays open until it passes in a later task; 3 failures make a suggested rule; removed testigos are ignored', async () => {
+  const { incidents, incidentsLine } = await import(`file://${SCRIPTS}/incidents.mjs`);
+  const r = (id, steps, unresolved = []) => ({ id, evaluation: { steps }, unresolved });
+  const recs = [r('T1', { Recordar: false, 'Índice': false }, ['no mem_search']), r('T2', { Recordar: true, Commit: false }), r('T3', { Commit: false }), r('T4', { Commit: false, Enrutar: false }, ['no routing line'])];
+  const found = incidents(recs);
+  assert.deepEqual(found.open.map((o) => [o.label, o.since, o.last, o.count]), [['Commit', 'T2', 'T4', 3], ['Enrutar', 'T4', 'T4', 1]], 'Recordar closed by T2; Índice is not a testigo any more');
+  assert.equal(found.open.find((o) => o.label === 'Enrutar').cause, 'no routing line');
+  assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
+  assert.equal(incidentsLine(found), 'Incidents: open Commit ✘×3 (T4), Enrutar ✘ (T4); suggested rule: Commit failed 3× (waymark.mjs incidents)');
+  assert.equal(incidentsLine(incidents([])), '');
+});
+
+test('new session notice: past 200k tokens of context the end-of-turn line says the next task goes in a new session', () => {
+  const ev = { steps: { Decision: true }, score: '1/1', tokens: 1000000, quotaPct: null };
+  assert.match(summaryLine('2026-10-05 · T2', ev, 420000), /· contexto ~420k: la próxima tarea, en una sesión nueva \(la tarjeta la retoma\)/);
+  assert.doesNotMatch(summaryLine('2026-10-05 · T2', ev, 90000), /sesión nueva/);
+});

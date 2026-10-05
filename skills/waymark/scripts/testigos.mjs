@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
+import { stackOf, translate } from './stack.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
@@ -33,22 +34,24 @@ export function buildNone(memoryFile) {
 }
 
 // The repo's typecheck, in this order: the verified typecheck/syntax row of memory.md's
-// "Quality gates" table (project root only) → package.json's typecheck script with the lockfile's package manager →
-// `tsc --noEmit` when TypeScript is installed. → { cmd, from } or null. Never the full build.
+// "Quality gates" table (project root only) → package.json's typecheck script → `tsc --noEmit` when TypeScript is
+// installed, each run with the repo's own package manager (stack.mjs: a memory row written for npm runs with pnpm in a
+// pnpm repo). → { cmd, from } or null. Never the full build.
 export function gateCommand(root, memoryFile) {
+  const stack = stackOf(root);
   for (const [gate, cmd] of gateRows(memoryFile)) {
-    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd, from: 'memory.md' };
+    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd: translate(cmd, stack), from: 'memory.md' };
   }
   let pkg = null;
   try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}
   const script = ['typecheck', 'type-check', 'tsc'].find((s) => pkg?.scripts?.[s]);
   if (script) {
-    const pm = fs.existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm' : fs.existsSync(path.join(root, 'yarn.lock')) ? 'yarn' : ['bun.lockb', 'bun.lock'].some((f) => fs.existsSync(path.join(root, f))) ? 'bun' : 'npm';
-    return { cmd: `${pm} run ${script}`, from: 'package.json' };
+    return { cmd: `${stack?.run || 'npm run'} ${script}`, from: 'package.json' };
   }
   const tsc = ['tsc', 'tsc.cmd'].some((f) => fs.existsSync(path.join(root, 'node_modules', '.bin', f)));
   const project = ['tsconfig.app.json', 'tsconfig.json'].find((f) => fs.existsSync(path.join(root, f))); // a solution tsconfig.json checks nothing
-  return tsc && project ? { cmd: `npx --no-install tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
+  const exec = !stack?.pm || stack.pm === 'npm' ? 'npx --no-install' : stack.exec;
+  return tsc && project ? { cmd: `${exec} tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
 }
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills

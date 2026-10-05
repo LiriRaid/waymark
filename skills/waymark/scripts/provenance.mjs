@@ -161,7 +161,7 @@ const WIP = /(\n## Work in progress[^\n]*\n)([\s\S]*?)(?=\n## |$)/;
 const headId = (l) => l.match(HOOK_LINE)?.[2] || l.slice(0, l.indexOf(':') + 1 || undefined).match(ID)?.[0] || null;
 // The Aprendido of a Cierre: its line, or, when the value ends with ":" or is empty, the lines below it up to a blank
 // line, the next field or a heading.
-function aprendidoOf(cierre) {
+export function aprendidoOf(cierre) {
   const m = cierre.match(/Aprendido:[ \t]*([^\n]*)/i);
   if (!m) return '';
   let v = m[1].trim();

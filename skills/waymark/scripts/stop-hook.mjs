@@ -168,7 +168,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
   // A command that writes Waymark's own memory is not a gate, even when its text says "build" or "tests".
   // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
-  const parts = (t) => bare(t).split(/&&|\|\||[;|\n]/).filter((p) => !/\.waymark[\\/]/.test(p));
+  // A part after a `cd` into a .waymark folder runs in Waymark's own memory, so it is no gate either.
+  const parts = (t) => {
+    const all = bare(t).split(/&&|\|\||[;|\n]/), inside = all.findIndex((p) => /^\s*cd\s+["']?[^"'\s]*\.waymark(?=["'\s\\/]|$)/.test(p));
+    return (inside >= 0 ? all.slice(0, inside) : all).filter((p) => !/\.waymark[\\/]/.test(p));
+  };
   const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
   // the first change to code that is not a spec: a spec written and run red before it is test-first
   const firstCodeChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !denied(t) && !(EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))));

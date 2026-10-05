@@ -62,6 +62,10 @@ export function projectHome(cwd) {
   if (old) return { ...at(old.root, old.slug), memory: old.file, log: path.join(HOME(), 'provenance', `${old.slug}.jsonl`), legacy: true, legacyFile: old.file };
   const top = gitTop(cwd);
   if (top) return at(top);
+  // A new project (a real folder with no git yet and no memory) keeps its memory and record inside itself, like any
+  // other; the home folder itself, which is no project, and a path that does not exist keep the home layout.
+  const here = path.resolve(String(cwd || '.'));
+  if (norm(here) !== home && fs.existsSync(here) && fs.statSync(here).isDirectory()) return at(here);
   const slug = slugOf(cwd);
   return { root: String(cwd), slug, dir: null, memory: path.join(HOME(), 'projects', `${slug}.md`), tasks: null, log: path.join(HOME(), 'provenance', `${slug}.jsonl`), legacy: false };
 }

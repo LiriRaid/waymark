@@ -1914,6 +1914,28 @@ test('Codex on Windows: binaries run with node (its sandbox cannot run pnpm exec
   assert.match(stackLine(repo), /run with `pnpm exec <bin>` \/ `pnpm run <script>`$/);
 });
 
+test('a new project (real folder, no git, no memory) keeps its memory inside itself; the home folder and a missing path keep the home layout', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-newproj-'));
+  temps.push(dir);
+  const h = projectHome(dir);
+  same(h.memory, path.join(dir, '.waymark', 'memory.md'));
+  same(h.log, path.join(dir, '.waymark', 'provenance.jsonl'));
+  assert.equal(h.legacy, false);
+  assert.equal(projectHome(os.homedir()).dir, null, 'the home folder is no project');
+  assert.equal(projectHome(path.join(dir, 'missing')).dir, null, 'a path that does not exist');
+});
+
+test('a command run inside a .waymark folder is no gate, even with cd and the path in separate parts', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const memWrite = 'cd C:/Users/x/.waymark && node -e "const p=\'projects/app.md\'; s=s.replace(\'gates: build\', \'ok\')"';
+  const g = cierreGaps(l2([call('Bash', { command: memWrite })]), cierre(id), undefined, undefined, ctxFor(cwd));
+  assert.ok(!g.observed.gates.some((x) => /\\.waymark/.test(x.cmd)), 'not listed as a gate');
+  assert.match(g.observed.gate.cmd, /npm run build/, 'the real gate before it is the one judged');
+  const still = cierreGaps(l2([call('Bash', { command: 'npx tsc --noEmit && grep T1 .waymark/memory.md' })]), cierre(id), undefined, undefined, ctxFor(cwd));
+  assert.match(still.observed.gate.cmd, /npx tsc --noEmit/, 'a gate that also reads the memory is still a gate');
+});
+
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {
   const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
   const rows = Object.fromEntries(sizes(process.cwd()).map((r) => [r.name, r]));

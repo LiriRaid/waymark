@@ -120,6 +120,11 @@ Five testigos still decided from the agent's words. Hours earlier, the Codex tes
 - **Cierre:** stays text on purpose. It is the report for the user, and no command can know its Resultado, Evidencia or Aprendido. The hook checks only the heading and its three fields.
 - Replayed on the 3e-4 Claude test: the same 6 steps and the same Enrutar ✘, nothing new blocked.
 
+### Landing test fixes (2026-10-05 · T11, the user's picks)
+The first test on a new project ("Flujo" landing, Opus 5.5 high, a folder with no git) scored 9/10 and 7/7. It found two gaps:
+- **A new project's memory lives inside it.** The card sent the agent to `~/.waymark/projects/<slug>.md`, the pre-2.0 place, because the folder had no git root yet. Now a real folder with no git and no memory gets `<folder>/.waymark/`. Only the home folder itself, or a path that does not exist, keeps the home layout. This replaces the 2026-10-03 rule "outside git and without memory the record stays in ~/.waymark" (ADR 0007). The landing's memory was migrated.
+- **A command run inside a `.waymark` folder is no gate.** `cd ~/.waymark && node -e "…"` (a memory write whose text said "build") was judged the task's gate, because the `.waymark/` filter saw the `cd` and the path as separate parts. The parts after a `cd` into `.waymark` no longer count.
+
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.
 - **The hook always runs the full gate:** strongest, but each close could take minutes. In a real project one eslint run took 7 minutes.

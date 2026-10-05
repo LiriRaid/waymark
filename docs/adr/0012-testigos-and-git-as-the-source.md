@@ -1,6 +1,6 @@
 # 0012 · Testigos, one decision, git as the source of truth, and a fixed context card (step 3e)
 
-**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1, 3e-1b, 3e-2, 3e-3 and 3e-4 landed (below).
+**Status:** proposed (2026-10-04, Waymark 2.0.0-dev, step 3e). Every pick below is the user's (2026-10-03 · T2p). It will supersede parts of 0005, 0006, 0007 and 0010 as each sub-step lands. 3e-1, 3e-1b, 3e-2, 3e-3, 3e-4 and 3e-5 landed (below).
 
 ## Context
 The 3c tests (Claude with Opus and Sonnet, Codex rollouts) kept producing false ✘. Almost all of them came from the hook reading prose the agent writes:
@@ -110,6 +110,15 @@ The routine contract becomes the list of testigos that apply at each level. Step
   | A department when invoked (average of 10) | 7,039 | 6,587 |
 
   Every session goes from 12,113 to 7,895 characters (≈3.0k → ≈2.0k tokens). The fixed context at the start of a Claude Code session, measured with `measure.mjs` on this repo, was 67.2k tokens; almost all of it is the agent's own system prompt and tools.
+
+### 3e-5 testigos by action (2026-10-05 · T7, the user's picks)
+Five testigos still decided from the agent's words. Hours earlier, the Codex test's Enrutar ✘ came from reading "frontend" instead of "dept-frontend". Each one now decides from what ran:
+- **Owner and level:** the owner is the `dept-*` the agent invoked: a re-route call wins, then the first one invoked in the turn, then the session's last. The level is the declared one raised by the files the agent changed (1–2 → L1, more → L2). L3 is taken only when declared, and an explicit L0 keeps its skip for a single file. A turn with no routing line and no Cierre that changed files is judged too. The line stays for the user and as the floor.
+- **Red (Tests):** applies at L2+ when a spec and code changed. The spec must have run before the first code change (a spec written first counts) or in a clean worktree. The words "rojo" or "habría fallado" trigger nothing; at L1 the run is only recorded.
+- **Pre-existing (Previos):** applies when the judged gate failed, and passes with a `git worktree add` run. "no comprobado (<why>)" still counts, only in the reply after the block. The words "ya fallaba" trigger nothing.
+- **Docs:** applies when the same command failed twice in the turn, and needs a docs call after the second failure, before the next run of that command. A retry that already ran without docs is too late to undo: recorded ✘, not blocked. "inferida de docs" triggers nothing.
+- **Cierre:** stays text on purpose. It is the report for the user, and no command can know its Resultado, Evidencia or Aprendido. The hook checks only the heading and its three fields.
+- Replayed on the 3e-4 Claude test: the same 6 steps and the same Enrutar ✘, nothing new blocked.
 
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.

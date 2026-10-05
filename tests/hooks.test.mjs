@@ -260,21 +260,56 @@ test('3e-1 testigo decision: an answer before the first change passes; a later o
   assert.equal(cierreGaps(currentTurn(denied), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(denied), taskTools: sessionTools(denied) }).steps.find((s) => s.id === 'decision').pass, true, 'an edit the gate denied changed nothing');
 });
 
-test('2b: a red claim needs a test run before the code change or in a clean worktree, or "inferida"', () => {
+// A shell run with its result: ok, or failed (is_error).
+const ran = (id, command, failed = false) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: failed, content: failed ? 'exit 1' : 'ok' }] } }];
+
+test('red by action: at L2+ a spec and code changed need the spec run before the first code change (or in a clean worktree); the word "rojo" means nothing', () => {
   const { cwd } = fresh();
-  const ids = taskIds(cwd);
-  const turn = (before = [], after = []) => currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend · skills: code-review'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
-    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...before, call('Edit', { file_path: FILE }),
-    call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), ...after, call('Skill', { skill: 'code-review' }), MEM()]);
-  const red = (ev) => cierre(ids.next).replace('Evidencia: observada timeouts en el log de pedidos', `Evidencia: ${ev}`);
-  const step = (g) => g.steps.find((s) => s.id === 'red');
-  assert.equal(step(cierreGaps(turn(), red('observada spec en rojo y luego verde'), undefined, undefined, ctxFor(cwd))).pass, false);
-  assert.equal(step(cierreGaps(turn([call('Bash', { command: 'npm test -- orders' })]), red('observada spec en rojo y luego verde'), undefined, undefined, ctxFor(cwd))).pass, true, 'run before the code change');
-  assert.equal(step(cierreGaps(turn([], [call('Bash', { command: 'git worktree add -q /tmp/w HEAD && (cd /tmp/w && npm test)' })]), red('observada el test habría fallado en HEAD'), undefined, undefined, ctxFor(cwd))).pass, true, 'clean worktree');
-  assert.equal(step(cierreGaps(turn(), red('inferida: el spec habría fallado (check: revertir y correr)'), undefined, undefined, ctxFor(cwd))).applies, false, 'inferida is honest');
-  assert.equal(step(cierreGaps(turn(), red('observada el botón rojo en el navegador'), undefined, undefined, ctxFor(cwd))).applies, false, 'a red button is not a red test');
+  const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs');
+  const turn = ({ before = [], after = [], spec = true, route = 'L2' } = {}) => currentTurn([prompt('agrega reintentos'), say(`Waymark → ${route} · dept-backend`), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...(spec ? [call('Edit', { file_path: SPECF })] : []), ...before, call('Edit', { file_path: FILE }),
+    call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test -- orders' }), ...after, call('Skill', { skill: 'code-review' }), MEM()]);
+  const step = (t, reply = cierre(ids.next)) => cierreGaps(t, reply, undefined, undefined, ctxFor(cwd)).steps.find((x) => x.id === 'red');
+  assert.deepEqual([step(turn()).applies, step(turn()).pass], [true, false], 'spec and code changed, the spec never ran first');
+  assert.match(checkCierre(turn(), cierre(ids.next), undefined, undefined, ctxFor(cwd)) || '', /show it red now in a clean copy/);
+  assert.equal(step(turn({ before: [call('Bash', { command: 'npm test -- orders' })] })).pass, true, 'spec written, run red, then the code: test-first');
+  assert.equal(step(turn({ after: [call('Bash', { command: 'git worktree add -q /tmp/w HEAD && (cd /tmp/w && npm test)' })] })).pass, true, 'shown red in a clean copy');
+  assert.equal(step(turn({ spec: false }), cierre(ids.next).replace('observada timeouts', 'observada spec en rojo y luego verde')).applies, false, 'the word alone triggers nothing');
+  assert.equal(step(turn({ route: 'L1' })).applies, false, 'L1 (2 files): recorded only');
+  const why = `${cierre(ids.next)}\nTests: no (el spec nuevo cubre un caso que el código viejo no tenía)`;
+  assert.equal(cierreGaps(turn(), why, undefined, undefined, { ...ctxFor(cwd), blocked: true }).steps.find((x) => x.id === 'red').pass, true, 'the way out its message names, after the block');
+  assert.equal(step(turn(), why).pass, false, 'written before the block, it does not count');
 });
 
+test('pre-existing and docs by action: a failing gate asks for a clean copy; the same command failing twice asks for docs before the next run', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const head = [prompt('agrega reintentos'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE })];
+  const judge = (lines, reply = cierre(id), extra = {}) => cierreGaps(currentTurn(lines), reply, undefined, undefined, { ...ctx, ...extra });
+  const pre = (g) => g.steps.find((x) => x.id === 'preexisting');
+  // pre-existing: from the gate's exit, never from "ya fallaba"
+  const failing = [...head, ...ran('g1', 'npx tsc --noEmit', true)];
+  assert.deepEqual([pre(judge(failing)).applies, pre(judge(failing)).pass], [true, false]);
+  assert.ok(judge(failing).missing.some((m) => /show the same failure in a clean copy now \(git worktree add <tmp> HEAD/.test(m)));
+  assert.equal(pre(judge([...failing, ...ran('w1', 'git worktree add ../clean HEAD && cd ../clean && npx tsc --noEmit', true)])).pass, true);
+  assert.equal(pre(judge(failing, `${cierre(id)}\nno comprobado (sin permiso para correr la suite)`, { blocked: true })).pass, true, 'or not checked, in the reply after the block');
+  assert.equal(pre(judge([...head, ...ran('g2', 'npx tsc --noEmit')], `${cierre(id)}\nNota: contact-center.spec.ts ya fallaba antes`)).applies, false, 'a passing gate: the words trigger nothing');
+  // docs: two failures of the same command, then a third run
+  const docs = (g) => g.steps.find((x) => x.id === 'docs');
+  const twice = [...head, ...ran('t1', 'npx tsc --noEmit', true), call('Edit', { file_path: FILE }), ...ran('t2', 'npx tsc --noEmit', true), call('Edit', { file_path: FILE })];
+  const waiting = judge(twice);
+  assert.deepEqual([docs(waiting).applies, docs(waiting).pass], [true, false]);
+  assert.ok(waiting.missing.some((m) => /the same command failed twice \(npx tsc --noEmit\): consult the docs/.test(m)), 'not retried yet: blocks, docs first');
+  const blind = judge([...twice, ...ran('t3', 'npx tsc --noEmit')]);
+  assert.deepEqual([docs(blind).pass, blind.missing.some((m) => /consult the docs/.test(m))], [false, false], 'retried blind: too late to undo, recorded not blocked');
+  assert.ok(blind.findings.some((m) => /failed twice and ran again without docs/.test(m)));
+  assert.equal(docs(judge([...twice, call('Skill', { skill: 'library-docs' }), ...ran('t3', 'npx tsc --noEmit')])).pass, true, 'docs between the second failure and the next run');
+  assert.equal(docs(judge([...twice, ...ran('t3', 'npx tsc --noEmit'), call('Skill', { skill: 'library-docs' })])).pass, false, 'docs after the retry is too late');
+  assert.equal(docs(judge([...head, ...ran('t1', 'npx tsc --noEmit', true), call('Edit', { file_path: FILE }), ...ran('t2', 'npx tsc --noEmit')])).applies, false, 'one failure: no docs needed');
+  assert.equal(docs(judge(failing, cierre(id).replace('observada timeouts en el log de pedidos', 'inferida de la doc de Meta Cloud API (check: x)'))).applies, false, '"inferida de docs" alone triggers nothing');
+});
 test('2b: a .ts with a sibling template counts as UI; a service does not', () => {
   const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // the OS temp folder is exempt
   temps.push(dir);
@@ -337,15 +372,28 @@ test('3e-1: Sub-decisiones are not read any more (no prose markers to parse)', (
     assert.equal(checkCierre(l2(), cierre(id, undefined, undefined, sub), undefined, undefined, ctx), null, sub);
 });
 
-test('Cierre: the routing line\'s department must have been invoked; the record keeps it', () => {
+test('owner department by action: the dept-* invoked, not the one the text names; none invoked blocks', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
   const noDept = currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend · skills: ui-build'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Skill', { skill: 'code-review' })]);
-  assert.ok(cierreGaps(noDept, cierre(id), undefined, undefined, ctx).missing.some((f) => /dept-frontend named in the routing line but never invoked/.test(f)));
+  assert.ok(cierreGaps(noDept, cierre(id), undefined, undefined, ctx).missing.some((f) => /no owner department was invoked: invoke the owner dept-\* skill/.test(f)), 'named in the text but never invoked');
   const gaps = cierreGaps(l2(), cierre(id), undefined, undefined, ctx);
   assert.deepEqual(provenanceRecord(l2(), gaps, ctx, {}).department, { declared: 'dept-backend', invoked: ['dept-backend'] });
+  const other = currentTurn([prompt('x'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })]);
+  assert.equal(cierreGaps(other, cierre(id), undefined, undefined, ctx).dept.declared, 'dept-backend', 'the invocation wins over the text');
 });
 
+test('level by action: the declared level is a floor raised by the files the agent changed; L3 and a one-file L0 as declared', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const files = (k) => Array.from({ length: k }, (_, i) => call('Edit', { file_path: FILE.replace('.mjs', `${i}.mjs`) }));
+  const turn = (route, k) => currentTurn([prompt('x'), say(`Waymark → ${route} · dept-backend`), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...files(k), call('Bash', { command: 'npx tsc --noEmit' })]);
+  const level = (route, k) => cierreGaps(turn(route, k), cierre(id), undefined, undefined, ctx)?.level ?? null;
+  assert.deepEqual([level('L1', 2), level('L1', 5), level('L2', 1), level('L3', 1)], [1, 2, 2, 3]);
+  assert.deepEqual([level('L0', 1), level('L0', 3)], [null, 2], 'L0 keeps its skip for one file only');
+  const unrouted = currentTurn([prompt('x'), ...files(3)]);
+  assert.equal(cierreGaps(unrouted, 'listo', undefined, undefined, ctx)?.level, 2, 'no routing line and no Cierre: still judged by what changed');
+});
 test('observed: memory, procedure and review are computed from the tool calls, not declared', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
@@ -383,20 +431,6 @@ test('Cierre: bold field names are read like plain ones', () => {
   assert.equal(checkCierre(l2(), bold, undefined, undefined, ctxFor(cwd)), null);
 });
 
-test('blocks: an inference from docs without docs, a pre-existing failure without a clean copy (3c: blocks once)', () => {
-  const { cwd } = fresh();
-  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
-  const has = (turn, reply, re) => cierreGaps(turn, reply, undefined, undefined, ctx).missing.some((f) => re.test(f));
-  const fromDocs = cierre(id).replace('observada timeouts en el log de pedidos', 'inferida de la doc de Meta Cloud API (check: enviar una respuesta citada)');
-  assert.match(checkCierre(l2(), fromDocs, undefined, undefined, ctx) || '', /inferred from docs but no docs were consulted/, 'an inference from docs blocks');
-  assert.equal(checkCierre(l2([call('Skill', { skill: 'library-docs' })]), fromDocs, undefined, undefined, ctx), null);
-  const pre = `${cierre(id)}\nNota: contact-center.spec.ts ya fallaba antes`;
-  assert.ok(has(l2(), pre, /pre-existing/));
-  assert.ok(!has(l2([call('Bash', { command: 'git worktree add ../clean HEAD && cd ../clean && npx vitest run x' })]), pre, /pre-existing/));
-  assert.match(checkCierre(l2(), pre, undefined, undefined, ctx) || '', /git worktree add <tmp> HEAD/, 'the block says how to check it now');
-  assert.equal(checkCierre(l2(), `${pre} (no comprobado (sin permiso para correr la suite))`, undefined, undefined, { ...ctx, blocked: true }), null, 'or says it was not checked, after the block');
-  assert.ok(has(l2(), `${pre} (no comprobado (preventivo))`, /pre-existing/), 'written before the hook blocked, it does not count');
-});
 
 test('blocks: a spec next to the changed code untouched, unless Tests: no (<why>)', () => {
   const dir = fs.mkdtempSync(path.join(os.homedir(), '.wm-spec-near-')); // outside temp so it is not exempt

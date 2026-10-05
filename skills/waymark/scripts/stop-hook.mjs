@@ -41,7 +41,6 @@ const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|g
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$|_spec\.rb$|_test\.(go|py)$|^test_.*\.py$/i;
 const TEST = /\b(test|tests|vitest|jest|karma|mocha|pytest|rspec|go test|dotnet test|mvn test|gradle test)\b/i;
 const GATE = /\b(tsc|typecheck|type-check|lint|eslint|ng build|build|go vet|mypy|ruff|rubocop|cargo (check|clippy)|node --check)\b/i;
-const PRE = /(pre-?existente|preexist|pre-existing|ya (fallaba|exist[ií]a)|fallos? previos?|en c[oó]digo que no cambi)/i;
 const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i; // <project>/.waymark/memory.md or the pre-0007 ~/.waymark/projects/<slug>.md (tasks.md is generated)
 const BUILD = /\b(ng build|vite build|next build|nuxt build|astro build|(npm|pnpm|yarn|bun)( run)? build|go build|cargo build|dotnet build|mvn (package|verify)|gradle build|tsc -b)\b/i;
 // The catalog of testigos: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006, 0012).
@@ -132,7 +131,15 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // is not a field (found when the hook read a bullet of the reply as Decisión).
   const reply = full.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || full;
   const routed = routedLevel([...turn.texts, full], turn.tools) || ctx.inherited?.level || 0; // an unrouted reply inside an open task
-  const level = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
+  // The level judged comes from what the agent changed, with the declared one as a floor: 1–2 files → L1, more → L2. L3
+  // only when declared; an explicit L0 keeps its skip for a single file; a Q turn that changed files is judged as L2.
+  const denied = (t) => !!(turn.results?.[t.id]?.error || t.error); // an edit the gate denied changed nothing
+  const agentFiles = new Set(turn.tools.filter((t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t))).map((t) => norm(fileOf(t))));
+  if (turn.tools.some((t) => shell(t) && changesProject(t.input.command))) for (const f of ctx.gitChanged || []) if (!exempt(f)) agentFiles.add(norm(f));
+  const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;
+  const explicitL0 = /^[ \t]*Waymark →\s*L0\b(?!\s*(?:\||or)\s*Q)/m.test([...turn.texts, full].join('\n'));
+  const declared = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
+  const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
   if (!level) return null;
 
   // ---- Observed (computed, never declared) ----
@@ -143,7 +150,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const isChange = (t) => (EDITS.test(t.name) && !exempt(fileOf(t))) || shellChange(t);
   const firstChange = allTools.findIndex((t, i) => i >= base && isChange(t));
   const before = (pred) => allTools.some((t, i) => pred(t) && (firstChange < 0 || i < firstChange));
-  const dept = { declared: routedDept([...turn.texts, full], turn.tools) || ctx.inherited?.dept || null, invoked: [...new Set(allTools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || ''))).map((t) => String(t.input.skill)))] };
+  // The owner is the department the agent invoked, not the one its text names: a re-route call (args "L<n>") wins, then
+  // the first dept-* invoked in this turn, then the last one of the session (a follow-up turn), then the open task's.
+  const deptCalls = (tools) => tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || ''))).map((t) => String(t.input.skill));
+  const rerouted = turn.tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*L[0-3]\b/i.test(String(t.input.args || ''))).pop();
+  const dept = { declared: (rerouted && String(rerouted.input.skill)) || deptCalls(turn.tools)[0] || deptCalls(allTools).pop() || ctx.inherited?.dept || null, invoked: [...new Set(deptCalls(allTools))] };
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
@@ -159,6 +170,17 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
   const parts = (t) => bare(t).split(/&&|\|\||[;|\n]/).filter((p) => !/\.waymark[\\/]/.test(p));
   const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
+  // the first change to code that is not a spec: a spec written and run red before it is test-first
+  const firstCodeChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !denied(t) && !(EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))));
+  // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
+  // failure, before the next run of that command); retrying blind is how a wrong direction repeats.
+  const cmdKey = (t) => cmdOf(t).replace(/\s+/g, ' ').trim();
+  const failedRuns = new Map();
+  turn.tools.forEach((t, i) => { if (shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)) && result(t)?.error) failedRuns.set(cmdKey(t), [...(failedRuns.get(cmdKey(t)) || []), i]); });
+  const retried = [...failedRuns].filter(([, at]) => at.length >= 2).map(([cmd, at]) => {
+    const next = turn.tools.findIndex((t, i) => i > at[1] && shell(t) && cmdKey(t) === cmd);
+    return { cmd, docs: turn.tools.some((t, i) => i > at[1] && (next < 0 || i < next) && DOCS(t)), late: next >= 0 };
+  });
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
@@ -186,7 +208,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(bare(t))),
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
-      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && ((firstChange >= 0 && i < firstChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
+      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && ((firstCodeChange >= 0 && i < firstCodeChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
     },
     build: noBuild ? { none: ctx.noBuild } : null, // the project declares no build (memory.md Quality gates)
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
@@ -198,6 +220,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: skillCalled(turn.tools, /(^|:)code-review$/) || skillCalled(ctx.taskTools || [], /(^|:)code-review$/),
     docs: turn.tools.filter(DOCS).length,
+    retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
     branches: ctx.branches || {},
     time: { minutes: turn.startedAt ? Math.round(Math.max(0, Date.now() - turn.startedAt - userWait * 1000) / 6000) / 10 : null, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
@@ -267,33 +290,30 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
     }
   }
-  const ev = field(reply, 'Evidencia');
-  const redText = `${ev} ${field(reply, 'Tests')}`;
-  // about a spec only ("spec en rojo", "rojo→verde", "el test habría fallado"), not a red button
-  const redClaim = /\b(specs?|tests?|prueba|suite)\b[^.;\n]{0,80}(\brojo\b|habr[ií]a fallado|\bfallaba\b)|\brojo\s*(→|->|a|y luego)\s*verde/i.test(redText) && !/inferid[ao]/i.test(redText);
   const near = code.length ? specsNear(code) : null;
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
   const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(bare(t)));
   const when = {
     engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
-    // whole words: "Docker" is not "docs"
-    inferredFromDocs: /inferida/i.test(ev) && /\b(docs?|documentaci[oó]n|documentation|oficial|official|specification|especificaci[oó]n|spec de)\b/i.test(ev), preClaim: PRE.test(reply), redClaim,
+    // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
+    repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false,
+    specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
   };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
-  if (!dept.declared) procedure.push('the routing line names no owner department');
-  else if (!dept.invoked.includes(dept.declared)) procedure.push(`${dept.declared} named in the routing line but never invoked`);
+  if (!dept.declared) procedure.push('no owner department was invoked: invoke the owner dept-* skill (its SKILL.md) first');
+  else if (!dept.invoked.includes(dept.declared)) procedure.push(`${dept.declared} owns the open task but was never invoked`);
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
     memory: observed.memory.searched ? [] : ['L2+: no mem_search before the first change: search engram for past decisions and rejected paths of this area now'],
     review: skip.Review || observed.review ? [] : [`code changed and code-review did not run: run it on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
     build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(exc) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
-    docs: observed.docs ? [] : ['Evidencia is inferred from docs but no docs were consulted: consult them (library-docs, or the installed package\'s types/source) and confirm or correct the change'],
+    docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
     spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
-    red: observed.tests.red ? [] : ['a red claim (rojo / habría fallado) with no test run before the first code change or in a clean worktree: run it there, or write it as inferida'],
-    preexisting: observed.worktree || /no comprobado/i.test(exc) ? [] : ['a failure called pre-existing without a clean-copy check: check it now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
+    red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the first code change: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
+    preexisting: observed.worktree || /no comprobado \(.{3,}\)/i.test(exc) ? [] : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
     chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
@@ -310,6 +330,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (lateDecision && dec?.applies) { // cannot be undone, so it does not block; the evaluation keeps it
     const why = 'the first choice-window question came after the task\'s first change';
     dec.pass = false; dec.why = [...dec.why, why]; findings.push(why);
+  }
+  const docsStep = steps.find((s) => s.id === 'docs'), blind = retried.filter((r) => !r.docs && r.late);
+  if (docsStep?.applies && blind.length) { // already retried without docs: too late to undo, so recorded, not blocked
+    const why = blind.map((r) => `the same command failed twice and ran again without docs (${r.cmd.slice(0, 80)})`);
+    docsStep.pass = false; docsStep.why = [...docsStep.why, ...why]; findings.push(...why);
   }
   const proc = steps.find((s) => s.id === 'procedure');
   if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change

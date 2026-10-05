@@ -8,6 +8,7 @@
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
 //   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
+//   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
 // agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
@@ -19,7 +20,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, readTaskRecords, tidyWip, refreshTasks } from './provenance.mjs';
+import { projectHome, readTaskRecords, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
 import { pushNotes } from './notes.mjs';
 import { found } from './connect-agents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -99,6 +100,8 @@ function migration(cwd) {
 
 function agents() {
   const fresh = found().filter((a) => !a.connected);
+  const stale = fresh.filter((a) => a.full && /waymark:(pointer|begin)/.test(read(a.path)));
+  if (stale.length === fresh.length && stale.length) return `connect: ${stale.map((a) => a.name).join(', ')} run${stale.length > 1 ? '' : 's'} Waymark's hooks but ${stale.length > 1 ? 'have' : 'has'} the pointer or an older Rule 0 block in ${stale.map((a) => a.path.replace(/\\/g, '/')).join(', ')}: offer to write the current block: node "${script('connect-agents.mjs')}" --apply`;
   return fresh.length ? `connect: other agents not connected to the project memory: ${fresh.map((a) => `${a.name} (${a.path.replace(/\\/g, '/')}${a.guestOf.length ? `; ${a.guestOf.join(', ')} governs it: Waymark joins as its guest` : ''})`).join(', ')}. One marked line in each one's instructions file so it reads .waymark/tasks.md first: node "${script('connect-agents.mjs')}" shows the plan, --apply on yes (backup first).` : '';
 }
 
@@ -154,6 +157,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => mcpFit(cwd));
   await add(skillFit);
   await add(() => migration(cwd));
+  await add(() => packageManager(cwd));
   await add(agents);
   await add(frameworks);
   await add(() => session(cwd, agent));
@@ -163,6 +167,23 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
     fs.writeFileSync(path.join(HOME(), '.check.json'), JSON.stringify({ ...st, checkedAt: Date.now() }));
   } catch {}
   return items;
+}
+
+// The package manager memory.md names (Identity, Quality gates) against the repo's own: package.json `packageManager`,
+// else the lockfile. → the pending line, or '' when they agree or either is unknown.
+export function packageManager(cwd) {
+  const home = projectHome(cwd), root = home.root;
+  let pkg = null;
+  try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}
+  if (!pkg) return '';
+  const locks = [['pnpm', 'pnpm-lock.yaml'], ['yarn', 'yarn.lock'], ['bun', 'bun.lockb'], ['bun', 'bun.lock'], ['npm', 'package-lock.json']];
+  const real = String(pkg.packageManager || '').match(/^(pnpm|yarn|bun|npm)@/)?.[1] || locks.find(([, f]) => fs.existsSync(path.join(root, f)))?.[0];
+  const mem = read(home.memory);
+  const said = mem.match(/Package manager[^:\n]*:\s*([a-z]+)/i)?.[1]?.toLowerCase();
+  const gates = section('\n' + mem, 'Quality gates').filter((l) => l.startsWith('|')).map((l) => l.split('|')[2] || '').join(' ');
+  const used = [...new Set([...gates.matchAll(/(?:^|[\s`])(npx|npm|pnpm|yarn|bunx?)\b/g)].map((m) => m[1].replace(/^npx$/, 'npm').replace(/^bunx$/, 'bun')))];
+  const off = [said && said !== real ? `Identity says ${said}` : '', used.some((u) => u !== real) ? `Quality gates use ${used.filter((u) => u !== real).join(', ')}` : ''].filter(Boolean);
+  return real && off.length ? `package manager: this repo uses ${real} (${pkg.packageManager ? 'package.json packageManager' : 'its lockfile'}) but ${home.memory.replace(/\\/g, '/')} ${off.join(' and ')}. Offer to correct Identity and the Quality gates rows to ${real} (each gate re-run once and marked verified).` : '';
 }
 
 // One line per task record, newest first: "<id> · <agent> · <result> · <score> · <request>"; with an ID, its whole record.
@@ -186,6 +207,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const changed = tidyWip(home);
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
+  } else if (sub === 'done') {
+    const at = rest.indexOf('--note'), note = at >= 0 ? rest.slice(at + 1).join(' ') : '';
+    const ids = (at >= 0 ? rest.slice(0, at) : rest).join(' ').match(new RegExp(ID.source, 'g')) || [];
+    const home = projectHome(process.cwd());
+    const done = ids.length ? confirmTasks(home, ids, { note }) : [];
+    if (done.length) refreshTasks(home, true);
+    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (✔ in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
+    process.exitCode = done.length ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
     const r = pushNotes(process.cwd(), rest[1] || 'origin');
     console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
@@ -199,7 +228,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

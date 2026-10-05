@@ -50,6 +50,10 @@ function digest(cwd) {
     const stale = date && Date.now() - date > STALE_DAYS * 86400000 ? ` [>${STALE_DAYS} d old: confirm it still applies before acting on it]` : '';
     return (l.length > 300 ? l.slice(0, 297) + '…' : l) + stale;
   });
+  // Open lines wait for the user (a check in the browser, a migration they run): ask once, close what already works.
+  // Before the lines themselves: the digest is clipped at its end.
+  const open = wip.filter((l) => /^-\s*▶/.test(l)).map((l) => l.match(/\[([^\]]+)\]/)?.[1]).filter(Boolean);
+  if (open.length) out.push(`Open tasks (▶): ${open.join(', ')}. In your first reply ask the user once, in the choice window (multi-select), which of them already work; close those with node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}" done "<ID>"… --note "<their words>".`);
   if (wip.length) out.push('Work in progress:\n' + wip.join('\n'));
   return out.join('\n');
 }

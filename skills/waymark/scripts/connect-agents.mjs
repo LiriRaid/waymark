@@ -2,9 +2,11 @@
 // Waymark · connects the other coding agents on this machine to the project memory, without installing anything in them.
 //   node connect-agents.mjs            dry run: prints, per agent found, what would be written (nothing is written)
 //   node connect-agents.mjs --apply    writes it (backup first)
-// Per agent folder that exists (Codex, Gemini CLI, OpenCode): one marked block in its global instructions file with the
-// pointer line below, and a row in ~/.waymark/agent.md (*Connected agents*). Only the marked block is ever written; the
-// rest of the file is never touched. Hooks and skills in those agents are a full install (INSTALL.md §1), not this.
+// Per agent folder that exists (Codex, Gemini CLI, OpenCode): one marked block in its global instructions file, and a
+// row in ~/.waymark/agent.md (*Connected agents*). An agent whose hooks run Waymark's scripts (a full install,
+// INSTALL.md §1) gets the same Rule 0 block as Claude Code (templates/instructions.md, between waymark:begin/end), kept
+// up to date on every run; the others get the pointer line below. Only the marked block is ever written; the rest of
+// the file is never touched.
 // `waymark.mjs check` reports each agent found and not connected (docs/adr/0008). Offline.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,7 +20,7 @@ const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getH
 
 // Global instructions file per agent (official docs: Codex AGENTS.md under CODEX_HOME, Gemini CLI GEMINI.md, OpenCode AGENTS.md).
 export const AGENTS = () => [
-  { name: 'Codex', dir: process.env.CODEX_HOME || path.join(USER(), '.codex'), file: 'AGENTS.md' },
+  { name: 'Codex', dir: process.env.CODEX_HOME || path.join(USER(), '.codex'), file: 'AGENTS.md', hooks: 'hooks.json' },
   { name: 'Gemini CLI', dir: path.join(USER(), '.gemini'), file: 'GEMINI.md' },
   { name: 'OpenCode', dir: path.join(USER(), '.config', 'opencode'), file: 'AGENTS.md' },
 ];
@@ -27,6 +29,12 @@ const REGISTRY = '## Connected agents (pointer only)';
 const registry = () => path.join(HOME(), 'agent.md');
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const slash = (p) => p.replace(/\\/g, '/');
+const BLOCK = /<!-- waymark:begin -->[\s\S]*?<!-- waymark:end -->/;
+const POINTER_RE = /\n*<!-- waymark:pointer -->[\s\S]*?<!-- \/waymark:pointer -->\n?/;
+// The Rule 0 block, as the installer writes it into CLAUDE.md.
+export const instructionsBlock = () => read(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'instructions.md')).trim();
+// The agent's hooks run Waymark's scripts (its hooks file names them).
+const hooked = (a) => !!a.hooks && /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(read(path.join(a.dir, a.hooks)));
 
 // Another framework's marked blocks (`<!-- gentle-ai:persona -->`): an orchestrator already governs that agent.
 export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s*([\w.-]+):[\w.-]+/g)].map((m) => m[1]).filter((n) => n !== 'waymark'))];
@@ -34,8 +42,10 @@ export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s
 // Agents whose folder exists, with their state: connected (block present) or not, and the orchestrator found, if any.
 export function found() {
   return AGENTS().filter((a) => fs.existsSync(a.dir)).map((a) => {
-    const file = path.join(a.dir, a.file), text = read(file);
-    return { ...a, path: file, exists: fs.existsSync(file), connected: text.includes('<!-- waymark:pointer -->'), guestOf: foreignIn(text) };
+    const file = path.join(a.dir, a.file), text = read(file), full = hooked(a);
+    // with hooks: connected when its block is the current one; else when the pointer is there
+    const connected = full ? text.match(BLOCK)?.[0] === instructionsBlock() : text.includes('<!-- waymark:pointer -->');
+    return { ...a, path: file, exists: fs.existsSync(file), full, connected, guestOf: foreignIn(text) };
   });
 }
 
@@ -43,6 +53,9 @@ export function found() {
 export function planFor(a) {
   if (a.connected) return { ...a, steps: [], skip: `already connected (${slash(a.path)})` };
   const guest = a.guestOf?.length ? ` as a guest of ${a.guestOf.join(', ')} (its blocks are not touched)` : '';
+  if (a.full) return { ...a, steps: [
+    `${a.exists ? `back up ${slash(a.path)}, then ` : `create ${slash(a.path)} and `}write the Rule 0 block (waymark:begin/end, as in CLAUDE.md; its hooks run Waymark) in place of the pointer or an older block${guest}`,
+    `register ${a.name} in ${slash(registry())} (${REGISTRY.slice(3)})`] };
   return { ...a, steps: [
     a.exists ? `back up ${slash(a.path)}, then append the marked pointer block${guest || ' (the rest of the file is not touched)'}` : `create ${slash(a.path)} with the marked pointer block`,
     `register ${a.name} in ${slash(registry())} (${REGISTRY.slice(3)})`] };
@@ -57,7 +70,11 @@ export function apply(plan, now = new Date()) {
   }
   const text = read(plan.path);
   fs.mkdirSync(plan.dir, { recursive: true });
-  fs.writeFileSync(plan.path, text + (text && !text.endsWith('\n') ? '\n' : '') + (text ? '\n' : '') + POINTER + '\n');
+  const block = plan.full ? instructionsBlock() : POINTER;
+  const rest = plan.full ? text.replace(POINTER_RE, '\n') : text;
+  const next = plan.full && BLOCK.test(rest) ? rest.replace(BLOCK, () => block)
+    : rest.replace(/\n*$/, '') + (rest.trim() ? '\n\n' : '') + block + '\n';
+  fs.writeFileSync(plan.path, next);
   register(plan, now);
   return bk;
 }

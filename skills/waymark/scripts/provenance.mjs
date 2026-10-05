@@ -189,6 +189,31 @@ export function writeTaskLine(home, rec, now = new Date()) {
   return rewriteWip(home, { id: rec.id, line: clip(`- ${done ? '✔' : '▶'} [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
+// The user confirmed that these tasks work (`waymark.mjs done <ID…>`): each one's line becomes "- ✔ [<id>] confirmada
+// por el usuario (<day>)[: <note>]; <its text>", the section is tidied, and a short chained record {kind: "confirm"}
+// keeps the IDs and the note. → the IDs that had a line (others are ignored).
+export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null } = {}) {
+  if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return [];
+  const text = fs.readFileSync(home.memory, 'utf8'), m = ('\n' + text).match(WIP);
+  if (!m) return [];
+  const wanted = new Map((ids || []).map((id) => [base(id), id]).filter(([b]) => b));
+  const done = [];
+  const say = maskSecrets(String(note || '').replace(/\s+/g, ' ').trim());
+  const body = m[2].split('\n').map((l) => {
+    const hid = /^\s*-/.test(l) ? headId(l) : null;
+    if (!hid || !wanted.has(base(hid))) return l;
+    done.push(hid);
+    const hook = l.match(HOOK_LINE);
+    const rest = hook ? hook[hook.length - 1] : l.replace(/^\s*-\s*[▶✔]?\s*/, '').replace(/^\[[^\]]*\]\s*/, ''); // its ID is already in the new head
+    return clip(`- ✔ [${hid}] confirmada por el usuario (${now.toLocaleDateString('sv')})${say ? `: ${say}` : ''}; ${rest.trim()}`, LINE_CHARS);
+  });
+  if (!done.length) return [];
+  fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
+  rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
+  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed: done, ...(say ? { note: say.slice(0, 300) } : {}) });
+  return done;
+}
+
 // Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). → true when it changed.
 export function tidyWip(home, now = new Date()) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return false;
@@ -405,14 +430,16 @@ export function decisionsIn(lines) {
   return out;
 }
 
-// Decisions as the chained log keeps them: the picked labels, never a free-text answer — it may hold a password or a
-// token, and a chained record cannot be edited.
+// Decisions as the chained log keeps them: the picked labels, and a free-text answer as written, at most 200
+// characters, with passwords, tokens, keys, URL credentials and e-mail addresses masked (a chained record cannot be
+// edited later).
+const answerText = (s) => clip(maskSecrets(s).replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[correo]'), 200);
 export function recordedDecisions(decisions = []) {
   return (decisions || []).map((d) => {
     if (!d.labels) return d; // built by hand (tests, older callers): no options known; decisionsIn always sets them
     const labels = d.labels, chosen = String(d.chosen ?? '');
     const kept = labels.includes(chosen) ? chosen
-      : chosen.split(',').map((p) => p.trim()).filter(Boolean).map((p) => (labels.includes(p) ? p : `(respuesta escrita, ${p.length} caracteres)`)).join(', ');
+      : chosen.split(',').map((p) => p.trim()).filter(Boolean).map((p) => (labels.includes(p) ? p : answerText(p))).join(', ');
     return { ...d, chosen: kept };
   });
 }

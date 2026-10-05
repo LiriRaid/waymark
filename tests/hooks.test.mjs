@@ -603,7 +603,7 @@ test('stop hook: without project memory, a Q turn leaves no record (with memory:
 });
 
 // ---- Step 2: project memory in <project>/.waymark/ (docs/adr/0007) ----
-const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip, confirmTasks } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { planFor, apply } = await import(`file://${SCRIPTS}/migrate-memory.mjs`);
 const tmpRepo = (name) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), `waymark-${name}-`));
@@ -1222,15 +1222,17 @@ test('T2l turn counting: a prompt far back (a pasted image) is found; a turn res
   assert.equal(currentTurn(lines, since).startedAt, since);
 });
 
-test('T2l secrets: the record keeps picked labels only, never a free-text answer; passwords and tokens masked in text', () => {
+test('T2l secrets: a free-text answer is kept as written with passwords, tokens and e-mails masked; picked labels as is', () => {
   const lines = [prompt('x'), answered('¿Usuario de prueba?', ['Crear uno', 'Sin login'], 'te paso uno: ana@example.com y la contraseña es S3cr3t-Pass!')];
   const raw = decisionsIn(lines);
   assert.match(raw[0].chosen, /S3cr3t/, 'the hook still sees the answer live');
   const kept = recordedDecisions(raw);
   assert.ok(!/S3cr3t|ana@/.test(JSON.stringify(kept)), 'never in the record');
-  assert.match(kept[0].chosen, /^\(respuesta escrita, \d+ caracteres\)$/);
+  assert.match(kept[0].chosen, /^te paso uno: \[correo\] y la contraseña es \[redactado\]$/, 'the words stay, the secrets do not');
+  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cuál?', ['A (Recomendado)', 'B'], 'la primer opcion recomendada haz')]))[0].chosen, 'la primer opcion recomendada haz', 'a chat answer is kept (Codex)');
+  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cuál?', ['A'], 'x'.repeat(300))]))[0].chosen.length, 200, 'clipped to 200');
   assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff')]))[0].chosen, 'Backoff');
-  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cuáles?', ['A', 'B', 'C'], 'A,mi texto')]))[0].chosen, 'A, (respuesta escrita, 8 caracteres)');
+  assert.equal(recordedDecisions(decisionsIn([prompt('x'), answered('¿Cuáles?', ['A', 'B', 'C'], 'A,mi texto')]))[0].chosen, 'A, mi texto');
   for (const [s, leak] of [['la contraseña es S3cr3t-Pass!', 'S3cr3t'], ['password: hunter22', 'hunter22'], ['curl -u admin:pw123 https://x', 'pw123'], ['https://bob:pw456@host/x', 'pw456'], ['token=abc.def.ghi', 'abc.def'], ['Authorization: Bearer eyJhbGci', 'eyJhb']]) assert.ok(!maskSecrets(s).includes(leak), s);
   assert.equal(maskSecrets('npm run build'), 'npm run build');
 });
@@ -1516,7 +1518,7 @@ test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; t
 });
 
 // ---- 3e-2: git as the source of truth (docs/adr/0012) ----
-const P = { readTaskRecords, writeTaskLine, taskSummary, tidyWip };
+const P = { readTaskRecords, writeTaskLine, taskSummary, tidyWip, confirmTasks };
 const commitTask = (repo, id, file = 'a.ts') => {
   fs.writeFileSync(path.join(repo, file), `export const x = ${Math.random()};\n`);
   gitT(repo, 'add', file); gitT(repo, 'commit', '-q', '-m', `x\n\nWaymark-Task: ${id}`);
@@ -1681,4 +1683,63 @@ test('commit trailer: Waymark-Task counts anywhere in the message, also when a b
   assert.equal(commitsFor(repo, '2026-10-04 · T6b').length, 0, 'another ID does not match');
   const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
   assert.match(block, /Waymark-Task: <task ID>` in the message's last paragraph, next to Co-Authored-By/);
+});
+
+test('done: the user confirms tasks that work: ✔ in Work in progress, a chained confirm record, and the session start asks about the open ones', async () => {
+  const wip = ['- ▶ [2026-10-04 · T4c] que el usuario recargue y confirme', '- ▶ [2026-10-04 · T3] skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'].join('\n');
+  const repo = memRepo('done', wip + '\n'), h = projectHome(repo), NOW = new Date(2026, 9, 5, 12, 0);
+  const digest = spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9\. In your first reply ask the user once, in the choice window \(multi-select\), which of them already work; close those with node "[^"]+waymark\.mjs" done/);
+  assert.deepEqual(P.confirmTasks(h, ['2026-10-04 · T4c', '2026-10-04 · T3', '2026-10-04 · T7'], { note: 'ya las vi, funcionan', now: NOW }), ['2026-10-04 · T4c', '2026-10-04 · T3']);
+  const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
+  assert.deepEqual(lines, ['- ✔ [2026-10-04 · T4c] confirmada por el usuario (2026-10-05): ya las vi, funcionan; que el usuario recargue y confirme', '- ✔ [2026-10-04 · T3] confirmada por el usuario (2026-10-05): ya las vi, funcionan; skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta']);
+  const rec = readRecords(h.log).pop();
+  assert.deepEqual([rec.kind, rec.confirmed, rec.note], ['confirm', ['2026-10-04 · T4c', '2026-10-04 · T3'], 'ya las vi, funcionan']);
+  assert.equal(verifyChain(readRecords(h.log)).ok, true);
+  assert.equal(taskIds(repo).known.has(undefined), false, 'a confirm record takes no task ID');
+  fs.writeFileSync(h.memory, fs.readFileSync(h.memory, 'utf8').replace('- Gotcha: una nota', '- Gotcha: una nota\n- [2026-10-03 · T1] `prisma migrate deploy` pendiente'));
+  P.confirmTasks(h, ['2026-10-03 · T1'], { now: NOW });
+  assert.match(fs.readFileSync(h.memory, 'utf8'), /- ✔ \[2026-10-03 · T1\] confirmada por el usuario \(2026-10-05\); `prisma migrate deploy` pendiente/, 'a free-form line keeps its ID once');
+  const cli = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'done', '2026-10-04 · T9', '--note', 'ok'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(cli.stdout, /confirmed by the user: 2026-10-04 · T9/);
+  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8'), /- 2026-10-04 · T9 · hecho · confirmada por el usuario/);
+});
+
+test('check: the package manager in memory.md must match package.json packageManager or the lockfile', async () => {
+  const { packageManager } = await import(`file://${SCRIPTS}/waymark.mjs`);
+  const repo = memRepo('pm');
+  const mem = path.join(repo, '.waymark', 'memory.md');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));
+  fs.writeFileSync(mem, '# P\n\n## Identity\n- Package manager / build tool: npm\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | npx tsc --noEmit | x |\n| build | npm run build | x |\n\n## Conventions\n');
+  assert.match(packageManager(repo), /this repo uses pnpm \(package\.json packageManager\) but .*Identity says npm and Quality gates use npm/);
+  fs.writeFileSync(mem, '# P\n\n## Identity\n- Package manager / build tool: pnpm\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | pnpm exec tsc --noEmit | x |\n| build | pnpm run build | x |\n\n## Conventions\n');
+  assert.equal(packageManager(repo), '', 'they agree');
+  fs.writeFileSync(path.join(repo, 'package.json'), '{}');
+  fs.writeFileSync(path.join(repo, 'package-lock.json'), '{}');
+  assert.match(packageManager(repo), /uses npm \(its lockfile\) but .*Identity says pnpm and Quality gates use pnpm/);
+});
+
+test('connect-agents: an agent whose hooks run Waymark gets the Rule 0 block in place of the pointer, kept up to date; its own text stays', async () => {
+  const { found, planFor, apply: connect, instructionsBlock, POINTER } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
+  const dir = path.join(agentsHome, '.codex');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), `# Mine\nkeep this\n\n${POINTER}\n`);
+  fs.writeFileSync(path.join(dir, 'hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "C:/u/.claude/skills/waymark/scripts/stop-hook.mjs" --agent codex' }] }] } }));
+  let codex = found().find((a) => a.name === 'Codex');
+  assert.deepEqual([codex.full, codex.connected], [true, false], 'pointer only: not connected for an agent with hooks');
+  assert.match(planFor(codex).steps[0], /write the Rule 0 block/);
+  connect(planFor(codex));
+  const text = fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8');
+  assert.equal(text, `# Mine\nkeep this\n\n${instructionsBlock()}\n`, 'the pointer replaced by the block, the rest untouched');
+  codex = found().find((a) => a.name === 'Codex');
+  assert.ok(codex.connected && planFor(codex).skip, 'up to date');
+  const { check } = await import(`file://${SCRIPTS}/waymark.mjs`);
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), text.replace('Rule 0', 'Rule 0 (old)'));
+  assert.equal(found().find((a) => a.name === 'Codex').connected, false, 'an older block is not current');
+  offline();
+  const items = await check(agentsHome);
+  assert.ok(items.some((x) => /^connect: Codex runs Waymark's hooks but has the pointer or an older Rule 0 block/.test(x)) || items.some((x) => /^connect: other agents not connected/.test(x)), items.join('\n'));
+  connect(planFor(found().find((a) => a.name === 'Codex')));
+  assert.equal(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), text, 'replaced in place, never twice');
+  fs.rmSync(path.join(dir, 'hooks.json'));
 });

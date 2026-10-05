@@ -11,7 +11,7 @@
     { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "repeatedFailure", "enforce": "block", "claim": "a command that failed twice runs again only after consulting the docs" },
     { "id": "procedure", "label": "Enrutar", "levels": [1, 2, 3], "enforce": "block", "claim": "the owner's procedures.md section read before the first change" },
     { "id": "spec", "label": "Tests", "levels": [1, 2, 3], "when": "specNear", "enforce": "block", "claim": "a spec next to the changed code added or changed" },
-    { "id": "red", "label": "Tests", "levels": [2, 3], "when": "specAndCode", "enforce": "block", "claim": "L2+ with a spec and code changed: the spec ran before the first code change or in a clean worktree" },
+    { "id": "red", "label": "Tests", "levels": [2, 3], "when": "specAndCode", "enforce": "block", "claim": "L2+ with a spec and code changed: the spec ran before the code it tests, or in a clean worktree" },
     { "id": "preexisting", "label": "Previos", "levels": [1, 2, 3], "when": "gateFailed", "enforce": "block", "claim": "a failing gate that is not this task's shown failing in a clean copy" },
     { "id": "trailer", "label": "Commit", "levels": [1, 2, 3], "when": "commit", "enforce": "record", "claim": "the task's commits carry Waymark-Task: <task ID>" },
     { "id": "chain", "label": "Cadena", "levels": [1, 2, 3], "enforce": "record", "claim": "the provenance chain intact before this record" }

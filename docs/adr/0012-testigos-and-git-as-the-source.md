@@ -125,6 +125,14 @@ The first test on a new project ("Flujo" landing, Opus 5.5 high, a folder with n
 - **A new project's memory lives inside it.** The card sent the agent to `~/.waymark/projects/<slug>.md`, the pre-2.0 place, because the folder had no git root yet. Now a real folder with no git and no memory gets `<folder>/.waymark/`. Only the home folder itself, or a path that does not exist, keeps the home layout. This replaces the 2026-10-03 rule "outside git and without memory the record stays in ~/.waymark" (ADR 0007). The landing's memory was migrated.
 - **A command run inside a `.waymark` folder is no gate.** `cd ~/.waymark && node -e "…"` (a memory write whose text said "build") was judged the task's gate, because the `.waymark/` filter saw the `cd` and the path as separate parts. The parts after a `cd` into `.waymark` no longer count.
 
+### No false results, checked on real sessions (2026-10-05 · T12, the user's picks)
+The hook's judgment was replayed, read-only, on the 6 tasks of the day: the Claude tests in a real project and the landing (T1, T1b), and the Codex tests T4, T5 and T6. Each ✔/✘ was checked against what really happened. Four results were false, and each now has a test from its real case:
+- **A relative path after a `cd`** (`cd ".../dept-architecture" && cat procedures.md`) was not seen as reading that procedure, so the landing's Enrutar was ✘ although it was read first. A relative file name now resolves against the `cd` before it (`cd`, `pushd`, `Set-Location`).
+- **Red is measured from the spec:** the spec is written, then run before the next edit of code. Config and scaffolding made earlier by commands (`ng new`, installs, `pnpm-workspace.yaml`) are not the code it tests. The landing did test-first and was marked ✘.
+- **Docs counts failed attempts, not failures:** a failure after a code change since the previous run of that command counts. A first red run of a new spec, a rerun with nothing changed, and a failure of the environment ("not recognized", "command not found") do not. Codex's sandbox failures and a red → fix → green loop were taken for blind retries.
+- **The environment is no failed command:** Codex's `pnpm exec` "not recognized" was reported as "a command after the last change failed".
+After the fixes the replay keeps only the real ✘: Claude T3 Enrutar (the procedure read only after the block) and Codex T4 Tests (the HTML edited before its spec). The landing scores 10/10.
+
 ## Alternatives considered
 - **Keep parsing the Cierre and fix each case:** each test found new prose variants, and the fixes only patched symptoms.
 - **The hook always runs the full gate:** strongest, but each close could take minutes. In a real project one eslint run took 7 minutes.

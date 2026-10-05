@@ -272,7 +272,7 @@ test('red by action: at L2+ a spec and code changed need the spec run before the
     call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test -- orders' }), ...after, call('Skill', { skill: 'code-review' }), MEM()]);
   const step = (t, reply = cierre(ids.next)) => cierreGaps(t, reply, undefined, undefined, ctxFor(cwd)).steps.find((x) => x.id === 'red');
   assert.deepEqual([step(turn()).applies, step(turn()).pass], [true, false], 'spec and code changed, the spec never ran first');
-  assert.match(checkCierre(turn(), cierre(ids.next), undefined, undefined, ctxFor(cwd)) || '', /show it red now in a clean copy/);
+  assert.match(checkCierre(turn(), cierre(ids.next), undefined, undefined, ctxFor(cwd)) || '', /never ran before the code it tests: show it red now in a clean copy/);
   assert.equal(step(turn({ before: [call('Bash', { command: 'npm test -- orders' })] })).pass, true, 'spec written, run red, then the code: test-first');
   assert.equal(step(turn({ after: [call('Bash', { command: 'git worktree add -q /tmp/w HEAD && (cd /tmp/w && npm test)' })] })).pass, true, 'shown red in a clean copy');
   assert.equal(step(turn({ spec: false }), cierre(ids.next).replace('observada timeouts', 'observada spec en rojo y luego verde')).applies, false, 'the word alone triggers nothing');
@@ -1934,6 +1934,33 @@ test('a command run inside a .waymark folder is no gate, even with cd and the pa
   assert.match(g.observed.gate.cmd, /npm run build/, 'the real gate before it is the one judged');
   const still = cierreGaps(l2([call('Bash', { command: 'npx tsc --noEmit && grep T1 .waymark/memory.md' })]), cierre(id), undefined, undefined, ctxFor(cwd));
   assert.match(still.observed.gate.cmd, /npx tsc --noEmit/, 'a gate that also reads the memory is still a gate');
+});
+
+test('false positives from the real sessions: a cd before a relative path, scaffolding before the spec, the TDD loop and the environment', async () => {
+  const { cdPaths } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  assert.equal(cdPaths('cd "C:/u/.claude/skills/dept-architecture" && grep -n "^## " procedures.md; ls -la x'), ' C:/u/.claude/skills/dept-architecture/procedures.md');
+  assert.equal(cdPaths('Set-Location C:\\skills\\dept-qa; Get-Content procedures.md'), ' C:\\skills\\dept-qa/procedures.md');
+  assert.equal(cdPaths('cat /abs/procedures.md'), '', 'no cd: nothing to resolve');
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs');
+  const head = (route = 'L2', proc = [PROC('dept-backend')]) => [prompt('x'), say(`Waymark → ${route} · dept-backend`), call('Skill', { skill: 'dept-backend' }), ...proc, call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff')];
+  // landing T1: the procedure read with cd + a relative name, before the first change
+  const cdRead = ran('p1', 'cd "C:/u/.claude/skills/dept-backend" && cat procedures.md'); // the output is what was read
+  const L1 = [...head('L2', cdRead), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()];
+  const g1 = cierreGaps(currentTurn(L1), cierre(id), sessionTools(L1), undefined, ctx); // the hook reads outputs from the whole session
+  assert.deepEqual([g1.observed.procedure.readBeforeChange, g1.steps.find((x) => x.id === 'procedure').pass], [true, true]);
+  // landing T1: config before the spec, then spec → red run → code: test-first
+  const scaffold = [call('Write', { file_path: '/work/proj/pnpm-workspace.yaml' }), call('Edit', { file_path: SPECF }), call('Bash', { command: 'npm test -- orders' }), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build && npm test' }), call('Skill', { skill: 'code-review' }), MEM()];
+  assert.equal(cierreGaps(currentTurn([...head(), ...scaffold]), cierre(id), undefined, undefined, ctx).steps.find((x) => x.id === 'red').pass, true);
+  // Codex T4: the environment failing twice is no failed attempt; a test red → fix → green is no blind retry
+  const env = (rid) => ran(rid, 'pnpm exec vitest run orders.spec.ts', true).map((d, i) => (i === 1 ? { ...d, message: { content: [{ type: 'tool_result', tool_use_id: rid, is_error: true, content: "'vitest' is not recognized as an internal or external command" }] } } : d));
+  const g2 = cierreGaps(currentTurn([...head(), call('Edit', { file_path: FILE }), ...env('v1'), ...env('v2'), ...ran('v3', 'node node_modules/vitest/vitest.mjs run orders.spec.ts', true), call('Edit', { file_path: FILE }), ...ran('v4', 'node node_modules/vitest/vitest.mjs run orders.spec.ts'), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]), cierre(id), undefined, undefined, ctx);
+  assert.equal(g2.steps.find((x) => x.id === 'docs').applies, false, 'no two failed attempts');
+  assert.ok(!g2.findings.some((f) => /a command after the last change failed/.test(f)), 'an environment failure is no failed command');
+  // a last gate that failed only because the command was not found checked nothing: the hook's own typecheck decides
+  const envGate = ran('g9', 'pnpm exec tsc --noEmit', true).map((d, i) => (i === 1 ? { ...d, message: { content: [{ type: 'tool_result', tool_use_id: 'g9', is_error: true, content: "'tsc' is not recognized as an internal or external command" }] } } : d));
+  const g3 = cierreGaps(currentTurn([...head(), call('Edit', { file_path: FILE }), ...envGate, call('Skill', { skill: 'code-review' }), MEM()]), cierre(id), undefined, undefined, { ...ctx, rerun: () => ({ cmd: 'npx tsc --noEmit', ok: true, s: 5 }) });
+  assert.deepEqual([g3.observed.gate.by, g3.observed.gate.ok, g3.steps.find((x) => x.id === 'preexisting').applies], ['testigo', true, false]);
 });
 
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {

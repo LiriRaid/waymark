@@ -53,6 +53,19 @@ const ROUTINE = (() => { try { const r = JSON.parse(fs.readFileSync(path.join(pa
 const DOCS = (t) => (t.name === 'Skill' && /library-docs/.test(String(t.input.skill || ''))) || /^(WebFetch|WebSearch)$/.test(t.name) || /context7|docs?/i.test(t.name) || (t.name === 'Read' && /node_modules|\.d\.ts$/.test(String(t.input.file_path || '')));
 const fileOf = (t) => t.input.file_path || t.input.notebook_path || '';
 const shell = (t) => /^(Bash|PowerShell)$/.test(t.name);
+// A relative file name in a shell command resolves against the `cd` before it in the same command, so
+// `cd ".../dept-qa" && cat procedures.md` reads dept-qa/procedures.md. → ' <dir>/<file>' for each one, or ''.
+export function cdPaths(command) {
+  let dir = null;
+  const out = [];
+  for (const part of String(command || '').split(/&&|\|\||[;|\n]/)) {
+    const cd = part.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:\/d\s+|-Path\s+)?["']?([^"'\s]+)["']?\s*$/i);
+    if (cd) { dir = cd[1].replace(/[\\/]+$/, ''); continue; }
+    if (!dir) continue;
+    for (const file of part.match(/(?<![\w./\\:~-])[\w@-][\w./\\@-]*\.[A-Za-z]{1,5}\b/g) || []) out.push(`${dir}/${file}`);
+  }
+  return out.length ? ` ${out.join(' ')}` : '';
+}
 const cmdOf = (t) => String(t.input.command || '');
 // The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
 // is not a test or gate run.
@@ -143,7 +156,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (!level) return null;
 
   // ---- Observed (computed, never declared) ----
-  const where = (t) => `${t.input.file_path || ''} ${t.input.path || ''} ${t.input.pattern || ''} ${t.input.command || ''}`;
+  const where = (t) => `${t.input.file_path || ''} ${t.input.path || ''} ${t.input.pattern || ''} ${t.input.command || ''}${shell(t) ? cdPaths(t.input.command) : ''}`;
   const base = allTools.length - turn.tools.filter((t) => !t.input.slash).length;
   const gitCode = (ctx.gitChanged || []).some((f) => !exempt(f) && !NOT_CODE.test(f)); // a shell command changed code only if git saw it
   const shellChange = (t) => shell(t) && changesProject(t.input.command) && gitCode;
@@ -174,13 +187,27 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     return (inside >= 0 ? all.slice(0, inside) : all).filter((p) => !/\.waymark[\\/]/.test(p));
   };
   const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
-  // the first change to code that is not a spec: a spec written and run red before it is test-first
-  const firstCodeChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !denied(t) && !(EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))));
+  // Test-first, measured from the spec: the spec written first, run (red) before the next edit of code. Config, scaffolding
+  // made by commands (`ng new`, installs) and the spec itself are not the code it tests.
+  const codeEdit = (t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !SPEC.test(path.basename(fileOf(t)));
+  const firstSpecEdit = allTools.findIndex((t, i) => i >= base && EDITS.test(t.name) && !denied(t) && SPEC.test(path.basename(fileOf(t))));
+  const codeBeforeSpec = firstSpecEdit >= 0 && allTools.some((t, i) => i >= base && i < firstSpecEdit && codeEdit(t));
+  const codeAfterSpec = firstSpecEdit < 0 ? -1 : allTools.findIndex((t, i) => i > firstSpecEdit && codeEdit(t));
+  // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
+  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT/i.test(String(result(t)?.text || t.out || ''));
   // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
   // failure, before the next run of that command); retrying blind is how a wrong direction repeats.
   const cmdKey = (t) => cmdOf(t).replace(/\s+/g, ' ').trim();
-  const failedRuns = new Map();
-  turn.tools.forEach((t, i) => { if (shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)) && result(t)?.error) failedRuns.set(cmdKey(t), [...(failedRuns.get(cmdKey(t)) || []), i]); });
+  // An attempt is a run after a code change since the previous run of the same command; a first red run of a new spec,
+  // a rerun with nothing changed and a failure of the environment are no failed attempts.
+  const failedRuns = new Map(), lastRun = new Map();
+  turn.tools.forEach((t, i) => {
+    if (!shell(t) || !parts(t).some((p) => GATE.test(p) || TEST.test(p))) return;
+    const key = cmdKey(t), from = lastRun.has(key) ? lastRun.get(key) : -1;
+    lastRun.set(key, i);
+    const attempt = turn.tools.slice(from + 1, i).some((x) => codeEdit(x) || shellChange(x));
+    if (attempt && result(t)?.error && !envFail(t)) failedRuns.set(key, [...(failedRuns.get(key) || []), i]);
+  });
   const retried = [...failedRuns].filter(([, at]) => at.length >= 2).map(([cmd, at]) => {
     const next = turn.tools.findIndex((t, i) => i > at[1] && shell(t) && cmdKey(t) === cmd);
     return { cmd, docs: turn.tools.some((t, i) => i > at[1] && (next < 0 || i < next) && DOCS(t)), late: next >= 0 };
@@ -208,11 +235,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
-    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error })),
+    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(bare(t))),
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
-      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && ((firstCodeChange >= 0 && i < firstCodeChange) || /git\s+worktree\s+add/.test(cmdOf(t)))),
+      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && (/git\s+worktree\s+add/.test(cmdOf(t)) || (firstSpecEdit >= 0 && !codeBeforeSpec && i > firstSpecEdit && (codeAfterSpec < 0 || i < codeAfterSpec)))),
     },
     build: noBuild ? { none: ctx.noBuild } : null, // the project declares no build (memory.md Quality gates)
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
@@ -264,7 +291,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // says the failure is not this task's.
   const gate = [];
   if (lastCode >= 0) {
-    const mine = turn.tools.slice(lastCode + 1).filter(gateCmd).pop();
+    const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t)).pop(); // a gate that never ran checked nothing
     const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
     // The exit belongs to the gate only when the gate is the command's last part: "build | grep -i error" exits 1 on a
     // clean build. A failure the gate may not own is decided by the hook's own typecheck (none: not held against it).
@@ -316,7 +343,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
     spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
-    red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the first code change: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
+    red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
     preexisting: observed.worktree || /no comprobado \(.{3,}\)/i.test(exc) ? [] : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
@@ -346,7 +373,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
-  const otherFailed = observed.gates.filter((g) => g.error && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
+  const otherFailed = observed.gates.filter((g) => g.error && !g.env && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   return { level, changed, reply, missing, findings, steps, dept, observed, renamed };
 }

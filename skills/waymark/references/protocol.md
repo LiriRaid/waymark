@@ -71,4 +71,4 @@ The second failed attempt on the same problem means guessing has started. Stop v
 2. **Re-read the source of truth.** Official docs for the exact API and version (`library-docs`), and the code that actually runs (not the file you think runs: check imports, overrides, themes, generated files).
 3. **Hypotheses.** List 2–3 possible causes; test first the check that rules out the most of them with the least effort. One change at a time.
 4. **Ask once, precisely.** Still unclear → one concrete question to the user (which element / screen / input, a screenshot of the inspector, the exact steps), not a list of guesses.
-5. **Record it.** When solved, project memory → *Solved problems*: symptom, root cause, fix, what did not work and why, cost.
+5. **Record it.** When solved, the Cierre's Aprendido holds symptom, root cause, fix and what did not work; the end-of-turn hook saves it to engram.

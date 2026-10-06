@@ -30,6 +30,8 @@ import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, app
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
 import { pushNotes, noteLateCommits } from './notes.mjs';
+import { saveLearned } from './engram.mjs';
+import { packedFiles } from './tool-hook.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -166,11 +168,15 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const isChange = (t) => (EDITS.test(t.name) && !exempt(fileOf(t))) || shellChange(t);
   const firstChange = allTools.findIndex((t, i) => i >= base && isChange(t));
   const before = (pred) => allTools.some((t, i) => pred(t) && (firstChange < 0 || i < firstChange));
-  // The owner is the department the agent invoked, not the one its text names: a re-route call (args "L<n>") wins, then
-  // the first dept-* invoked in this turn, then the last one of the session (a follow-up turn), then the open task's.
+  // The owner is a department the agent invoked, not one its text only names: a re-route call (args "L<n>") wins, then
+  // the first dept-* invoked in this turn, then the routing line's department when it was invoked earlier in the session
+  // (a department loads once per session, docs/adr/0015), then the last one of the session, then the open task's.
+  // Earlier in the session = these lines or this session's earlier records (ctx.sessionDepts).
   const deptCalls = (tools) => tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || ''))).map((t) => String(t.input.skill));
   const rerouted = turn.tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*L[0-3]\b/i.test(String(t.input.args || ''))).pop();
-  const dept = { declared: (rerouted && String(rerouted.input.skill)) || deptCalls(turn.tools)[0] || deptCalls(allTools).pop() || ctx.inherited?.dept || null, invoked: [...new Set(deptCalls(allTools))] };
+  const invoked = [...new Set([...(ctx.sessionDepts || []), ...deptCalls(allTools)])];
+  const lineDept = routedDept(turn.texts, turn.tools);
+  const dept = { declared: (rerouted && String(rerouted.input.skill)) || deptCalls(turn.tools)[0] || (invoked.includes(lineDept) ? lineDept : null) || deptCalls(allTools).pop() || ctx.inherited?.dept || null, invoked };
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
@@ -230,7 +236,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const observed = {
     memory: {
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
-      searched: before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || (shell(t) && /waymark\.mjs["']?\s+(pack|memory|tasks)\b/.test(cmdOf(t))) || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
+      // or the hook handed the pack over at the first edit (docs/adr/0015)
+      searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || (shell(t) && /waymark\.mjs["']?\s+(pack|memory|tasks)\b/.test(cmdOf(t))) || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading
@@ -469,6 +476,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
       ctx.commits = commitsFor(cwd, claimed);
+      try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
+      ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
@@ -508,6 +517,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       try { appendRecord(cwd, rec); } catch {}
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
+      try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch {} // the learned layer: engram, written here, never by the agent
       // the agent pushed the task (the user asked): its note goes to the same remote, now that it exists
       let pushed = '';
       try {

@@ -12,10 +12,9 @@ description: "Waymark · Security department. Use FIRST for auth, secrets and ri
 **DoD:** `security-review` clean or findings resolved · authz tests for 401/403 · audit has no high/critical
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-security.md` if it exists.
 - Stack profile: L1 *Commands* (audit) + *Security*, L2+ full.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer before the first edit:
@@ -33,7 +32,7 @@ The brief must answer before the first edit:
 - Does not own (security reviews, they implement): endpoint implementation → `dept-backend` · schema and data policy implementation → `dept-data` · CI and infra hardening → `dept-devops` · UI → `dept-frontend`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Security review of a change (L2+ with security impact)
 - New or changed auth flow
@@ -67,7 +66,7 @@ Mapped to OWASP Top 10 (2021) and ASVS chapters.
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Framework security APIs (auth, CSRF, CSP, sanitization) not verified this session | Q |
-| memory | `engram` (MCP) | `mem_save` security decisions and vulnerability root causes | L1 |
+| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Find every instance of a vulnerable pattern | L1 |
 | config.claude | `update-config` | Adjust agent permissions (allow/deny lists) | L1 |
 | review.security | `security-review` | Changes touch auth, input, secrets, config, dependencies, uploads, webhooks (L3 always) | L2 |
@@ -94,4 +93,4 @@ Mapped to OWASP Top 10 (2021) and ASVS chapters.
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

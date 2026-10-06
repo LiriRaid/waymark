@@ -8,14 +8,13 @@ description: "Waymark · Product department. Use FIRST when an idea must become 
 ## Quick ref
 **Mission:** Turn a request into verifiable requirements, acceptance criteria and a scoped breakdown before code is written.
 **Rules:** Given/When/Then criteria for every L2+ change · explicit out-of-scope · smallest scope that delivers the value · plan before coding at L3
-**Skills by default:** `engram` (mem_search) · `Explore` · `Plan` · `library-docs`
+**Skills by default:** `Explore` · `Plan` · `library-docs`
 **DoD:** Requirements unambiguous and testable, criteria mapped to tests, scope and out-of-scope written.
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-product.md` if it exists.
 - Stack profile: L1 *Commands*, L2+ full.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer:
@@ -33,7 +32,7 @@ The brief must answer:
 - Does not own: technical design and placement → `dept-architecture` · UI/visual decisions → `dept-ux-ui` · test implementation → `dept-qa` · delivery pipeline → `dept-devops`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - New feature (L2/L3)
 - Bug report
@@ -57,7 +56,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| `memory` | `engram` MCP (mem_search / mem_save) | Before eliciting: prior decisions. After a non-obvious scope decision: save it | L1 |
+| `memory` | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | `search.codebase` | `Explore` agent | Scoping needs more than 3 locations | L1 |
 | `plan.implementation` | `Plan` agent (or plan mode when approval is needed) | Multi-layer features, shared/core changes, L3 breakdowns | L3 |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Feasibility depends on an unverified library/framework API | Q |
@@ -71,7 +70,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - [ ] Every criterion mapped to a test or a manual verification step
 - [ ] Preserved behavior listed for change requests
 - [ ] Breakdown tagged with department skill and level
-- [ ] Non-obvious scope decisions saved (engram and/or project memory)
+- [ ] Non-obvious scope decisions in the Cierre's Aprendido (the hook saves them to engram)
 
 ## Hand-offs
 - To `dept-architecture`: placement, boundaries, new modules, new projects, or any L3 decision.
@@ -84,4 +83,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

@@ -21,6 +21,7 @@ import { out as claudeOut } from './claude.mjs';
 export const name = 'codex';
 const HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 export const instructions = path.join(HOME(), 'AGENTS.md');
+export const preContext = true; // PreToolUse additionalContext alone (0.160 rejects permissionDecision allow without updatedInput)
 export const lacks = []; // routine steps this agent has no capability for (recorded as not applicable); its review is waymark.mjs review
 export const out = claudeOut; // same output shapes (verified in the hooks docs)
 

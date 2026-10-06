@@ -8,14 +8,13 @@ description: "Waymark · Data & State department. Use FIRST for schema, queries 
 ## Quick ref
 **Mission:** Keep data correct, consistent and fast, from the database schema to the client-side store.
 **Rules:** migrations reversible and zero-downtime · index foreign keys and filtered columns · every cache has a key scheme, TTL and invalidation · single source of truth for client state · no secrets in client storage
-**Skills by default:** library-docs · code-review · Explore · engram (MCP)
+**Skills by default:** library-docs · code-review · Explore
 **DoD:** migration rollback tested · query plan checked · cache invalidation defined · state derived, not duplicated
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-data.md` if it exists.
 - Stack profile: L1 *Commands* + *Data/State*, L2+ full.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer before the first edit:
@@ -33,7 +32,7 @@ The brief must answer before the first edit:
 - Does not own: endpoints and handlers → `dept-backend` · UI components → `dept-frontend` · authn/authz policy, secrets → `dept-security` · backups, DB provisioning → `dept-devops` · module boundaries → `dept-architecture`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Schema migration
 - New query or repository method
@@ -65,7 +64,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | ORM, migration DSL, DB engine, cache client, store/reactivity API not verified this session | Q |
-| memory | `engram` (MCP) | `mem_search` before re-reading schema; `mem_save` after a data-model decision | L1 |
+| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Find all readers/writers of a table, cache key or store (mandatory for destructive changes) | L1 |
 | review.diff | `code-review` | Before declaring done | L2 |
 | plan.implementation | `Plan` (agent) | Destructive migration, new store architecture | L3 |
@@ -90,4 +89,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

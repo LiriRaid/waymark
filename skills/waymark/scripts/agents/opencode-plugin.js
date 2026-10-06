@@ -4,6 +4,7 @@
 // - session.created → session-hook (the context card), added to the system prompt of the next request.
 // - chat.message → rule0-hook (the task ID and the reminder), added the same way.
 // - tool.execute.before → tool-hook: a deny throws, so the tool does not run and the agent gets the reason.
+// - tool.execute.after → tool-hook (PostToolUse): the first edit of a file gets its pack appended to the result.
 // - session.idle → stop-hook: a block is sent back once as a prompt (the agent continues); the next idle is the retry.
 // Before each call the session's messages are written to ~/.waymark/opencode/<session>.jsonl (agents/opencode.mjs reads it).
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -16,6 +17,7 @@ const DIR = join(process.env.WAYMARK_HOME || join(homedir(), '.waymark'), 'openc
 export const Waymark = async ({ client, $, directory }) => {
   const pending = new Map(); // session → context for its next request
   const blocked = new Set(); // sessions whose turn the stop-hook already sent back once
+  const args = new Map(); // callID → the edit's args, from before to after the tool
   const add = (id, text) => { if (id && text) pending.set(id, [...(pending.get(id) || []), text]); };
   const dump = async (id) => {
     const r = await client.session.messages({ path: { id } });
@@ -73,10 +75,20 @@ export const Waymark = async ({ client, $, directory }) => {
     },
     'tool.execute.before': async (input, output) => {
       if (!['bash', 'edit', 'write', 'apply_patch'].includes(input.tool)) return; // the gate judges changes only
+      if (input.tool !== 'bash') args.set(input.callID, output.args); // the after hook hands this file's pack
       const { file } = await dump(input.sessionID);
       const o = await run('tool-hook.mjs', { session_id: input.sessionID, tool_name: input.tool, tool_input: output.args, transcript_path: file });
       const deny = o?.hookSpecificOutput?.permissionDecision === 'deny' && o.hookSpecificOutput.permissionDecisionReason;
-      if (deny) throw new Error(deny);
+      if (deny) { args.delete(input.callID); throw new Error(deny); }
+    },
+    // Recordar by the hook: the first edit of each file gets its pack appended to the tool's result
+    'tool.execute.after': async (input, output) => {
+      if (!args.has(input.callID)) return;
+      const toolInput = args.get(input.callID);
+      args.delete(input.callID);
+      const o = await run('tool-hook.mjs', { hook_event_name: 'PostToolUse', session_id: input.sessionID, tool_name: input.tool, tool_input: toolInput });
+      const text = context(o);
+      if (text && output) output.output = `${output.output ?? ''}\n\n${text}`;
     },
   };
 };

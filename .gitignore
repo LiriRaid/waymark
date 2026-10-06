@@ -4,3 +4,6 @@ Thumbs.db
 *.zip
 # never commit a private layer by accident
 .waymark/
+
+# engram's learned memory stays local in this public repo (its memories mention private projects)
+.engram/

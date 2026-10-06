@@ -3,13 +3,13 @@
 Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the task needs.
 
 ### Quick bug triage (L1)
-1. **Recall:** project memory → *Solved problems* by symptom; known → apply it.
+1. **Recall:** the learned memory by symptom (`engram search "<symptom>"` or mem_search); known → apply it.
 2. **Reproduce the symptom precisely** from the user's words or screenshot: what, where, when it works and when it does not (e.g. "works after refresh, fails after navigating").
 3. **Locate the exact target** (element, file, selector, function) and read only the relevant lines.
 4. **Stale view after an action?** Check what reloads it: another tab or window (`window.open`, `target="_blank"`), a cache in a service or store, a reused route or component that does not re-fetch. Rule this out before blaming the backend.
 5. **Explain every symptom** with one cause; a cause that explains only some of them is not the cause yet.
 6. **Evidence:** observe the real state, or give the user the one-line check (*When stuck* → plan B).
-7. **Smallest fix**, then the L1 gate (lint/typecheck of changed files) and *Solved problems* entry.
+7. **Smallest fix**, then the L1 gate (lint/typecheck of changed files); symptom, cause and fix go in the Cierre's Aprendido (the hook saves it).
 
 ### Test pyramid — choose the level
 1. **Unit** (most): pure logic, services, state, mappers. No network, DB or browser.

@@ -45,7 +45,7 @@ Steps:
 7. **Sync.** `node scripts/sync.mjs`; confirm it is listed and has no `auto: true`.
 8. **Use it now** for the current task; it loads automatically in the next session.
 9. **Report:** *"Creé la skill `<name>` (trigger: …) en `<path>`."*
-10. **Memory:** if a memory MCP (e.g. engram) is available, `mem_save` that the skill exists and why.
+10. **Memory:** say in the Cierre's Aprendido that the skill exists and why (the hook saves it to engram).
 
 ## 4. Project skills from repetition
 

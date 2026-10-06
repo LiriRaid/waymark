@@ -23,6 +23,7 @@ export const HOOKS = [
   { event: 'UserPromptSubmit', file: 'rule0-hook.mjs' },
   { event: 'PreToolUse', file: 'tool-hook.mjs', matcher: true }, // the agent's tools: MATCHER
   { event: 'Stop', file: 'stop-hook.mjs' },
+  { event: 'PostToolUse', file: 'tool-hook.mjs', matcher: true, only: ['gemini'] }, // the pack after the first edit where the pre-tool hook cannot add context
 ];
 const SETTINGS = {
   claude: () => process.env.WAYMARK_CLAUDE_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json'),
@@ -31,7 +32,7 @@ const SETTINGS = {
 };
 export const PLUGIN = () => process.env.WAYMARK_OPENCODE_PLUGIN || path.join(os.homedir(), '.config', 'opencode', 'plugins', 'waymark.js');
 // The core's event names → each agent's (Claude Code and Codex share them).
-const EVENTS = { gemini: { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', Stop: 'AfterAgent' } };
+const EVENTS = { gemini: { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' } };
 const MATCHER = { claude: 'Bash|PowerShell|Edit|Write|NotebookEdit', codex: 'Bash|apply_patch', gemini: 'run_shell_command|write_file|replace' }; // PreToolUse tools per agent
 const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.replace('.', '\\.')}`).test(String(h?.command || ''));
 
@@ -39,7 +40,7 @@ const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.r
 export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
   const s = structuredClone(input || {}), steps = [];
   s.hooks = s.hooks || {};
-  for (const h of HOOKS) {
+  for (const h of HOOKS.filter((x) => !x.only || x.only.includes(agent))) {
     const command = `node "${scripts}/${h.file}"${agent === 'claude' ? '' : ` --agent ${agent}`}`;
     const matcher = h.matcher ? MATCHER[agent] || MATCHER.claude : null;
     const windows = agent === 'codex' ? { commandWindows: command } : {}; // Codex's Windows override, the same command

@@ -141,6 +141,18 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **The hook writes Work in progress:** at each close, the task's line is `- ✔|▶ [<task ID>] <Aprendido>` (✔ when Resultado is hecho), at most 200 characters (a longer Aprendido is clipped; the whole Cierre stays in the record). A follow-up replaces its task's line. Closed lines beyond the newest 5 and any line over 200 characters move whole to `history.md`. The testigo *Aprender* is gone: the Cierre already requires the Aprendido.
   - **tasks.md** reads the records back from the notes; *Last closed* names `git notes --ref=waymark show <commit>` as the full record.
   - **Code comments say how the code works, never task history:** task IDs, dates and "user's choice" markers are gone from the scripts (a test keeps them out), and the rule is in `dept-architecture` and the instructions block.
+- **Three layers of memory and fewer responses** (`docs/adr/0015`, the user's picks; the numbers in `docs/audit-context.md`):
+  - **git** holds what was done, **engram** what was learned, **memory.md** the project manual.
+  - The end-of-turn hook saves each Aprendido to engram with its CLI (topic = task ID, project = the slug pinned in `.engram/config.json`).
+  - Before a `git commit`, the pre-tool hook syncs and stages `.engram/`. The session hook imports new chunks and shows the latest memories on the card.
+  - Departments no longer ask for `mem_save`. `waymark.mjs learned` moves memory.md's Solved problems, Gotchas and Decisions to engram; `check` offers it, and offers engram itself when it is missing.
+  - **Recordar by the hook:** the first edit of each file gets its `pack`. Claude Code and Codex get it before the tool, with no `permissionDecision`. OpenCode and Gemini CLI get it with the result (`tool.execute.after`, `AfterTool`).
+  - **Pending tasks close themselves:** a turn another session left open over two hours becomes an interrupted record; "sin resolver" leaves tasks.md once a later task passes that testigo; a follow-up done closes its ▶.
+  - **Fewer responses:**
+    - C1: a department loads once per session.
+    - C2: the reminder carries the git status.
+    - C3: the reminder no longer repeats the block.
+    - C4: the departments' shared Entry, Procedures and Learned text lives once, in the block (~440 characters less per department).
 - **Final test across agents** (`docs/adr/0014`, the user's picks). One task each in Claude Code, Codex and OpenCode left four records in one chain. Gemini CLI's hooks fired, but its API call failed. Fixes for the gaps it showed:
   - `pack` reads each commit's note even with no local log, so records travel with a clone.
   - A task committed later by another task gets its record as that commit's note (`noteLateCommits`).

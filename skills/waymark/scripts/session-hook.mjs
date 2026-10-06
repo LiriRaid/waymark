@@ -2,7 +2,8 @@
 // Waymark · the session-start link of the chain (docs/adr/0007, 0008). Registered by install-hooks.mjs as a
 // session-start hook (Claude Code: SessionStart, fires on startup, resume, clear and after a context summary; another
 // agent: same script with `--agent <name>`). Runs locally; it injects once per session a compact digest of what the
-// agent must recall: this machine's Environment and the current project's memory (Work in progress, Solved problems
+// agent must recall: this machine's Environment and the current project's memory (Work in progress, the latest learned
+// memories from engram (docs/adr/0015)
 // symptoms, Quality gates) with the pointer to .waymark/tasks.md. Missing project memory → a one-line instruction.
 // With ~/.waymark/coexistence.md it also injects that file's rules (the agent must obey them). Offers, syncs and the
 // update check are `waymark.mjs check` (docs/adr/0008): this hook only adds one line pointing to it when the last
@@ -11,8 +12,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks } from './provenance.mjs';
 import { repairNotes, noteLateCommits } from './notes.mjs';
+import { importChunks, learnedLines } from './engram.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -67,9 +69,12 @@ export function digest(cwd, agentName = 'claude') {
     .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
-  const solved = section('\n' + best.text, 'Solved problems').filter((l) => l.startsWith('-')).length;
+  // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
+  let learned = [];
+  try { if (!home.legacy) { importChunks(home); learned = learnedLines(home); } } catch {}
+  if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
   const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
-  out.push(`Commands (W = ${cmd}): before your first change to a file, W pack <files…> (what earlier tasks did there, from git); on demand, W memory <section> (${solved ? `Solved problems: ${solved} · ` : ''}Conventions · Identity) and W tasks.`);
+  out.push(`Commands (W = ${cmd}): the hook hands you W pack before your first edit of each file (what earlier tasks did there, from git); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -119,8 +124,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const emit = () => {
     if (done) return;
     done = true;
-    let cwd = process.cwd();
-    try { cwd = JSON.parse(input).cwd || cwd; } catch {}
+    let cwd = process.cwd(), sessionId = null;
+    try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; } catch {}
     let text = '';
     try {
       text = CARD_HEAD + digest(cwd, agent.name);
@@ -130,6 +135,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const moved = records.length ? repairNotes(home.root, records) : [];
         if (moved.length) text += `\nNotes: moved to their rebased commits: ${moved.join(', ')}`;
         if (records.length) noteLateCommits(home.root, records); // a task committed after its close (by hand or by a later task)
+        // turns other sessions left open for hours (API error, quota, crash): closed as interrupted, said once here
+        const gone = home.dir && !home.legacy ? expireOpen(home, sessionId) : [];
+        if (gone.length) { refreshTasks(home, true); text += `\nInterrupted (never closed, now out of tasks.md): ${gone.map((o) => `${o.next}${o.agent ? ` in ${o.agent}` : ''} "${o.prompt}"`).join('; ')}`; }
       } catch {}
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';

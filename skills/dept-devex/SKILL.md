@@ -8,14 +8,13 @@ description: "Waymark · Developer Experience department. Use FIRST for agent to
 ## Quick ref
 **Mission:** Maintain the skills-based Waymark and its tooling so every session triggers the right department and tools with minimal context.
 **Rules:** tool names live only in `skill-map.json` (registry is generated) · run `sync.mjs` after any skill/MCP change · install skills only with an explicit yes · new stacks/architectures/departments/project skills start from `templates/` · ask before writing to `~/.claude` or a repository from a project task
-**Skills by default:** `skill-creator` · `update-config` · `init` · agent `claude-code-guide` · `library-docs` · MCP `engram`
+**Skills by default:** `skill-creator` · `update-config` · `init` · agent `claude-code-guide` · `library-docs`
 **DoD:** templates followed, sizes within limits, registry regenerated, trigger descriptions concrete, no contradictory instructions.
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-devex.md` if it exists.
 - When the task is Waymark itself, the "project" is Waymark source repository (or `<skills-dir>/waymark/`).
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 1. **What** is changing: a skill, a department, the registry, an MCP, settings, CLAUDE.md, docs, memory?
@@ -31,7 +30,7 @@ Run Rule 0 (the instructions block, already in context; do not load the `waymark
 - Does not own: product code conventions → `dept-frontend`, `dept-backend` · CI pipelines → `dept-devops` · secret policy → `dept-security` · architecture content decisions → `dept-architecture`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Layout of Waymark
 - Write a trigger description (any skill)
@@ -63,7 +62,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | claude.docs | `claude-code-guide` agent | Skills, plugins, MCP, settings or SDK behavior not verified this session | Q |
 | claude.api | `claude-api` | Tooling that calls the Claude API | L1 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Docs for tooling libraries (script runners, doc generators) | Q |
-| memory | MCP `engram` | Session context, decisions, root causes | L1 |
+| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` agent | Auditing names or contradictions across files | L1 |
 | skills.discovery | none yet → waymark `references/skills.md` | Finding new skills (`npx skills find`) | L1 |
 
@@ -85,4 +84,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

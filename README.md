@@ -60,11 +60,11 @@ Nothing is preloaded "just in case". Loading is layered:
 
 | Layer | Loaded | Size |
 |---|---|---|
-| Instructions block in `CLAUDE.md` / `AGENTS.md` | always | ~5.6 k chars (~1.4 k tokens): levels, routing, compact Entry/Exit, learning, memory |
+| Instructions block in `CLAUDE.md` / `AGENTS.md` | always | ~6.5 k chars (~1.6 k tokens): levels, routing, the testigos, memory |
 | Department `dept-*/SKILL.md` | when a task arrives | ~6–8 k chars: rules, brief questions, tools to use, DoD |
 | Department `procedures.md` | only the section the task needs | one procedure |
 | Core `waymark/references/*`, stack and architecture profiles | only in the situations they list (first time in a project, L2+, learning, missing skill) | on demand |
-| Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, solved problems and gates, injected automatically (~400 tokens) |
+| Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, its latest learned memories (engram) and gates, injected automatically (~600 tokens) |
 | Project memory + *Project map* | every task | replaces re-exploring the project each session |
 
 A small L1 task loads the block plus one department and one procedure. Memory (project map, verified gate commands, engram) avoids re-discovering the same things every session.
@@ -166,13 +166,13 @@ Nothing personal ships in this repository: no stack, no preferences, no projects
 | File | Fills itself when… |
 |---|---|
 | `profile.md` | a project of a new stack, package manager or architecture is detected |
-| `projects.md` (index) + `<project>/.waymark/memory.md` | you work in a project for the first time; then gates, gotchas and decisions as they are learned. The memory lives in the project, local and never committed |
+| `projects.md` (index) + `<project>/.waymark/memory.md` | you work in a project for the first time; it is the project manual (identity, map, gates, conventions), local and never committed. What each task learned goes to engram, saved by the end-of-turn hook and committed in `.engram/` |
 | `preferences.md` | you correct how the agent answers or delivers code |
 | `subagents.md` | a search or delegation rule proves wrong or missing |
 | `agent.md` | the installer records where your agent keeps skills and instructions |
 | `coexistence.md` | the installer finds another agent framework (see below) |
 
-The same layer serves every agent, so switching from Claude Code to Codex keeps your memory.
+The same layer serves every agent, so switching from Claude Code to Codex keeps your memory. Memory has three layers (`docs/adr/0015`): git holds what was done (commits, trailers, notes), engram what was learned (written by the hooks, shared by every agent, carried in `.engram/`), and `memory.md` the project manual.
 
 ### Living next to an orchestrator
 

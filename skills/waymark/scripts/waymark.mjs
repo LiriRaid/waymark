@@ -10,8 +10,9 @@
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
+//   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
-//   node waymark.mjs memory [<section>]     one section of the project memory (Solved problems, Conventions, Identity…); none → the section names
+//   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
@@ -30,6 +31,8 @@ import { pushNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { agentFrom } from './agents/index.mjs';
+import { engramBin } from './engram.mjs';
+import { learnedEntries } from './learned.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +45,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -104,6 +107,18 @@ function migration(cwd) {
   return home.legacy ? `migrate: this project's memory and record are still in ~/.waymark (docs/adr/0007). Move them into ${home.root}/.waymark/ (local, excluded from git, any agent resumes from it): node "${script('migrate-memory.mjs')}" --project "${home.root}" shows the plan, --apply on yes (backup first); the old location works until 2.1.0.` : '';
 }
 
+// The learned layer (docs/adr/0015): engram installed, and memory.md without the learned sections engram replaced.
+function learnedLayer(cwd) {
+  const out = [];
+  if (!engramBin()) out.push('engram: not installed. The learned layer (docs/adr/0015) needs it: engram_<version>_<os>_<arch> from https://github.com/Gentleman-Programming/engram/releases (verify checksums.txt), on the PATH; then each agent\'s MCP with engram setup <claude-code|codex|opencode|gemini-cli>. Until then Waymark keeps git and memory.md.');
+  const home = projectHome(cwd);
+  try {
+    const n = home.legacy ? 0 : learnedEntries(read(home.memory)).length;
+    if (n) out.push(`learned: ${home.memory.replace(/\\/g, '/')} still holds ${n} learned entries (Solved problems, Gotchas, Decisions), which now live in engram: node "${script('waymark.mjs')}" learned shows the plan, --apply on yes (history.md keeps their text).`);
+  } catch {}
+  return out.join('\n');
+}
+
 function agents() {
   const fresh = found().filter((a) => !a.connected);
   const stale = fresh.filter((a) => a.full && /waymark:(pointer|begin)/.test(read(a.path)));
@@ -163,6 +178,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => mcpFit(cwd));
   await add(skillFit);
   await add(() => migration(cwd));
+  await add(() => learnedLayer(cwd));
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
   await add(agents);

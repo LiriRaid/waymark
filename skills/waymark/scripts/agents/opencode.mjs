@@ -18,6 +18,7 @@ import { patchFiles } from './codex.mjs';
 
 export const name = 'opencode';
 export const instructions = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+export const preContext = false; // tool.execute.before cannot add context: the plugin appends the pack to the result (tool.execute.after)
 export const lacks = []; // no code-review skill in OpenCode: its review is waymark.mjs review
 export const out = claudeOut; // the plugin reads these shapes
 export const dumpDir = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'opencode');

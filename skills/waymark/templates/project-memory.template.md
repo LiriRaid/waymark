@@ -52,16 +52,6 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 ## Conventions specific to this project
 - …
 
-## Solved problems
-Searched by symptom at Recall. One entry per problem that took more than one attempt; keep the dead ends, they are what saves time next time.
-<!-- - [YYYY-MM-DD] Symptom: <what the user saw> · Root cause: <real cause> · Fix: <what worked, file:line> · Did not work: <attempts and why> · Cost: <attempts / requests> -->
-
-## Gotchas
-- …
-
-## Decisions (ADR log)
-- [YYYY-MM-DD] <decision> — <why>
-
 ## Repeated procedures
 Count how often a project-specific procedure happens. At 2 → propose a project skill.
 | Procedure | Times | Project skill |

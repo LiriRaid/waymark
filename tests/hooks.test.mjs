@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-test-'));
+process.env.WAYMARK_ENGRAM = ''; // never the real engram: a test that needs it points this at a fake
 process.env.WAYMARK_HOME = home;
 const agentsHome = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-agents-')); // never the real ~/.codex, ~/.gemini…
 process.env.WAYMARK_AGENTS_HOME = agentsHome;
@@ -644,7 +645,7 @@ test('stop hook: without project memory, a Q turn leaves no record (with memory:
 });
 
 // ---- Step 2: project memory in <project>/.waymark/ (docs/adr/0007) ----
-const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip, confirmTasks, workspaceSiblings } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip, confirmTasks, workspaceSiblings, expireOpen: expireOpenT } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { planFor, apply } = await import(`file://${SCRIPTS}/migrate-memory.mjs`);
 const tmpRepo = (name) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), `waymark-${name}-`));
@@ -1885,7 +1886,7 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
-  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): before your first change to a file, W pack <files…>.*W memory <section> \(Solved problems: 2 · /);
+  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): the hook hands you W pack before your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2057,8 +2058,8 @@ test('OpenCode adapter: the SDK messages dump (question answers, skill tool, app
 test('install-hooks: Gemini gets its own event names and matcher; OpenCode gets the plugin with the scripts folder in place', async () => {
   const { planHooks, pluginText } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   const { settings, steps } = planHooks({ general: { x: 1 } }, { scripts: '/s/waymark/scripts', agent: 'gemini' });
-  assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterAgent']);
-  assert.equal(steps.length, 4);
+  assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterAgent', 'AfterTool']);
+  assert.equal(steps.length, 5);
   assert.deepEqual(settings.hooks.BeforeTool, [{ matcher: 'run_shell_command|write_file|replace', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent gemini' }] }]);
   assert.deepEqual(settings.general, { x: 1 }, 'the rest of the settings stays');
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'gemini' }).steps, [], 'idempotent');
@@ -2278,4 +2279,152 @@ test('OpenCode: a tool lasts from time.start to time.end; the plugin\'s version 
   assert.equal(at('tool_result') - at('tool_use'), 40000);
   assert.equal(turnInputs(lines, '/w/p').agent, '1.18.34');
   assert.match(fs.readFileSync(path.join(SCRIPTS, 'agents', 'opencode-plugin.js'), 'utf8'), /agent_version/);
+});
+
+// ---- three layers of memory (docs/adr/0015): engram written by the hooks, Recordar by the hook, pending tasks close ----
+// A fake engram: logs each call's args (one JSON line) and answers `context` with two observations.
+const fakeEngram = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-engram-'));
+  temps.push(dir);
+  const log = path.join(dir, 'calls.jsonl'), bin = path.join(dir, 'engram.mjs');
+  fs.writeFileSync(bin, `import fs from 'node:fs';
+const a = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + '\\n');
+if (a[0] === 'version') console.log('engram 3.1.0');
+if (a[0] === 'context') console.log('## Memory from Previous Sessions\\n\\n### Recent Observations\\n- [learning] **2026-10-06 · T4 · precios**: Aprendido: el ahorro vive en la entity\\n- [learning] **2026-10-06 · T3 · faq**: Aprendido: grupo con nombre accesible');
+if (a[0] === 'sync' && a[1] !== '--import') { fs.mkdirSync('.engram/chunks', { recursive: true }); fs.writeFileSync('.engram/chunks/c1.jsonl.gz', 'x'); }
+`);
+  return { bin, calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []) };
+};
+const withEngram = async (bin, fn) => { const prev = process.env.WAYMARK_ENGRAM; process.env.WAYMARK_ENGRAM = bin; try { return await fn(); } finally { process.env.WAYMARK_ENGRAM = prev; } };
+
+test('engram layer: the close saves the Aprendido under the project slug (config pinned), a commit stages .engram/, chunks import once, the card reads the latest', async () => {
+  const e = await import(`file://${SCRIPTS}/engram.mjs`);
+  const repo = memRepo('engram-layer'), h = projectHome(repo), fake = fakeEngram();
+  await withEngram(fake.bin, async () => {
+    const rec = { id: '2026-10-06 · T1', agent: 'codex', prompt: 'contador en rojo', files: [path.join(repo, 'a.ts')], commits: ['abcdef123456'], decisions: [{ chosen: 'Rojo al pasar 500' }], cierre: '## Cierre · x\nResultado: hecho\nAprendido: reusar el rojo de errores ← html:89' };
+    assert.equal(e.saveLearned(h, rec), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repo, '.engram', 'config.json'), 'utf8')), { project_name: h.slug });
+    const save = fake.calls().find((c) => c[0] === 'save');
+    assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · contador en rojo', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
+    assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
+    assert.equal(e.saveLearned(h, { ...rec, cierre: 'Resultado: hecho' }), false, 'no Aprendido, nothing to learn');
+    assert.equal(e.stageForCommit(h), true);
+    assert.match(gitT(repo, 'diff', '--cached', '--name-only').stdout, /\.engram\/chunks\/c1\.jsonl\.gz[\s\S]*\.engram\/config\.json|\.engram\/config\.json[\s\S]*\.engram\/chunks\/c1\.jsonl\.gz/);
+    fs.writeFileSync(path.join(repo, '.engram', 'manifest.json'), '{}');
+    const state = path.join(home, 'engram-import-test.json');
+    assert.deepEqual([e.importChunks(h, state), e.importChunks(h, state)], [true, false], 'once per manifest change');
+    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible']);
+  });
+  assert.deepEqual([e.saveLearned(h, { id: 'x', cierre: 'Aprendido: y' }), e.learnedLines(h)], [false, []], 'no engram: a no-op, Waymark keeps git and memory.md');
+});
+
+test('Recordar by the hook: the first edit of each file in a task gets its pack (once); the end-of-turn hook counts it as the memory searched', async () => {
+  const { packContext, packedFiles } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const repo = memRepo('recordar-hook'), state = path.join(home, `packed-${n}.json`);
+  fs.writeFileSync(path.join(repo, 'a.ts'), '1\n'); gitT(repo, 'add', 'a.ts'); gitT(repo, 'commit', '-q', '-m', 'by hand');
+  const hook = (file) => ({ cwd: repo, session_id: 'sp', tool_name: 'Edit', tool_input: { file_path: path.join(repo, file) } });
+  const first = await packContext(hook('a.ts'), claude, state);
+  assert.match(first || '', /^Waymark memory for the file you are changing[\s\S]*a\.ts:\n  - [0-9a-f]{8} · by hand \(no task record\)/);
+  assert.equal(await packContext(hook('a.ts'), claude, state), null, 'once per file and task');
+  assert.match(await packContext(hook('b.ts'), claude, state) || '', /b\.ts: no earlier task or commit/);
+  assert.equal(packedFiles('sp', 0, state).size, 2);
+  assert.equal(await packContext({ ...hook('a.ts'), tool_input: { file_path: path.join(os.homedir(), '.waymark', 'x.md') } }, claude, state), null, 'memory files are exempt');
+  assert.deepEqual([claude.preContext, (await import(`file://${SCRIPTS}/agents/codex.mjs`)).preContext, (await import(`file://${SCRIPTS}/agents/opencode.mjs`)).preContext, (await import(`file://${SCRIPTS}/agents/gemini.mjs`)).preContext], [true, true, false, false]);
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const lines = [prompt('cambia el texto'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
+  const g = cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines), packed: 1 });
+  assert.equal(g.steps.find((s) => s.id === 'memory').pass, true, 'the hook handed the pack over: no agent step needed');
+});
+
+test('Recordar by the hook, end to end: OpenCode and Gemini get the pack with the result (after-tool); Codex before the tool, with no permissionDecision', () => {
+  const repo = memRepo('recordar-e2e');
+  const env = { ...process.env, WAYMARK_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'wm-packed-')) };
+  temps.push(env.WAYMARK_HOME);
+  const runTool = (agent, payload) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'tool-hook.mjs'), '--agent', agent], { input: JSON.stringify({ cwd: repo, ...payload }), env, encoding: 'utf8' }).stdout || '{}');
+  const oc = runTool('opencode', { hook_event_name: 'PostToolUse', session_id: 'o1', tool_name: 'edit', tool_input: { filePath: path.join(repo, 'a.ts') } });
+  assert.match(oc.hookSpecificOutput?.additionalContext || '', /a\.ts: no earlier task or commit/);
+  const gm = runTool('gemini', { hook_event_name: 'AfterTool', session_id: 'g1', tool_name: 'replace', tool_input: { file_path: path.join(repo, 'a.ts') } });
+  assert.deepEqual([gm.hookSpecificOutput?.hookEventName, /a\.ts:/.test(gm.hookSpecificOutput?.additionalContext || '')], ['AfterTool', true]);
+  const transcript = path.join(env.WAYMARK_HOME, 'no-turn.jsonl');
+  fs.writeFileSync(transcript, '');
+  const cx = runTool('codex', { hook_event_name: 'PreToolUse', session_id: 'c1', transcript_path: transcript, tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch\n*** Update File: b.ts\n*** End Patch' } });
+  assert.deepEqual(Object.keys(cx.hookSpecificOutput || {}).sort(), ['additionalContext', 'hookEventName'], 'Codex 0.160 drops the context when permissionDecision is allow');
+  assert.match(cx.hookSpecificOutput.additionalContext, /b\.ts: no earlier task or commit/);
+});
+
+test('install-hooks: Gemini also gets AfterTool (the pack with the result); Claude Code and Codex keep their four hooks', async () => {
+  const { planHooks } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
+  assert.deepEqual(Object.keys(planHooks({}, { agent: 'gemini', scripts: '/s' }).settings.hooks), ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterAgent', 'AfterTool']);
+  assert.deepEqual(Object.keys(planHooks({}, { agent: 'claude', scripts: '/s' }).settings.hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+  assert.match(JSON.stringify(planHooks({}, { agent: 'gemini', scripts: '/s' }).settings.hooks.AfterTool), /tool-hook\.mjs\\" --agent gemini.*run_shell_command\|write_file\|replace|run_shell_command\|write_file\|replace.*tool-hook\.mjs/);
+});
+
+test('pending tasks close by time: a turn another session left open over two hours becomes an interrupted record; the current session\'s stays', () => {
+  const repo = memRepo('interrupted'), h = projectHome(repo), now = new Date();
+  fs.writeFileSync(path.join(repo, '.waymark', 'open.json'), JSON.stringify({
+    old: { at: new Date(now - 3 * 3600000).toISOString(), next: '2026-10-06 · T2', agent: 'gemini', prompt: '¿por dónde voy?' },
+    mine: { at: new Date(now - 5 * 3600000).toISOString(), next: '2026-10-06 · T2', agent: 'claude', prompt: 'sigue' },
+    fresh: { at: new Date(now - 600000).toISOString(), next: '2026-10-06 · T2', agent: 'codex', prompt: 'x' } }));
+  const gone = expireOpenT(h, 'mine', now);
+  assert.deepEqual(gone.map((o) => o.agent), ['gemini']);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(repo, '.waymark', 'open.json'), 'utf8'))).sort(), ['fresh', 'mine']);
+  const rec = readRecords(h.log).pop();
+  assert.deepEqual([rec.kind, rec.agent, rec.task, rec.prompt], ['interrupted', 'gemini', '2026-10-06 · T2', '¿por dónde voy?']);
+  assert.equal(verifyChain(readRecords(h.log)).ok, true);
+});
+
+test('pending tasks close by record: a later task that passes the testigo clears "sin resolver"; a follow-up done closes its ▶', () => {
+  const repo = memRepo('sin-resolver', '- ▶ [2026-10-06 · T1] contador a medias\n'), h = projectHome(repo);
+  appendRecord(repo, { id: '2026-10-06 · T1', agent: 'claude', at: new Date().toISOString(), cierre: 'Resultado: parcial\nAprendido: a medias', unresolved: ['no pack'], evaluation: { score: '9/10', steps: { Recordar: false, Decision: true } } });
+  refreshTasks(h, true);
+  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8'), /2026-10-06 · T1 · claude \| parcial · 1 sin resolver/);
+  const t1b = { id: '2026-10-06 · T1b', agent: 'codex', at: new Date().toISOString(), cierre: 'Resultado: hecho\nAprendido: terminado', unresolved: [], evaluation: { score: '10/10', steps: { Recordar: true, Decision: true } } };
+  appendRecord(repo, t1b);
+  writeTaskLine(h, t1b);
+  refreshTasks(h, true);
+  const tasks = fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8');
+  assert.match(tasks, /2026-10-06 · T1 · claude \| parcial \|/, 'Recordar passed later: no longer "sin resolver"');
+  assert.doesNotMatch(fs.readFileSync(h.memory, 'utf8'), /▶ \[2026-10-06 · T1\]/, 'the follow-up done closed the ▶ (any agent)');
+});
+
+test('fewer responses: a department loaded earlier in the session owns a task routed by the line alone (C1); the reminder brings git status (C2) and no rule twice (C3)', async () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const lines = [prompt('otro cambio'), say('Waymark → L1 · dept-frontend'), PROC('dept-frontend'), PACK(), ...askWithId('q1', '¿Cómo?', ['A', 'B'], 'A'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
+  const judge = (sessionDepts) => cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines), sessionDepts });
+  const loaded = judge(['dept-devex', 'dept-frontend']);
+  assert.deepEqual([loaded.dept.declared, loaded.missing], ['dept-frontend', []], 'invoked in an earlier task of this session: the line is enough');
+  assert.ok(judge([]).missing.some((m) => /no owner department was invoked/.test(m)), 'never loaded in the session: invoke it once');
+  const { gitLine, REMINDER } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const repo = memRepo('gitline');
+  fs.writeFileSync(path.join(repo, 'x.ts'), '1\n');
+  assert.match(gitLine(repo), /^ Git \(read now\): [^·]+ · \d+ changed: .*\?\? x\.ts/);
+  assert.equal(gitLine(path.join(os.tmpdir(), 'no-such-dir-wm')), '');
+  assert.ok(REMINDER.full.length < 400 && !/procedures\.md section|browser verification|Independent tool calls/.test(REMINDER.full), 'the block holds the rules once');
+});
+
+test('learned move: Solved problems, Gotchas and Decisions go to engram once; memory.md keeps the manual, history.md the moved text', async () => {
+  const { learnedEntries, moveLearned } = await import(`file://${SCRIPTS}/learned.mjs`);
+  const repo = memRepo('learned-move'), h = projectHome(repo), fake = fakeEngram();
+  fs.appendFileSync(h.memory, '\n## Solved problems\nSearched by symptom.\n- [2026-10-01] Symptom: X fails · Root cause: Y · Fix: Z\n\n## Gotchas\n- …\n- CRLF breaks edits\n\n## Decisions (ADR log)\n- [YYYY-MM-DD] <decision> — <why>\n- [2026-10-02] Use pnpm — lockfile\n\n## Project skills\n- none\n');
+  assert.deepEqual(learnedEntries(fs.readFileSync(h.memory, 'utf8')).map((e) => [e.section, e.type]), [['Solved problems', 'bugfix'], ['Gotchas', 'learning'], ['Decisions', 'decision']], 'placeholders skipped');
+  assert.equal(await withEngram(fake.bin, () => moveLearned(h)), 3);
+  const saves = fake.calls().filter((c) => c[0] === 'save');
+  assert.deepEqual(saves.map((c) => [c[1], c[c.indexOf('--type') + 1]]), [['X fails', 'bugfix'], ['CRLF breaks edits', 'learning'], ['Use pnpm', 'decision']]);
+  const mem = fs.readFileSync(h.memory, 'utf8');
+  assert.ok(!/## (Solved problems|Gotchas|Decisions)/.test(mem) && /## Identity/.test(mem) && /## Project skills\n- none/.test(mem), mem);
+  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'history.md'), 'utf8'), /moved to engram[\s\S]*Symptom: X fails[\s\S]*Use pnpm/);
+  assert.equal(await withEngram(fake.bin, () => moveLearned(h)), 0, 'nothing left');
+  fs.appendFileSync(h.memory, '\n## Gotchas\n- again\n');
+  assert.equal(moveLearned(h), null, 'no engram: nothing moved, nothing removed');
+  assert.match(fs.readFileSync(h.memory, 'utf8'), /## Gotchas\n- again/);
+});
+
+test('git commit detection: the command run, not the word in a log or grep', async () => {
+  const { GIT_COMMIT } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  for (const c of ['git commit -m "x"', 'git add a.ts && git commit -m x', 'git -C ../api commit -m x', 'git -c user.name=t commit -m x', 'cd repo; git commit -F -']) assert.ok(GIT_COMMIT.test(c), c);
+  for (const c of ['git log --oneline | grep commit', 'git show HEAD --stat # last commit', 'echo "git commit later"', 'git log --grep=commit']) assert.ok(!GIT_COMMIT.test(c), c);
 });

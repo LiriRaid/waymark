@@ -17,10 +17,11 @@ import { readTail } from '../transcript.mjs';
 export const name = 'gemini';
 const HOME = () => process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
 export const instructions = path.join(HOME(), 'GEMINI.md');
+export const preContext = false; // BeforeTool cannot add context: the pack goes with the result (AfterTool)
 export const lacks = []; // no code-review skill in Gemini CLI: its review is waymark.mjs review
 
 // The core's event names → Gemini's.
-const EVENT = { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', Stop: 'AfterAgent' };
+const EVENT = { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' };
 export const out = {
   context: (event, text) => ({ hookSpecificOutput: { hookEventName: EVENT[event] || event, additionalContext: text } }),
   deny: (reason) => ({ decision: 'deny', reason }),

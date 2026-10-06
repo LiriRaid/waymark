@@ -15,6 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
+import { stageForCommit } from './engram.mjs';
 import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -80,6 +81,9 @@ export function checkTrailer(command, cwd = process.cwd()) {
   return why ? `Waymark: the trailer "Waymark-Task: ${id}" ${why}, so the end-of-turn hook would record this task as ${ids.next} and the commit would disagree with its record. Commit with "Waymark-Task: ${ids.next}" and use the same ID in the Cierre heading.` : null;
 }
 
+// `git commit` as the command run (global options such as -C <dir> or -c k=v before it), not a word in a log or grep.
+export const GIT_COMMIT = /(?:^|[;&|(]\s*|\n\s*)git(?:\s+-{1,2}[\w-]+(?:[=\s]+(?!commit\b)\S+)?)*\s+commit\b/;
+
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
@@ -88,6 +92,8 @@ export function gate(hook, agent) {
   if (c.command !== undefined) {
     const trailer = checkTrailer(c.command, cwd);
     if (trailer) return trailer;
+    // the learned memory rides in the commit: export what is new to .engram/ and stage it before git commits
+    if (GIT_COMMIT.test(c.command)) { try { const home = projectHome(cwd); if (home.dir && !home.legacy) stageForCommit(home); } catch {} }
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
   }
   const files = c.files.filter((f) => !exempt(f));
@@ -98,15 +104,55 @@ export function gate(hook, agent) {
 }
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+// Recordar by the hook (docs/adr/0015): the first edit of each project file in a task gets that file's `pack` (what
+// earlier tasks did there) as context, so the routine never depends on the agent remembering it. Claude Code and Codex
+// take it before the tool runs; OpenCode and Gemini CLI with the tool's result (their after-tool hook). The files
+// handed over are kept per session and task (packed state), and the end-of-turn hook reads them for the testigo.
+export const PACKED = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.packed.json');
+const readPacked = (file = PACKED()) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
+// The files whose pack this session's current task already got (task = since its last close). → Set of normalized paths.
+export function packedFiles(session, since = 0, file = PACKED()) {
+  const st = readPacked(file)[session || 'unknown'];
+  return new Set(st && st.since === since ? st.files : []);
+}
+export async function packContext(hook, agent, file = PACKED()) {
+  const c = agent.call(hook), cwd = hook.cwd || process.cwd();
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return null; // a project with Waymark's memory
+  // the project's own files: not outside its root (scratch), not Waymark's or engram's memory
+  const root = norm(home.root);
+  const files = (c?.files || []).filter((f) => { const p = norm(path.resolve(cwd, f)); return p.startsWith(`${root}/`) && !/\/\.(waymark|engram)\//.test(p); });
+  if (!files.length) return null;
+  let records = [];
+  try { records = readRecords(home.log); } catch {}
+  const session = hook.session_id || 'unknown', since = taskStart(records, session);
+  const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(path.resolve(cwd, f))));
+  if (!fresh.length) return null;
+  const { pack } = await import('./waymark.mjs');
+  const text = pack(cwd, fresh);
+  const all = readPacked(file);
+  for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map((f) => norm(path.resolve(cwd, f)))] };
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
+  return `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}`;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const agent = agentFrom();
   let input = '', done = false;
-  const run = () => {
+  const run = async () => {
     if (done) return;
     done = true;
     try {
-      const deny = gate(JSON.parse(input), agent);
-      if (deny) process.stdout.write(JSON.stringify(agent.out.deny(deny)));
+      const hook = JSON.parse(input), after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
+      if (!after) {
+        const deny = gate(hook, agent);
+        if (deny) { process.stdout.write(JSON.stringify(agent.out.deny(deny))); return; }
+      }
+      if (after || agent.preContext) {
+        const text = await packContext(hook, agent);
+        if (text) process.stdout.write(JSON.stringify(agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text)));
+      }
     } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });

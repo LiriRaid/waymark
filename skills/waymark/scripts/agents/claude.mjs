@@ -30,6 +30,7 @@ export const out = {
 };
 
 export const instructions = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+export const preContext = true; // a pre-tool hook can add context and let the tool run (additionalContext, no permissionDecision)
 export const lacks = []; // routine steps this agent cannot do (recorded as not applicable); Claude Code has them all
 export const note = () => ''; // how this agent does what the routine names in Claude terms (added to the reminder and the gate)
 

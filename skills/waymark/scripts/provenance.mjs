@@ -142,6 +142,22 @@ export function closeOpen(home, session, closedId) {
   return true;
 }
 
+// A turn another session left open for over `maxAge` (an API error, the quota, a crash) is interrupted: it leaves
+// open.json and a chained {kind: "interrupted"} record keeps it (docs/adr/0015). The current session's own turn stays.
+// → the entries closed (then tasks.md must be regenerated).
+export const INTERRUPTED_AFTER = 2 * 3600000;
+export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED_AFTER) {
+  const file = openFile(home), open = readOpen(home);
+  const gone = Object.entries(open).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) > maxAge);
+  if (!file || !gone.length) return [];
+  for (const [k, o] of gone) {
+    delete open[k];
+    appendRecord(home.root, { kind: 'interrupted', agent: o.agent || null, at: now.toISOString(), session: k, task: o.next, startedAt: o.at, prompt: o.prompt });
+  }
+  if (Object.keys(open).length) fs.writeFileSync(file, JSON.stringify(open, null, 1)); else fs.rmSync(file, { force: true });
+  return gone.map(([, o]) => o);
+}
+
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
 const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
 const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
@@ -317,7 +333,9 @@ export function tasksMarkdown(home, now = new Date()) {
   const notes = wip.length - (withId.length || tasks.length);
   let hidden = 0; // in-progress lines left out of tasks.md by the budget
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
-  const result = (r) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length ? ` · ${r.unresolved.length} sin resolver` : '');
+  // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
+  const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
+  const result = (r, later = []) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : '');
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home, { last: 8 }), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
@@ -334,7 +352,7 @@ export function tasksMarkdown(home, now = new Date()) {
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
     ...(lastRec.evaluation ? [(() => { const failed = Object.entries(lastRec.evaluation.steps || {}).filter(([, v]) => !v).map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}`; })()] : []), ''] : [];
   const rows = records.slice(-8).reverse()
-    .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
+    .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (\`waymark.mjs tasks [<task ID>]\`: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
@@ -625,8 +643,8 @@ export function appendRecord(cwd, record) {
   if (commit) {
     const text = JSON.stringify(record);
     if (addNote(cwd, commit, text)) {
-      const { id, kind, agent, at, session, cwd: where, files, commits } = record;
-      line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits }).filter(([, v]) => v !== undefined));
+      const { id, kind, agent, at, session, cwd: where, files, commits, department } = record; // department: what the session loaded (docs/adr/0015)
+      line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, department }).filter(([, v]) => v !== undefined));
       line.note = { commit, sha: noteSha(text) };
     }
   }

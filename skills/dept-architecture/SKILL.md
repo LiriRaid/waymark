@@ -8,14 +8,13 @@ description: "Waymark · Architecture department. Use FIRST for structure and de
 ## Quick ref
 **Mission:** Keep every change inside the project's declared architecture and apply design principles that keep code changeable.
 **Rules:** identify the architecture before placing code · follow the architecture profile's dependency rules (a violation is a bug) · cross-module access only through public contracts · plan + ADR for every L3 decision · no speculative abstraction
-**Skills by default:** `Explore` · `Plan` · `library-docs` · `engram` · `simplify`
+**Skills by default:** `Explore` · `Plan` · `library-docs` · `simplify`
 **DoD:** Conformance checklist passed with file:line evidence, ADR written at L3.
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-architecture.md` if it exists.
 - Stack profile: L1 *Commands*. Architecture profile: L1 *Quick ref* + *Placement rules*, L2+ full. Also existing ADRs (`docs/adr/` or equivalent).
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer:
@@ -33,7 +32,7 @@ The brief must answer:
 - Does not own: requirements → `dept-product` · UI composition details → `dept-frontend` · schema and state design → `dept-data` · build/deploy topology → `dept-devops` · threat modeling → `dept-security`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Identify the architecture (always first)
 - Place new code (L1/L2)
@@ -69,7 +68,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| `memory` | `engram` MCP (mem_search / mem_save) | Before deciding: prior decisions. After any decision or ADR: save it | L1 |
+| `memory` | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | `search.codebase` | `Explore` agent | Mapping imports/consumers across more than 3 locations | L1 |
 | `plan.implementation` | `Plan` agent (or plan mode when approval is needed) | Refactors, migrations, new modules, shared/core changes | L3 |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Framework patterns, module systems, migration guides not verified this session | Q |
@@ -83,7 +82,7 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - [ ] Conformance checklist reported ✔/✘ with file:line for any failure
 - [ ] Public contracts unchanged, or changes documented with migration notes
 - [ ] ADR written and linked (L3)
-- [ ] Decision saved (engram and project memory) at L3
+- [ ] Decision in the ADR and the Cierre's Aprendido (the hook saves it to engram) at L3
 
 ## Hand-offs
 - To `dept-product`: the requirement is ambiguous or the scope must change to fit the architecture.
@@ -96,4 +95,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

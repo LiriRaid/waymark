@@ -13,10 +13,9 @@ description: "Waymark · Frontend department. Use FIRST, before any ui-* skill, 
 **DoD:** Works in the running app, a11y basics pass, all states handled, tests cover criteria.
 
 ## Entry
-Run Rule 0 (the instructions block, already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-frontend.md` if it exists.
 - Stack profile: L1 *Commands* + *Conventions by department → Frontend*, L2+ full. UI work: also the *Quick ref* of `dept-ux-ui`.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer:
@@ -34,7 +33,7 @@ The brief must answer:
 - Does not own: visual and interaction design decisions → `dept-ux-ui` · API contracts → `dept-backend` · global state, caching and data models → `dept-data` · module placement rules → `dept-architecture` · build/deploy → `dept-devops`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - New component / screen (L2)
 - Bug fix (L1/L2)
@@ -102,4 +101,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

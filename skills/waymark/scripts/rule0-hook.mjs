@@ -2,7 +2,8 @@
 // Waymark · the per-prompt link of the chain (docs/adr/0001, 0002, 0008). Registered by install-hooks.mjs as a
 // per-prompt hook (Claude Code: UserPromptSubmit; another agent: same script with `--agent <name>`). Runs locally
 // (0 tokens); only this reaches the model:
-// - the Rule 0 reminder: full (~140 tokens) when the last reply did not open with "Waymark →", one line (~60) when it did;
+// - the Rule 0 reminder: full (~70 tokens) when the last reply did not open with "Waymark →", one line (~10) when it did;
+// - the repo now: its stack (package manager, versions) and a one-line git status (branch, changed files);
 // - the task ID of a new task and of a follow-up of the last recorded one (~25 tokens), from the project's provenance
 //   log; the Cierre heading carries it.
 // It also takes a git snapshot (the end-of-turn hook diffs against it) and marks the turn open in .waymark/open.json, so
@@ -12,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
 import { taskIds, saveSnapshot, markOpen, projectHome } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
@@ -26,11 +28,18 @@ try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^
 
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
 // The rules themselves live in the instructions block; this only points at the steps a new session skips most.
-const full =
-  'Waymark Rule 0 (the instructions block) — first text: "Waymark → L<n> or Q · dept-<owner> · skills: …" (e.g. "Waymark → L1 · dept-frontend"); first tool call: that dept-* skill. ' +
-  'Before the first change: its procedures.md section, L2+ waymark.mjs pack <files>, git status --short, then one choice-window call with the options and every decision that shapes the work (the user decides; never offer browser verification). ' +
-  'Close changes with "## Cierre · <task ID>" (Resultado · Evidencia · Aprendido ≤200 characters). The end-of-turn hook blocks once per testigo of waymark/routine.json that applies. Independent tool calls in one response. User\'s language. Only L0 skips.';
-const short = 'Waymark Rule 0 as in your last reply: routing line + owner dept-* skill first; opener before the first edit; the user decides every real decision (options first); "## Cierre · <task ID>" after changes. Independent tool calls in one response.';
+// The rules live once, in the block; the reminder points at the steps a turn skips most (docs/adr/0015, C3).
+const full = 'Waymark Rule 0 (the instructions block): routing line first ("Waymark → L<n> or Q · dept-<owner> · skills: …"); a department not loaded yet in this session → its dept-* skill; one choice-window call before the first change; "## Cierre · <task ID>" after changes. User\'s language.';
+const short = 'Waymark Rule 0 as in your last reply.';
+// The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
+export function gitLine(root, max = 8) {
+  const r = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', timeout: 2000 });
+  if (r.status !== 0) return '';
+  const [head, ...files] = r.stdout.split('\n').filter(Boolean);
+  const branch = head.replace(/^##\s*/, '').replace(/\.\.\.\S+/, '').trim();
+  const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${l.slice(3)}`).join(', ');
+  return ` Git (read now): ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
+}
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
   return ` Task ID for the Cierre heading: new task → ${ids.next}${ids.followUp ? ` · follow-up of ${ids.last} → ${ids.followUp}` : ''}.`;
@@ -51,6 +60,7 @@ export function reminder(hook, agent) {
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
+  try { repo += gitLine(projectHome(cwd).root); } catch {}
   return agent.out.context('UserPromptSubmit', (st.openedWithWaymark ? short : full) + ids + repo + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR));
 }
 

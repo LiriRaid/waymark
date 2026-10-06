@@ -6,7 +6,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 1. Read project memory → architecture. If present, load `../waymark/architectures/<slug>.md`. Available: `screaming`, `hexagonal`, `clean`, `layered`, `feature-sliced`, `modular-monolith`.
 2. If absent, detect it with the folder signals of `waymark` `../waymark/references/project-detection.md` and each profile's *Detect* line.
 3. Signals mixed or absent → state the best match and its confidence in the brief; ask the user before an L3 change and record the answer in project memory.
-4. Search `engram` (mem_search) for prior architecture decisions on this project.
+4. Search the learned memory (`engram search "<words>"` or mem_search) for prior architecture decisions on this project.
 
 ### Place new code (L1/L2)
 1. Apply the decision list in the architecture profile → *Placement rules*.
@@ -27,7 +27,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 3. Define the module's public contract (exported interface, events, DTOs) before its internals.
 4. Prefer strangler-style incremental migration over big-bang rewrites; keep old and new paths working until cut-over.
 5. Verify framework/library migration steps with `library-docs`; use the framework CLI MCP when the stack has one.
-6. Write an ADR (below) and save the decision (`engram` mem_save and project memory).
+6. Write an ADR (below) and put the decision in the Cierre's Aprendido (the end-of-turn hook saves it to engram).
 
 ### Review for conformance
 1. Run every item in the architecture profile → *Conformance checklist* (Grep patterns where given).

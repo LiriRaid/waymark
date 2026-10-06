@@ -3,7 +3,7 @@
 Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the task needs.
 
 ### New feature (L2/L3)
-1. Search memory (`engram` mem_search) with the feature keywords; reuse prior decisions instead of re-deriving them.
+1. Search the learned memory (`engram search` or mem_search) with the feature keywords; reuse prior decisions instead of re-deriving them.
 2. Restate the request in one sentence: "As <actor> I want <capability> so that <outcome>".
 3. List unknowns. For each, decide: ask the user (see *Ask vs assume*) or assume and record the assumption.
 4. Write requirements that meet the 29148 quality attributes: necessary, unambiguous, singular, feasible, verifiable, bounded. One per line, numbered (R1, R2…).

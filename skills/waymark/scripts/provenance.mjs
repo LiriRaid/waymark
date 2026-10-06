@@ -71,22 +71,33 @@ export function projectHome(cwd) {
 }
 
 export const projectSlug = (cwd) => projectHome(cwd).slug;
+
+// The other projects of the same workspace: the folders next to this project's root that hold a .waymark/memory.md,
+// when that parent is a workspace (its name says "workspace", or it holds a .code-workspace file). A generic parent
+// (Proyectos/) with unrelated projects is not one. → [projectHome] of each sibling.
+export function workspaceSiblings(root) {
+  if (!root) return [];
+  const parent = path.dirname(path.resolve(root));
+  if (parent === path.resolve(root)) return [];
+  let names = [];
+  try { names = fs.readdirSync(parent); } catch { return []; }
+  if (!/workspace/i.test(path.basename(parent)) && !names.some((n) => n.endsWith('.code-workspace'))) return [];
+  return names.map((n) => path.join(parent, n)).filter((d) => norm(d) !== norm(root) && fs.existsSync(path.join(d, '.waymark', 'memory.md'))).map((d) => projectHome(d));
+}
 export const logFile = (cwd) => projectHome(cwd).log;
 
-// Keeps <root>/.waymark/ out of git through .git/info/exclude (untracked; the user's decision, docs/adr/0007) and writes
-// its README once. → true when the exclude line is in place (or the root is not a repo).
+// Keeps <root>/.waymark/ out of git through the project's .gitignore (added once, created if missing) and writes its
+// README once. → true when the ignore line is in place.
 export function ensureLocal(home) {
   if (!home?.dir) return false;
   fs.mkdirSync(home.dir, { recursive: true });
   const readme = path.join(home.dir, 'README.md');
   if (!fs.existsSync(readme)) fs.writeFileSync(readme, README);
-  const r = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: home.root, encoding: 'utf8', timeout: 1500 });
-  if (r.status !== 0) return true;
-  const file = path.resolve(home.root, r.stdout.trim());
+  // the project's .gitignore, so every clone and every agent keeps it out of git
+  const file = path.join(home.root, '.gitignore');
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
   if (/^\/?\.waymark\/?\s*$/m.test(text)) return true;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}# Waymark: project memory, local only\n.waymark/\n`);
   return true;
 }
@@ -96,12 +107,12 @@ const README = `# .waymark: this project's Waymark memory (local, not committed)
 Any agent (Claude Code, Codex, Cursor, a new session) resumes the work from this folder:
 
 - \`tasks.md\`: where the work stands: in progress, pending, next step, and the tasks already done. Generated at each task close; do not edit it.
-- \`memory.md\`: the project memory. *Work in progress* has one line per task (≤200 characters, written by the end-of-turn hook from the Cierre), then identity, verified gate commands, conventions and solved problems.
+- \`memory.md\`: the project memory. *Work in progress* has one line per open task (≤200 characters, written by the end-of-turn hook from the Cierre; a task done leaves it), then identity, verified gate commands, conventions and solved problems.
 - \`provenance.jsonl\`: one line per closed task, chained (each holds the hash of the previous one). A task with a commit keeps its whole record (the request, the user's decisions, files, gates, evidence, the automatic evaluation) as a git note on that commit (\`git notes --ref=waymark show <commit>\`, \`waymark.mjs tasks\`) and a stub here; one without a commit keeps it here.
 - \`open.json\`: turns that started and have not ended (one per session); shown in tasks.md under *Started, not closed*.
-- \`history.md\` (when present): *Work in progress* lines moved out of memory.md whole (closed beyond the last 5, or over 200 characters), never deleted. Read it only for the past.
+- \`history.md\` (when present): *Work in progress* lines moved out of memory.md whole (older closed lines, or over 200 characters), never deleted. Read it only for the past.
 
-Excluded from git through \`.git/info/exclude\`.
+Kept out of git through the project's \`.gitignore\`.
 `;
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one

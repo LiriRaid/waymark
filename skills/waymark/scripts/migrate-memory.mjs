@@ -4,7 +4,7 @@
 //   node migrate-memory.mjs --all              every project in ~/.waymark/projects/ not migrated yet
 //   add --apply to write; without it this is a dry run that only prints the plan.
 // Per project: back up the old files, copy memory.md and provenance.jsonl byte for byte (the hash chain must verify the
-// same after the copy), write .waymark/README.md and tasks.md, add .waymark/ to .git/info/exclude, leave a `Moved:` stub
+// same after the copy), write .waymark/README.md and tasks.md, add .waymark/ to the project's .gitignore, leave a `Moved:` stub
 // in the old memory file (the bridge then skips it), remove the old log and point the projects.md row to the new file.
 // It never overwrites: a project that already has <root>/.waymark/memory.md is skipped. Offline, no dependencies.
 import fs from 'node:fs';
@@ -31,7 +31,7 @@ export function planFor(old) {
   plan.steps.push(`back up the old files to ${BACKUPS()}/<stamp>-migrate-memory/${old.slug}/`,
     `copy ${from.memory} → ${to.memory}`,
     fs.existsSync(from.log) ? `copy ${from.log} → ${to.log} (${records.length} records, chain ${chain.ok ? 'ok' : `broken at record ${chain.at}, copied as is`})` : 'no provenance log yet (it starts at the next closed task)',
-    `write ${to.dir}/README.md and tasks.md; add .waymark/ to the repo's .git/info/exclude`,
+    `write ${to.dir}/README.md and tasks.md; add .waymark/ to the project's .gitignore`,
     `leave a Moved: stub in ${from.memory}${fs.existsSync(from.log) ? `, remove ${from.log}` : ''}; point the projects.md row to ${to.memory}`);
   return plan;
 }

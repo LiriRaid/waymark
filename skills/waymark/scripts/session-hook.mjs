@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings } from './provenance.mjs';
 import { repairNotes } from './notes.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
@@ -70,6 +70,17 @@ export function digest(cwd, agentName = 'claude') {
   const solved = section('\n' + best.text, 'Solved problems').filter((l) => l.startsWith('-')).length;
   const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
   out.push(`Commands (W = ${cmd}): before your first change to a file, W pack <files…> (what earlier tasks did there, from git); on demand, W memory <section> (${solved ? `Solved problems: ${solved} · ` : ''}Conventions · Identity) and W tasks.`);
+  // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
+  // the card's cap trims this before the commands
+  try {
+    const sib = workspaceSiblings(home.root).slice(0, 4).map((h) => {
+      const closed = readTaskRecords(h, { last: 3 }).filter((r) => r.id).slice(-3).reverse(); // the newest 3, newest first
+      const openIds = section('\n' + read(h.memory), 'Work in progress').map((l) => l.match(/^-\s*▶\s*\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
+      const lines = closed.map((r) => `  - ${r.id} · ${r.agent || '?'} · ${clip(aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')) || '', 120)}`);
+      return `- ${path.basename(h.root)}${openIds.length ? ` (open ▶ ${openIds.join(', ')})` : ''}:${lines.length ? `\n${lines.join('\n')}` : ' no task closed yet'}`;
+    });
+    if (sib.length) out.push(`Workspace (projects next to this one; whole records: W tasks --workspace):\n${sib.join('\n')}`);
+  } catch {}
   return out.join('\n');
 }
 

@@ -36,6 +36,13 @@ After the 3e tests, three gaps kept Waymark from being one supply chain:
 - **With the push:** when the agent pushes the task, the end-of-turn hook pushes `refs/notes/waymark` to the same remote. Pushing at all is the user's request. A failure is reported, never forced.
 - **After a rebase or amend:** at session start, one `git log` of HEAD finds each task whose note sits on a commit the branch no longer has. It copies that note to the branch's commit carrying the same `Waymark-Task`. The note is copied, not moved, so the chained stub still matches. Git's config is never changed.
 
+### After the API/FE work (2026-10-05 · T14, the user's picks)
+A large task in an API, followed by its front end, showed four gaps:
+- **The front end's session did not know what the API had done.** The card now lists the other projects of the workspace: what each left open (▶) and its last 3 closed tasks, with their Aprendido. `waymark.mjs tasks --workspace` lists all of them. A workspace is the parent folder of the project when its name says "workspace" or it holds a `.code-workspace` file; a generic parent (`Proyectos/`) with unrelated projects is not one.
+- **`.waymark/` goes in the project's `.gitignore`**, added once and created if missing, so every clone keeps it out of git. This replaces 0007's `.git/info/exclude`.
+- **The % without pairs:** a model with no calibration pairs of its own gets an estimate from a calibrated model of its family (claude-*, gpt-*), marked "sin calibrar", and the % is still asked. This replaces 3e-4c's "no pairs, no %".
+- **Codex's sandbox**, not Waymark, made its pnpm commands fail. It has no network, cannot write pnpm's store in AppData ("unable to open database file"), and cannot read folders outside the project. A dev server in watch mode never ends, so Codex cuts it. This is fixed in the user's Codex configuration (`[sandbox_workspace_write]` `network_access` and `writable_roots`, learn.chatgpt.com/docs/config-file) and noted in the machine's Environment. No code changed for it.
+
 ## Alternatives considered
 - **OpenCode through its SQLite database:** rejected. It is not documented; the SDK is.
 - **Keep ✔ lines (the newest 5):** rejected by the user. It is the duplication this step removes.

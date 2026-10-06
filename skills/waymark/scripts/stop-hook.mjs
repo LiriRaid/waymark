@@ -437,10 +437,10 @@ export function questionRecord(turn, meta = {}) {
 export const NEW_SESSION = 200000;
 export function summaryLine(id, ev, context = 0) {
   const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ');
-  const ask = /^(none|default|pairs:[12])$/.test(String(ev.quotaBy || ''))
+  const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
-  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (estimado)` : ''}${fresh}${ask}`;
+  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (${String(ev.quotaBy).startsWith('family:') ? `sin calibrar, factor de ${ev.quotaBy.slice(7)}` : 'estimado'})` : ''}${fresh}${ask}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -35,6 +35,13 @@ export function estimate(usage, model) {
     const perPct = pairs.reduce((s, p) => s + p.total / p.pct, 0) / pairs.length;
     return { pct: round(total / perPct), by: `pairs:${pairs.length}` };
   }
+  // no pairs of its own: another calibrated model of the same family (claude-*, gpt-*) gives an uncalibrated estimate
+  const family = String(model || '').match(/^[a-z]+-/)?.[0];
+  const kin = family ? readPairs().filter((p) => String(p.model || '').startsWith(family) && p.model !== model) : [];
+  if (kin.length) {
+    const perPct = kin.reduce((s, p) => s + p.total / p.pct, 0) / kin.length;
+    return { pct: round(total / perPct), by: `family:${kin[kin.length - 1].model}` };
+  }
   return { pct: null, by: 'none' };
 }
 

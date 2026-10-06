@@ -644,7 +644,7 @@ test('stop hook: without project memory, a Q turn leaves no record (with memory:
 });
 
 // ---- Step 2: project memory in <project>/.waymark/ (docs/adr/0007) ----
-const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip, confirmTasks } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { projectHome, ensureLocal, tasksMarkdown, taskSummary, refreshTasks, readRecords, closeOpen, readTaskRecords, writeTaskLine, readNotes, tidyWip, confirmTasks, workspaceSiblings } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { planFor, apply } = await import(`file://${SCRIPTS}/migrate-memory.mjs`);
 const tmpRepo = (name) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), `waymark-${name}-`));
@@ -658,7 +658,7 @@ const oldMemory = (slug, root, wip = '- ▶ task A (2026-10-01 · T2): NEXT step
   fs.writeFileSync(file, `# Project: ${slug}\n\nPath: ${root}\n\n## Work in progress\n${wip}\n\n## Identity\n- Stack: test\n`);
   return file;
 };
-const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8');
+const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'); // where Waymark keeps .waymark/ out of git
 const same = (a, b) => assert.equal(path.resolve(a).toLowerCase(), path.resolve(b).toLowerCase());
 
 test('project home: nearest .waymark/memory.md walking up, else the old memory (bridge), else the git root, else the home layout', () => {
@@ -682,14 +682,47 @@ test('project home: nearest .waymark/memory.md walking up, else the old memory (
   fs.rmSync(old);
 });
 
-test('ensureLocal: .waymark/ excluded through .git/info/exclude once, README written', () => {
+test('ensureLocal: .waymark/ added once to the project\'s .gitignore (created if missing, kept if there), README written', () => {
   const repo = tmpRepo('exclude');
   const h = projectHome(repo);
   ensureLocal(h); ensureLocal(h);
-  assert.equal(excludeOf(repo).match(/^\.waymark\/$/gm).length, 1);
+  const ignore = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
+  assert.equal(ignore.match(/^\.waymark\/$/gm).length, 1);
   assert.match(fs.readFileSync(path.join(repo, '.waymark', 'README.md'), 'utf8'), /tasks\.md/);
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), 'x');
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).stdout, '', 'git does not see .waymark/');
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).stdout.trim(), '?? .gitignore', 'git sees only the .gitignore, never .waymark/');
+  const other = tmpRepo('exclude-own');
+  fs.writeFileSync(path.join(other, '.gitignore'), 'node_modules/');
+  ensureLocal(projectHome(other));
+  assert.equal(fs.readFileSync(path.join(other, '.gitignore'), 'utf8'), 'node_modules/\n# Waymark: project memory, local only\n.waymark/\n', 'appended after the user\'s lines');
+});
+
+test('quota: a model with no pairs of its own gets an uncalibrated estimate from a calibrated model of its family, and the % is still asked', async () => {
+  const { estimate, pairsFile } = await import(`file://${SCRIPTS}/calibrate.mjs`);
+  fs.mkdirSync(path.dirname(pairsFile()), { recursive: true });
+  fs.appendFileSync(pairsFile(), JSON.stringify({ model: 'claude-big-9', pct: 2, total: 2000000 }) + '\n');
+  const est = estimate({ total: 3000000 }, 'claude-small-9');
+  assert.ok(est.pct > 0 && est.by.startsWith('family:claude-'), `the family's pairs give it an estimate: ${JSON.stringify(est)}`);
+  assert.deepEqual(estimate({ total: 3000000 }, 'gpt-other'), { pct: null, by: 'none' }, 'another family borrows nothing');
+  const line = summaryLine('x', { steps: { Decision: true }, score: '1/1', tokens: 3e6, quotaPct: 3, quotaBy: 'family:claude-big-9' });
+  assert.match(line, /≈ 3% de la cuota \(sin calibrar, factor de claude-big-9\) · ¿qué % marcó tu cuota/);
+});
+
+test('workspace: the card of a project shows the other projects of its workspace (open ▶ and the last closed); a generic parent is no workspace', () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-acme-workspace-'));
+  temps.push(ws);
+  const mk = (name, wip = '') => { const d = path.join(ws, name); fs.mkdirSync(path.join(d, '.waymark'), { recursive: true }); fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), `# P\n\n## Work in progress\n${wip}\n## Identity\n- x\n`); return d; };
+  const api = mk('acme-api', '- ▶ [2026-10-05 · T3] el FE debe usar /v2/login'), fe = mk('acme-web');
+  appendRecord(api, { id: '2026-10-05 · T2', agent: 'claude', cierre: '## Cierre · 2026-10-05 · T2\nResultado: hecho\nEvidencia: e\nAprendido: login con OTP en /v2/login' });
+  assert.deepEqual(P.workspaceSiblings(fe).map((h) => path.basename(h.root)), ['acme-api']);
+  const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: fe }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
+  assert.match(card, /Workspace \(projects next to this one[^\n]*\n- acme-api \(open ▶ 2026-10-05 · T3\):\n {2}- 2026-10-05 · T2 · claude · login con OTP en \/v2\/login/);
+  const generic = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-projects-'));
+  temps.push(generic);
+  for (const n of ['a', 'b']) { fs.mkdirSync(path.join(generic, n, '.waymark'), { recursive: true }); fs.writeFileSync(path.join(generic, n, '.waymark', 'memory.md'), '# P\n'); }
+  assert.deepEqual(P.workspaceSiblings(path.join(generic, 'a')), [], 'a parent that is no workspace: unrelated projects stay out');
+  fs.writeFileSync(path.join(generic, 'x.code-workspace'), '{}');
+  assert.deepEqual(P.workspaceSiblings(path.join(generic, 'a')).map((h) => path.basename(h.root)), ['b'], 'a .code-workspace file makes it one');
 });
 
 test('migration: dry run writes nothing; apply moves memory and log byte for byte, chain intact, stub, exclude, backup', () => {
@@ -799,7 +832,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   const r2 = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: bare, session_id: 's-step2b', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.ok(r2.stdout);
   assert.equal(readRecords(path.join(bare, '.waymark', 'provenance.jsonl')).length, 1);
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: bare, encoding: 'utf8' }).stdout, '', 'git does not see .waymark/');
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: bare, encoding: 'utf8' }).stdout.trim(), '?? .gitignore', 'git does not see .waymark/, only the .gitignore that keeps it out');
   const logOnly = tmpRepo('mig-log');
   fs.mkdirSync(path.join(logOnly, '.waymark'));
   fs.writeFileSync(path.join(logOnly, '.waymark', 'provenance.jsonl'), '{}\n');
@@ -1568,7 +1601,7 @@ test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; t
 });
 
 // ---- 3e-2: git as the source of truth (docs/adr/0012) ----
-const P = { readTaskRecords, writeTaskLine, taskSummary, tidyWip, confirmTasks };
+const P = { readTaskRecords, writeTaskLine, taskSummary, tidyWip, confirmTasks, workspaceSiblings };
 const commitTask = (repo, id, file = 'a.ts') => {
   fs.writeFileSync(path.join(repo, file), `export const x = ${Math.random()};\n`);
   gitT(repo, 'add', file); gitT(repo, 'commit', '-q', '-m', `x\n\nWaymark-Task: ${id}`);

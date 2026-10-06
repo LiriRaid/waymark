@@ -23,7 +23,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
 import { incidentsAt } from './incidents.mjs';
 import { pushNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
@@ -256,6 +256,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (sub === 'check') {
     const items = await check(process.cwd());
     console.log(items.length ? `Waymark check · ${items.length} pending (offer each with the choice window; run its command only after the user's yes):\n${items.map((t) => `- ${t}`).join('\n')}` : 'Waymark check: nothing pending.');
+  } else if (sub === 'tasks' && rest[0] === '--workspace') { // every project of the workspace, this one first
+    const here = projectHome(process.cwd());
+    for (const h of [here, ...workspaceSiblings(here.root)]) console.log(`## ${path.basename(h.root)}\n${tasks(h.root, null)}\n`);
   } else if (sub === 'tasks') {
     console.log(tasks(process.cwd(), rest[0] || null));
   } else if (sub === 'tidy') {

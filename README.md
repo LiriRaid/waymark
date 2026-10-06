@@ -46,11 +46,12 @@ There is no installer script. [`INSTALL.md`](INSTALL.md) is written **for the ag
 2. Clones the repo and backs up anything already installed.
 3. Offers to remove the third-party skills this one replaces.
 4. Copies the skills and creates your private layer `~/.waymark/`.
-5. Writes a managed block of general working rules into the agent's instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…). The rest of that file stays as it is.
-6. Proposes MCP servers (`context7`; stack-specific ones only for stacks you use) and runs `sync.mjs`.
-7. Lists every file it created or modified, asks you to restart, and gives you a smoke test.
+5. Writes a managed block of general working rules into each agent's instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…). The rest of that file stays as it is.
+6. Registers Waymark's hooks in each agent: settings for Claude Code, Codex and Gemini CLI, a plugin for OpenCode.
+7. Sets up engram, the learned memory every agent shares (installs it after your yes if it is missing), proposes MCP servers (`context7`; stack-specific ones only for stacks you use) and runs `sync.mjs`.
+8. Lists every file it created or modified, asks you to restart, and gives you a smoke test.
 
-It can configure every agent on the machine in one run (Claude Code, Codex, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: project memory keeps a *Work in progress* section (task, done, next, open) rewritten after every task.
+It can configure every agent on the machine in one run (Claude Code, Codex, OpenCode, Gemini CLI, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: `.waymark/tasks.md` and the git notes say where the work stands, and engram what each task learned.
 
 When a new version is published, `waymark.mjs check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it. Node.js 18+ is needed only for `sync.mjs`.
 
@@ -61,7 +62,8 @@ Nothing is preloaded "just in case". Loading is layered:
 | Layer | Loaded | Size |
 |---|---|---|
 | Instructions block in `CLAUDE.md` / `AGENTS.md` | always | ~6.5 k chars (~1.6 k tokens): levels, routing, the testigos, memory |
-| Department `dept-*/SKILL.md` | when a task arrives | ~6–8 k chars: rules, brief questions, tools to use, DoD |
+| Reminder (hook) | every prompt | ~70 tokens (~10 once the last reply followed the routine): the task ID, the repo's stack and a one-line git status |
+| Department `dept-*/SKILL.md` | once per session per department | ~5–7 k chars: rules, brief questions, tools to use, DoD |
 | Department `procedures.md` | only the section the task needs | one procedure |
 | Core `waymark/references/*`, stack and architecture profiles | only in the situations they list (first time in a project, L2+, learning, missing skill) | on demand |
 | Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, its latest learned memories (engram) and gates, injected automatically (~600 tokens) |
@@ -70,6 +72,8 @@ Nothing is preloaded "just in case". Loading is layered:
 A small L1 task loads the block plus one department and one procedure. Memory (project map, verified gate commands, engram) avoids re-discovering the same things every session.
 
 The bigger saving is not the size of each attempt but the **number of attempts**: a task costs *attempts × cost per attempt*. Waymark's fields (the ask and what each screenshot points at, evidence before the fix, reuse, verified APIs, the two-strike rule) aim at one attempt per task. Large tasks keep their plan as checkpoints in the project memory, so a context compaction does not make the agent guess what was done.
+
+Measured on real tasks ([`docs/audit-context.md`](docs/audit-context.md)), each model response re-reads the whole context (~58 k tokens in Claude Code), so the cost driver is the number of responses. The hooks do the routine's own steps instead of the agent: the git status comes with each prompt, each file's history at its first edit, a department loads once per session, and what was learned is saved at the close. A step the agent could forget is a step the hook does.
 
 ### MCP servers only where their framework is used
 

@@ -66,7 +66,12 @@ export const Waymark = async ({ client, $, directory }) => {
       const prompt = (output.parts || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
       if (/^\s*Waymark: this L/.test(prompt)) return; // the stop-hook's own block reason, sent back above
       const { file } = await dump(input.sessionID);
-      add(input.sessionID, context(await run('rule0-hook.mjs', { session_id: input.sessionID, prompt, transcript_path: file })));
+      const o = await run('rule0-hook.mjs', { session_id: input.sessionID, prompt, transcript_path: file });
+      if (o.decision === 'block') { // the context brake: the message never reaches the model (a throw stops chat.message)
+        await client.tui?.showToast?.({ body: { message: o.reason, variant: 'warning' } })?.catch?.(() => {});
+        throw new Error(o.reason);
+      }
+      add(input.sessionID, context(o));
     },
     'experimental.chat.system.transform': async (input, output) => {
       const id = input?.sessionID || [...pending.keys()].pop();

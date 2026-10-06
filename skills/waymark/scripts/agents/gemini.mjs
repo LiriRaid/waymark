@@ -23,6 +23,7 @@ export const lacks = []; // no code-review skill in Gemini CLI: its review is wa
 // The core's event names → Gemini's.
 const EVENT = { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' };
 export const out = {
+  blockPrompt: (reason) => ({ decision: 'deny', reason }), // BeforeAgent: the message never reaches the model and leaves the history
   context: (event, text) => ({ hookSpecificOutput: { hookEventName: EVENT[event] || event, additionalContext: text } }),
   deny: (reason) => ({ decision: 'deny', reason }),
   block: (reason) => ({ decision: 'deny', reason }), // AfterAgent: the reason goes back as a prompt and the agent continues

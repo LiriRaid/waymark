@@ -2457,3 +2457,73 @@ test('no secret reaches engram: the learned save and the learned move mask them'
   assert.doesNotMatch(save.join(' '), /hunter2|sk-live-123456789abcdef/);
   assert.match(save[2], /\[redactado\]/);
 });
+
+test('a task that changed no project file (a push the user asked for): a missing choice window is recorded, not blocked; the message never says "changed files"', async () => {
+  const { blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const lines = [prompt('haz push por favor'), say('Waymark → L1 · dept-devops'), call('Skill', { skill: 'dept-devops' }), PROC('dept-devops'), PACK(), call('Bash', { command: 'git push origin develop 2>&1 | tail -6' })];
+  const g = cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines), outside: true });
+  assert.deepEqual(g.changed, []);
+  assert.deepEqual(g.missing, [], 'not blocked');
+  const dec = g.steps.find((s) => s.id === 'decision');
+  assert.deepEqual([dec.pass, dec.enforce], [false, 'record'], 'still recorded and scored');
+  assert.match(blockReason({ level: 1, changed: [], missing: ['x'] }), /^Waymark: this L1 task \(no project file changed\) and is missing/);
+  assert.match(blockReason({ level: 2, changed: ['a.ts'], missing: ['x'] }), /^Waymark: this L2 turn changed files/);
+});
+
+test('context brake: a message to a session past 150k is stopped before the model once, kept for the next session, and brought by its card', async () => {
+  const { brake, BRAKE_TOKENS } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`), codex = await import(`file://${SCRIPTS}/agents/codex.mjs`);
+  const repo = memRepo('brake'), state = path.join(home, `brake-${n}.json`);
+  const hook = (session, prompt = 'agrega un buscador al FAQ') => ({ cwd: repo, session_id: session, prompt });
+  assert.equal(BRAKE_TOKENS, 150000);
+  assert.equal(brake(hook('s1'), claude, { context: 90000 }, state), null, 'a small session is never braked');
+  const held = brake(hook('s1'), claude, { context: 180000 }, state);
+  assert.equal(held.block.decision, 'block');
+  assert.match(held.block.reason, /~180k tokens[\s\S]*Open a new session[\s\S]*Send it again here to continue/);
+  assert.equal(brake(hook('s1'), claude, { context: 190000 }, state), null, 'once per session: resent, it continues');
+  assert.equal(heldPrompt(projectHome(repo)), 'agrega un buscador al FAQ');
+  assert.equal(heldPrompt(projectHome(repo)), '', 'brought once, then cleared');
+  assert.equal(brake(hook('s2'), codex, { context: 200000 }, state).block.decision, 'block', 'Codex 0.160 takes the same shape');
+  const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
+  assert.equal(brake(hook('s3'), gemini, { context: 200000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
+  assert.match(brake(hook('s4'), { out: {} }, { context: 200000 }, state).line, /~200k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
+});
+
+test('context brake in OpenCode: the plugin shows the reason and throws from chat.message, so the message never reaches the model', async () => {
+  const { pluginText } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-ocbrake-'));
+  temps.push(dir);
+  const file = path.join(dir, 'waymark.mjs');
+  fs.writeFileSync(file, pluginText('/s/waymark/scripts'));
+  const toasts = [];
+  const $ = (strings, ...values) => {
+    if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) };
+    const script = String(values[0]).split(/[\\/]/).pop();
+    const r = { stdout: Buffer.from(JSON.stringify(script === 'rule0-hook.mjs' ? { decision: 'block', reason: 'Waymark: this session holds ~180k' } : {})) };
+    return { nothrow: () => ({ quiet: async () => r }) };
+  };
+  const client = { session: { messages: async () => ({ data: [] }) }, tui: { showToast: async (x) => toasts.push(x) } };
+  const { Waymark } = await import(`file://${file.replace(/\\/g, '/')}`);
+  const hooks = await Waymark({ client, $, directory: dir });
+  await assert.rejects(hooks['chat.message']({ sessionID: 's1' }, { parts: [{ type: 'text', text: 'agrega un buscador' }] }), /holds ~180k/);
+  assert.equal(toasts[0].body.variant, 'warning');
+});
+
+test('one project-skills folder: a skill in .agents/skills (Codex, OpenCode, Gemini) is mirrored to .claude/skills for Claude Code and back; newer wins, nothing deleted', async () => {
+  const { mirrorProjectSkills } = await import(`file://${SCRIPTS}/project-skills.mjs`);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-pskills-'));
+  temps.push(root);
+  const put = (dir, name, text, mtime) => { const d = path.join(root, dir, name); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'SKILL.md'), text); fs.utimesSync(path.join(d, 'SKILL.md'), mtime, mtime); };
+  put('.agents/skills', 'flujo-add-section', 'by codex', new Date('2026-10-06T10:00:00Z'));
+  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), ['flujo-add-section → .claude/skills']);
+  assert.equal(fs.readFileSync(path.join(root, '.claude/skills/flujo-add-section/SKILL.md'), 'utf8'), 'by codex');
+  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), [], 'equal now: nothing to do');
+  put('.claude/skills', 'flujo-add-section', 'improved by claude', new Date('2026-10-06T12:00:00Z'));
+  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), ['flujo-add-section → .agents/skills']);
+  assert.equal(fs.readFileSync(path.join(root, '.agents/skills/flujo-add-section/SKILL.md'), 'utf8'), 'improved by claude');
+  put('.agents/skills', 'solo-codex', 'x', new Date('2026-10-06T10:00:00Z'));
+  assert.deepEqual(mirrorProjectSkills(root, { claude: false }), [], 'no Claude Code on the machine: no .claude copy');
+});

@@ -135,7 +135,7 @@ export function blockReason(gaps) {
   // field that changes goes as that line alone. Only a turn with no Cierre at all is asked for one.
   const noCierre = gaps.missing.some((m) => m.startsWith('the "## Cierre'));
   const then = noCierre ? 'then reply with the Cierre.' : 'then reply in one or two lines with what you did. Do not repeat the Cierre: the hook keeps the one you wrote; a field that changes goes as that one line (e.g. "Resultado: parcial (…)").';
-  return `Waymark: this L${gaps.level} turn changed files and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), ${then}`;
+  return `Waymark: this L${gaps.level} ${gaps.changed?.length ? 'turn changed files' : 'task (no project file changed)'} and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), ${then}`;
 }
 
 // The reply the hook judges: the last one when it holds the Cierre; after a block, the Cierre written earlier in the
@@ -388,7 +388,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked;
     const why = applies ? fails[s.id] || [] : [];
-    return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
+    // a task that changed no project file (a push, a commit, an install the user asked for): the action already ran, so
+    // a missing choice-window answer is recorded, not blocked (the pre-tool gate still stops file changes before asking)
+    const enforce = s.id === 'decision' && !changed.length ? 'record' : s.enforce;
+    return { id: s.id, label: s.label, enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
   });
   const missing = steps.filter((s) => s.applies && s.enforce === 'block').flatMap((s) => s.why);
   const findings = [...steps.filter((s) => s.applies && s.enforce !== 'block').flatMap((s) => s.why), ...extras];

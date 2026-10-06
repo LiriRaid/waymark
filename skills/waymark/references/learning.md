@@ -31,7 +31,7 @@ Format: `- [YYYY-MM-DD] <lesson> — <why> (source: <project>)`.
 
 **4. Consolidation (the skills evolve).** When a `## Learned notes` / `## Learned rules` list passes ~10 items, fold them into the body of the skill (the Procedure, Rules or Anti-patterns they refine), keep the meaning, and clear the list. Report it in the closing report.
 
-**5. Project skills.** When the same project-specific procedure has been done twice (project memory → *Repeated procedures*), or the user asks, generate a skill **inside the project**: `<project>/<project-skills-dir>/<slug>-<topic>/SKILL.md` from `templates/project-skill.template.md`, with the trigger phrases the user actually used. Register it in project memory and run `node scripts/sync.mjs`. Ask before writing into the repository; offer `.gitignore` if it should not be committed.
+**5. Project skills.** When the same project-specific procedure has been done twice (project memory → *Repeated procedures*), or the user asks, generate a skill **inside the project**: `<project>/.agents/skills/<slug>-<topic>/SKILL.md` (every agent reads it; the session hook mirrors it to `.claude/skills` for Claude Code, docs/adr/0016) from `templates/project-skill.template.md`, with the trigger phrases the user actually used. Register it in project memory and run `node scripts/sync.mjs`. Ask before writing into the repository; offer `.gitignore` if it should not be committed.
 
 **6. Three layers (docs/adr/0015).** git holds what was done (commits, notes); engram what was learned (the hook saves each Aprendido, `engram sync` carries it in `.engram/`); memory.md the project manual. Never `mem_save` by hand what the Cierre holds.
 

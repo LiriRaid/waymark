@@ -23,7 +23,7 @@ const HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 export const instructions = path.join(HOME(), 'AGENTS.md');
 export const preContext = true; // PreToolUse additionalContext alone (0.160 rejects permissionDecision allow without updatedInput)
 export const lacks = []; // routine steps this agent has no capability for (recorded as not applicable); its review is waymark.mjs review
-export const out = claudeOut; // same output shapes (verified in the hooks docs)
+export const out = claudeOut; // same output shapes, the prompt brake's {decision: block, reason} too (user_prompt_submit.rs, 0.160.1)
 
 const SKILL = /[\\/]([A-Za-z0-9:_-]+)[\\/]SKILL\.md\b/i;
 const READS = /\b(Get-Content|gc|cat|type|sed|head|tail|more|less|bat|awk)\b/i; // a read of the file, not a Test-Path or a listing

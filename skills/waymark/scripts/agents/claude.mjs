@@ -26,6 +26,7 @@ export const out = {
   context: (event, text) => ({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }),
   deny: (reason) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }),
   block: (reason) => ({ decision: 'block', reason }),
+  blockPrompt: (reason) => ({ decision: 'block', reason }), // UserPromptSubmit: the prompt never reaches the model; the user sees the reason
   notice: (text) => ({ systemMessage: text }), // shown to the user, not added to the model's context
 };
 

@@ -141,6 +141,12 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **The hook writes Work in progress:** at each close, the task's line is `- ✔|▶ [<task ID>] <Aprendido>` (✔ when Resultado is hecho), at most 200 characters (a longer Aprendido is clipped; the whole Cierre stays in the record). A follow-up replaces its task's line. Closed lines beyond the newest 5 and any line over 200 characters move whole to `history.md`. The testigo *Aprender* is gone: the Cierre already requires the Aprendido.
   - **tasks.md** reads the records back from the notes; *Last closed* names `git notes --ref=waymark show <commit>` as the full record.
   - **Code comments say how the code works, never task history:** task IDs, dates and "user's choice" markers are gone from the scripts (a test keeps them out), and the rule is in `dept-architecture` and the instructions block.
+- **Context brake, one project-skills folder, no-change tasks** (`docs/adr/0016`, the user's picks):
+  - **Context brake:** a message to a session past 150k tokens is stopped before the model once, kept for the next session and brought by its card. Claude Code and Codex block it, Gemini CLI denies it, OpenCode throws from `chat.message`.
+  - **One project-skills folder:** project skills live in `.agents/skills`, and the session hook mirrors them to `.claude/skills` for Claude Code.
+  - **No-change tasks:** a task that changed no project file (a push the user asked for) records a missing choice window instead of blocking.
+  - **One Cierre after a block:** the hook keeps the Cierre already written and applies the corrected lines.
+  - **No secrets in engram:** the engram save and the learned move mask secrets.
 - **Three layers of memory and fewer responses** (`docs/adr/0015`, the user's picks; the numbers in `docs/audit-context.md`):
   - **git** holds what was done, **engram** what was learned, **memory.md** the project manual.
   - The end-of-turn hook saves each Aprendido to engram with its CLI (topic = task ID, project = the slug pinned in `.engram/config.json`).

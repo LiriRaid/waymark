@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks } from './provenance.mjs';
 import { repairNotes, noteLateCommits } from './notes.mjs';
 import { importChunks, learnedLines } from './engram.mjs';
+import { mirrorProjectSkills } from './project-skills.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -89,6 +90,14 @@ export function digest(cwd, agentName = 'claude') {
   return out.join('\n');
 }
 
+// The message the context brake kept in .waymark/next-prompt.md, if under a day old; the file is removed once read.
+export function heldPrompt(home, now = Date.now()) {
+  const file = path.join(home.dir, 'next-prompt.md');
+  let text = '';
+  try { if (now - fs.statSync(file).mtimeMs < 86400000) text = fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '').trim(); fs.rmSync(file, { force: true }); } catch {}
+  return text.length > 1200 ? text.slice(0, 1199) + '…' : text;
+}
+
 // One line when neither a check nor this pointer happened in the last week.
 export function checkPointer(now = Date.now()) {
   let st = {};
@@ -126,7 +135,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     done = true;
     let cwd = process.cwd(), sessionId = null;
     try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; } catch {}
-    let text = '';
+    let text = '', held = '';
     try {
       text = CARD_HEAD + digest(cwd, agent.name);
       // a note a rebase or amend left on the old commit follows the task to its new commit
@@ -138,9 +147,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         // turns other sessions left open for hours (API error, quota, crash): closed as interrupted, said once here
         const gone = home.dir && !home.legacy ? expireOpen(home, sessionId) : [];
         if (gone.length) { refreshTasks(home, true); text += `\nInterrupted (never closed, now out of tasks.md): ${gone.map((o) => `${o.next}${o.agent ? ` in ${o.agent}` : ''} "${o.prompt}"`).join('; ')}`; }
+        held = home.dir && !home.legacy ? heldPrompt(home) : ''; // the context brake's message (docs/adr/0016), once
+        // a project skill one agent generated, there for every agent (.agents/skills ⇄ .claude/skills)
+        const mirrored = home.dir && !home.legacy ? mirrorProjectSkills(home.root) : [];
+        if (mirrored.length) text += `\nProject skills mirrored for every agent: ${mirrored.join(', ')}`;
       } catch {}
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
+    // after the cap: the user's own words are never cut by it
+    if (held) text += `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${held}`;
     try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}
     try { const c = coexistence(); if (c) text = (text ? text + '\n' : '') + c; } catch {}
     if (text) process.stdout.write(JSON.stringify(agent.out.context('SessionStart', text)));

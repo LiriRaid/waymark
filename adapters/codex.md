@@ -3,7 +3,7 @@
 | Key | Value |
 |---|---|
 | `<skills-dir>` | `~/.codex/skills` (*verify*: some versions read `~/.agents/skills`) |
-| `<project-skills-dir>` | `.agents/skills` (*verify*) |
+| `<project-skills-dir>` | `.agents/skills` (verified, codex-rs `host_roots.rs`, 0.160) |
 | `<instructions-file>` | `~/.codex/AGENTS.md` |
 | `<project-instructions-file>` | `AGENTS.md` at the project root |
 | Skill loading | native Agent Skills support (*verify* in the docs); otherwise read `SKILL.md` as the instructions block says |

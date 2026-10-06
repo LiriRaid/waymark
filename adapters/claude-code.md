@@ -3,7 +3,7 @@
 | Key | Value |
 |---|---|
 | `<skills-dir>` | `~/.claude/skills` |
-| `<project-skills-dir>` | `.claude/skills` |
+| `<project-skills-dir>` | `.agents/skills`, mirrored to `.claude/skills` (the only one Claude Code reads) by the session hook (`docs/adr/0016`) |
 | `<instructions-file>` | `~/.claude/CLAUDE.md` |
 | `<project-instructions-file>` | `CLAUDE.md` at the project root |
 | Skill loading | native (`Skill` tool, triggered by each skill's `description`) |

@@ -338,7 +338,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const render = () => [`# Tasks · ${home.slug}`, '',
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (\`waymark.mjs tasks [<task ID>]\`: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
-    ...(started.length ? ['## Started, not closed (the turn never ended: quota, crash, or still running)', ...started, ''] : []),
+    ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash)', ...started, ''] : []),
     ...(questions ? [`Preguntas (Q) desde el último cierre: ${questions} (provenance.jsonl, kind "Q")`, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,

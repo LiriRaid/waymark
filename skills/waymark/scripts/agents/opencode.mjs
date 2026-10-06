@@ -18,14 +18,14 @@ import { patchFiles } from './codex.mjs';
 
 export const name = 'opencode';
 export const instructions = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
-export const lacks = ['review']; // no code-review skill in OpenCode: recorded as not applicable
+export const lacks = []; // no code-review skill in OpenCode: its review is waymark.mjs review
 export const out = claudeOut; // the plugin reads these shapes
 export const dumpDir = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'opencode');
 
 const textOf = (parts) => (parts || []).filter((p) => p.type === 'text' && !p.synthetic).map((p) => p.text || '').join('\n');
 
 // The dumped messages → the core's lines (Claude Code .jsonl shape, canonical tool names).
-export function toLines(rows, cwd = process.cwd()) {
+export function toLines(rows, cwd = process.cwd(), version = null) { // version: OpenCode's, from the plugin (agent_version)
   const lines = [];
   let n = 0;
   const assistant = (ts, content, extra = {}) => lines.push({ type: 'assistant', timestamp: ts, message: { id: `oc-${n++}`, content, ...extra } });
@@ -33,7 +33,7 @@ export function toLines(rows, cwd = process.cwd()) {
     const ts = info.time?.created ? new Date(info.time.created).toISOString() : undefined;
     if (info.role === 'user') {
       const text = textOf(parts);
-      if (text.trim()) lines.push({ type: 'user', uuid: info.id, timestamp: ts, message: { role: 'user', content: text } });
+      if (text.trim()) lines.push({ type: 'user', uuid: info.id, timestamp: ts, ...(version ? { version } : {}), message: { role: 'user', content: text } });
       continue;
     }
     if (info.role !== 'assistant') continue;
@@ -43,13 +43,14 @@ export function toLines(rows, cwd = process.cwd()) {
       const st = p.state || {}, a = st.input || {}, id = p.callID || `oc-call-${n}`;
       const at = st.time?.start ? new Date(st.time.start).toISOString() : ts;
       const isError = st.status === 'error';
-      const res = () => lines.push({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(st.output ?? st.error ?? '').slice(0, 400) }] } });
+      const end = st.time?.end ? new Date(st.time.end).toISOString() : at; // a tool lasts from its start to its end
+      const res = () => lines.push({ type: 'user', timestamp: end, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(st.output ?? st.error ?? '').slice(0, 400) }] } });
       if (p.tool === 'question') {
         const qs = (a.questions || []).map((q) => ({ question: String(q.question || q.header || '').trim(), options: (q.options || []).map((o) => ({ label: String(o?.label ?? o) })) }));
         assistant(at, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { questions: qs } }]);
         const picked = st.metadata?.answers || [];
         const answers = Object.fromEntries(qs.map((q, i) => [q.question, [].concat(picked[i] || []).join(',')]).filter(([, v]) => v));
-        if (!isError && Object.keys(answers).length) lines.push({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
+        if (!isError && Object.keys(answers).length) lines.push({ type: 'user', timestamp: end, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
         else res();
         continue;
       }
@@ -70,7 +71,7 @@ export function toLines(rows, cwd = process.cwd()) {
   return lines;
 }
 
-export const read = (hook, bytes) => toLines(readTail(hook.transcript_path, bytes), hook.cwd);
+export const read = (hook, bytes) => toLines(readTail(hook.transcript_path, bytes), hook.cwd, hook.agent_version || null);
 
 export function call(hook) {
   const tool = hook.tool_name || '', input = hook.tool_input || {};
@@ -80,7 +81,7 @@ export function call(hook) {
   return null;
 }
 
-export const note = () => ' In OpenCode: invoke a department with the skill tool (name: dept-<owner>); the choice window is the question tool.';
+export const note = (skillsDir) => ` In OpenCode: invoke a department with the skill tool (name: dept-<owner>); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; the choice window is the question tool.`;
 
 // The dumped sessions of cwd, newest first (each dump's messages carry their session's directory in info.path.cwd).
 export function sessions(cwd) {

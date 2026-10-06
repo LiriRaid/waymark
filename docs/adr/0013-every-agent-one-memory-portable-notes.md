@@ -30,7 +30,7 @@ After the 3e tests, three gaps kept Waymark from being one supply chain:
 
 **One memory.**
 - **Work in progress** keeps only open (▶) tasks. A task done, or confirmed with `done`, leaves its line: its Aprendido lives in its record and in `tasks.md`. Older ✔ lines move to `history.md` at the next close.
-- **Recordar** applies at L2+ always, with or without engram. Waymark's own memory satisfies it (`waymark.mjs pack`, `memory`, `tasks`, or reading `.waymark/memory.md`). `mem_search` also counts, for whoever uses engram.
+- **Recordar** applies at L2+ always, with or without engram (every level since 0014). Waymark's own memory satisfies it (`waymark.mjs pack`, `memory`, `tasks`, or reading `.waymark/memory.md`). `mem_search` also counts, for whoever uses engram.
 
 **Notes that travel and survive.**
 - **With the push:** when the agent pushes the task, the end-of-turn hook pushes `refs/notes/waymark` to the same remote. Pushing at all is the user's request. A failure is reported, never forced.

@@ -342,7 +342,7 @@ test('3e-1: the decision is the choice window\'s answer, never the Cierre\'s wor
 });
 
 test('3e-1: an L1 Cierre is Resultado · Evidencia · Aprendido; older callers without ctx skip the ID and decision checks', () => {
-  const turn = currentTurn([prompt('typo en el título'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx eslint src/orders.service.mjs' }), MEM()]);
+  const turn = currentTurn([prompt('typo en el título'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), PACK(), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx eslint src/orders.service.mjs' }), MEM()]);
   const base = '## Cierre\nResultado: hecho\nEvidencia: observada el typo en el título\nAprendido: "x ← y"';
   assert.equal(checkCierre(turn, base), null);
   assert.match(checkCierre(turn, base.replace(/Evidencia: [^\n]*\n/, '')) || '', /Evidencia: observada/);
@@ -355,7 +355,7 @@ test('Cierre: a turn routed Q that changed files is checked as L2 and the routin
   const g = cierreGaps(currentTurn([...head, ...tail]), close);
   assert.equal(g.level, 2);
   assert.ok(g.missing.some((f) => /routed as a question/.test(f)));
-  assert.ok(g.missing.some((m) => /code-review did not run/.test(m)) && g.missing.some((m) => /run the build once/.test(m)), 'L2 with code: review and build block');
+  assert.ok(g.missing.some((m) => /no review ran/.test(m)) && g.missing.some((m) => /run the build once/.test(m)), 'L2 with code: review and build block');
   assert.equal(cierreGaps(currentTurn([...head, call('Skill', { skill: 'dept-frontend', args: 'L1' }), ...tail]), close).level, 1, 're-routed to L1 by tool call');
 });
 
@@ -849,6 +849,7 @@ test('open.json: the per-prompt hook marks the turn started; the end of the turn
   assert.equal(open['s-open'].prompt, 'arregla el login ya');
   const tasks = () => fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8');
   assert.match(tasks(), /## Started, not closed[^\n]*\n- \d{4}-\d\d-\d\d · T1 · started [^\n]* · "arregla el login ya"/, 'a turn that never ends (quota) still shows');
+  assert.match(tasks(), /## Started, not closed \([^)\n]*the turn reading this file[^)\n]*\)/, 'an agent reading it mid-turn finds its own turn there, not a hung one');
   const transcript = path.join(home, 't-open.jsonl');
   fs.writeFileSync(transcript, [prompt('¿qué hace esto?'), say('Waymark → Q · dept-qa'), call('Read', { file_path: FILE })].map((l) => JSON.stringify(l)).join('\n') + '\n');
   spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-open', last_assistant_message: 'Respuesta' }), env, encoding: 'utf8' });
@@ -1079,14 +1080,14 @@ test('codex adapter: without request_user_input, a question that ended the turn 
   assert.equal(cx.call({ tool_name: 'mcp__engram__mem_save', tool_input: {} }), null);
 });
 
-test('stop hook --agent codex: the task is recorded as codex and code-review does not apply', () => {
+test('stop hook --agent codex: the task is recorded as codex and waymark.mjs review is its review', () => {
   const { cwd, log } = fresh();
   const memFile = path.join(os.homedir(), '.waymark', 'projects', 'proj.md');
   const rows = [row('session_meta', { cli_version: '0.160.0' }), row('turn_context', { model: 'gpt-5.5' }),
     cxUser('t1', 'i1', 'agrega reintentos al servicio de pedidos'), cxSay('t1', 'Waymark → L2 · dept-backend · skills: ninguna'),
     cxCmd('t1', 'Get-Content C:/skills/dept-backend/SKILL.md'), cxCmd('t1', 'Get-Content C:/skills/dept-backend/procedures.md', 0, '### Endpoint'), cxCmd('t1', 'node C:/s/waymark/scripts/waymark.mjs pack src/orders.service.mjs'),
     cxAsk('call_9', [{ id: 'q', question: '¿Cómo?', options: [{ label: 'Backoff' }, { label: 'Cola' }] }]), cxAnswer('call_9', { q: { answers: ['Backoff'] } }),
-    cxEdit('t1', FILE), cxCmd('t1', 'node --check src/orders.service.mjs && npm run build'), cxEdit('t1', memFile), cxTokens(2000, 1500, 1000, 500)];
+    cxEdit('t1', FILE), cxCmd('t1', 'node --check src/orders.service.mjs && npm run build'), cxCmd('t1', 'node C:/s/waymark/scripts/waymark.mjs review src/orders.service.mjs'), cxEdit('t1', memFile), cxTokens(2000, 1500, 1000, 500)];
   const transcript = path.join(home, `t-codex-${n}.jsonl`);
   fs.writeFileSync(transcript, rows.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
@@ -1095,7 +1096,7 @@ test('stop hook --agent codex: the task is recorded as codex and code-review doe
   assert.ok(out.systemMessage && !out.decision, `not blocked: ${r.stdout}`);
   const rec = readLog(cwd).pop();
   assert.equal(rec.agent, 'codex');
-  assert.equal(rec.evaluation.steps.Review, undefined, 'no code-review capability: not applicable, not ✘');
+  assert.equal(rec.evaluation.steps.Review, true, 'waymark.mjs review counts where code-review does not exist');
   assert.equal(rec.evaluation.model, 'gpt-5.5');
   assert.deepEqual(rec.department.invoked, ['dept-backend'], 'the SKILL.md read is the invocation');
   assert.ok(fs.existsSync(log));
@@ -1318,7 +1319,7 @@ test('T2l Review: a follow-up that applies the review findings passes with the c
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
   const noReview = currentTurn([prompt('corrige los hallazgos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), MEM()]);
-  assert.match(checkCierre(noReview, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /code-review did not run/);
+  assert.match(checkCierre(noReview, cierre(id), undefined, undefined, ctxFor(cwd)) || '', /no review ran/);
   assert.equal(checkCierre(noReview, cierre(id), undefined, undefined, { ...ctxFor(cwd), taskTools: [{ name: 'Skill', input: { skill: 'code-review' } }] }), null);
 });
 
@@ -1464,7 +1465,7 @@ test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (
   const id = taskIds(cwd).next;
   const use = (tid, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name, input }] } });
   const res = (tid, isError = false) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: tid, content: isError ? 'error TS2322' : 'ok', is_error: isError }] } });
-  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     use('e', 'Edit', { file_path: FILE }), res('e'), use('t', 'Bash', { command: 'npx vitest run' }), res('t', true), use('d', 'Bash', { command: 'npx tsc --noEmit' }), res('d', true), MEM()]);
   const g = cierreGaps(turn, cierre(id), undefined, undefined, ctxFor(cwd));
   assert.ok(g.missing.some((m) => /the gate after the last code change failed \(npx tsc --noEmit\): fix it/.test(m)));
@@ -1477,7 +1478,7 @@ test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (
 test('3e-1 testigo gate: with no gate after the last code change, the repo typecheck the hook re-runs decides', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), MEM()]);
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), MEM()]);
   let asked = null;
   const withRun = (r) => ({ ...ctxFor(cwd), rerun: (files) => { asked = files; return r; } });
   const ok = cierreGaps(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', from: 'package.json', ok: true, s: 3, timedOut: false }));
@@ -1585,7 +1586,7 @@ test('3e-1 review fixes: a gate piped into grep is not failed by grep\'s exit; t
   const id = taskIds(cwd).next;
   const use = (tid, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: tid, name, input }] } });
   const res = (tid, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: tid, content: '', is_error: isError }] } });
-  const turn = (cmd) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+  const turn = (cmd) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     use('e', 'Edit', { file_path: FILE }), res('e', false), use('g', 'Bash', { command: cmd }), res('g', true), MEM()]);
   let runs = 0;
   const ctx = (r) => ({ ...ctxFor(cwd), rerun: () => { runs++; return r; } });
@@ -1916,7 +1917,7 @@ test('incidents: a testigo ✘ stays open until it passes in a later task; 3 fai
 test('3e-4 testigo procedure with position: read after the first change is ✘ (not blocked); read after a denied edit still counts as first', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd);
-  const head = [prompt('ajusta el skeleton'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' })];
+  const head = [prompt('ajusta el skeleton'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PACK()];
   const ask = askWithId('q1', '¿Altura?', ['3.5rem', 'Otra'], '3.5rem');
   const tail = [call('Bash', { command: 'npx tsc --noEmit' })];
   const judge = (lines) => cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines) });
@@ -2075,7 +2076,9 @@ test('OpenCode plugin: context into the system prompt, a deny throws, a stop blo
   const answers = { 'session-hook.mjs': { hookSpecificOutput: { additionalContext: 'CARD' } }, 'rule0-hook.mjs': { hookSpecificOutput: { additionalContext: 'RULE0' } },
     'tool-hook.mjs': { hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: 'ask first' } }, 'stop-hook.mjs': { decision: 'block', reason: 'Waymark: this L1 turn…' } };
   const calls = [], prompts = [];
-  const $ = (strings, ...values) => { const script = String(values[0]).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
+  const $ = (strings, ...values) => {
+    if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) }; // opencode --version, once per load
+    const script = String(values[0]).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
   const client = { session: { messages: async () => ({ data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'listo' }] }] }), prompt: async (x) => prompts.push(x) } };
   const { Waymark } = await import(`file://${file.replace(/\\/g, '/')}`);
   const hooks = await Waymark({ client, $, directory: dir });
@@ -2100,6 +2103,7 @@ test('stop hook --agent gemini: prompt_response is the reply, the record says ge
     gm('a1', 'gemini', { content: 'Waymark → L1 · dept-backend', model: 'gemini-3-pro', tokens: { input: 2000, output: 100, cached: 1500 }, toolCalls: [
       { id: 'c1', name: 'read_file', args: { file_path: 'C:/s/dept-backend/SKILL.md' }, status: 'success', result: 'x' },
       { id: 'c2', name: 'read_file', args: { file_path: 'C:/s/dept-backend/procedures.md' }, status: 'success', result: '### Endpoint' },
+      { id: 'c2b', name: 'run_shell_command', args: { command: 'node C:/s/waymark/scripts/waymark.mjs pack src/orders.service.mjs' }, status: 'success', result: 'x' },
       { id: 'c3', name: 'ask_user', args: { questions: [{ question: '¿Cómo?', options: [{ label: 'Backoff' }, { label: 'Cola' }] }] }, status: 'success', result: JSON.stringify({ answers: { 0: 'Backoff' } }) },
       { id: 'c4', name: 'replace', args: { file_path: FILE }, status: 'success', result: 'ok' },
       { id: 'c5', name: 'run_shell_command', args: { command: 'node --check src/orders.service.mjs && npm run build' }, status: 'success', result: 'ok' }] })];
@@ -2179,4 +2183,99 @@ test('new session notice: past 200k tokens of context the end-of-turn line says 
   const ev = { steps: { Decision: true }, score: '1/1', tokens: 1000000, quotaPct: null };
   assert.match(summaryLine('2026-10-05 · T2', ev, 420000), /· contexto ~420k: la próxima tarea, en una sesión nueva \(la tarjeta la retoma\)/);
   assert.doesNotMatch(summaryLine('2026-10-05 · T2', ev, 90000), /sesión nueva/);
+});
+
+// ---- across agents: notes that travel, the trailer's ID, pack at every level, review everywhere ----
+test('pack in a fresh clone: with no local log, the commit\'s note is the record; a later commit of a recorded task is shown once', async () => {
+  const { addNote } = await import(`file://${SCRIPTS}/notes.mjs`);
+  const repo = memRepo('pack-clone');
+  const W = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;
+  const sha = commitTask(repo, '2026-10-06 · T3', 'a.ts');
+  addNote(repo, sha, JSON.stringify({ id: '2026-10-06 · T3', agent: 'codex', cierre: 'Aprendido: faq group ← a11y' }));
+  assert.match(W('pack', 'a.ts'), /^a\.ts:\n  - 2026-10-06 · T3 · codex · faq group ← a11y · [0-9a-f]{8}$/m, 'no provenance.jsonl here: the note travels alone');
+  appendRecord(repo, { id: '2026-10-06 · T1', agent: 'claude', at: new Date().toISOString(), files: [path.join(repo, 'b.ts')], commits: [], cierre: 'Aprendido: red counter ← user' });
+  commitTask(repo, '2026-10-06 · T1', 'b.ts'); // committed by a later task, with T1's trailer
+  const out = W('pack', 'b.ts');
+  assert.match(out, /^b\.ts:\n  - 2026-10-06 · T1 · claude · red counter ← user · [0-9a-f]{8}$/m, `one row, with its commit: ${out}`);
+});
+
+test('noteLateCommits: a commit made later with an earlier task\'s trailer gets that task\'s record as its note; the log stays intact', async () => {
+  const { noteLateCommits } = await import(`file://${SCRIPTS}/notes.mjs`);
+  const repo = memRepo('late-note'), id = '2026-10-06 · T1', log = projectHome(repo).log;
+  appendRecord(repo, { id, agent: 'claude', at: new Date().toISOString(), files: ['a.ts'], commits: [], cierre: 'Aprendido: x', evaluation: { score: '9/10' } });
+  appendRecord(repo, { kind: 'Q', agent: 'codex', at: new Date().toISOString() });
+  const sha = commitTask(repo, id);
+  assert.deepEqual(noteLateCommits(repo, readRecords(log)), [id]);
+  const note = JSON.parse(readNotes(repo).get(sha));
+  assert.deepEqual([note.id, note.agent, note.commits, note.prev, note.hash], [id, 'claude', [sha], undefined, undefined]);
+  assert.deepEqual(noteLateCommits(repo, readRecords(log)), [], 'once: the commit has its note now');
+  assert.equal(verifyChain(readRecords(log), readNotes(repo)).ok, true, 'the chained line was not touched');
+});
+
+test('commit trailer: a follow-up ID whose task shares no staged file is denied with the new ID; a recorded, the next or a sharing ID passes', async () => {
+  const { checkTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const repo = memRepo('trailer'), day = new Date().toLocaleDateString('sv');
+  appendRecord(repo, { id: `${day} · T1`, files: [path.join(repo, 'a.ts')], commits: [] });
+  appendRecord(repo, { id: `${day} · T2`, files: [path.join(repo, 'c.ts')], commits: [] });
+  const commit = (id) => `git commit -m "feat: x" -m "Waymark-Task: ${id}"`;
+  assert.equal(checkTrailer(commit(`${day} · T2b`), repo), null, 'nothing staged yet: no evidence, no denial');
+  fs.writeFileSync(path.join(repo, 'b.ts'), '1\n'); gitT(repo, 'add', 'b.ts');
+  assert.match(checkTrailer(commit(`${day} · T2b`), repo) || '', new RegExp(`Waymark-Task: ${day} · T2b[\\s\\S]*${day} · T3`));
+  assert.match(checkTrailer(commit(`${day} · T9`), repo) || '', new RegExp(`${day} · T3`), 'an ID never offered');
+  assert.equal(checkTrailer(commit(`${day} · T3`), repo), null, 'the next ID');
+  assert.equal(checkTrailer(commit(`${day} · T1`), repo), null, 'a recorded task: its work committed by a later task');
+  fs.writeFileSync(path.join(repo, 'c.ts'), '1\n'); gitT(repo, 'add', 'c.ts');
+  assert.equal(checkTrailer(commit(`${day} · T2b`), repo), null, 'the follow-up shares c.ts with T2');
+  assert.equal(checkTrailer('git status --short', repo), null);
+});
+
+test('Recordar at every level: an L1 change without pack (or mem_search) is blocked; with pack it passes', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const lines = (withPack) => [prompt('cambia el texto del botón'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), ...(withPack ? [PACK()] : []),
+    ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
+  const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
+  const without = judge(lines(false));
+  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run waymark\.mjs pack/.test(m)), JSON.stringify(without.missing));
+  assert.equal(judge(lines(true)).steps.find((s) => s.id === 'memory').pass, true);
+});
+
+test('review everywhere: waymark.mjs review on the task\'s files counts as the review; Codex reads a SKILL.md to invoke it, a Test-Path does not', async () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const base = [prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
+    ...askWithId('q1', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' })];
+  const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
+  assert.ok(judge(base).missing.some((m) => /no review ran: .*waymark\.mjs review/.test(m)));
+  assert.equal(judge([...base, call('Bash', { command: 'node "C:/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs' })]).observed.review, true);
+  for (const a of ['codex', 'gemini', 'opencode']) assert.deepEqual((await import(`file://${SCRIPTS}/agents/${a}.mjs`)).lacks, [], `${a} reviews with waymark.mjs review`);
+  const cx = await import(`file://${SCRIPTS}/agents/codex.mjs`);
+  const skills = (command) => cx.toLines([row('session_meta', { cli_version: '0.160.0' }), cxUser('t9', 'i9', 'x'), cxCmd('t9', command)]).flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c.name === 'Skill').map((c) => c.input.skill));
+  assert.deepEqual(skills("Test-Path 'C:\\Users\\u\\.claude\\skills\\code-review\\SKILL.md'"), [], 'checking that it exists is not invoking it');
+  assert.deepEqual(skills("Get-Content -Path 'C:\\Users\\u\\.claude\\skills\\dept-frontend\\SKILL.md'"), ['dept-frontend']);
+});
+
+test('waymark.mjs review: the diff of the task\'s files (new ones included) and the checklist', () => {
+  const repo = memRepo('review');
+  const W = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1;\n'); gitT(repo, 'add', 'a.ts'); gitT(repo, 'commit', '-q', '-m', 'a');
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 2;\n');
+  fs.writeFileSync(path.join(repo, 'n.ts'), 'export const n = 0;\n');
+  const out = W('review', 'a.ts', 'n.ts');
+  assert.match(out, /^-export const a = 1;$/m);
+  assert.match(out, /^\+export const a = 2;$/m);
+  assert.match(out, /new file n\.ts[\s\S]*export const n = 0;/);
+  assert.match(out, /Checklist/);
+  assert.match(W('review'), /^Usage: node waymark\.mjs review <file…>/);
+});
+
+test('OpenCode: a tool lasts from time.start to time.end; the plugin\'s version reaches the record\'s inputs', async () => {
+  const o = await import(`file://${SCRIPTS}/agents/opencode.mjs`);
+  const rows = [{ info: { id: 'm1', role: 'user', time: { created: 1000 } }, parts: [{ type: 'text', text: 'build' }] },
+    { info: { id: 'm2', role: 'assistant', modelID: 'big-pickle', time: { created: 2000 } }, parts: [{ type: 'tool', tool: 'bash', callID: 'k1', state: { status: 'completed', input: { command: 'pnpm run build' }, output: 'ok', time: { start: 3000, end: 43000 } } }] }];
+  const lines = o.toLines(rows, '/w/p', '1.18.34');
+  const at = (type) => Date.parse(lines.find((l) => l.message?.content?.[0]?.type === type).timestamp);
+  assert.equal(at('tool_result') - at('tool_use'), 40000);
+  assert.equal(turnInputs(lines, '/w/p').agent, '1.18.34');
+  assert.match(fs.readFileSync(path.join(SCRIPTS, 'agents', 'opencode-plugin.js'), 'utf8'), /agent_version/);
 });

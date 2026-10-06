@@ -10,6 +10,7 @@
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
+//   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Solved problems, Conventions, Identity…); none → the section names
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
@@ -197,8 +198,9 @@ export function suggestedRules(cwd) {
 }
 
 // Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a
-// note, or a stub's commits), plus the records of tasks without a commit that list the file. A commit no task recorded
-// is shown too (a change made by hand). → text.
+// note, read even with no local log, a stub's commits, or the recorded task the commit's trailer names), plus the
+// records of tasks without a commit that list the file. A commit no task recorded is shown too (a change made by hand).
+// → text.
 export function pack(cwd, files, per = 3) {
   const home = projectHome(cwd), root = home.root;
   const git = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', timeout: 5000 });
@@ -206,17 +208,21 @@ export function pack(cwd, files, per = 3) {
   const out = [];
   for (const file of files) {
     const abs = path.resolve(cwd, file), rel = path.relative(root, abs).replace(/\\/g, '/');
-    const log = git('log', '-n', '20', '--format=%H%x1f%ct%x1f%s', '--', rel).stdout.trim().split('\n').filter(Boolean).map((l) => l.split('\x1f'));
+    const log = git('log', '-n', '20', '--format=%H%x1f%ct%x1f%s%x1f%B%x1e', '--', rel).stdout.split('\x1e').map((l) => l.trim()).filter(Boolean).map((l) => l.split('\x1f'));
     const notes = readNotes(root, log.map(([h]) => h));
     const byCommit = new Map(records.flatMap((r) => (r.commits || []).map((c) => [c, r])));
+    const byId = new Map(records.map((r) => [r.id, r]));
     const seen = new Set(), rows = [];
     const learnedOf = (r) => clipTo(aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')) || r.prompt || '', 120);
-    for (const [h, ct, subject] of log) {
-      const stub = byCommit.get(h);
+    for (const [h, ct, subject, body = ''] of log) {
+      // the commit's record: its stub here; else its note alone (a clone without this machine's log); else the
+      // recorded task its trailer names (committed later by another task)
+      const stub = byCommit.get(h), trailer = body.match(/^\s*Waymark-Task:\s*(.+?)\s*$/im)?.[1];
       let rec = stub;
-      const n = gitNote(stub) && notes.get(gitNote(stub).commit);
+      const n = notes.get(gitNote(stub)?.commit || h);
       if (n) { try { rec = { ...JSON.parse(n), ...stub }; } catch {} }
       else if (gitNote(stub)) rec = { ...stub, prompt: '(its git note is missing: a rebase or amend?)' };
+      else if (!stub && trailer && byId.has(trailer)) rec = byId.get(trailer);
       if (rec && seen.has(rec.id)) continue;
       if (rec) seen.add(rec.id);
       rows.push({ at: Number(ct) * 1000, text: rec ? `${rec.id} · ${rec.agent || '?'} · ${learnedOf(rec)} · ${h.slice(0, 8)}` : `${h.slice(0, 8)} · ${clipTo(subject, 100)} (no task record)` });
@@ -232,6 +238,31 @@ export function pack(cwd, files, per = 3) {
   return out.join('\n');
 }
 const clipTo = (s, n) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+
+// The review where the agent has no code-review skill (Codex, Gemini CLI, OpenCode): the diff of the task's files
+// against HEAD (a file git does not track yet: its first lines) and the checklist to review it with. Running it after
+// the last code change is the Review testigo's action. → text.
+export const REVIEW_CHECKLIST = [
+  'Correctness: each change does what the task asked; edge cases (empty, null, limits, errors, concurrency) handled.',
+  'Callers: every consumer of a changed export, signature or response shape still works.',
+  'Tests: a spec covers the new behavior and fails without it; no test was weakened to pass.',
+  'Reuse: no duplicate of an existing helper or component; the smallest change that does it.',
+  'Security: no secret in code or logs; input reaching a query, command or HTML is validated or escaped.',
+];
+export function review(cwd, files) {
+  const root = projectHome(cwd).root;
+  const git = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+  const out = [];
+  for (const file of files) {
+    const rel = path.relative(root, path.resolve(cwd, file)).replace(/\\/g, '/');
+    const tracked = git('ls-files', '--error-unmatch', '--', rel).status === 0;
+    if (tracked) { const d = git('diff', 'HEAD', '--', rel).stdout.trimEnd(); out.push(d || `${rel}: no change against HEAD`); continue; }
+    const text = read(path.join(root, rel));
+    const lines = text.split('\n');
+    out.push(text ? `new file ${rel} (${lines.length} lines)\n${lines.slice(0, 300).map((l) => `+${l}`).join('\n')}${lines.length > 300 ? '\n+…' : ''}` : `${rel}: not found`);
+  }
+  return `${out.join('\n\n')}\n\nChecklist (fix every finding before the Cierre; a finding you leave goes in Resultado: parcial):\n${REVIEW_CHECKLIST.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+}
 
 // One section of the project memory, or the list of its sections.
 export function memorySection(cwd, name) {
@@ -268,6 +299,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'pack') {
     console.log(rest.length ? pack(process.cwd(), rest) : 'Usage: node waymark.mjs pack <file…>');
+  } else if (sub === 'review') {
+    console.log(rest.length ? review(process.cwd(), rest) : 'Usage: node waymark.mjs review <file…>   (the task\'s changed files: their diff against HEAD and the review checklist)');
   } else if (sub === 'memory') {
     console.log(memorySection(process.cwd(), rest.join(' ')));
   } else if (sub === 'incidents') {
@@ -294,7 +327,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | pack <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

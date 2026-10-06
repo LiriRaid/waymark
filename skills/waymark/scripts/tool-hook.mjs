@@ -7,13 +7,15 @@
 // message asks for the foreseeable sub-decisions in the same call; browser verification is never offered (only when the
 // user asks); the branch is the user's, never pushed as a sub-decision. An unrouted reply inside an open task inherits its routing.
 // Memory and scratch files are exempt; L0 skipped. Procedure and mem_search are recorded and scored by the end-of-turn hook, not denied.
+// A git commit whose "Waymark-Task" trailer the end-of-turn hook would record under another ID is denied with the right one.
 // Remove the hook from the agent's settings to disable it.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
-import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords } from './provenance.mjs';
+import { spawnSync } from 'node:child_process';
+import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -56,12 +58,38 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   return null;
 }
 
+// Commit trailer: a "Waymark-Task: <id>" the end-of-turn hook would record under another ID (a follow-up letter whose
+// task shares no staged file, or an ID never offered) is denied with the right one, so a commit and its record carry
+// the same ID. A recorded task's ID passes (its work committed by a later task); nothing staged yet → no evidence, no
+// denial. → the denial reason, or null.
+export function checkTrailer(command, cwd = process.cwd()) {
+  const id = String(command || '').match(/Waymark-Task:\s*(20\d\d-\d\d-\d\d · T\d+[a-z]?)/)?.[1];
+  if (!id || !/\bgit\b[\s\S]*\bcommit\b/.test(command)) return null;
+  const ids = taskIds(cwd);
+  if (ids.known.has(id)) return null;
+  const home = projectHome(cwd);
+  const staged = spawnSync('git', ['diff', '--cached', '--name-only'], { cwd: home.root, encoding: 'utf8', timeout: 3000 });
+  const files = staged.status === 0 ? staged.stdout.split('\n').filter(Boolean).map((f) => norm(path.resolve(home.root, f))) : [];
+  if (!files.length) return null;
+  const parent = id.replace(/[a-z]$/, '');
+  let why = validId(id, ids) ? null : 'was never offered for this task';
+  if (!why && id !== parent) {
+    const own = new Set(taskFiles(readRecords(home.log), id).map(norm));
+    if (!files.some((f) => own.has(f))) why = `is a follow-up of ${parent}, but none of the staged files is one ${parent} changed`;
+  }
+  return why ? `Waymark: the trailer "Waymark-Task: ${id}" ${why}, so the end-of-turn hook would record this task as ${ids.next} and the commit would disagree with its record. Commit with "Waymark-Task: ${ids.next}" and use the same ID in the Cierre heading.` : null;
+}
+
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
-  if (c.command !== undefined) return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
+  if (c.command !== undefined) {
+    const trailer = checkTrailer(c.command, cwd);
+    if (trailer) return trailer;
+    return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
+  }
   const files = c.files.filter((f) => !exempt(f));
   if (!files.length) return null;
   const lines = readTurns((b) => agent.read(hook, b)); // a long session (pasted images) keeps the turn's prompt in view

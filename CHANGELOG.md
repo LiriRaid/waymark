@@ -141,6 +141,14 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **The hook writes Work in progress:** at each close, the task's line is `- ✔|▶ [<task ID>] <Aprendido>` (✔ when Resultado is hecho), at most 200 characters (a longer Aprendido is clipped; the whole Cierre stays in the record). A follow-up replaces its task's line. Closed lines beyond the newest 5 and any line over 200 characters move whole to `history.md`. The testigo *Aprender* is gone: the Cierre already requires the Aprendido.
   - **tasks.md** reads the records back from the notes; *Last closed* names `git notes --ref=waymark show <commit>` as the full record.
   - **Code comments say how the code works, never task history:** task IDs, dates and "user's choice" markers are gone from the scripts (a test keeps them out), and the rule is in `dept-architecture` and the instructions block.
+- **Final test across agents** (`docs/adr/0014`, the user's picks). One task each in Claude Code, Codex and OpenCode left four records in one chain. Gemini CLI's hooks fired, but its API call failed. Fixes for the gaps it showed:
+  - `pack` reads each commit's note even with no local log, so records travel with a clone.
+  - A task committed later by another task gets its record as that commit's note (`noteLateCommits`).
+  - A `git commit` whose `Waymark-Task` trailer would be recorded under another ID is denied with the right one.
+  - Recordar (`waymark.mjs pack` before the first change) applies at every level.
+  - `waymark.mjs review <files>` (diff + checklist) is the Review step in Codex, Gemini CLI and OpenCode. Codex's `Test-Path` of a `SKILL.md` no longer counts as invoking the skill.
+  - OpenCode records each tool's real duration and its version.
+  - The *Started, not closed* list in tasks.md says it includes the turn reading it.
 - **API ↔ FE and the rest of that test** (`docs/adr/0013`): the card shows the other projects of the workspace (open ▶ and their last 3 closed tasks) and `waymark.mjs tasks --workspace` lists them; `.waymark/` goes in the project's `.gitignore`; a model without pairs gets an uncalibrated % from its family's calibrated model.
 - **Steps 3d + 3f: every agent in the chain, one memory, notes that travel** (`docs/adr/0013`, the user's picks):
   - **Gemini CLI and OpenCode join the chain.** Gemini through its command hooks (`install-hooks --agent gemini`: SessionStart, BeforeAgent, BeforeTool, AfterAgent in `~/.gemini/settings.json`). OpenCode through a plugin (`install-hooks --agent opencode` → `~/.config/opencode/plugins/waymark.js`) that runs the same four scripts. Each has an adapter that reads its transcript, its choice window (`ask_user`, `question`) and its skill invocation.

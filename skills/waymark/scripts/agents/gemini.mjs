@@ -17,7 +17,7 @@ import { readTail } from '../transcript.mjs';
 export const name = 'gemini';
 const HOME = () => process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
 export const instructions = path.join(HOME(), 'GEMINI.md');
-export const lacks = ['review']; // no code-review skill in Gemini CLI: recorded as not applicable
+export const lacks = []; // no code-review skill in Gemini CLI: its review is waymark.mjs review
 
 // The core's event names → Gemini's.
 const EVENT = { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', Stop: 'AfterAgent' };
@@ -100,7 +100,7 @@ export function call(hook) {
   return null;
 }
 
-export const note = (skillsDir) => ` In Gemini CLI: "invoke the skill <name>" = read_file ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); the choice window is ask_user.`;
+export const note = (skillsDir) => ` In Gemini CLI: "invoke the skill <name>" = read_file ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; the choice window is ask_user.`;
 
 // Chats of the sessions opened in cwd, newest first (~/.gemini/projects.json maps the folder to its project id).
 export function sessions(cwd) {

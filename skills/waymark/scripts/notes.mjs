@@ -1,7 +1,8 @@
 // Waymark · task records as git notes (docs/adr/0012). A committed task's whole record is a note on its last commit under
 // refs/notes/waymark; provenance.jsonl keeps a chained stub with the note's sha256, so an edited or lost note shows up in
 // verifyChain. Notes travel when the agent pushes the task (the end-of-turn hook pushes the notes ref to the same remote)
-// or with `waymark.mjs notes push`, and follow a rebased or amended commit (repairNotes); git's config is never changed.
+// or with `waymark.mjs notes push`, and follow a rebased or amended commit (repairNotes); a task committed later by
+// another task gets its record as a note too (noteLateCommits); git's config is never changed.
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
@@ -68,6 +69,30 @@ export function repairNotes(cwd, records) {
     if (c.status === 0) copied.push(r.id);
   }
   return copied;
+}
+
+// A task recorded with no commit (its record whole in the log) whose work a later task committed with its trailer
+// "Waymark-Task: <id>": the record, with that commit, becomes the commit's note, so it travels with the repo. The chained
+// line stays as it is (verifyChain only checks stubs). One git log (the last 500 commits of HEAD) and one notes list,
+// only when such a record exists. → the task IDs whose record became a note.
+export function noteLateCommits(cwd, records) {
+  const loose = (records || []).filter((r) => r.id && !r.kind && !r.note && !(r.commits || []).length);
+  if (!loose.length) return [];
+  const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
+  if (log.status !== 0) return [];
+  const byTask = new Map();
+  for (const entry of log.stdout.split('\x1e')) {
+    const [commit, body = ''] = entry.trim().split('\x00');
+    if (commit) for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) if (!byTask.has(m[1])) byTask.set(m[1], commit); // newest first
+  }
+  const notes = readNotes(cwd), added = [];
+  for (const r of loose) {
+    const commit = byTask.get(r.id);
+    if (!commit || notes.has(commit)) continue;
+    const { prev, hash, ...record } = r;
+    if (addNote(cwd, commit, JSON.stringify({ ...record, commits: [commit] }))) { notes.set(commit, ''); added.push(r.id); }
+  }
+  return added;
 }
 
 // Pushes the notes ref to a remote (default origin). → { ok, output }

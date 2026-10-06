@@ -29,7 +29,7 @@ import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
-import { pushNotes } from './notes.mjs';
+import { pushNotes, noteLateCommits } from './notes.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -75,6 +75,8 @@ const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
 // never inherits another task's answers. Not checked without records or without changes.
 const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFiles || !changed.length || (() => { const own = ctx.taskFiles(id); return changed.some((f) => own.has(norm(f))); })();
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
+// The review: the code-review skill, or `waymark.mjs review <files>` where the agent has none (Codex, Gemini CLI, OpenCode).
+const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(cmdOf(t)));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
 
@@ -251,7 +253,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
-    review: skillCalled(turn.tools, /(^|:)code-review$/) || skillCalled(ctx.taskTools || [], /(^|:)code-review$/),
+    review: reviewed(turn.tools) || reviewed(ctx.taskTools || []),
     docs: turn.tools.filter(DOCS).length,
     retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
@@ -339,8 +341,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
-    memory: observed.memory.searched ? [] : ['L2+: the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
-    review: skip.Review || observed.review ? [] : [`code changed and code-review did not run: run it on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
+    memory: observed.memory.searched ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
+    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review, or node waymark.mjs review <files> where the agent has no code-review, on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
     build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(exc) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
@@ -504,6 +506,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); } catch {}
+      // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
+      try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       // the agent pushed the task (the user asked): its note goes to the same remote, now that it exists
       let pushed = '';
       try {

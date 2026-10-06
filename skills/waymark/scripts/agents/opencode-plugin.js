@@ -25,9 +25,14 @@ export const Waymark = async ({ client, $, directory }) => {
     writeFileSync(file, rows.map((m) => JSON.stringify(m)).join('\n') + '\n');
     return { file, rows };
   };
+  let version; // OpenCode's version for the record's inputs, asked once per load (a failed ask is not repeated)
+  const agentVersion = async () => {
+    if (version === undefined) version = await $`opencode --version`.nothrow().quiet().then((r) => r.stdout.toString().trim().split('\n').pop() || null).catch(() => null);
+    return version;
+  };
   const run = async (script, payload) => {
     try {
-      const input = new Response(JSON.stringify({ cwd: directory, ...payload }));
+      const input = new Response(JSON.stringify({ cwd: directory, agent_version: await agentVersion(), ...payload }));
       const r = await $`node ${join(SCRIPTS, script)} --agent opencode < ${input}`.nothrow().quiet();
       return JSON.parse(r.stdout.toString().trim() || '{}');
     } catch { return {}; }

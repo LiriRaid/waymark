@@ -9,7 +9,7 @@
 | Skill loading | native Agent Skills support (*verify* in the docs); otherwise read `SKILL.md` as the instructions block says |
 | Restart needed | yes |
 | Hooks (Waymark 2.0, `docs/adr/0009`) | `~/.codex/hooks.json`: the same four scripts as Claude Code with `--agent codex` (`SessionStart`, `UserPromptSubmit`, `PreToolUse` matcher `Bash|apply_patch`, `Stop`), written by `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent codex` (dry run, then `--apply`). Codex skips a new or changed hook until you trust it in `/hooks`. One install serves both agents: the hooks point at the Claude Code copy of the skills. |
-| Hook adapter | `skills/waymark/scripts/agents/codex.mjs`. It reads the rollout's `item_completed` events. Reading `<skills-dir>/<skill>/SKILL.md` counts as invoking the skill. The choice window is `request_user_input` (Plan mode); otherwise a question that ends the turn plus your reply counts as the decision. `code-review` is not applicable. Checked on codex-cli 0.160. |
+| Hook adapter | `skills/waymark/scripts/agents/codex.mjs`. It reads the rollout's `item_completed` events. Reading `<skills-dir>/<skill>/SKILL.md` counts as invoking the skill. The choice window is `request_user_input` (Plan mode); otherwise a question that ends the turn plus your reply counts as the decision. Its review is `node <skills-dir>/waymark/scripts/waymark.mjs review <files>` (diff + checklist). Checked on codex-cli 0.160. |
 
 ## MCP registration
 

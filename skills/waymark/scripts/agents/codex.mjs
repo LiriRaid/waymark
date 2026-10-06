@@ -21,10 +21,11 @@ import { out as claudeOut } from './claude.mjs';
 export const name = 'codex';
 const HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 export const instructions = path.join(HOME(), 'AGENTS.md');
-export const lacks = ['review']; // routine steps this agent has no capability for: recorded as not applicable
+export const lacks = []; // routine steps this agent has no capability for (recorded as not applicable); its review is waymark.mjs review
 export const out = claudeOut; // same output shapes (verified in the hooks docs)
 
 const SKILL = /[\\/]([A-Za-z0-9:_-]+)[\\/]SKILL\.md\b/i;
+const READS = /\b(Get-Content|gc|cat|type|sed|head|tail|more|less|bat|awk)\b/i; // a read of the file, not a Test-Path or a listing
 const QUESTION = /^[^\n]*\?[ \t*_)]*$/gm; // a line that ends with "?" (also "¿…?")
 
 const shellOf = (cmd) => {
@@ -103,7 +104,7 @@ export function toLines(rows) {
     } else if (/^(CommandExecution|FileChange|McpToolCall|WebSearch)$/.test(it.type)) tail = []; // an action: what follows is the turn's final stretch
     if (it.type === 'CommandExecution') {
       const command = shellOf(it.command), started = new Date((Date.parse(ts) || 0) - ((it.duration?.secs || 0) * 1000)).toISOString();
-      const skill = command.match(SKILL)?.[1];
+      const skill = READS.test(command) && command.match(SKILL)?.[1];
       if (skill) assistant(started, [{ type: 'tool_use', name: 'Skill', id: `${it.id}-skill`, input: { skill } }]);
       assistant(started, [{ type: 'tool_use', name: 'Bash', id: it.id, input: { command } }]);
       result(ts, it.id, (it.exit_code ?? 0) !== 0 || it.status === 'failed', it.aggregated_output);
@@ -134,7 +135,7 @@ export function call(hook) {
 }
 
 // One line added to the reminder and to the gate's message: how this agent does what the routine names in Claude terms.
-export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it, otherwise put the options in the chat and end your turn — the user's reply counts as the decision.`;
+export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it, otherwise put the options in the chat and end your turn — the user's reply counts as the decision.`;
 
 // Rollouts of the sessions opened in cwd, newest first (session_meta.cwd of each file modified in the last 14 days).
 export function sessions(cwd) {

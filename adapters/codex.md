@@ -2,7 +2,7 @@
 
 | Key | Value |
 |---|---|
-| `<skills-dir>` | `~/.codex/skills` (*verify*: some versions read `~/.agents/skills`) |
+| `<skills-dir>` | `~/.agents/skills`, shared by every agent (verified, codex-rs `host_roots.rs`, 0.160.1: `$CODEX_HOME/skills` deprecated, then `~/.agents/skills`; directory links followed). `~/.codex/skills` only for a skill the user wants in Codex alone |
 | `<project-skills-dir>` | `.agents/skills` (verified, codex-rs `host_roots.rs`, 0.160) |
 | `<instructions-file>` | `~/.codex/AGENTS.md` |
 | `<project-instructions-file>` | `AGENTS.md` at the project root |

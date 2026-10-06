@@ -86,19 +86,29 @@ export function workspaceSiblings(root) {
 }
 export const logFile = (cwd) => projectHome(cwd).log;
 
-// Keeps <root>/.waymark/ out of git through the project's .gitignore (added once, created if missing) and writes its
-// README once. → true when the ignore line is in place.
+// The agents' local folders kept out of git (docs/adr/0017): Waymark's memory, engram's store, the project skills
+// (.agents/skills, every agent) and Claude Code's link to them. Each line is added once.
+export const LOCAL_DIRS = [
+  ['.waymark/', 'Waymark: project memory'],
+  ['.engram/', 'engram: learned memory store'],
+  ['.agents/', 'project skills, every agent'],
+  ['.claude/skills/', "Claude Code's links to .agents/skills"],
+];
+// Keeps the LOCAL_DIRS out of git through the project's .gitignore (created if missing) and writes .waymark's README
+// once. → true when the ignore lines are in place.
 export function ensureLocal(home) {
   if (!home?.dir) return false;
   fs.mkdirSync(home.dir, { recursive: true });
   const readme = path.join(home.dir, 'README.md');
   if (!fs.existsSync(readme)) fs.writeFileSync(readme, README);
-  // the project's .gitignore, so every clone and every agent keeps it out of git
+  // the project's .gitignore, so every clone and every agent keeps them out of git
   const file = path.join(home.root, '.gitignore');
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
-  if (/^\/?\.waymark\/?\s*$/m.test(text)) return true;
-  fs.appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}# Waymark: project memory, local only\n.waymark/\n`);
+  const has = (dir) => new RegExp(`^/?${dir.replace(/[.]/g, '\\.').replace(/\/$/, '')}/?\\s*$`, 'm').test(text);
+  const missing = LOCAL_DIRS.filter(([dir]) => !has(dir));
+  if (!missing.length) return true;
+  fs.appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${missing.map(([dir, what]) => `# ${what}, local only\n${dir}\n`).join('')}`);
   return true;
 }
 

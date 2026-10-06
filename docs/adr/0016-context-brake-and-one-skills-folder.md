@@ -8,7 +8,7 @@
 - **A push blocked for a decision.** In a task that changed no project file (a `git push` the user asked for), the end-of-turn hook blocked for a choice-window answer. The action had already run, and its message said "changed files".
 
 ## Decision
-**Context brake.** When a new message reaches a session holding over 150k tokens of context, the per-prompt hook stops it before the model. That costs 0 tokens and happens once per session. The message is kept in `.waymark/next-prompt.md`, and the next session's card brings it, after the card's cap so it is never cut. Sending it again in the same session continues there. `WAYMARK_BRAKE_TOKENS` tunes the threshold, and 0 turns it off.
+**Context brake.** Updated in T11 at the user's request: the default threshold is 300k tokens, up from 150k, to prioritize longer sessions while stopping before context grows too large. It costs 0 tokens and happens once per session. The message is kept in `.waymark/next-prompt.md`, and the next session's card brings it, after the card's cap so it is never cut. Sending it again in the same session continues there. `WAYMARK_BRAKE_TOKENS` tunes the threshold, and 0 turns it off.
 
 How each agent stops the message, verified at the installed versions:
 

@@ -14,7 +14,8 @@ const HOME = os.homedir();
 const SKILLS_HOME = path.dirname(SKILL_DIR); // the agent's user skills folder (this skill lives inside it)
 const CLAUDE = path.join(HOME, '.claude'); // optional extras (plugins, claude.ai skills) when Claude Code is present
 const LOCAL = process.env.WAYMARK_HOME || path.join(HOME, '.waymark'); // private layer, agent-neutral
-const PROJECT_SKILL_DIRS = ['.claude', '.agents', '.codex', '.cursor', '.gemini', '.opencode'].map((d) => [d, 'skills']);
+// .agents first: the real copy of a project skill; .claude/skills holds Claude Code's links to it (docs/adr/0017)
+const PROJECT_SKILL_DIRS = ['.agents', '.claude', '.codex', '.cursor', '.gemini', '.opencode'].map((d) => [d, 'skills']);
 const MAP_FILE = path.join(SKILL_DIR, 'skill-map.json');
 const REGISTRY = path.join(SKILL_DIR, 'skill-registry.md');
 // Other agents' user-level skill folders; the one Waymark is installed in (SKILLS_HOME) is scanned as 'user'.
@@ -111,6 +112,10 @@ function discover() {
     const p = readText(path.join(LOCAL, 'projects', f))?.match(/^Path:\s*(.+)$/m)?.[1]?.trim();
     if (p) for (const d of PROJECT_SKILL_DIRS) for (const s of scanSkillsDir(path.join(p, ...d), `project:${path.basename(p)}`)) projects.push(s);
   }
+  // a skill reached through a link and through its real folder is listed once
+  const real = (file) => { try { return fs.realpathSync(file).toLowerCase(); } catch { return file; } };
+  const once = new Set();
+  projects.splice(0, projects.length, ...projects.filter((s) => !once.has(real(s.file)) && once.add(real(s.file))));
   const seen = new Map();
   for (const s of found) if (!seen.has(s.name)) seen.set(s.name, s);
   return { skills: [...seen.values()].filter((s) => !OWN.test(s.name)), projects };

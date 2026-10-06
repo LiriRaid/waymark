@@ -5,7 +5,7 @@
     { "id": "gate", "label": "Verificar", "levels": [1, 2, 3], "when": "code", "enforce": "block", "claim": "a gate passing after the last code change (yours, or the typecheck the hook re-runs)" },
     { "id": "cierre", "label": "Cierre", "levels": [1, 2, 3], "enforce": "block", "claim": "the Cierre complete (Resultado · Evidencia · Aprendido)" },
     { "id": "secrets", "label": "Secretos", "levels": [1, 2, 3], "enforce": "block", "claim": "no secret in the memory or the task's diff and commits" },
-    { "id": "memory", "label": "Recordar", "levels": [1, 2, 3], "enforce": "block", "claim": "the project memory searched (waymark.mjs pack) before the first change" },
+    { "id": "memory", "label": "Recordar", "levels": [1, 2, 3], "enforce": "block", "claim": "each file's memory pack, handed by the hook at its first edit (never run pack)" },
     { "id": "review", "label": "Review", "levels": [2, 3], "when": "code", "enforce": "block", "claim": "L2+ with code: code-review (or waymark.mjs review <files>) on the task's files" },
     { "id": "build", "label": "Build", "levels": [2, 3], "when": "build", "enforce": "block", "claim": "L2+ with code: the build once at the end (unless Quality gates has `build | none (<why>)`)" },
     { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "repeatedFailure", "enforce": "block", "claim": "a command that failed twice runs again only after consulting the docs" },

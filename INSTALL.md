@@ -20,15 +20,15 @@ Repository: `https://github.com/LiriRaid/waymark`
 
 Identify which agent **you** are, and **every other agent installed on this machine** (config folders such as `~/.claude`, `~/.codex`, `~/.cursor`, `~/.gemini`, `~/.config/opencode`, or the agent's CLI on the PATH). Waymark can be installed in all of them at once; they share one private layer, so work started in one agent can be resumed in another. For each agent, open `adapters/<agent>.md` from the repository (`claude-code`, `codex`, `cursor`, `gemini-cli`, `opencode`, or `generic` if none fits). It gives:
 
-- `<skills-dir>` — user-level skills folder (e.g. `~/.claude/skills`)
-- `<project-skills-dir>` — project-level skills folder (e.g. `.claude/skills`)
+- `<skills-dir>` — where Waymark's skills live: **`~/.agents/skills` for every agent**, one real copy (`docs/adr/0017`). Claude Code, which reads only `~/.claude/skills`, gets a link to each one there. An agent's own folder (`~/.claude/skills`, `~/.codex/skills`…) holds only the skills the user asks for that agent alone.
+- `<project-skills-dir>` — project skills: `.agents/skills` for every agent (Claude Code through a link in `.claude/skills`), kept out of git
 - `<instructions-file>` — global instructions file (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
 - how to register MCP servers
 
 If the adapter marks a path as *verify*, check it against your own documentation or the filesystem before using it. Tell the user in one line per agent what you detected:
 
 ```
-Agente: Claude Code · skills: ~/.claude/skills · instrucciones: ~/.claude/CLAUDE.md · capa privada: ~/.waymark
+Agente: Claude Code · skills: ~/.agents/skills (enlaces en ~/.claude/skills) · instrucciones: ~/.claude/CLAUDE.md · capa privada: ~/.waymark
 También encontré: Codex (~/.codex) · Cursor (~/.cursor)
 ```
 
@@ -44,7 +44,7 @@ Nothing found → the normal plan below; Waymark leads.
 
 ```
 Voy a instalar Waymark así:
-1. Skills (17)            → ~/.claude/skills/            (respaldo previo si ya existe algo)
+1. Skills (17)            → ~/.agents/skills/            (una sola copia para todos los agentes; Claude Code las ve por enlaces en ~/.claude/skills; respaldo previo si ya existe algo)
 2. Instrucciones generales → ~/.claude/CLAUDE.md          (bloque marcado arriba; el resto no se toca)
 3. Capa privada            → ~/.waymark/             (fuera de .claude; sirve para cualquier agente y se completa sola)
 4. Hooks              → ~/.claude/settings.json      (tarjeta del proyecto al iniciar sesión ~600 tokens; recordatorio por mensaje ~70 tokens con el ID de la tarea y el git status; el pack de cada archivo en su primera edición; tu decisión antes de cambiar archivos; los testigos, el registro y lo aprendido al terminar el turno)
@@ -111,7 +111,7 @@ Remove only the confirmed ones. Remove a link, not the folder it points to, unle
 
 ## 5. Copy the skills
 
-Copy every folder in the repository's `skills/` into `<skills-dir>`, replacing existing folders with the same name:
+Copy every folder in the repository's `skills/` into `~/.agents/skills` (every agent's user folder), replacing existing folders with the same name:
 
 ```
 waymark  dept-product  dept-architecture  dept-frontend  dept-ux-ui  dept-backend
@@ -119,7 +119,7 @@ dept-data  dept-security  dept-qa  dept-devops  dept-devex
 ui-build  ui-refine  ui-system  ui-audit  browser-verify  library-docs
 ```
 
-Copy real files (no symlinks). If this is a reinstall and the user's installed copies have entries under `## Learned rules` / `## Learned notes`, or files in `patterns/`, `rules/`, `facts/` that the repository does not have, keep those entries: merge them into the new files instead of overwriting.
+Copy real files into `~/.agents/skills`. Then, where Claude Code is installed, link them from `~/.claude/skills`: `node ~/.agents/skills/waymark/scripts/skill-links.mjs --user` shows the plan **[ask]**, `--apply` makes a junction (Windows) or symlink per skill. A Waymark skill still copied in `~/.claude/skills` from an older install moves to `~/.agents/skills` (the newer content wins; the replaced folder goes to `~/.waymark/backups/skills-<date>/`). Skills that are not Waymark's are never touched. From here on `<skills-dir>` = `~/.agents/skills` in every path below, the hooks included. If this is a reinstall and the user's installed copies have entries under `## Learned rules` / `## Learned notes`, or files in `patterns/`, `rules/`, `facts/` that the repository does not have, keep those entries: merge them into the new files instead of overwriting.
 
 ## 6. Private layer and instructions
 
@@ -153,7 +153,7 @@ These files start generic on purpose. **Do not ask the user to fill them**: Waym
 | Server | Propose when | Command / source |
 |---|---|---|
 | `context7` | always (docs for any library) | `https://mcp.context7.com/mcp` (HTTP) |
-| `engram` | always: the learned layer (`docs/adr/0015`). The end-of-turn hook saves each task's Aprendido with the `engram` CLI, a commit carries `.engram/` and the card shows the latest memories, in every agent | `https://github.com/Gentleman-Programming/engram` (3.1+). Binary missing → offer **[ask]** the release asset for the OS (`engram_<version>_<os>_<arch>`, verified against `checksums.txt`) on the PATH. Then each agent's MCP **[ask]**: `engram setup <agent>` (`claude-code`, `codex`, `gemini-cli`); OpenCode: add `mcp.engram` (`["<engram>", "mcp", "--tools=agent"]`, type `local`) to the config file OpenCode actually reads (`~/.config/opencode/opencode.json[c]`; on Windows `engram setup opencode` writes `%APPDATA%opencode`, which OpenCode does not read). A project with learned sections in memory.md: `waymark.mjs learned` (§8 check) |
+| `engram` | always: the learned layer (`docs/adr/0015`). The end-of-turn hook saves each task's Aprendido with the `engram` CLI into its local store (`.engram/` is git-ignored, `docs/adr/0017`) and the card shows the latest memories, in every agent on the machine | `https://github.com/Gentleman-Programming/engram` (3.1+). Binary missing → offer **[ask]** the release asset for the OS (`engram_<version>_<os>_<arch>`, verified against `checksums.txt`) on the PATH. Then each agent's MCP **[ask]**: `engram setup <agent>` (`claude-code`, `codex`, `gemini-cli`); OpenCode: add `mcp.engram` (`["<engram>", "mcp", "--tools=agent"]`, type `local`) to the config file OpenCode actually reads (`~/.config/opencode/opencode.json[c]`; on Windows `engram setup opencode` writes `%APPDATA%opencode`, which OpenCode does not read). A project with learned sections in memory.md: `waymark.mjs learned` (§8 check) |
 | stack-specific servers | only when the user works with that stack | entries in `skill-map.json` → `mcp` with a `stack` field |
 
 The stack-specific entries shipped today are **examples** for Angular (`angular-cli`: `npx -y @angular/cli mcp`, `primeng`: `npx -y @primeng/mcp`). On a fresh machine the stack is usually unknown: skip them, and let `dept-devex` propose the right server later, when a project of that stack is detected (`waymark` §5).
@@ -164,9 +164,9 @@ The stack-specific entries shipped today are **examples** for Angular (`angular-
 
 **7.2 Hooks (installed by default): the four links of the chain** (`docs/adr/0008`). Four small local scripts, 0 tokens to run, one per link, the same for every agent:
 - **Session start** (`session-hook.mjs`, also after `/clear` and a context summary): a capped digest (≤ 2,700 chars, usually ~600 tokens) of this machine's *Environment*, the project's manual and open tasks, and its latest learned memories from engram (after importing the chunks `.engram/` brought), with the pointer to `.waymark/tasks.md`, so Recall never depends on the agent remembering to read it. A turn another session left open over two hours (an API error, the quota) is closed as interrupted (`docs/adr/0015`). With `coexistence.md` it also injects its rules (≤ 1,800 chars). When the last `waymark.mjs check` is older than a week, one line (~30 tokens, at most once a week) asks the agent to run it.
-- **Each prompt** (`rule0-hook.mjs`): the Rule 0 reminder (~70 tokens, ~10 once the previous reply opened with `Waymark →`), the task ID (`2026-10-02 · T3`), the repo's stack and a one-line `git status`, so the agent spends no response on it. **Context brake** (`docs/adr/0016`): a message to a session past 150k tokens is stopped before the model once (0 tokens), kept in `.waymark/next-prompt.md` and brought by the next session's card; resending it continues there (`WAYMARK_BRAKE_TOKENS`, 0 = off). It takes a `git status` snapshot (≤ 1.5 s) so the end-of-turn hook knows every file the turn changed, and marks the turn open in `.waymark/open.json` (a turn that never ends still shows in `tasks.md`). It never changes the prompt.
+- **Each prompt** (`rule0-hook.mjs`): the Rule 0 reminder (~70 tokens, ~10 once the previous reply opened with `Waymark →`), the task ID (`2026-10-02 · T3`), the repo's stack and a one-line `git status`, so the agent spends no response on it. **Context brake** (`docs/adr/0016`): by default, a message to a session at 300k tokens is stopped before the model once (0 tokens), kept in `.waymark/next-prompt.md` and brought by the next session's card; resending it continues there (`WAYMARK_BRAKE_TOKENS`, 0 = off). It takes a `git status` snapshot (≤ 1.5 s) so the end-of-turn hook knows every file the turn changed, and marks the turn open in `.waymark/open.json` (a turn that never ends still shows in `tasks.md`). It never changes the prompt.
 - **Decision gate** (`tool-hook.mjs`, before shell commands and edits): every L1–L3 change to project files (edits, and shell commands that change files such as `git checkout --`, `sed -i`, `rm` or a redirect) is denied until the user was asked in the choice window in this task. A single way is confirmed there too. A turn routed Q is told once to re-route by invoking the owner department with args `L<n>`. The message asks for every decision that shapes the work in the same call and never offers browser verification (only when the user asks); the branch is the user's and is never pushed as a sub-decision. A reply with no routing line inside a task that has not closed keeps the task's routing.
-- **Memory at the first edit and at the commit** (`tool-hook.mjs` too, `docs/adr/0014`, `0015`): the first edit of each project file in a task gets that file's `waymark.mjs pack` (what earlier tasks did there) as context: before the tool in Claude Code and Codex, with the edit's result in OpenCode and Gemini CLI. Recordar never depends on the agent. A `git commit` whose `Waymark-Task` trailer would be recorded under another ID is denied with the right one; before a commit, engram's new memories are exported to `.engram/` and staged.
+- **Memory at the first edit and at the commit** (`tool-hook.mjs` too, `docs/adr/0014`, `0015`): the first edit of each project file in a task gets that file's `waymark.mjs pack` (what earlier tasks did there) as context: before the tool in Claude Code and Codex, with the edit's result in OpenCode and Gemini CLI. Recordar never depends on the agent. A `git commit` whose `Waymark-Task` trailer would be recorded under another ID is denied with the right one. The project's `.gitignore` keeps `.waymark/`, `.engram/`, `.agents/` and `.claude/skills/` out of git (`docs/adr/0017`).
 - **End of turn** (`stop-hook.mjs`): a turn routed L1–L3 that changed project files must end with `## Cierre · <task ID>` (`Resultado`, `Evidencia`, `Aprendido`); the decision is the user's answer in the choice window, recorded as is. Everything it can observe is computed and recorded under `observed`: memory, procedure, gates after the last change with time and failure, the gate testigo's run, secrets found (where and kind, never the value), the chain, tests, browser, review, docs, branches, time.
   - What blocks (once) and what is only recorded and scored is one file, the catalog of testigos `skills/waymark/routine.json` (`docs/adr/0006`, `0012`). Each testigo executes instead of reading prose: when the agent ran no gate after its last code change, the hook runs the repo typecheck (memory.md *Quality gates* → package.json → tsconfig, 40 s, never the full build). Every testigo that applies blocks once; only the commit trailer and the chain are recorded (`docs/adr/0010`). `node waymark.mjs testigos [<task ID>]` re-runs the ones that execute.
   - Every task gets an automatic evaluation (✔/✘ per step, tokens, estimated quota from your own pairs: `calibrate.mjs "<task ID>" <percent>`) that the user sees as one line.

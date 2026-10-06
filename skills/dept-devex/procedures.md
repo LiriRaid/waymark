@@ -36,7 +36,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### Generate a project skill
 1. Trigger: a procedure counted twice in project memory (*Repeated procedures*), or the user asks.
 2. Copy `../waymark/templates/project-skill.template.md` (`skill-creator` for wording): description = the user's real phrases; procedure = real paths and verified gates.
-3. Ask before writing `<project>/.agents/skills/<slug>-<topic>/SKILL.md` (every agent's folder: Codex, OpenCode and Gemini CLI read it; the session hook mirrors it to `.claude/skills` for Claude Code, docs/adr/0016); offer to `.gitignore` both.
+3. Ask before writing `<project>/.agents/skills/<slug>-<topic>/SKILL.md`, its `name` equal to the folder. That is the only real copy, in every agent's folder: Codex, OpenCode and Gemini CLI read it, and the session hook links it into `.claude/skills` for Claude Code. Never write a project skill into an agent's own folder (`.claude/skills`, `.opencode/skills`, `.gemini/skills`). Both folders stay out of git (docs/adr/0017).
 4. Register it in project memory → *Project skills*, run sync (it appears under `## Project skills`).
 
 ### Private layer maintenance

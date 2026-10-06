@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks } from './provenance.mjs';
 import { repairNotes, noteLateCommits } from './notes.mjs';
 import { importChunks, learnedLines } from './engram.mjs';
-import { mirrorProjectSkills } from './project-skills.mjs';
+import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -75,7 +75,7 @@ export function digest(cwd, agentName = 'claude') {
   try { if (!home.legacy) { importChunks(home); learned = learnedLines(home); } } catch {}
   if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
   const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
-  out.push(`Commands (W = ${cmd}): the hook hands you W pack before your first edit of each file (what earlier tasks did there, from git); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
+  out.push(`Commands (W = ${cmd}): the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -148,9 +148,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const gone = home.dir && !home.legacy ? expireOpen(home, sessionId) : [];
         if (gone.length) { refreshTasks(home, true); text += `\nInterrupted (never closed, now out of tasks.md): ${gone.map((o) => `${o.next}${o.agent ? ` in ${o.agent}` : ''} "${o.prompt}"`).join('; ')}`; }
         held = home.dir && !home.legacy ? heldPrompt(home) : ''; // the context brake's message (docs/adr/0016), once
-        // a project skill one agent generated, there for every agent (.agents/skills ⇄ .claude/skills)
-        const mirrored = home.dir && !home.legacy ? mirrorProjectSkills(home.root) : [];
-        if (mirrored.length) text += `\nProject skills mirrored for every agent: ${mirrored.join(', ')}`;
+        // a project skill lives once in .agents/skills (every agent); Claude Code gets a link in .claude/skills
+        const linked = home.dir && !home.legacy ? linkProjectSkills(home.root) : [];
+        if (linked.length) text += `\nProject skills (one copy in .agents/skills, linked for Claude Code): ${linked.join('; ')}`;
       } catch {}
     } catch { text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';

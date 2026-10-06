@@ -15,7 +15,6 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { stageForCommit } from './engram.mjs';
 import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -81,9 +80,6 @@ export function checkTrailer(command, cwd = process.cwd()) {
   return why ? `Waymark: the trailer "Waymark-Task: ${id}" ${why}, so the end-of-turn hook would record this task as ${ids.next} and the commit would disagree with its record. Commit with "Waymark-Task: ${ids.next}" and use the same ID in the Cierre heading.` : null;
 }
 
-// `git commit` as the command run (global options such as -C <dir> or -c k=v before it), not a word in a log or grep.
-export const GIT_COMMIT = /(?:^|[;&|(]\s*|\n\s*)git(?:\s+-{1,2}[\w-]+(?:[=\s]+(?!commit\b)\S+)?)*\s+commit\b/;
-
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
@@ -92,8 +88,6 @@ export function gate(hook, agent) {
   if (c.command !== undefined) {
     const trailer = checkTrailer(c.command, cwd);
     if (trailer) return trailer;
-    // the learned memory rides in the commit: export what is new to .engram/ and stage it before git commits
-    if (GIT_COMMIT.test(c.command)) { try { const home = projectHome(cwd); if (home.dir && !home.legacy) stageForCommit(home); } catch {} }
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
   }
   const files = c.files.filter((f) => !exempt(f));

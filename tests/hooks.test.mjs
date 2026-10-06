@@ -598,7 +598,7 @@ test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
   assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T2 · follow-up of ${DAY} · T1 → ${DAY} · T1b`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T2 · follow-up of ${DAY} · T1 \\(it continues that task's files\\) → ${DAY} · T1b`));
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -683,19 +683,21 @@ test('project home: nearest .waymark/memory.md walking up, else the old memory (
   fs.rmSync(old);
 });
 
-test('ensureLocal: .waymark/ added once to the project\'s .gitignore (created if missing, kept if there), README written', () => {
+test('ensureLocal: .waymark/, .engram/, .agents/ and .claude/skills/ added once to the project\'s .gitignore (created if missing, kept if there), README written', () => {
   const repo = tmpRepo('exclude');
   const h = projectHome(repo);
   ensureLocal(h); ensureLocal(h);
   const ignore = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
-  assert.equal(ignore.match(/^\.waymark\/$/gm).length, 1);
+  for (const d of ['\\.waymark/', '\\.engram/', '\\.agents/', '\\.claude/skills/']) assert.equal(ignore.match(new RegExp(`^${d}$`, 'gm')).length, 1, d);
   assert.match(fs.readFileSync(path.join(repo, '.waymark', 'README.md'), 'utf8'), /tasks\.md/);
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), 'x');
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).stdout.trim(), '?? .gitignore', 'git sees only the .gitignore, never .waymark/');
+  for (const d of ['.engram', '.agents/skills/s', '.claude/skills/s']) { fs.mkdirSync(path.join(repo, d), { recursive: true }); fs.writeFileSync(path.join(repo, d, 'f'), 'x'); }
+  fs.writeFileSync(path.join(repo, '.claude', 'settings.json'), '{}');
+  assert.deepEqual(spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: repo, encoding: 'utf8' }).stdout.trim().split('\n').sort(), ['?? .claude/settings.json', '?? .gitignore'], 'git never sees the agents\' local folders; the rest of .claude/ stays the project\'s');
   const other = tmpRepo('exclude-own');
-  fs.writeFileSync(path.join(other, '.gitignore'), 'node_modules/');
+  fs.writeFileSync(path.join(other, '.gitignore'), 'node_modules/\n/.engram\n');
   ensureLocal(projectHome(other));
-  assert.equal(fs.readFileSync(path.join(other, '.gitignore'), 'utf8'), 'node_modules/\n# Waymark: project memory, local only\n.waymark/\n', 'appended after the user\'s lines');
+  assert.equal(fs.readFileSync(path.join(other, '.gitignore'), 'utf8'), "node_modules/\n/.engram\n# Waymark: project memory, local only\n.waymark/\n# project skills, every agent, local only\n.agents/\n# Claude Code's links to .agents/skills, local only\n.claude/skills/\n", 'appended after the user\'s lines; a line already there is kept');
 });
 
 test('quota: a model with no pairs of its own gets an uncalibrated estimate from a calibrated model of its family, and the % is still asked', async () => {
@@ -1886,7 +1888,7 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
-  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): the hook hands you W pack before your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2291,14 +2293,14 @@ const fakeEngram = () => {
 const a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + '\\n');
 if (a[0] === 'version') console.log('engram 3.1.0');
-if (a[0] === 'context') console.log('## Memory from Previous Sessions\\n\\n### Recent Observations\\n- [learning] **2026-10-06 · T4 · precios**: Aprendido: el ahorro vive en la entity\\n- [learning] **2026-10-06 · T3 · faq**: Aprendido: grupo con nombre accesible');
+if (a[0] === 'context') console.log('## Memory from Previous Sessions\\n\\n### Recent Observations\\n- [learning] **2026-10-06 · T4 · precios**: Aprendido: el ahorro vive en la entity\\n- [learning] **2026-10-06 · T3 · faq**: Aprendido: grupo con nombre accesible\\n- [decision] **ADR docs/adr/0001 (screaming + SSR)**: [2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema');
 if (a[0] === 'sync' && a[1] !== '--import') { fs.mkdirSync('.engram/chunks', { recursive: true }); fs.writeFileSync('.engram/chunks/c1.jsonl.gz', 'x'); }
 `);
   return { bin, calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []) };
 };
 const withEngram = async (bin, fn) => { const prev = process.env.WAYMARK_ENGRAM; process.env.WAYMARK_ENGRAM = bin; try { return await fn(); } finally { process.env.WAYMARK_ENGRAM = prev; } };
 
-test('engram layer: the close saves the Aprendido under the project slug (config pinned), a commit stages .engram/, chunks import once, the card reads the latest', async () => {
+test('engram layer: the close saves the Aprendido under the project slug (config pinned), nothing is exported or staged for git, chunks import once, the card reads the latest', async () => {
   const e = await import(`file://${SCRIPTS}/engram.mjs`);
   const repo = memRepo('engram-layer'), h = projectHome(repo), fake = fakeEngram();
   await withEngram(fake.bin, async () => {
@@ -2309,12 +2311,12 @@ test('engram layer: the close saves the Aprendido under the project slug (config
     assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · contador en rojo', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
     assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
     assert.equal(e.saveLearned(h, { ...rec, cierre: 'Resultado: hecho' }), false, 'no Aprendido, nothing to learn');
-    assert.equal(e.stageForCommit(h), true);
-    assert.match(gitT(repo, 'diff', '--cached', '--name-only').stdout, /\.engram\/chunks\/c1\.jsonl\.gz[\s\S]*\.engram\/config\.json|\.engram\/config\.json[\s\S]*\.engram\/chunks\/c1\.jsonl\.gz/);
+    assert.equal(e.stageForCommit, undefined, 'the learned memory stays local (docs/adr/0017)');
+    assert.ok(!fake.calls().some((c) => c[0] === 'sync'), 'no export to .engram/');
     fs.writeFileSync(path.join(repo, '.engram', 'manifest.json'), '{}');
     const state = path.join(home, 'engram-import-test.json');
     assert.deepEqual([e.importChunks(h, state), e.importChunks(h, state)], [true, false], 'once per manifest change');
-    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible']);
+    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
   });
   assert.deepEqual([e.saveLearned(h, { id: 'x', cierre: 'Aprendido: y' }), e.learnedLines(h)], [false, []], 'no engram: a no-op, Waymark keeps git and memory.md');
 });
@@ -2423,12 +2425,6 @@ test('learned move: Solved problems, Gotchas and Decisions go to engram once; me
   assert.match(fs.readFileSync(h.memory, 'utf8'), /## Gotchas\n- again/);
 });
 
-test('git commit detection: the command run, not the word in a log or grep', async () => {
-  const { GIT_COMMIT } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
-  for (const c of ['git commit -m "x"', 'git add a.ts && git commit -m x', 'git -C ../api commit -m x', 'git -c user.name=t commit -m x', 'cd repo; git commit -F -']) assert.ok(GIT_COMMIT.test(c), c);
-  for (const c of ['git log --oneline | grep commit', 'git show HEAD --stat # last commit', 'echo "git commit later"', 'git log --grep=commit']) assert.ok(!GIT_COMMIT.test(c), c);
-});
-
 test('one Cierre per task: after a block the agent writes only what changed; the hook keeps the Cierre written earlier in the turn', async () => {
   const { effectiveReply, blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
@@ -2458,7 +2454,7 @@ test('no secret reaches engram: the learned save and the learned move mask them'
   assert.match(save[2], /\[redactado\]/);
 });
 
-test('a task that changed no project file (a push the user asked for): a missing choice window is recorded, not blocked; the message never says "changed files"', async () => {
+test('a task that changed no project file (a push the user asked for): the user\'s order is the decision, so Decision does not apply; the message never says "changed files"', async () => {
   const { blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
   const { cwd } = fresh();
   const ids = taskIds(cwd);
@@ -2467,29 +2463,33 @@ test('a task that changed no project file (a push the user asked for): a missing
   assert.deepEqual(g.changed, []);
   assert.deepEqual(g.missing, [], 'not blocked');
   const dec = g.steps.find((s) => s.id === 'decision');
-  assert.deepEqual([dec.pass, dec.enforce], [false, 'record'], 'still recorded and scored');
+  assert.deepEqual([dec.applies, dec.pass], [false, null], 'not applicable: no ✘ in the evaluation');
   assert.match(blockReason({ level: 1, changed: [], missing: ['x'] }), /^Waymark: this L1 task \(no project file changed\) and is missing/);
   assert.match(blockReason({ level: 2, changed: ['a.ts'], missing: ['x'] }), /^Waymark: this L2 turn changed files/);
 });
 
-test('context brake: a message to a session past 150k is stopped before the model once, kept for the next session, and brought by its card', async () => {
+test('context brake: a message to a session at 300k is stopped before the model once, kept for the next session, and brought by its card', async () => {
   const { brake, BRAKE_TOKENS } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);
   const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`), codex = await import(`file://${SCRIPTS}/agents/codex.mjs`);
   const repo = memRepo('brake'), state = path.join(home, `brake-${n}.json`);
   const hook = (session, prompt = 'agrega un buscador al FAQ') => ({ cwd: repo, session_id: session, prompt });
-  assert.equal(BRAKE_TOKENS, 150000);
-  assert.equal(brake(hook('s1'), claude, { context: 90000 }, state), null, 'a small session is never braked');
-  const held = brake(hook('s1'), claude, { context: 180000 }, state);
+  assert.equal(BRAKE_TOKENS, 300000);
+  assert.equal(brake(hook('s1'), claude, { context: 299999 }, state), null, 'a session below 300k is never braked');
+  const held = brake(hook('s1'), claude, { context: 300000 }, state);
   assert.equal(held.block.decision, 'block');
-  assert.match(held.block.reason, /~180k tokens[\s\S]*Open a new session[\s\S]*Send it again here to continue/);
-  assert.equal(brake(hook('s1'), claude, { context: 190000 }, state), null, 'once per session: resent, it continues');
-  assert.equal(heldPrompt(projectHome(repo)), 'agrega un buscador al FAQ');
+  assert.match(held.block.reason, /~300k tokens[\s\S]*Open a new session[\s\S]*Send it again here to continue/);
+  assert.equal(heldPrompt(projectHome(repo)), 'agrega un buscador al FAQ', 'the new session\'s card brings it');
   assert.equal(heldPrompt(projectHome(repo)), '', 'brought once, then cleared');
-  assert.equal(brake(hook('s2'), codex, { context: 200000 }, state).block.decision, 'block', 'Codex 0.160 takes the same shape');
+  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 300000 }, state).block.decision, 'block');
+  assert.equal(brake(hook('s1', 'sigo aquí'), claude, { context: 310000 }, state), null);
+  assert.match(fs.readFileSync(path.join(projectHome(repo).dir, 'next-prompt.md'), 'utf8'), /otra cosa/, 'another braked session continuing never removes s5\'s held message');
+  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per session: resent, it continues');
+  assert.equal(heldPrompt(projectHome(repo)), '', 'resent here: the held copy is gone, no new session gets it');
+  assert.equal(brake(hook('s2'), codex, { context: 300000 }, state).block.decision, 'block', 'Codex 0.160 takes the same shape');
   const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
-  assert.equal(brake(hook('s3'), gemini, { context: 200000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
-  assert.match(brake(hook('s4'), { out: {} }, { context: 200000 }, state).line, /~200k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
+  assert.equal(brake(hook('s3'), gemini, { context: 300000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
+  assert.match(brake(hook('s4'), { out: {} }, { context: 300000 }, state).line, /~300k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
 });
 
 test('context brake in OpenCode: the plugin shows the reason and throws from chat.message, so the message never reaches the model', async () => {
@@ -2512,18 +2512,56 @@ test('context brake in OpenCode: the plugin shows the reason and throws from cha
   assert.equal(toasts[0].body.variant, 'warning');
 });
 
-test('one project-skills folder: a skill in .agents/skills (Codex, OpenCode, Gemini) is mirrored to .claude/skills for Claude Code and back; newer wins, nothing deleted', async () => {
-  const { mirrorProjectSkills } = await import(`file://${SCRIPTS}/project-skills.mjs`);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-pskills-'));
+test('one real copy per shared skill: .agents/skills holds it, Claude Code gets a link; a copy or a skill written on Claude\'s side moves to .agents/skills, the replaced folder to the backup', async () => {
+  const { linkProjectSkills, linkUserSkills } = await import(`file://${SCRIPTS}/skill-links.mjs`);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-pskills-')), backup = path.join(root, 'backup');
   temps.push(root);
   const put = (dir, name, text, mtime) => { const d = path.join(root, dir, name); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'SKILL.md'), text); fs.utimesSync(path.join(d, 'SKILL.md'), mtime, mtime); };
+  const read = (dir, name) => fs.readFileSync(path.join(root, dir, name, 'SKILL.md'), 'utf8');
+  const linked = (name) => fs.lstatSync(path.join(root, '.claude/skills', name)).isSymbolicLink() && fs.realpathSync(path.join(root, '.claude/skills', name)) === fs.realpathSync(path.join(root, '.agents/skills', name));
   put('.agents/skills', 'flujo-add-section', 'by codex', new Date('2026-10-06T10:00:00Z'));
-  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), ['flujo-add-section → .claude/skills']);
-  assert.equal(fs.readFileSync(path.join(root, '.claude/skills/flujo-add-section/SKILL.md'), 'utf8'), 'by codex');
-  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), [], 'equal now: nothing to do');
+  assert.deepEqual(linkProjectSkills(root, { claude: true, backup }), ['flujo-add-section: linked']);
+  assert.ok(linked('flujo-add-section'));
+  assert.equal(read('.claude/skills', 'flujo-add-section'), 'by codex', 'Claude Code reads the one real file through the link');
+  assert.deepEqual(linkProjectSkills(root, { claude: true, backup }), [], 'linked: nothing to do');
+  // an old copy (ADR 0016's mirror) with newer content from Claude: its content wins, the older folder is kept aside
+  fs.rmSync(path.join(root, '.claude/skills/flujo-add-section'), { recursive: false, force: true });
   put('.claude/skills', 'flujo-add-section', 'improved by claude', new Date('2026-10-06T12:00:00Z'));
-  assert.deepEqual(mirrorProjectSkills(root, { claude: true }), ['flujo-add-section → .agents/skills']);
-  assert.equal(fs.readFileSync(path.join(root, '.agents/skills/flujo-add-section/SKILL.md'), 'utf8'), 'improved by claude');
+  assert.match(linkProjectSkills(root, { claude: true, backup })[0], /^flujo-add-section: copy replaced by a link \(its newer content moved to/);
+  assert.ok(linked('flujo-add-section'));
+  assert.equal(read('.agents/skills', 'flujo-add-section'), 'improved by claude');
+  assert.equal(fs.readFileSync(path.join(backup, 'flujo-add-section', 'SKILL.md'), 'utf8'), 'by codex', 'never deleted');
+  // a skill Claude wrote into its own folder belongs to every agent
+  put('.claude/skills', 'solo-claude', 'x', new Date('2026-10-06T10:00:00Z'));
+  assert.deepEqual(linkProjectSkills(root, { claude: true, backup }), [`solo-claude: moved to ${path.join(root, '.agents/skills')}, linked`]);
+  assert.ok(linked('solo-claude'));
   put('.agents/skills', 'solo-codex', 'x', new Date('2026-10-06T10:00:00Z'));
-  assert.deepEqual(mirrorProjectSkills(root, { claude: false }), [], 'no Claude Code on the machine: no .claude copy');
+  assert.deepEqual(linkProjectSkills(root, { claude: false, backup }), [], 'no Claude Code on the machine: no .claude side');
+  // user level: only Waymark's skills move; the user's own Claude skills stay Claude's
+  const home2 = path.join(root, 'home');
+  for (const [n, t] of [['waymark', 'core'], ['mine', 'per agent']]) { const d = path.join(home2, '.claude/skills', n); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'SKILL.md'), t); }
+  assert.deepEqual(linkUserSkills({ home: home2, names: new Set(['waymark']), apply: false }), [`waymark: moved to ${path.join(home2, '.agents/skills')}, linked`], 'a plan first');
+  assert.ok(!fs.existsSync(path.join(home2, '.agents')), 'the plan changes nothing');
+  linkUserSkills({ home: home2, names: new Set(['waymark']), backup });
+  assert.equal(fs.readFileSync(path.join(home2, '.agents/skills/waymark/SKILL.md'), 'utf8'), 'core');
+  assert.ok(fs.lstatSync(path.join(home2, '.claude/skills/waymark')).isSymbolicLink());
+  assert.ok(!fs.lstatSync(path.join(home2, '.claude/skills/mine')).isSymbolicLink(), 'a per-agent skill is not touched');
+});
+
+test('sync: a project skill reached through Claude Code\'s link and through its real folder is listed once', async () => {
+  const { makeLink } = await import(`file://${SCRIPTS}/skill-links.mjs`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-sync-'));
+  temps.push(tmp);
+  fs.cpSync(path.join(SCRIPTS, '..', '..'), path.join(tmp, 'skills'), { recursive: true });
+  const proj = path.join(tmp, 'proj'), priv = path.join(tmp, 'private');
+  fs.mkdirSync(path.join(proj, '.agents/skills/proj-section'), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.agents/skills/proj-section/SKILL.md'), '---\nname: proj-section\ndescription: Proyecto proj. Agregar una sección.\n---\n');
+  makeLink(path.join(proj, '.agents/skills/proj-section'), path.join(proj, '.claude/skills/proj-section'));
+  fs.mkdirSync(path.join(priv, 'projects'), { recursive: true });
+  fs.writeFileSync(path.join(priv, 'projects', 'proj.md'), `# Project: proj\n\nPath: ${proj}\n`);
+  const r = spawnSync(process.execPath, [path.join(tmp, 'skills/waymark/scripts/sync.mjs')], { encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: priv } });
+  assert.equal(r.status, 0, r.stderr);
+  const rows = fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8').split('\n').filter((l) => l.startsWith('| `proj-section`'));
+  assert.equal(rows.length, 1);
+  assert.match(rows[0], /\.agents\/skills\/proj-section\/SKILL\.md/, 'the real folder, not the link');
 });

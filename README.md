@@ -176,7 +176,7 @@ Nothing personal ships in this repository: no stack, no preferences, no projects
 | `agent.md` | the installer records where your agent keeps skills and instructions |
 | `coexistence.md` | the installer finds another agent framework (see below) |
 
-The same layer serves every agent, so switching from Claude Code to Codex keeps your memory. Memory has three layers (`docs/adr/0015`): git holds what was done (commits, trailers, notes), engram what was learned (written by the hooks, shared by every agent, carried in `.engram/`), and `memory.md` the project manual.
+The same layer serves every agent, so switching from Claude Code to Codex keeps your memory. Memory has three layers (`docs/adr/0015`): git holds what was done (commits, trailers, notes), engram what was learned (written by the hooks, shared by every agent on the machine, never committed: `docs/adr/0017`), and `memory.md` the project manual.
 
 ### Living next to an orchestrator
 

@@ -2,7 +2,7 @@
 
 | Key | Value |
 |---|---|
-| `<skills-dir>` | `~/.gemini/skills` (*verify*; fallback `~/.agents/skills`) |
+| `<skills-dir>` | `~/.agents/skills`, shared by every agent (verified, 0.62.0: `~/.gemini/skills` then `~/.agents/skills`, which wins a name clash; junctions followed). `~/.gemini/skills` only for a skill the user wants in Gemini alone |
 | `<project-skills-dir>` | `.agents/skills` (read with `.gemini/skills`, `.agents` wins; verified at v0.62) |
 | `<instructions-file>` | `~/.gemini/GEMINI.md` |
 | `<project-instructions-file>` | `GEMINI.md` at the project root |

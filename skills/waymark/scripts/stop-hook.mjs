@@ -386,12 +386,12 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   };
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
-    const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked;
+    // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
+    // decision, so the choice window does not apply (docs/adr/0017); the pre-tool gate still stops file changes first
+    const ordered = s.id === 'decision' && !changed.length;
+    const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked && !ordered;
     const why = applies ? fails[s.id] || [] : [];
-    // a task that changed no project file (a push, a commit, an install the user asked for): the action already ran, so
-    // a missing choice-window answer is recorded, not blocked (the pre-tool gate still stops file changes before asking)
-    const enforce = s.id === 'decision' && !changed.length ? 'record' : s.enforce;
-    return { id: s.id, label: s.label, enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
+    return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
   });
   const missing = steps.filter((s) => s.applies && s.enforce === 'block').flatMap((s) => s.why);
   const findings = [...steps.filter((s) => s.applies && s.enforce !== 'block').flatMap((s) => s.why), ...extras];

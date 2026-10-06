@@ -136,7 +136,7 @@ export function call(hook) {
 }
 
 // One line added to the reminder and to the gate's message: how this agent does what the routine names in Claude terms.
-export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it, otherwise put the options in the chat and end your turn — the user's reply counts as the decision.`;
+export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it, otherwise put the options in the chat and end your turn — the user's reply counts as the decision; after request_user_input_async, end your turn too (no sleep, no wait: the answer comes as the user's next message).`;
 
 // Rollouts of the sessions opened in cwd, newest first (session_meta.cwd of each file modified in the last 14 days).
 export function sessions(cwd) {

@@ -42,7 +42,7 @@ export function gitLine(root, max = 8) {
 }
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
-  return ` Task ID for the Cierre heading: new task → ${ids.next}${ids.followUp ? ` · follow-up of ${ids.last} → ${ids.followUp}` : ''}.`;
+  return ` Task ID for the Cierre heading: new task → ${ids.next}${ids.followUp ? ` · follow-up of ${ids.last} (it continues that task's files) → ${ids.followUp}` : ''}.`;
 }
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
@@ -53,21 +53,27 @@ const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 // .waymark/next-prompt.md and the next session's card brings it; sending it again here continues. Agents whose
 // prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder instead.
 // WAYMARK_BRAKE_TOKENS tunes it (0 = off).
-export const BRAKE_TOKENS = Number(process.env.WAYMARK_BRAKE_TOKENS ?? 150000);
+export const BRAKE_TOKENS = Number(process.env.WAYMARK_BRAKE_TOKENS ?? 300000);
 export const NEXT_PROMPT = 'next-prompt.md';
 export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json')) {
   if (!BRAKE_TOKENS || (st.context || 0) < BRAKE_TOKENS || !String(hook.prompt || '').trim()) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const session = hook.session_id || 'unknown', k = `${Math.round(st.context / 1000)}k`;
-  if (seen[session]) return null; // braked once already: the user chose to continue here
+  if (seen[session]) { // braked once already: the user chose to continue here, so this session's held message is not for a new one
+    try {
+      const home = projectHome(hook.cwd || process.cwd()), file = path.join(home.dir, NEXT_PROMPT);
+      if (home.dir && !home.legacy && fs.readFileSync(file, 'utf8').split('\n')[0].includes(`· session ${session} -->`)) fs.rmSync(file, { force: true });
+    } catch {}
+    return null;
+  }
   for (const [s, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[s];
   seen[session] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
   if (!agent.out.blockPrompt) return { line: ` Context: this session holds ~${k} tokens and every response re-reads them; before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
   const home = projectHome(hook.cwd || process.cwd());
   let kept = '';
-  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date().toISOString()} · held by the context brake (~${k}) -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
+  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date().toISOString()} · held by the context brake (~${k}) · session ${session} -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
   return { block: agent.out.blockPrompt(`Waymark: this session holds ~${k} tokens of context and every response re-reads all of it. Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
 }
 

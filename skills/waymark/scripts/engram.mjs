@@ -1,12 +1,11 @@
-// Waymark · the learned-memory layer (docs/adr/0015). The hooks write and read engram through its CLI, so every agent
-// shares one learned memory whether or not it has engram's MCP server:
+// Waymark · the learned-memory layer (docs/adr/0015, 0017). The hooks write and read engram through its CLI, so every
+// agent on this machine shares one learned memory whether or not it has engram's MCP server:
 // - saveLearned: at each close, the task's Aprendido, decisions, files and commit (`engram save`, topic = task ID, so a
 //   re-close of the same task updates its memory instead of adding one);
-// - stageForCommit: before a `git commit`, `engram sync` exports new memories to .engram/chunks/ and stages .engram/,
-//   so they ride in that commit;
-// - importChunks: at session start, `engram sync --import` loads chunks a clone or another machine brought;
+// - importChunks: at session start, `engram sync --import` loads chunks a repo still carries in .engram/;
 // - learnedLines: the project's latest memories, for the context card.
-// The project name is Waymark's slug, pinned in .engram/config.json so engram's own MCP server resolves the same name.
+// The memory stays local: .engram/ is git-ignored and nothing is exported to it. The project name is Waymark's slug,
+// pinned in .engram/config.json so engram's own MCP server resolves the same name.
 // engram missing → every function is a no-op (Waymark keeps git and memory.md). WAYMARK_ENGRAM overrides the binary
 // (a .mjs path runs with node, for tests). The update check is skipped (ENGRAM_NO_UPDATE_CHECK=1).
 import fs from 'node:fs';
@@ -64,16 +63,9 @@ export function saveLearned(home, rec) {
     rec.commits?.length ? `Commit: ${rec.commits.map((c) => c.slice(0, 8)).join(', ')}` : '',
     `Agente: ${rec.agent || '?'}`,
   ].filter(Boolean).join('\n');
-  // never a secret in engram: .engram/ is committed gzipped, where the secrets testigo cannot read it
+  // never a secret in engram: its store is gzipped or SQLite, where the secrets testigo cannot read it
   const r = run(home, ['save', maskSecrets(`${rec.id} · ${clip(rec.prompt, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
   return !!r?.ok;
-}
-
-// Before a commit: export what is new and stage .engram/ (config and chunks). → true when .engram/ was staged.
-export function stageForCommit(home) {
-  if (!fs.existsSync(configFile(home)) || !engramBin()) return false;
-  run(home, ['sync', '--project', projectOf(home)]);
-  return spawnSync('git', ['add', '--', '.engram'], { cwd: home.root, encoding: 'utf8', timeout: 3000 }).status === 0;
 }
 
 // At session start: import chunks the repo brought, once per manifest change (state in WAYMARK_HOME).
@@ -96,5 +88,7 @@ export function learnedLines(home, n = 3, width = 150) {
   const r = run(home, ['context', projectOf(home)]);
   if (!r?.ok) return [];
   const obs = (r.out.split(/^### Recent Observations\s*$/m)[1] || '').split('\n').map((l) => l.match(/^- \[[^\]]*\] \*\*(.+?)\*\*:\s*(.*)$/)).filter(Boolean);
-  return obs.slice(0, n).map(([, title, body]) => clip(`${title}: ${body}`, width));
+  // a memory whose body repeats its title (moved from memory.md: "[date] <title>…") shows the body alone
+  const same = (title, body) => body.replace(/^\[[^\]]*\]\s*/, '').startsWith(title.replace(/…$/, ''));
+  return obs.slice(0, n).map(([, title, body]) => clip(same(title, body) ? body : `${title}: ${body}`, width));
 }

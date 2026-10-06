@@ -9,7 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { projectHome } from './provenance.mjs';
+import { projectHome, maskSecrets } from './provenance.mjs';
 import { engramBin, ensureConfig } from './engram.mjs';
 
 export const SECTIONS = [['Solved problems', 'bugfix'], ['Gotchas', 'learning'], ['Decisions', 'decision']];
@@ -39,7 +39,7 @@ export function moveLearned(home, now = new Date()) {
   for (const e of entries) {
     const title = e.text.replace(/^\[\d{4}-\d\d-\d\d\]\s*/, '').replace(/^Symptom:\s*/i, '').split(/\s·\s|—/)[0].trim().slice(0, 90);
     const topic = `waymark/memory/${e.section.toLowerCase().replace(/\s+/g, '-')}/${crypto.createHash('sha256').update(e.text).digest('hex').slice(0, 10)}`;
-    const r = spawnSync(bin[0], [...bin.slice(1), 'save', title, e.text, '--type', e.type, '--project', project, '--topic', topic], { cwd: home.root, encoding: 'utf8', timeout: 5000, env: { ...process.env, ENGRAM_NO_UPDATE_CHECK: '1' } });
+    const r = spawnSync(bin[0], [...bin.slice(1), 'save', maskSecrets(title), maskSecrets(e.text), '--type', e.type, '--project', project, '--topic', topic], { cwd: home.root, encoding: 'utf8', timeout: 5000, env: { ...process.env, ENGRAM_NO_UPDATE_CHECK: '1' } });
     if (r.status !== 0) throw new Error(`engram save failed: ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
   }
   let kept = '\n' + text, moved = '';

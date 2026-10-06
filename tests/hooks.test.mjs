@@ -2428,3 +2428,32 @@ test('git commit detection: the command run, not the word in a log or grep', asy
   for (const c of ['git commit -m "x"', 'git add a.ts && git commit -m x', 'git -C ../api commit -m x', 'git -c user.name=t commit -m x', 'cd repo; git commit -F -']) assert.ok(GIT_COMMIT.test(c), c);
   for (const c of ['git log --oneline | grep commit', 'git show HEAD --stat # last commit', 'echo "git commit later"', 'git log --grep=commit']) assert.ok(!GIT_COMMIT.test(c), c);
 });
+
+test('one Cierre per task: after a block the agent writes only what changed; the hook keeps the Cierre written earlier in the turn', async () => {
+  const { effectiveReply, blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const id = `${new Date().toLocaleDateString('sv')} · T1`;
+  const first = cierre(id);
+  assert.equal(effectiveReply(['texto', first], first), first, 'a reply with its Cierre is judged as is');
+  const kept = effectiveReply(['Waymark → L2', first, 'Listo: corrí el build.'], 'Listo: corrí el build.');
+  assert.ok(kept.startsWith(`## Cierre · ${id}\n`), kept);
+  assert.match(kept, /Aprendido:[^\n]*\n\nListo: corrí el build\.$/);
+  const fixed = effectiveReply([first, 'Resultado: parcial (falta el deploy)'], 'Resultado: parcial (falta el deploy)');
+  assert.match(fixed, /^Resultado: parcial \(falta el deploy\)$/m);
+  assert.equal(fixed.match(/^Resultado:/gm).length, 1, 'the field is replaced, never twice');
+  assert.equal(effectiveReply(['sin cierre'], 'listo'), 'listo', 'no Cierre in the turn: nothing to keep');
+  assert.match(blockReason({ level: 2, missing: ['L2+ with code: run the build once now'] }), /Do not repeat the Cierre: the hook keeps the one you wrote/);
+  assert.match(blockReason({ level: 1, missing: ['the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)'] }), /then reply with the Cierre\.$/);
+  const transcript = [...l2Lines.slice(0, -2), say(first), call('Skill', { skill: 'code-review' }), say('Listo: corrí code-review.'), MEM()];
+  const { out, records } = runStop(transcript, 'Listo: corrí code-review.', { stop_hook_active: true });
+  assert.ok(JSON.parse(out).systemMessage && !JSON.parse(out).decision, out);
+  assert.match(records[0].cierre, /^## Cierre · /, 'recorded with the Cierre written before the block');
+});
+
+test('no secret reaches engram: the learned save and the learned move mask them', async () => {
+  const e = await import(`file://${SCRIPTS}/engram.mjs`);
+  const repo = memRepo('engram-secret'), h = projectHome(repo), fake = fakeEngram();
+  await withEngram(fake.bin, () => e.saveLearned(h, { id: '2026-10-06 · T8', prompt: 'conecta con password: hunter2', cierre: 'Aprendido: la api key = sk-live-123456789abcdef ← .env' }));
+  const save = fake.calls().find((c) => c[0] === 'save');
+  assert.doesNotMatch(save.join(' '), /hunter2|sk-live-123456789abcdef/);
+  assert.match(save[2], /\[redactado\]/);
+});

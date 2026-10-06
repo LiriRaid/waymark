@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { maskSecrets } from './provenance.mjs';
 
 const ENV = () => ({ ...process.env, ENGRAM_NO_UPDATE_CHECK: '1' });
 let found;
@@ -63,7 +64,8 @@ export function saveLearned(home, rec) {
     rec.commits?.length ? `Commit: ${rec.commits.map((c) => c.slice(0, 8)).join(', ')}` : '',
     `Agente: ${rec.agent || '?'}`,
   ].filter(Boolean).join('\n');
-  const r = run(home, ['save', `${rec.id} · ${clip(rec.prompt, 70)}`, content, '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
+  // never a secret in engram: .engram/ is committed gzipped, where the secrets testigo cannot read it
+  const r = run(home, ['save', maskSecrets(`${rec.id} · ${clip(rec.prompt, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
   return !!r?.ok;
 }
 

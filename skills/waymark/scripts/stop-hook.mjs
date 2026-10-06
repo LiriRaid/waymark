@@ -131,7 +131,31 @@ export function checkCierre(turn, last, allTools = turn.tools, prompts = [turn.p
 // From gaps already computed (the hook never judges twice: the gate testigo may have re-run the typecheck).
 export function blockReason(gaps) {
   if (!gaps?.missing.length) return null;
-  return `Waymark: this L${gaps.level} turn changed files and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), then reply with the completed Cierre only.`;
+  // One Cierre per task: with one already written the agent does what is missing and says so in a line or two; a
+  // field that changes goes as that line alone. Only a turn with no Cierre at all is asked for one.
+  const noCierre = gaps.missing.some((m) => m.startsWith('the "## Cierre'));
+  const then = noCierre ? 'then reply with the Cierre.' : 'then reply in one or two lines with what you did. Do not repeat the Cierre: the hook keeps the one you wrote; a field that changes goes as that one line (e.g. "Resultado: parcial (…)").';
+  return `Waymark: this L${gaps.level} turn changed files and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), ${then}`;
+}
+
+// The reply the hook judges: the last one when it holds the Cierre; after a block, the Cierre written earlier in the
+// turn with the field lines the last reply corrected (Resultado, Evidencia, Aprendido), then the rest of that reply
+// (an exception such as "no comprobado (…)" or "Tests: no (…)" still counts). → text.
+const CIERRE_HEAD = /^[ \t]*##\s*Cierre\s*·/m;
+const FIELDS = ['Resultado', 'Evidencia', 'Aprendido'];
+export function effectiveReply(texts = [], last = '') {
+  const plain = (s) => String(s || '').replace(/\*\*|__/g, '');
+  if (CIERRE_HEAD.test(plain(last))) return last;
+  const earlier = [...texts].reverse().find((t) => CIERRE_HEAD.test(plain(t)));
+  if (!earlier) return last;
+  let cierre = plain(earlier), rest = plain(last);
+  for (const f of FIELDS) {
+    const line = rest.match(new RegExp(`^[ \\t]*${f}:[^\\n]*`, 'm'))?.[0];
+    if (!line) continue;
+    cierre = new RegExp(`^[ \\t]*${f}:[^\\n]*`, 'm').test(cierre) ? cierre.replace(new RegExp(`^[ \\t]*${f}:[^\\n]*`, 'm'), line.trim()) : `${cierre.trimEnd()}\n${line.trim()}`;
+    rest = rest.replace(line, '');
+  }
+  return rest.trim() ? `${cierre.trimEnd()}\n\n${rest.trim()}` : cierre;
 }
 
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
@@ -470,6 +494,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       // notification's turn.
       if (pendingBackground(lines, since).length) return;
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
+      h.last_assistant_message = effectiveReply(currentTurn(lines, since).texts, h.last_assistant_message); // one Cierre per task
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);

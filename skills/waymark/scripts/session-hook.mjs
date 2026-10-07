@@ -127,7 +127,7 @@ function coexistence() {
   return block.length > MAX_COEXIST ? block.slice(0, MAX_COEXIST) + '…' : block;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const agent = agentFrom();
   let input = '', done = false;
   const emit = () => {

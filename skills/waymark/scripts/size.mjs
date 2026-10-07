@@ -30,7 +30,7 @@ export function sizes(cwd) {
   return rows;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const rows = sizes(process.cwd());
   if (process.argv.includes('--json')) { console.log(JSON.stringify(rows)); process.exit(0); }
   const sum = (g) => rows.filter((r) => r.group === g).reduce((n, r) => n + r.chars, 0);

@@ -131,7 +131,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   return `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}`;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const agent = agentFrom();
   let input = '', done = false;
   const run = async () => {

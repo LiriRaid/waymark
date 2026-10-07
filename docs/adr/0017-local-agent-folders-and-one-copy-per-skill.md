@@ -48,3 +48,16 @@ Two smaller items from earlier tasks: a project skill's `name` must equal its fo
 | Codex 0.160.1 | `$CODEX_HOME/skills` (deprecated), `~/.agents/skills` | directory links followed (a junction observed); a linked `SKILL.md` file is skipped | `codex-rs/ext/skills/src/host_roots.rs` |
 | OpenCode 1.18.35 | `~/.claude/skills`, `~/.agents/skills`, `~/.config/opencode/skills` | followed (glob `follow: true`, a junction observed) | `packages/opencode/src/skill/index.ts` |
 | Gemini CLI 0.62.0 | `~/.gemini/skills`, then `~/.agents/skills` (wins a clash) | junctions followed (`gemini skills link` makes them) | `skillManager.ts`, `docs/cli/skills.md` |
+
+## Follow-up (2026-10-07 · T1): hooks through a link
+**What broke.** After the move, every hook was still registered as `~/.claude/skills/waymark/scripts/<hook>.mjs`, which is a junction to `~/.agents/skills`. Node runs a linked main script from its real path. Each script's guard compared `process.argv[1]` with `import.meta.url`, so the two never matched and the hook exited without doing anything, in all four agents. Three tasks were never recorded: T10 (Claude) and two Codex tasks. Codex's commit `dab8811` got no note.
+
+**Decision (the user's picks):**
+- Every script's main guard compares real paths, and a test runs two hooks through a link.
+- `install-hooks.mjs` re-registered the hooks of the four agents from `~/.agents/skills`. Codex asks to trust them again in `/hooks`.
+- The missing records were rebuilt from the transcripts, as the hook would have judged them, and marked `reconstructed`:
+  - T10 (Claude), 8/10, the note on `dab8811`;
+  - T11 (Codex, its Cierre said T10), 6/10;
+  - T12 (Codex), 3/4.
+- Recordar does not apply to a task that changed no project file: with no first edit, there is no pack to hand over. Decision already did not apply in that case.
+- INSTALL §11 replaces a 1.x install with a clean 2.0. Waymark is released as 2.0.0.

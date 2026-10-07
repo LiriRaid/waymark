@@ -2464,6 +2464,8 @@ test('a task that changed no project file (a push the user asked for): the user\
   assert.deepEqual(g.missing, [], 'not blocked');
   const dec = g.steps.find((s) => s.id === 'decision');
   assert.deepEqual([dec.applies, dec.pass], [false, null], 'not applicable: no ✘ in the evaluation');
+  const mem = g.steps.find((s) => s.id === 'memory');
+  assert.deepEqual([mem.applies, mem.pass], [false, null], 'Recordar: no first edit, no pack to hand over');
   assert.match(blockReason({ level: 1, changed: [], missing: ['x'] }), /^Waymark: this L1 task \(no project file changed\) and is missing/);
   assert.match(blockReason({ level: 2, changed: ['a.ts'], missing: ['x'] }), /^Waymark: this L2 turn changed files/);
 });
@@ -2564,4 +2566,19 @@ test('sync: a project skill reached through Claude Code\'s link and through its 
   const rows = fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8').split('\n').filter((l) => l.startsWith('| `proj-section`'));
   assert.equal(rows.length, 1);
   assert.match(rows[0], /\.agents\/skills\/proj-section\/SKILL\.md/, 'the real folder, not the link');
+});
+
+test('a script reached through a link runs (Waymark installed in ~/.agents/skills, registered through ~/.claude/skills)', async () => {
+  const { makeLink } = await import(`file://${SCRIPTS}/skill-links.mjs`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-linked-'));
+  temps.push(tmp);
+  const real = path.join(tmp, 'agents', 'waymark'), linked = path.join(tmp, 'claude', 'waymark');
+  fs.cpSync(path.join(SCRIPTS, '..'), real, { recursive: true });
+  makeLink(real, linked);
+  const src = fs.readdirSync(SCRIPTS).filter((f) => f.endsWith('.mjs') && /process\.argv\[1\]/.test(fs.readFileSync(path.join(SCRIPTS, f), 'utf8')));
+  for (const f of src) assert.match(fs.readFileSync(path.join(SCRIPTS, f), 'utf8'), /fs\.realpathSync\(path\.resolve\(process\.argv\[1\]\)\) === fileURLToPath\(import\.meta\.url\)/, `${f}: its main guard compares real paths`);
+  for (const hook of ['rule0-hook.mjs', 'session-hook.mjs']) {
+    const r = spawnSync(process.execPath, [path.join(linked, 'scripts', hook)], { cwd: tmp, input: '{}', encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+    assert.match(r.stdout, /additionalContext/, `${hook} through the link`);
+  }
 });

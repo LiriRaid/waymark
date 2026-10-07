@@ -96,7 +96,9 @@ export function reminder(hook, agent) {
   return agent.out.context('UserPromptSubmit', (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths on both sides: Node runs a script reached through a link (~/.claude/skills → ~/.agents/skills) from its
+// real path, so the path as typed would never match and the hook would do nothing.
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const agent = agentFrom();
   let input = '', done = false;
   const run = () => {

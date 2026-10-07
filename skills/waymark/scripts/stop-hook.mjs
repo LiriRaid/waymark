@@ -387,8 +387,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
-    // decision, so the choice window does not apply (docs/adr/0017); the pre-tool gate still stops file changes first
-    const ordered = s.id === 'decision' && !changed.length;
+    // decision, so the choice window does not apply, and with no first edit there is no pack to hand over (docs/adr/0017);
+    // the pre-tool gate still stops file changes first
+    const ordered = (s.id === 'decision' || s.id === 'memory') && !changed.length;
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked && !ordered;
     const why = applies ? fails[s.id] || [] : [];
     return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
@@ -479,7 +480,7 @@ export function summaryLine(id, ev, context = 0) {
   return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (${String(ev.quotaBy).startsWith('family:') ? `sin calibrar, factor de ${ev.quotaBy.slice(7)}` : 'estimado'})` : ''}${fresh}${ask}`;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const agent = agentFrom();
   let input = '', done = false;
   const run = () => {

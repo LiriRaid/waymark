@@ -77,7 +77,7 @@ function oldProjects() {
   return out;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), write = args.includes('--apply');
   const p = args[args.indexOf('--project') + 1];
   const olds = args.includes('--all') ? oldProjects() : args.includes('--project') && p ? [legacyMemory(path.resolve(p))].filter(Boolean) : null;

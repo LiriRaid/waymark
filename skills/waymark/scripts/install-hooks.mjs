@@ -73,7 +73,7 @@ function coexistMode() {
   try { return fs.readFileSync(path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'coexistence.md'), 'utf8').match(/^Mode:\s*(\S+)/m)?.[1] || ''; } catch { return ''; }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), write = args.includes('--apply');
   const agent = args.includes('--agent') ? args[args.indexOf('--agent') + 1] : 'claude';
   if (agent === 'opencode') { // a plugin file, not a settings entry

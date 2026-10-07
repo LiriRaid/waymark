@@ -58,7 +58,7 @@ export function addPair(taskId, pct, cwd = process.cwd(), now = new Date()) {
   return pair;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const show = () => {
     const by = {};

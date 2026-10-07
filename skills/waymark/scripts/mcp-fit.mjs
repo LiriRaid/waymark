@@ -120,7 +120,7 @@ function applyFit(f, state) {
   state[norm(f.project)] = [...ours];
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const apply = args.includes('--apply'), asJson = args.includes('--json');
   const only = args.includes('--project') ? path.resolve(args[args.indexOf('--project') + 1]) : null;

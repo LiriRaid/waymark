@@ -49,7 +49,7 @@ export function moveLearned(home, now = new Date()) {
   return entries.length;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const home = projectHome(process.cwd());
   if (!fs.existsSync(home.memory) || home.legacy) { console.log('No project memory in .waymark/ here.'); process.exit(0); }
   const entries = learnedEntries(fs.readFileSync(home.memory, 'utf8'));

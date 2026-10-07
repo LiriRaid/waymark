@@ -7,3 +7,7 @@ Thumbs.db
 
 # engram's learned memory stays local in this public repo (its memories mention private projects)
 .engram/
+# project skills, every agent, local only
+.agents/
+# Claude Code's links to .agents/skills, local only
+.claude/skills/

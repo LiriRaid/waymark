@@ -93,7 +93,7 @@ function register(a, now) {
   fs.writeFileSync(registry(), lines.join('\n').replace(/\n*$/, '\n'));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const write = process.argv.includes('--apply');
   const agents = found();
   if (!agents.length) { console.log('No other agent found (~/.codex, ~/.gemini, ~/.config/opencode).'); process.exit(0); }

@@ -15,6 +15,7 @@ Repository: `https://github.com/LiriRaid/waymark`
 | "instálame / install Waymark" | §1 (incl. §1.1 orchestrators, §1.2 confirm) → §8 |
 | "actualiza / update Waymark" | §9 |
 | "desinstala / uninstall Waymark" | §10 |
+| "quita la versión vieja e instala la nueva" / a Waymark before 2.0 is installed | §11 |
 
 ## 1. Detect the agent and its paths
 
@@ -249,13 +250,39 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
 4. `~/.waymark/`: only create missing files or folders from the templates; never edit existing ones. Existing `projects/<slug>.md` files gain new template sections (e.g. *Work in progress*) the next time a task runs there; do not rewrite them now. From 2.0 project memory lives in `<project>/.waymark/` (docs/adr/0007): `waymark.mjs check` reports the move per project; `node <skills-dir>/waymark/scripts/migrate-memory.mjs --all` shows the plan for every project (dry run) and `--apply` migrates (backup first, hash chain verified). The old location keeps working until 2.1.0. A memory.md that still holds *Solved problems*, *Gotchas* or *Decisions*: `check` offers `waymark.mjs learned` (dry run; `--apply` on yes) to move them to engram (`docs/adr/0015`).
    `skill-map.json`: take every entry from the repository, then add back the installed entries the repository does not have (skills and MCP servers the user created or mapped, project skills).
 5. Re-run §1.1: a framework or rules that `~/.waymark/coexistence.md` does not list yet → classify only those and ask **[ask]** (no such file yet and a framework found now → the §1.2 question: keep leading or become guest). `Mode: other-leads` from 1.5.0 → offer to switch to `guest`: remove Waymark's block and hooks (backup first).
-6. Per mode: leading → replace the instructions block (§6.2) in every agent and re-run `install-hooks.mjs --agent <agent>` for each one (§7.2), so each has all its hooks; `guest` → no block, no hooks, re-run the orchestrator's refresh (§7.4). Then run sync (§7.3).
+6. Per mode: leading → replace the instructions block (§6.2) in every agent and re-run `install-hooks.mjs --agent <agent>` for each one (§7.2) from `~/.agents/skills/waymark/scripts`, so each has all its hooks and they point at the shared folder (an install from before `docs/adr/0017` registered them under `~/.claude/skills`; run `skill-links.mjs --user --apply` first, §5); `guest` → no block, no hooks, re-run the orchestrator's refresh (§7.4). Then run sync (§7.3).
 7. Report with the same list of modified files as §8, plus `Versión: <old> → <new>`.
 
 ## 10. Uninstall **[ask]**
 
 1. Back up (§3).
-2. Remove from `<skills-dir>`: `waymark`, `dept-*` and the six tool skills from §5.
+2. Remove `waymark`, `dept-*` and the six tool skills from §5 in `~/.agents/skills`, and their links (or older copies) in `~/.claude/skills`. Remove a link, never the folder it points to through it.
 3. Remove the block between the `waymark` markers from `<instructions-file>`; leave the rest. Remove the hook entries that run `rule0-hook.mjs`, `session-hook.mjs`, `tool-hook.mjs` and `stop-hook.mjs` from the agent settings.
 4. Ask whether to keep `~/.waymark/` (it is the user's memory; default: keep). A coexisting framework needs nothing: its files were never changed. In `guest`, re-run its registry refresh so it stops listing Waymark's skills.
 5. MCP servers: list the ones the install registered and ask before removing any.
+
+## 11. Replace an older Waymark (1.x) with 2.0 **[ask]**
+
+For a machine with Waymark 1.x (the 17 skills copied in `~/.claude/skills`, memory in `~/.waymark/projects/`) that should end with a clean 2.0. Tell the user the plan first:
+
+```
+Encontré Waymark <versión> (skills en ~/.claude/skills). Voy a:
+1. Respaldar skills, instrucciones, hooks y ~/.waymark      → ~/.waymark-backups/<fecha>/
+2. Quitar la versión vieja: las 17 skills, el bloque y los hooks de Waymark en cada agente (lo demás no se toca)
+3. ~/.waymark (tu memoria): conservarla y migrar cada proyecto a <proyecto>/.waymark (Recomendado) · o empezar vacía (queda en el respaldo)
+4. Instalar 2.0 (§1–§8): skills en ~/.agents/skills con enlaces en ~/.claude/skills, bloque y hooks en cada agente, engram
+```
+
+1. **Detect** the installed version per agent: `<agent skills folder>/waymark/VERSION` (missing = older than 0.3.0). 2.0 or newer → §9 instead.
+2. **Back up** (§3), adding each agent's hook file (`~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.gemini/settings.json`, `~/.config/opencode/plugins/waymark.js`).
+3. **Remove the old install:** §10 steps 2–3 in every agent. Merge nothing back: a clean 2.0 starts from the repository's skills. Learned rules the user wants kept stay in the backup; they move to engram later with `waymark.mjs learned`.
+4. **The private layer [ask]:**
+   - **Keep (Recommended):** `~/.waymark/` stays. After step 5, `node ~/.agents/skills/waymark/scripts/migrate-memory.mjs --all` shows the move of each project's memory into `<project>/.waymark/` (dry run). On a yes, re-run it with `--apply`: backup first, hash chain verified.
+   - **Start empty:** move `~/.waymark/` into the backup. §6.1 creates it again from the templates.
+5. **Install 2.0:** §1–§8, from a clone of `main` (§2). The skills go to `~/.agents/skills` (§5). The hooks are registered from `~/.agents/skills/waymark/scripts` (§7.2), so they never run through a link.
+6. **Verify** before the report:
+   - `echo {} | node ~/.agents/skills/waymark/scripts/rule0-hook.mjs` prints JSON with `additionalContext`. The same through `~/.claude/skills/waymark/scripts/rule0-hook.mjs` (the link) prints it too.
+   - A new Claude Code session lists the Waymark skills (`/skills`).
+   - Codex: trust the four hooks in `/hooks`.
+   - `waymark.mjs check` reports nothing pending.
+

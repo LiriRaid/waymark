@@ -298,7 +298,7 @@ export function tasks(cwd = process.cwd(), id = null) {
     .join(' · ') + (r.noteMissing ? ' · (note missing)' : '')).join('\n') || 'no task recorded yet';
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const [sub = 'check', ...rest] = process.argv.slice(2).filter((a, i, all) => a !== '--agent' && all[i - 1] !== '--agent');
   if (sub === 'check') {
     const items = await check(process.cwd());

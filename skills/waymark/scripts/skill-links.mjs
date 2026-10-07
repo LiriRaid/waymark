@@ -109,7 +109,7 @@ export function linkUserSkills({ home = os.homedir(), names = WAYMARK_SKILLS(), 
   return linkSkills(path.join(home, SHARED), path.join(home, CLAUDE), { names, claude, backup, apply });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes('--user')) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url) && process.argv.includes('--user')) {
   const apply = process.argv.includes('--apply');
   const done = linkUserSkills({ apply });
   console.log(done.length ? `${apply ? 'Done' : 'Plan (re-run with --apply)'}:\n- ${done.join('\n- ')}` : 'Nothing to do: every Waymark skill lives in ~/.agents/skills and Claude Code links to it.');

@@ -118,7 +118,7 @@ function addedLines(diff, prefix = '') {
 // → [{ where, kind }] (never the value)
 export const secretHits = (sources) => sources.flatMap((s) => findSecrets(s.text).map((h) => ({ where: s.where, kind: h.kind, ...(s.where === 'memory.md' ? { line: h.line } : {}) })));
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const cwd = process.cwd(), home = projectHome(cwd), records = readRecords(home.log);
   const id = process.argv[2] || records.filter((r) => r.id).pop()?.id;
   const mark = (ok) => (ok === null ? '—' : ok ? '✔' : '✘');

@@ -128,7 +128,7 @@ function write(mutate) {
   fs.writeFileSync(SETTINGS, JSON.stringify(s, null, 2) + '\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const days = Number(args[args.indexOf('--days') + 1]) || 30;
   const p = plan({ days });

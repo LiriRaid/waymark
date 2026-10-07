@@ -49,15 +49,14 @@ Voy a instalar Waymark así:
 2. Instrucciones generales → ~/.claude/CLAUDE.md          (bloque marcado arriba; el resto no se toca)
 3. Capa privada            → ~/.waymark/             (fuera de .claude; sirve para cualquier agente y se completa sola)
 4. Hooks              → ~/.claude/settings.json      (tarjeta del proyecto al iniciar sesión ~600 tokens; recordatorio por mensaje ~70 tokens con el ID de la tarea y el git status; el pack de cada archivo en su primera edición; tu decisión antes de cambiar archivos; los testigos, el registro y lo aprendido al terminar el turno)
-5. Agentes: Claude Code (este) + ¿también Codex, OpenCode, Gemini CLI…? (los que encontré: skills, bloque y hooks en cada uno; la misma memoria)
+5. Agentes: Claude Code (este) + los que encontré (Codex, OpenCode, Gemini CLI…): las skills compartidas del paso 1, y bloque y hooks en cada uno; la misma memoria
 6. Memoria aprendida  → engram (CLI; si falta te ofrezco instalarlo) y su MCP en cada agente
 7. Te preguntaré antes de: quitar skills de terceros, mover contenido de tu archivo de instrucciones, instalar engram y registrar MCP.
 ```
 
 Ask it with your **choice window** if the agent has one (Claude Code: `AskUserQuestion`), the plan in the question, options as buttons:
-- **Instalar (Recomendado)** — this agent, as in the plan.
-- **Instalar en todos mis agentes** — only if §1 found others; lists them.
-- **Instalar aquí y conectar los demás** — only if §1 found Codex, Gemini CLI or OpenCode. This agent gets the full install; the others get only one marked line in their global instructions file ("if the project has `.waymark/`, read `.waymark/tasks.md` first"), with no hooks or skills in them: `node <skills-dir>/waymark/scripts/connect-agents.mjs` shows the plan, `--apply` writes it after a backup and registers them in `~/.waymark/agent.md`. After the install, `waymark.mjs check` reports each agent that appears later.
+- **Instalar en todos mis agentes (Recomendado)** — when §1 found other agents; it lists them. Waymark is a user-level install for every agent: the skills once in `~/.agents/skills`, and the instructions block and hooks in each agent. With no other agent found, the option is **Instalar (Recomendado)**, for this agent.
+- **Solo este agente** — only when §1 found others: the full install here, nothing in the others. After the install, `waymark.mjs check` offers each agent that is not set up yet.
 - **Cambiar algo** — the user says what (another folder, skip the hook, skip a step).
 - **Cancelar**.
 
@@ -71,7 +70,7 @@ Then show the lists (Adopted · Fallback · Resolved) and let the user move any 
 
 Agents without a choice window: show the plan and end with *"¿Continúo?"*.
 
-Use the real paths from the adapter. **Several agents chosen** → run §3–§7 once per agent with its own adapter (skills, instructions block, hook if supported, MCP in its own config), and §6.1 (private layer) only once. If the user says no or changes something (another folder, skip a step), adapt and show the plan again.
+Use the real paths from the adapter. **Several agents chosen** → §5 (skills in `~/.agents/skills`) and §6.1 (private layer) once; §3, §6.2, §7 once per agent with its own adapter (backup, instructions block, hooks, MCP in its own config). If the user says no or changes something (another folder, skip a step), adapt and show the plan again.
 
 ## 2. Get the files
 

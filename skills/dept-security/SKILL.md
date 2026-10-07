@@ -7,15 +7,14 @@ description: "Waymark · Security department. Use FIRST for auth, secrets and ri
 
 ## Quick ref
 **Mission:** Prevent exploitable defects and secret leaks in every change, and make security checks part of the normal flow.
-**Must:** zero secrets in code or logs · authorize on the server for every protected resource · validate input at every boundary · run the stack's dependency audit · threat-model at L3
+**Rules:** no secrets or PII in logs · authorize on the server for every protected resource · validate input at every boundary · run the stack's dependency audit · threat-model at L3
 **Skills by default:** security-review · code-review · library-docs · Explore
-**DoD:** gates green · `security-review` clean or findings resolved · no secret in diff · authz tests for 401/403 · audit has no high/critical
+**DoD:** `security-review` clean or findings resolved · authz tests for 401/403 · audit has no high/critical
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-security.md` if it exists.
 - Stack profile: L1 *Commands* (audit) + *Security*, L2+ full.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer before the first edit:
@@ -33,7 +32,7 @@ The brief must answer before the first edit:
 - Does not own (security reviews, they implement): endpoint implementation → `dept-backend` · schema and data policy implementation → `dept-data` · CI and infra hardening → `dept-devops` · UI → `dept-frontend`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Security review of a change (L2+ with security impact)
 - New or changed auth flow
@@ -44,30 +43,30 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Rules
 Mapped to OWASP Top 10 (2021) and ASVS chapters.
-- **MUST** enforce authorization server-side on every protected route, query and realtime subscription; deny by default (A01 · V4/V8).
-- **MUST** scope user/tenant data by row-level authorization: database policies or a mandatory query scope (A01).
-- **MUST** use TLS for all external traffic and vetted crypto libraries; no custom crypto, no weak password hashes (A02 · V6/V9).
-- **MUST** validate input at every boundary with allowlists and parameterized queries; never pass input to eval, shell or template compilation (A03 · V5).
-- **MUST** encode output for its context; no raw HTML injection APIs or sanitizer bypasses with untrusted data (A03 · V5).
-- **MUST** rate-limit authentication and expensive endpoints and cap request/upload sizes (A04 · V11).
-- **MUST** configure CORS with an explicit origin allowlist in production; no wildcard with credentials (A05 · V14).
-- **MUST** enable CSRF protection on cookie-authenticated state-changing requests (A05 · V13).
-- **SHOULD** set a Content-Security-Policy and security headers (HSTS, X-Content-Type-Options, frame-ancestors) in production (A05 · V14).
-- **MUST** keep dependencies audited and patched; no high/critical with an available fix at release (A06 · V14).
-- **MUST** use proven session/token handling; tokens in HttpOnly cookies; rotate on privilege change; enforce expiry (A07 · V2/V3).
-- **MUST** verify integrity of webhooks (signatures) and of CI artifacts (A08 · V10).
-- **MUST** log security events (login, failed authz, admin actions) with request IDs; never log secrets, tokens, passwords or PII (A09 · V7).
-- **MUST** restrict outbound requests built from user input (allowlist hosts, block internal ranges) (A10 · V12).
-- **MUST** return generic error messages to clients; stack traces only in server logs.
-- **MUST NOT** commit secrets, private keys or credential files.
-- **MUST NOT** rely on client-side checks for security decisions.
-- **MUST NOT** widen agent tool permissions to destructive commands (force push, hard reset, recursive delete, privilege escalation); confirm destructive actions with the user.
+- Enforce authorization server-side on every protected route, query and realtime subscription; deny by default (A01 · V4/V8).
+- Scope user/tenant data by row-level authorization: database policies or a mandatory query scope (A01).
+- Use TLS for all external traffic and vetted crypto libraries; no custom crypto, no weak password hashes (A02 · V6/V9).
+- Validate input at every boundary with allowlists and parameterized queries; never pass input to eval, shell or template compilation (A03 · V5).
+- Encode output for its context; no raw HTML injection APIs or sanitizer bypasses with untrusted data (A03 · V5).
+- Rate-limit authentication and expensive endpoints and cap request/upload sizes (A04 · V11).
+- Configure CORS with an explicit origin allowlist in production; no wildcard with credentials (A05 · V14).
+- Enable CSRF protection on cookie-authenticated state-changing requests (A05 · V13).
+- Prefer: set a Content-Security-Policy and security headers (HSTS, X-Content-Type-Options, frame-ancestors) in production (A05 · V14).
+- Keep dependencies audited and patched; no high/critical with an available fix at release (A06 · V14).
+- Use proven session/token handling; tokens in HttpOnly cookies; rotate on privilege change; enforce expiry (A07 · V2/V3).
+- Verify integrity of webhooks (signatures) and of CI artifacts (A08 · V10).
+- Log security events (login, failed authz, admin actions) with request IDs; never log secrets, tokens, passwords or PII (A09 · V7).
+- Restrict outbound requests built from user input (allowlist hosts, block internal ranges) (A10 · V12).
+- Return generic error messages to clients; stack traces only in server logs.
+- Never commit private keys or credential files.
+- Never rely on client-side checks for security decisions.
+- Never widen agent tool permissions to destructive commands (force push, hard reset, recursive delete, privilege escalation); confirm destructive actions with the user.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Framework security APIs (auth, CSRF, CSP, sanitization) not verified this session | Q |
-| memory | `engram` (MCP) | `mem_save` security decisions and vulnerability root causes | L1 |
+| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Find every instance of a vulnerable pattern | L1 |
 | config.claude | `update-config` | Adjust agent permissions (allow/deny lists) | L1 |
 | review.security | `security-review` | Changes touch auth, input, secrets, config, dependencies, uploads, webhooks (L3 always) | L2 |
@@ -76,7 +75,6 @@ Mapped to OWASP Top 10 (2021) and ASVS chapters.
 | secret.scan / dependency.audit tooling | none yet → waymark `references/skills.md` | Automated secret scanning or SCA beyond the stack audit command | L2 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] `security-review` run; findings fixed or accepted with reason
 - [ ] No secret, token, key or PII in the diff, fixtures or logs
 - [ ] Authz tests cover 401, 403 and cross-tenant access for new protected resources
@@ -95,4 +93,4 @@ Mapped to OWASP Top 10 (2021) and ASVS chapters.
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

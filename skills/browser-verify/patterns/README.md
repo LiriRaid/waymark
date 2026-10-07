@@ -16,6 +16,6 @@ Start from `../../waymark/templates/pattern.template.md` and fill it for a check
 - **Stack adapters** — one short block per provider or stack actually used (built-in pane, Playwright, Angular, Rails…).
 
 ## What does not belong here
-- Project routes, seed accounts, ports or data → project memory (`~/.waymark/projects/<slug>.md`).
+- Project routes, seed accounts, ports or data → project memory (`<project>/.waymark/memory.md`).
 - Real credentials of any kind, ever.
 - Anything already covered by `../SKILL.md` or a stack profile.

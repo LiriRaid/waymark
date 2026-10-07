@@ -13,11 +13,11 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 8. Implement every state: loading, empty, error, success, disabled; plus hover, focus, active for interactive elements.
 9. Add accessibility semantics: native elements first, labels, focus order, keyboard handling (`dept-ux-ui` rules).
 10. SSR/SSG enabled → verify server render and hydration without errors; guard browser-only APIs.
-11. Launch with `run` and verify the criteria; use `browser-verify` for flows, breakpoints and console errors.
+11. Verify the criteria with specs and the build; `run` / `browser-verify` only when the user asks.
 12. Run the Exit protocol gates (commands from project memory).
 
 ### Bug fix (L1/L2)
-1. Reproduce: in the running app (`run` / `browser-verify`) or with a failing test.
+1. Reproduce with a failing test (the running app or `browser-verify` only when the user asks).
 2. Confirm the root cause before editing (render timing, stale state, missing cleanup, hydration mismatch, CSS cascade).
 3. Write a regression test that fails.
 4. Apply the smallest fix in the owning component; preserve inputs, outputs, styles and interactions.

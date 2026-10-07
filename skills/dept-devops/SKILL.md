@@ -7,15 +7,14 @@ description: "Waymark · DevOps department. Use FIRST for build, CI/CD, git and 
 
 ## Quick ref
 **Mission:** Keep changes flowing safely from commit to production: reproducible builds, clean git history, reliable CI, observable and reversible deploys.
-**Must:** commit, push or deploy only when the user asks · commands only from project memory or the stack profile · never force-push the default branch, never `--no-verify` · build green locally before any push · every deploy has a rollback path
-**Skills by default:** `run` · `browser-verify` · `code-review` · `library-docs`
-**DoD:** build green, lockfile consistent, conventional commits, CI valid, config externalized, rollback stated.
+**Rules:** commit, push or deploy only when the user asks · commands only from the "Repo (read now)" line, project memory or the stack profile · never force-push the default branch, never `--no-verify` · every deploy has a rollback path
+**Skills by default:** `code-review` · `library-docs` (`run` / `browser-verify` only when the user asks)
+**DoD:** lockfile consistent, conventional commits, CI valid, config externalized, rollback stated.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-devops.md` if it exists.
 - Stack profile: *Commands*. L2+: also the existing CI files and build config.
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 1. **What** is being built, shipped, branched or configured — and did the user explicitly ask to commit, push or deploy?
@@ -31,7 +30,7 @@ Run the *Waymark protocol → Entry* from the instructions file (already in cont
 - Does not own: test design → `dept-qa` · secret scanning and dependency policy → `dept-security` · rendering code inside components → `dept-frontend` · server business logic → `dept-backend` · Claude Code tooling → `dept-devex`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Git: commit (only when the user asks)
 - Git: pull request (only when the user asks)
@@ -44,31 +43,29 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 - Observability
 
 ## Rules
-- **MUST** commit, push, open PRs or deploy only when the user explicitly asks.
-- **MUST** take every install/build/run command from project memory or the stack profile.
-- **MUST** keep the build green locally before pushing.
-- **MUST** keep config out of code and document required environment variables.
-- **MUST NOT** use `--no-verify`, skip signing or force-push the default branch unless explicitly asked.
-- **MUST NOT** commit secrets, build output, dependency folders or local env files.
-- **SHOULD** use Conventional Commits and branch prefixes matching commit types.
-- **SHOULD** use isolated worktrees for large or risky changes.
-- **SHOULD** track DORA metrics: deployment frequency, lead time, change failure rate, time to restore.
-- **SHOULD** keep migrations and config changes backward-compatible with the previous release.
+- Commit, push, open PRs or deploy only when the user explicitly asks.
+- Take every install/build/run command from the "Repo (read now)" line, project memory's Quality gates or the stack profile.
+- Keep config out of code and document required environment variables.
+- Never use `--no-verify`, skip signing or force-push the default branch unless explicitly asked.
+- Never commit build output, dependency folders or local env files.
+- Prefer Conventional Commits and branch prefixes matching commit types.
+- Prefer isolated worktrees for large or risky changes.
+- Prefer: track DORA metrics: deployment frequency, lead time, change failure rate, time to restore.
+- Prefer: keep migrations and config changes backward-compatible with the previous release.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | app.run | `run` | Confirm the built app starts and serves after build/config changes | L2 |
-| test.browser | `browser-verify` | Hydration/SSR checks, post-deploy smoke tests | L2 |
+| test.browser | `browser-verify` | Hydration/SSR checks, post-deploy smoke tests, only when the user asks | — |
 | review.diff | `code-review` | Before opening a PR or merging | L2 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | CI provider, container, build tool or SSR config syntax not verified this session | Q |
 | search.codebase | `Explore` agent | Locating env variable usages or build scripts across the repo | L1 |
-| memory | MCP `engram` | `mem_save` deploy decisions and build root causes | L1 |
+| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | ci.authoring / containers / IaC | none yet → waymark `references/skills.md` | Dedicated CI, Docker or Terraform skill | L2 |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
-- [ ] Build passes with the verified command; no new warnings or budget overruns
+- [ ] No new build warnings or budget overruns
 - [ ] Lockfile consistent with dependency changes
 - [ ] Commits follow Conventional Commits; nothing unrelated or generated staged
 - [ ] CI config mirrors local gates and is valid
@@ -88,4 +85,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

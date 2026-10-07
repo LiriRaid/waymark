@@ -5,7 +5,7 @@ Reusable, stack-agnostic UI patterns learned while building new interface with `
 ## What belongs here
 - One file per pattern, named `<pattern>.md` in kebab-case (`confirm-dialog.md`, `data-table.md`, `multi-step-form.md`).
 - Generic knowledge only: intent, anatomy, states, accessibility, pitfalls, and a short adapter per stack where the pattern was actually built.
-- Project-specific details (paths, product copy, a project's token names) go to `~/.waymark/projects/<slug>.md` or a project skill, not here.
+- Project-specific details (paths, product copy, a project's token names) go to `<project>/.waymark/memory.md` or a project skill, not here.
 
 ## How it is used
 1. Before building, list this folder and read the file that matches the request, if any.

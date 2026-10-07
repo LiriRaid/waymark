@@ -51,7 +51,7 @@ When the route falls back, say so in one line (for example: "framework MCP not c
 |---|---|
 | Brief | the department brief: what code depends on which library API |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Tools* (`docs.library` row) and *Official docs* |
-| Project context | `~/.waymark/projects/<slug>.md` → *Identity* (stack, versions), *Gotchas* |
+| Project context | `<project>/.waymark/memory.md` → *Identity* (stack, versions), *Gotchas* |
 | Known facts | `facts/<library>.md` in this skill (verified, version-scoped) |
 
 ## Output contract

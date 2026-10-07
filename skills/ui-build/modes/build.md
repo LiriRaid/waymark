@@ -14,5 +14,5 @@ Loaded on demand from `../SKILL.md` → *Modes*.
   8. Responsive: build from the narrowest viewport up; prefer fluid grid/flex, `minmax`, `clamp` and container-relative sizing over new breakpoints. Check reflow at 320 CSS px.
   9. Accessibility basics: labelled controls, logical focus order, visible focus, dialogs trap and restore focus and close on Escape, async status in a live region, contrast in every theme, targets at least 24x24 px.
   10. Motion only where it explains a change (open, close, reorder, feedback); respect reduced motion. Elaborate motion belongs to `ui-refine` animate.
-  11. Run it (`run` / `browser-verify`): every state, narrow and wide, light and dark, keyboard-only pass.
+  11. Cover every state with specs (narrow and wide, light and dark, keyboard-only); run it (`run` / `browser-verify`) only when the user asks.
 - **Output:** files created, the design decision, states checklist, screenshots or notes of the checks.

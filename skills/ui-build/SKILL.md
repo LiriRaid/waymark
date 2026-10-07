@@ -41,7 +41,7 @@ Brownfield rule: if a field would require a new token, font or component variant
 |---|---|
 | Brief | the `dept-frontend` brief (plus `dept-ux-ui` states/specs when present) |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Conventions by department → Frontend* |
-| Project context | `~/.waymark/projects/<slug>.md` → *Identity*, *Conventions*, `## Design system` (create the section if missing) |
+| Project context | `<project>/.waymark/memory.md` → *Identity*, *Conventions*, `## Design system` (create the section if missing) |
 | Design system | token source of truth, theme preset, shared/ui components (Grep the shared layer) |
 | Known patterns | `patterns/` in this skill (generic) + project skills (project-specific) |
 

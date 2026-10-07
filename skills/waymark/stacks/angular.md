@@ -11,7 +11,8 @@ Default commands the agent runs in the Exit protocol; verify each once, then rec
 | typecheck | `<pm> run typecheck` if script `typecheck` exists; else if `tsconfig.app.json` exists `<pm> exec tsc --noEmit -p tsconfig.app.json`; else if `tsconfig.json` exists `<pm> exec tsc --noEmit` | Angular projects usually hit the `tsconfig.app.json` branch. Specs live in `tsconfig.spec.json` and are not covered by it. |
 | compile (L1 UI) | `<pm> exec ng build --configuration development` | The quickest check that also type-checks templates (`tsc` does not read them): no optimization or budgets, so faster than `build` and with a shorter output. Skip env/prebuild scripts unless the build needs their output. L2+ still runs `build`. |
 | lint | if `eslint` in dependencies: `<pm> exec eslint {files}`; else `<pm> run lint` if script exists | Changed files only. `ng lint` is not used by the default gate. |
-| test | `<pm> run test` with `CI=true` if script `test` exists | Non-watch. `ng test` with the Vitest builder respects `CI`. The Karma-era `ng test` stays in watch mode, so recommend a `test:ci` script and record it in project memory. |
+| test (scoped, while working) | Vitest: `<pm> exec vitest related {files} --run`; else the spec files by path | Only the specs that import the changed files; the full suite once at the end (L2+). |
+| test | `<pm> run test` with `CI=true` if script `test` exists | Full suite, once at the end. Non-watch. `ng test` with the Vitest builder respects `CI`. The Karma-era `ng test` stays in watch mode, so recommend a `test:ci` script and record it in project memory. |
 | build | `<pm> run build` if script exists | Runs `ng build`. In SSR projects with a preindex or prerender script, check `package.json` and run the preindex first. |
 | format | `<pm> exec prettier --check {files}` | Not a gate. |
 
@@ -56,7 +57,7 @@ Only what is specific to Angular. General rules live in the `dept-*` department 
 - Vitest is the default (v4 era) with `@analogjs/vitest-angular` or Angular's `@angular/build:unit-test` builder; JSDOM environment, setup in `src/test-setup.ts`, specs co-located as `<file>.spec.ts`. Older projects may still use Karma/Jasmine: keep their runner, do not migrate unasked.
 - TDD for services and logic: failing spec first, minimal implementation, refactor green.
 - Prefer `TestBed` with real providers; mock only HTTP (`provideHttpClientTesting`) and true boundaries. Zoneless tests use `await fixture.whenStable()` instead of `fixture.detectChanges()` loops.
-- A passing test is not proof a UI works: confirm in the browser (`test.browser`, `app.run`) for UI changes.
+- Prove UI behavior with component specs and the build; the browser (`test.browser`, `app.run`) only when the user asks.
 
 ### Data & state
 - Signals first; services `providedIn: 'root'` when singleton. `localStorage` only for UI preferences, never tokens, always SSR-guarded.

@@ -42,7 +42,7 @@ Starting, reusing or stopping the dev server → `references/server-lifecycle.md
 |---|---|
 | Brief | the `dept-qa` / `dept-frontend` brief: acceptance criteria, affected screens, states, viewports |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Commands* and *Testing* |
-| Project context | `~/.waymark/projects/<slug>.md` → *Quality gates* (dev server row), *Gotchas*, test accounts |
+| Project context | `<project>/.waymark/memory.md` → *Quality gates* (dev server row), *Gotchas*, test accounts |
 | Known patterns | `patterns/` in this skill (generic flows) + project skills (project-specific) |
 
 ## Output contract

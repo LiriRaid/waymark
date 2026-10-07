@@ -1,138 +1,112 @@
 #!/usr/bin/env node
-// Waymark · Rule 0 reminder + context notices + daily update check. Registered by INSTALL.md as a per-prompt hook
-// (Claude Code: UserPromptSubmit). Runs locally (0 tokens); only the text below reaches the model:
-// - the reminder: full (~130 tokens) when the last reply did not open with "Waymark →", one line (~40) when it did;
-// - at most once a day while a newer VERSION exists, one update line.
-// Context notices (never change the prompt):
-// - Resume guard: the session holds ≥ 150k tokens and was idle longer than the prompt-cache lifetime (60 min), so
-//   resuming re-writes the whole context as new input (measured: 502k tokens for one line). The hook stops that one
-//   prompt (0 tokens; the user sees why) and saves it to ~/.waymark/.pending-prompt.json: a new session in the same
-//   folder within 30 min receives it (session-hook.mjs); resending it here continues. WAYMARK_RESUME_TOKENS /
-//   WAYMARK_RESUME_MINUTES tune it (0 = off).
-// - Size notice: while the session is active, at 300k tokens of context and every 200k more, a message shown only to
-//   the user (systemMessage: not added to the model's context) says each response re-reads all of it and a new
-//   session is cheaper for a new task. Nothing is blocked. WAYMARK_CONTEXT_NOTICE / WAYMARK_CONTEXT_STEP (0 = off).
-// Remove it from the agent's settings to disable it.
+// Waymark · the per-prompt link of the chain (docs/adr/0001, 0002, 0008). Registered by install-hooks.mjs as a
+// per-prompt hook (Claude Code: UserPromptSubmit; another agent: same script with `--agent <name>`). Runs locally
+// (0 tokens); only this reaches the model:
+// - the Rule 0 reminder: full (~70 tokens) when the last reply did not open with "Waymark →", one line (~10) when it did;
+// - the repo now: its stack (package manager, versions) and a one-line git status (branch, changed files);
+// - the task ID of a new task and of a follow-up of the last recorded one (~25 tokens), from the project's provenance
+//   log; the Cierre heading carries it.
+// It also takes a git snapshot (the end-of-turn hook diffs against it) and marks the turn open in .waymark/open.json, so
+// a turn that never ends (quota, crash) still shows in tasks.md. Update checks, session size and offers live in
+// `waymark.mjs check` (docs/adr/0008). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readTail, sessionState } from './transcript.mjs';
+import { spawnSync } from 'node:child_process';
+import { sessionState } from './transcript.mjs';
+import { taskIds, saveSnapshot, markOpen, projectHome } from './provenance.mjs';
+import { stackLine, directBins } from './stack.mjs';
+import { agentFrom } from './agents/index.mjs';
 
-const REPO = process.env.WAYMARK_REPO || 'LiriRaid/waymark';
-const DAY = 24 * 60 * 60 * 1000;
-const here = path.dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
-const stateFile = path.join(HOME, '.update-check.json');
-const guardFile = path.join(HOME, '.resume-guard.json');
-const noticeFile = path.join(HOME, '.context-notice.json');
-export const PENDING = path.join(HOME, '.pending-prompt.json');
-const num = (v, d) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? d : Number(v));
-const RESUME_TOKENS = num(process.env.WAYMARK_RESUME_TOKENS, 150000);
-const RESUME_MINUTES = num(process.env.WAYMARK_RESUME_MINUTES, 60);
-const NOTICE_TOKENS = num(process.env.WAYMARK_CONTEXT_NOTICE, 300000);
-const NOTICE_STEP = num(process.env.WAYMARK_CONTEXT_STEP, 200000);
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; } };
-const writeJson = (p, v) => { fs.mkdirSync(HOME, { recursive: true }); fs.writeFileSync(p, JSON.stringify(v)); };
-const prune = (o) => { for (const [k, v] of Object.entries(o)) if (Date.now() - (v.at ?? v) > 7 * DAY) delete o[k]; return o; };
+const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // where this install's skills live
 
 // Coexistence mode (~/.waymark/coexistence.md, waymark/references/coexistence.md) decides the reminder.
 let mode = '';
 try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^Mode:\s*(waymark-leads|guest|other-leads|skills-only)\b/m)?.[1] || ''; } catch {}
 
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
-const full =
-  'Waymark Rule 0 — first text: "Waymark → L<n>|Q · <dept> · skills: …"; first tool call: the owner dept-* skill. ' +
-  'Before the first edit: "Pedido · Captura" (the ask; what each image marks; "like X" → Copia: only what was named; a layer the user named → Capa, ask before leaving it) then "Memoria · Reutiliza · Evidencia · Procedimiento" (memory digest injected at session start: pointers, verify in code; obey Environment; code read ≠ observed). ' +
-  'Close changes with "## Cierre" (Gates after the last edit · Aprendido = your rewritten Work in progress line · engram; L2+: Tests · Navegador = browser-verify tried · Review = code-review on the task\'s files or why not). Independent tool calls in one response. User\'s language. Only L0 skips.';
-const short = 'Waymark Rule 0 as in your last reply: routing line + owner dept-* skill first; opener before the first edit; "## Cierre" after changes. Independent tool calls in one response.';
+// The rules themselves live in the instructions block; this only points at the steps a new session skips most.
+// The rules live once, in the block; the reminder points at the steps a turn skips most (docs/adr/0015, C3).
+const full = 'Waymark Rule 0 (the instructions block): routing line first ("Waymark → L<n> or Q · dept-<owner> · skills: …"); a department not loaded yet in this session → its dept-* skill; one choice-window call before the first change; "## Cierre · <task ID>" after changes. User\'s language.';
+const short = 'Waymark Rule 0 as in your last reply.';
+// The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
+export function gitLine(root, max = 8) {
+  const r = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', timeout: 2000 });
+  if (r.status !== 0) return '';
+  const [head, ...files] = r.stdout.split('\n').filter(Boolean);
+  const branch = head.replace(/^##\s*/, '').replace(/\.\.\.\S+/, '').trim();
+  const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${l.slice(3)}`).join(', ');
+  return ` Git (read now): ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
+}
+export function taskLine(cwd, now = new Date()) {
+  const ids = taskIds(cwd, now);
+  return ` Task ID for the Cierre heading: new task → ${ids.next}${ids.followUp ? ` · follow-up of ${ids.last} (it continues that task's files) → ${ids.followUp}` : ''}.`;
+}
+export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
-const kTok = (n) => `${Math.round(n / 1000)}k`;
 
-function resumeGuard(hook, st) {
-  if (!RESUME_TOKENS || !RESUME_MINUTES || !st.lastAt || st.context < RESUME_TOKENS) return '';
-  const idle = Date.now() - st.lastAt;
-  if (idle < RESUME_MINUTES * 60000) return '';
-  const seen = prune(readJson(guardFile)), key = hook.session_id || 'unknown';
-  if (seen[key] === st.lastAt) { // already stopped once for this pause: the resent prompt goes through here
-    try { if (readJson(PENDING).session === key) fs.rmSync(PENDING); } catch {}
-    return '';
+// Context brake (docs/adr/0016): every response re-reads the whole session, so a new message to a session past
+// BRAKE_TOKENS is stopped before the model (0 tokens), once per session. The message is kept in
+// .waymark/next-prompt.md and the next session's card brings it; sending it again here continues. Agents whose
+// prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder instead.
+// WAYMARK_BRAKE_TOKENS tunes it (0 = off).
+export const BRAKE_TOKENS = Number(process.env.WAYMARK_BRAKE_TOKENS ?? 300000);
+export const NEXT_PROMPT = 'next-prompt.md';
+export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json')) {
+  if (!BRAKE_TOKENS || (st.context || 0) < BRAKE_TOKENS || !String(hook.prompt || '').trim()) return null;
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+  const session = hook.session_id || 'unknown', k = `${Math.round(st.context / 1000)}k`;
+  if (seen[session]) { // braked once already: the user chose to continue here, so this session's held message is not for a new one
+    try {
+      const home = projectHome(hook.cwd || process.cwd()), file = path.join(home.dir, NEXT_PROMPT);
+      if (home.dir && !home.legacy && fs.readFileSync(file, 'utf8').split('\n')[0].includes(`· session ${session} -->`)) fs.rmSync(file, { force: true });
+    } catch {}
+    return null;
   }
-  seen[key] = st.lastAt;
-  try {
-    writeJson(guardFile, seen);
-    if (hook.prompt) writeJson(PENDING, { at: Date.now(), session: key, cwd: hook.cwd || process.cwd(), prompt: String(hook.prompt).slice(0, 4000) });
-  } catch { return ''; }
-  const k = kTok(st.context), min = Math.round(idle / 60000);
-  return `Waymark: esta sesión ya tiene ~${k} tokens de contexto y estuvo ${min} min inactiva; la caché del modelo venció, así que seguir aquí vuelve a escribir todo ese contexto (~${k} tokens de tu cuota) antes de responder. ` +
-    'Recomendado: abre una sesión nueva en esta carpeta en los próximos 30 min; tu mensaje pasa solo (la memoria del proyecto también). Para seguir aquí igualmente, vuelve a enviarlo (este aviso sale una sola vez). ' +
-    `· This session holds ~${k} tokens and was idle ${min} min; the cache expired. Open a new session here within 30 min and your message carries over, or resend it to continue here.`;
+  for (const [s, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[s];
+  seen[session] = Date.now();
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  if (!agent.out.blockPrompt) return { line: ` Context: this session holds ~${k} tokens and every response re-reads them; before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
+  const home = projectHome(hook.cwd || process.cwd());
+  let kept = '';
+  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date().toISOString()} · held by the context brake (~${k}) · session ${session} -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
+  return { block: agent.out.blockPrompt(`Waymark: this session holds ~${k} tokens of context and every response re-reads all of it. Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
 }
 
-function sizeNotice(hook, st) {
-  if (!NOTICE_TOKENS || st.context < NOTICE_TOKENS) return '';
-  const level = NOTICE_STEP ? Math.floor((st.context - NOTICE_TOKENS) / NOTICE_STEP) : 0;
-  const seen = prune(readJson(noticeFile)), key = hook.session_id || 'unknown';
-  if (seen[key] && seen[key].level >= level) return '';
-  try { writeJson(noticeFile, { ...seen, [key]: { at: Date.now(), level } }); } catch { return ''; }
-  const k = kTok(st.context);
-  return `Waymark: esta sesión ya tiene ~${k} tokens de contexto y cada respuesta los vuelve a leer. Si lo que sigue es una tarea nueva, abre otra sesión para ahorrar (la memoria del proyecto se pasa sola); si es la misma tarea, sigue aquí. · ~${k} tokens of context, re-read on every response: a new task is cheaper in a new session.`;
+export function reminder(hook, agent) {
+  if (silent) return null;
+  const cwd = hook.cwd || process.cwd();
+  let st = { openedWithWaymark: false };
+  try { st = sessionState(agent.read(hook)); } catch {}
+  let held = null;
+  try { held = brake(hook, agent, st); } catch {}
+  if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
+  let ids = '';
+  try { ids = taskLine(cwd); } catch {}
+  try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
+  try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
+  // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
+  let repo = '';
+  try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
+  try { repo += gitLine(projectHome(cwd).root); } catch {}
+  return agent.out.context('UserPromptSubmit', (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR));
 }
 
-const newer = (a, b) => {
-  const pa = String(a).trim().split('.').map(Number), pb = String(b).trim().split('.').map(Number);
-  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
-  return false;
-};
-
-async function updateLine() {
-  try {
-    const installed = fs.readFileSync(path.join(here, '..', 'VERSION'), 'utf8').trim();
-    let st = {};
-    try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-    const now = Date.now();
-    if (!st.checkedAt || now - st.checkedAt > DAY) {
-      const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/skills/waymark/VERSION`, { signal: AbortSignal.timeout(1500) });
-      if (res.ok) st.latest = (await res.text()).trim();
-      st.checkedAt = now;
-    }
-    let line = '';
-    if (st.latest && newer(st.latest, installed) && (!st.notifiedAt || now - st.notifiedAt > DAY)) {
-      line = ` Waymark update available: ${installed} → ${st.latest}. Before the task, ask the user with your choice window if you have one (options: Actualizar ahora / Más tarde / Ver cambios); "Actualizar ahora" → follow INSTALL.md §9 from https://github.com/${REPO}; "Ver cambios" → show CHANGELOG.md entries since ${installed}, then ask again.`;
-      st.notifiedAt = now;
-    }
-    fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-    fs.writeFileSync(stateFile, JSON.stringify(st));
-    return line;
-  } catch {
-    return ''; // offline, no VERSION, unwritable state: stay silent
-  }
-}
-
-async function main(input) {
-  let hook = {};
-  try { hook = JSON.parse(input); } catch {}
-  let st = { context: 0, lastAt: 0, openedWithWaymark: false };
-  try { st = sessionState(readTail(hook.transcript_path)); } catch {}
-  let block = '', notice = '';
-  try { block = resumeGuard(hook, st); } catch {}
-  if (block) return { decision: 'block', reason: block };
-  try { notice = sizeNotice(hook, st); } catch {}
-  const reminder = silent ? '' : (st.openedWithWaymark ? short : full) + (mode === 'waymark-leads' ? coexist : '');
-  const extra = await updateLine();
-  const out = {};
-  if ((reminder + extra).trim()) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: (reminder + extra).trim() };
-  if (notice) out.systemMessage = notice;
-  return Object.keys(out).length ? out : null;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths on both sides: Node runs a script reached through a link (~/.claude/skills → ~/.agents/skills) from its
+// real path, so the path as typed would never match and the hook would do nothing.
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
+  const agent = agentFrom();
   let input = '', done = false;
   const run = () => {
     if (done) return;
     done = true;
-    main(input).then((out) => { if (out) process.stdout.write(JSON.stringify(out)); }).catch(() => {});
+    let hook = {};
+    try { hook = JSON.parse(input); } catch {}
+    try { const out = reminder(hook, agent); if (out) process.stdout.write(JSON.stringify(out)); } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

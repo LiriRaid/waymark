@@ -9,5 +9,5 @@ Loaded on demand from `../SKILL.md` → *Modes*.
   3. Dark theme remaps roles, not primitives (rules in `palette-method.md` §3); never a blind inversion.
   4. Theme switching: one attribute or class on the root, `prefers-color-scheme` as default, applied before first paint (with SSR: cookie or inline bootstrap). Runtime code is handed to `dept-frontend`.
   5. Migrate literals reported by `consistency-check` file by file; visual output stays identical unless change is the goal.
-  6. Verify: contrast table for every touched pair and theme; build gate; light and dark screenshots via `test.browser` (`browser-verify`).
+  6. Verify: contrast table for every touched pair and theme; build gate; light and dark screenshots via `test.browser` (`browser-verify`) only when the user asks.
 - **Output:** files changed, token diff (added / renamed / removed), contrast table.

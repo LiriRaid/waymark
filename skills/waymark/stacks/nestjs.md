@@ -47,7 +47,7 @@ Only what is specific to NestJS. General rules live in the `dept-*` department s
 - Every bug fix gets a regression test. Test guards and pipes directly, not only through controllers.
 
 ### Data & state
-- Prisma: schema in `prisma/schema.prisma`; schema changes go through `prisma migrate dev` (never edit applied migrations; migrations are immutable after merge); regenerate the client after changes; wrap `PrismaClient` in a `PrismaService` with `onModuleInit` and shutdown hooks. Select only needed fields; avoid N+1 by using `include` / `select` deliberately.
+- Prisma: schema in `prisma/schema.prisma`; schema changes go through `prisma migrate dev` (never edit applied migrations; migrations are immutable after merge). Never hand-write migration SQL: generate it with `prisma migrate dev --create-only` (writes the migration without applying it) or `prisma migrate diff --from-<state> --to-schema prisma/schema.prisma --script` (no data touched; Prisma ≤ 6 names it `--to-schema-datamodel`; check the installed version). Applying a migration to a real database needs the user's yes. Regenerate the client after changes; wrap `PrismaClient` in a `PrismaService` with `onModuleInit` and shutdown hooks. Select only needed fields; avoid N+1 by using `include` / `select` deliberately.
 - TypeORM: migrations over `synchronize: true` (never in production); repositories injected via `TypeOrmModule.forFeature`; explicit relations loading.
 - Tables and columns `snake_case` (use `@map` / `@@map` in Prisma). Indexes on foreign keys and queried fields. Multi-step writes in transactions. If Supabase PostgreSQL is used, enable RLS on user-data tables.
 

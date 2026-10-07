@@ -15,7 +15,7 @@ The thinking model of this tool in 5–10 lines: what it optimizes for, the ques
 |---|---|
 | Brief | the department brief |
 | Stack conventions | `../waymark/stacks/<stack>.md` → section relevant to this tool |
-| Project context | `~/.waymark/projects/<slug>.md` → relevant sections |
+| Project context | `<project>/.waymark/memory.md` → relevant sections |
 | Known patterns | `patterns/` in this skill (generic) + project skills (project-specific) |
 
 ## Modes

@@ -197,7 +197,7 @@
         "*"
       ],
       "capability": "memory",
-      "when": "mem_search before re-reading context; mem_save after non-obvious decisions",
+      "when": "search what was learned (engram search / mem_search) before re-reading context; the end-of-turn hook saves each Aprendido (docs/adr/0015)",
       "level": "L1",
       "source": "https://github.com/Gentleman-Programming/engram"
     },

@@ -12,9 +12,10 @@ Default commands the agent runs in the Exit protocol; verify each once, then rec
 
 | Gate | Command | Notes |
 |---|---|---|
-| typecheck | `<pm> run typecheck` if script `typecheck` exists; else if `tsconfig.app.json` exists `<pm> exec tsc --noEmit -p tsconfig.app.json`; else if `tsconfig.json` exists `<pm> exec tsc --noEmit` | Plain JS projects have no typecheck gate; do not add one. SvelteKit/Vue projects usually ship `svelte-check` / `vue-tsc` scripts: expose them as a `typecheck` script. |
+| typecheck | `<pm> run typecheck` if script `typecheck` exists; else if `tsconfig.app.json` exists `<pm> exec tsc --noEmit -p tsconfig.app.json`; else if `tsconfig.json` exists `<pm> exec tsc --noEmit` | Whole project: once at the end, after the last change, not after every edit (a whole-project run on a real API took 9 min, a later one 6 s). Add `--incremental` when the project allows it. Plain JS projects have no typecheck gate; do not add one. SvelteKit/Vue projects usually ship `svelte-check` / `vue-tsc` scripts: expose them as a `typecheck` script. |
 | lint | if `eslint` in dependencies: `<pm> exec eslint {files}`; else `<pm> run lint` if script exists | Changed files only. Biome or oxlint projects have no `eslint` dependency, so the `lint` script is used. |
-| test | `<pm> run test` with `CI=true` if script `test` exists | Non-watch. Watch-by-default runners (`vitest` bare) need `vitest run` in the script or in project memory. |
+| test (scoped, while working) | Vitest: `<pm> exec vitest related {files} --run`; Jest: `<pm> exec jest --findRelatedTests {files}`; else the spec files by path | Only the tests that import the changed files: seconds instead of the whole suite. |
+| test | `<pm> run test` with `CI=true` if script `test` exists | Full suite, once at the end (L2+). Non-watch. Watch-by-default runners (`vitest` bare) need `vitest run` in the script or in project memory. |
 | build | `<pm> run build` if script exists | Libraries: confirm `dist/` types and exports resolve. |
 | format | `<pm> exec prettier --check {files}` (or `biome check`) | Not a gate. |
 
@@ -47,7 +48,7 @@ Only what is specific to Node/TypeScript. General rules live in the `dept-*` dep
 - Match the existing runner: Vitest (preferred for new TS projects), Jest, or `node:test`. Co-locate unit specs (`*.test.ts` / `*.spec.ts`); integration tests may live in `test/`.
 - Test behavior through the public API. Mock only true boundaries (network, clock, filesystem); prefer in-memory fakes. For HTTP servers use `supertest` or the framework's inject (`fastify.inject`).
 - Deterministic tests: fake timers for time, no reliance on ordering or on external services. TDD for logic; every bug fix gets a regression test.
-- Vue/Svelte fallback: use the framework's Testing Library package (`@testing-library/vue`, `@testing-library/svelte`) and query by role; confirm UI changes in the browser (`test.browser`).
+- Vue/Svelte fallback: use the framework's Testing Library package (`@testing-library/vue`, `@testing-library/svelte`) and query by role; the browser (`test.browser`) only when the user asks.
 
 ### Data & state
 - Database access through one layer (Prisma, Drizzle, Kysely, or a driver wrapper). Parameterized queries only. Migrations immutable after merge. Timeouts and pool limits set explicitly. Cache keys prefixed, with TTLs and invalidation.

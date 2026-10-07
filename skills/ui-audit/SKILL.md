@@ -22,7 +22,7 @@ An audit produces evidence, not opinions. Every finding names a rule, a location
 | Brief | the `dept-ux-ui` (or `dept-qa`) brief |
 | Scope | files or globs given; else the diff (`git diff --name-only HEAD` plus untracked) filtered to templates, components and styles |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Frontend* (template syntax, component library) |
-| Project context | `~/.waymark/projects/<slug>.md` → `## UI audit log`, `## Design system` (token pairs for contrast), UI language |
+| Project context | `<project>/.waymark/memory.md` → `## UI audit log`, `## Design system` (token pairs for contrast), UI language |
 | Rules | `rules/README.md` (index, check syntax) + the category files it lists |
 | Known patterns | `patterns/` of `ui-build` / `ui-system` (expected a11y of known widgets) + project skills |
 

@@ -21,7 +21,7 @@ A design system is derived from a few decisions, not chosen from a catalogue: pr
 |---|---|
 | Brief | the `dept-ux-ui` brief |
 | Stack conventions | `../waymark/stacks/<stack>.md` → *Frontend* (styling system, component library, SSR) |
-| Project context | `~/.waymark/projects/<slug>.md` → `## Design system` (this skill's record, shared with ui-build and ui-refine) |
+| Project context | `<project>/.waymark/memory.md` → `## Design system` (this skill's record, shared with ui-build and ui-refine) |
 | Methods | `references/`: `palette-method`, `type-scale`, `product-direction`, `chart-choice` (load only what the mode needs) |
 | Known patterns | `patterns/` in this skill (generic) + project skills (project-specific) |
 

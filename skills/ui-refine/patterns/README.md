@@ -7,7 +7,7 @@ Reusable, stack-agnostic refinement recipes learned while improving existing int
   - **Component refinements**: how a common component should look and behave once refined (e.g. `data-table-density.md`).
   - **Refinement recipes**: a repeatable treatment from one mode (e.g. `staggered-list-entrance.md`, `skeleton-to-content.md`, `long-text-truncation.md`).
 - Generic knowledge only: intent, anatomy, states, accessibility, pitfalls, and a short adapter per stack where it was actually applied. Note which mode produced it.
-- Project-specific details (paths, token names, product copy) go to `~/.waymark/projects/<slug>.md` or a project skill, not here.
+- Project-specific details (paths, token names, product copy) go to `<project>/.waymark/memory.md` or a project skill, not here.
 
 ## How it is used
 1. Before refining, list this folder and read the file that matches the target or mode, if any.

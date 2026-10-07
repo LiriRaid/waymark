@@ -4,10 +4,10 @@ Part of the `waymark` core skill. Paths are relative to the core skill folder (`
 
 ## Minimal bootstrap (any level, one step)
 
-No `~/.waymark/projects/<slug>.md` yet → create it **now**, before the task, from `templates/project-memory.template.md`, filling only what one quick look gives:
+No project memory yet → create `<project>/.waymark/memory.md` **now** (`<project>` = the git root, or the folder itself when it has no git yet; the session hook names the exact path), before the task, from `templates/project-memory.template.md`. The folder is local: the end-of-turn hook adds `.waymark/` to the project's `.gitignore` and writes its `README.md` and `tasks.md` (docs/adr/0007). Fill only what one quick look gives:
 - *Identity*: stack and version from the manifest; architecture from the folder signals below (or "unknown").
 - *Quality gates*: commands from the project's own `AGENTS.md` / `CLAUDE.md` / README, else the manifest scripts (`package.json` scripts, `Makefile`, `composer.json`…); mark them *not verified*.
-- *Work in progress*: the current task.
+- *Work in progress*: empty; the end-of-turn hook writes one line per task from its Cierre (`- ✔|▶ [<task ID>] …`, ≤200 characters).
 - Add the row to `~/.waymark/projects.md`.
 
 Leave *Project map* empty; the **full scan below** runs at L2+ or when the map is needed. Never skip Recall or Learn because the file did not exist.
@@ -42,6 +42,6 @@ Signals only say *which* technology it is, not *how this project is built*. Befo
 **Project instructions file.** The global instructions block is the same for every project. If the scan finds something this project needs **on every task** and that differs from the general rules (a mandatory convention, a forbidden library, a different language for code or commits, a monorepo layout, how to run it), propose a project instructions file **[ask]**: `<project>/<project-instructions-file>` (`CLAUDE.md` for Claude Code, `AGENTS.md` for most other agents; see `~/.waymark/agent.md`).
 - If one already exists, read it and propose only additions; never rewrite the team's content.
 - Keep it short (< ~2,000 characters) and only always-needed, non-personal rules: it is committed and shared with the team, and loaded on every task. Commands, gotchas, maps and decisions stay in project memory.
-- It never repeats or contradicts Waymark; it may add one line: *"This project uses Waymark; project memory: `~/.waymark/projects/<slug>.md`."*
+- It never repeats or contradicts Waymark; it may add one line: *"This project uses Waymark; project memory: `.waymark/memory.md` (local, not committed)."*
 
 Then verify the gate commands once (run each, keep the ones that work) and write the project memory file. Then keep the private layer current: add the project's row to `~/.waymark/projects.md`, and add any stack, package manager or architecture not yet listed to `~/.waymark/profile.md`. **New project from scratch**: run `dept-product` (scope) → `dept-architecture` (choose architecture, write ADR) → owner department, and create the project memory at the end of the first session.

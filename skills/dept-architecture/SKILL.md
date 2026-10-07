@@ -7,15 +7,14 @@ description: "Waymark · Architecture department. Use FIRST for structure and de
 
 ## Quick ref
 **Mission:** Keep every change inside the project's declared architecture and apply design principles that keep code changeable.
-**Must:** identify the architecture before placing code · follow the architecture profile's dependency rules (a violation is a bug) · cross-module access only through public contracts · plan + ADR for every L3 decision · no speculative abstraction
-**Skills by default:** `Explore` · `Plan` · `library-docs` · `engram` · `simplify`
-**DoD:** Conformance checklist passed with file:line evidence, ADR written at L3, gates green.
+**Rules:** identify the architecture before placing code · follow the architecture profile's dependency rules (a violation is a bug) · cross-module access only through public contracts · plan + ADR for every L3 decision · no speculative abstraction
+**Skills by default:** `Explore` · `Plan` · `library-docs` · `simplify`
+**DoD:** Conformance checklist passed with file:line evidence, ADR written at L3.
 
 ## Entry
-Run the *Waymark protocol → Entry* from the instructions file (already in context; do not load the `waymark` skill for it). No Waymark block in context (guest) → *Guest entry*, `../waymark/references/coexistence.md` §3. Department-specific reads:
+Guest (no Waymark block in context) → `../waymark/references/coexistence.md` §3. Reads:
 - Learnings: `~/.waymark/learnings/dept-architecture.md` if it exists.
 - Stack profile: L1 *Commands*. Architecture profile: L1 *Quick ref* + *Placement rules*, L2+ full. Also existing ADRs (`docs/adr/` or equivalent).
-- Tools: the **Tools** table below. Open `../waymark/skill-registry.md` only if a capability there has no installed provider.
 
 ## Brief questions
 The brief must answer:
@@ -33,7 +32,7 @@ The brief must answer:
 - Does not own: requirements → `dept-product` · UI composition details → `dept-frontend` · schema and state design → `dept-data` · build/deploy topology → `dept-devops` · threat modeling → `dept-security`.
 
 ## Procedures
-Detailed steps live in `procedures.md` (same folder). **Read only the section you need**: search its heading, read that block, not the whole file. Anti-patterns and references are at the end of that file.
+In `procedures.md` (same folder), one section per task:
 
 - Identify the architecture (always first)
 - Place new code (L1/L2)
@@ -45,31 +44,31 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 ## Rules
 
 ### Architecture conformance
-- **MUST** identify the architecture before placing or moving code.
-- **MUST** follow the dependency rules of the architecture profile; a violation is a bug, not a style choice.
-- **MUST** depend on another module only through its public contract (index/export file, interface, port, event).
-- **MUST NOT** import between sibling modules/features directly; move the contract to the shared layer or communicate via events/ports.
-- **MUST NOT** let inner or core layers depend on outer, UI or feature layers.
-- **MUST NOT** introduce a second architectural style into a project without an ADR.
+- Identify the architecture before placing or moving code.
+- Follow the dependency rules of the architecture profile; a violation is a bug, not a style choice.
+- Depend on another module only through its public contract (index/export file, interface, port, event).
+- Never import between sibling modules/features directly; move the contract to the shared layer or communicate via events/ports.
+- Never let inner or core layers depend on outer, UI or feature layers.
+- Never introduce a second architectural style into a project without an ADR.
 
 ### Design system principles (all architectures)
-- **MUST** apply Single Responsibility: one reason to change per module, class or component.
-- **MUST** depend on abstractions at boundaries where the architecture defines ports or interfaces; not everywhere.
-- **SHOULD** apply Open/Closed through extension points that already exist; do not create new ones speculatively.
-- **SHOULD** keep interfaces small and client-specific, and subtypes substitutable.
-- **SHOULD** prefer composition over inheritance; apply YAGNI and KISS.
-- **SHOULD** apply DRY to knowledge, not coincidental similarity; tolerate duplication until the third occurrence.
-- **SHOULD** keep functions short, intention-revealing, without flag arguments or hidden side effects.
-- **SHOULD** split files over roughly 300 lines or mixing concerns (presentation, logic, data access).
-- **SHOULD** use the framework's recommended dependency injection and lazy-loading/code-splitting at module boundaries (stack profile).
-- **SHOULD** keep configuration in the environment (Twelve-Factor).
-- **MUST NOT** add abstractions, wrappers or patterns "just in case".
-- **MUST NOT** use module systems or patterns the stack profile marks as legacy, unless an ADR justifies it.
+- Apply Single Responsibility: one reason to change per module, class or component.
+- Depend on abstractions at boundaries where the architecture defines ports or interfaces; not everywhere.
+- Prefer: apply Open/Closed through extension points that already exist; do not create new ones speculatively.
+- Prefer: keep interfaces small and client-specific, and subtypes substitutable.
+- Prefer composition over inheritance; apply YAGNI and KISS.
+- Prefer: apply DRY to knowledge, not coincidental similarity; tolerate duplication until the third occurrence.
+- Prefer: keep functions short, intention-revealing, without flag arguments or hidden side effects.
+- Prefer: split files over roughly 300 lines or mixing concerns (presentation, logic, data access).
+- Prefer the framework's recommended dependency injection and lazy-loading/code-splitting at module boundaries (stack profile).
+- Prefer: keep configuration in the environment (Twelve-Factor).
+- Never add abstractions, wrappers or patterns "just in case".
+- Never use module systems or patterns the stack profile marks as legacy, unless an ADR justifies it.
 
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| `memory` | `engram` MCP (mem_search / mem_save) | Before deciding: prior decisions. After any decision or ADR: save it | L1 |
+| `memory` | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | `search.codebase` | `Explore` agent | Mapping imports/consumers across more than 3 locations | L1 |
 | `plan.implementation` | `Plan` agent (or plan mode when approval is needed) | Refactors, migrations, new modules, shared/core changes | L3 |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Framework patterns, module systems, migration guides not verified this session | Q |
@@ -78,13 +77,12 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 | `adr.tooling` | none yet → waymark `references/skills.md` | ADR scaffolding or architecture lint | — |
 
 ## Definition of Done
-- [ ] Exit protocol of `waymark` (instructions file → Exit; L2+ full: `../waymark/references/protocol.md`) (gates, architecture conformance, review, learnings)
 - [ ] Architecture identified and named in the brief; recorded in project memory
 - [ ] New code placed per *Placement rules*; imports respect *Dependency rules*
 - [ ] Conformance checklist reported ✔/✘ with file:line for any failure
 - [ ] Public contracts unchanged, or changes documented with migration notes
 - [ ] ADR written and linked (L3)
-- [ ] Decision saved (engram and project memory) at L3
+- [ ] Decision in the ADR and the Cierre's Aprendido (the hook saves it to engram) at L3
 
 ## Hand-offs
 - To `dept-product`: the requirement is ambiguous or the scope must change to fit the architecture.
@@ -97,4 +95,4 @@ Detailed steps live in `procedures.md` (same folder). **Read only the section yo
 
 ## Learned rules
 
-_Grows with use (waymark `references/learning.md`). Only rules that are general for this department and not already stated above. Format: `- [YYYY-MM-DD] <rule> — <why> (source: <project>)`._
+_Grows with use (`../waymark/references/learning.md`)._

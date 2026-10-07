@@ -8,7 +8,7 @@
 // Waymark's own skills, every skill or agent that skill-map.json names as a provider, and skills bundled with the agent. Only the entries this script
 // added are ever lifted (tracked in ~/.waymark/skill-fit.json). Takes effect in the next session. Also see /skill-doctor.
 // Usage: node skill-fit.mjs [--apply | --restore] [--days 30] [--json]   (plans by default; --apply after the user's yes)
-//        node skill-fit.mjs --cache   (used by the session hook: writes the plan to ~/.waymark/.skill-fit-plan.json)
+// `waymark.mjs check` reports the plan's size (docs/adr/0008).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -22,7 +22,6 @@ const PLUGINS = process.env.WAYMARK_CLAUDE_PLUGINS || path.join(HOME, '.claude',
 const SKILLS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAP = path.join(SKILLS_ROOT, 'waymark', 'skill-map.json');
 const STATE = path.join(LOCAL, 'skill-fit.json');
-export const PLAN_CACHE = path.join(LOCAL, '.skill-fit-plan.json');
 const MIN_HISTORY_DAYS = Number(process.env.WAYMARK_SKILL_FIT_MIN_DAYS ?? 14); // less history than this → no recommendation (everything would look unused)
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const readText = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
@@ -129,14 +128,10 @@ function write(mutate) {
   fs.writeFileSync(SETTINGS, JSON.stringify(s, null, 2) + '\n');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const days = Number(args[args.indexOf('--days') + 1]) || 30;
   const p = plan({ days });
-  if (args.includes('--cache')) {
-    try { fs.mkdirSync(LOCAL, { recursive: true }); fs.writeFileSync(PLAN_CACHE, JSON.stringify({ at: Date.now(), ...p })); } catch {}
-    process.exit(0);
-  }
   if (args.includes('--json')) { console.log(JSON.stringify(p, null, 2)); process.exit(0); }
   const state = readJson(STATE) || { skills: {}, plugins: {} };
   if (args.includes('--restore')) {

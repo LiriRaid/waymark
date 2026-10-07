@@ -4,16 +4,8 @@ Path: <absolute path to project root>
 Updated: <YYYY-MM-DD>
 
 ## Work in progress
-Read first at Recall; one entry per open task, each rewritten after its own milestones (never delete another task's pending items) (not at session end: sessions can stop without warning, e.g. out of tokens). Any agent can resume from here.
-- Updated: <YYYY-MM-DD HH:mm> · by: <agent>
-- Task: <what the user asked, in their words> · goal: <done looks like…>
-- Done: <steps finished, files touched>
-- Decision: <what was decided> ← <the evidence it rests on: file:line, output, observed value>
-- Plan (L3): ✔1 <step> · ▶2 <step> · 3 <step> — next gate: <command> · Descartado: <what was ruled out and why>
-- Next: <ordered remaining steps>
-- Open: <decisions or questions pending>
-- Last request: <the user's last message, short>
-<!-- When the task is finished and nothing is pending: "- Status: idle (last: <task>, <date>)" -->
+Read first at Recall. **One line per task, written by the end-of-turn hook from the Cierre's Aprendido** (≤200 characters); never edit these lines by hand. tasks.md is generated from them; a line without an ID at its head counts as a note. Any agent can resume from here.
+<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) or "- ✔ [<task ID>] <Aprendido>" (hecho; the newest 5 stay). A follow-up replaces its task's line; older ✔ lines and lines over 200 characters move whole to history.md. The whole record: `waymark.mjs tasks <task ID>`. -->
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)
@@ -45,6 +37,7 @@ Filled by the minimal project scan (waymark `references/project-detection.md`); 
 | test (related) | | |
 | test (full) | | |
 | build | | |
+<!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. -->
 
 ## Design system
 Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refine.
@@ -58,16 +51,6 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 
 ## Conventions specific to this project
 - …
-
-## Solved problems
-Searched by symptom at Recall. One entry per problem that took more than one attempt; keep the dead ends, they are what saves time next time.
-<!-- - [YYYY-MM-DD] Symptom: <what the user saw> · Root cause: <real cause> · Fix: <what worked, file:line> · Did not work: <attempts and why> · Cost: <attempts / requests> -->
-
-## Gotchas
-- …
-
-## Decisions (ADR log)
-- [YYYY-MM-DD] <decision> — <why>
 
 ## Repeated procedures
 Count how often a project-specific procedure happens. At 2 → propose a project skill.

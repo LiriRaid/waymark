@@ -1,7 +1,7 @@
 {
   "name": "waymark",
   "version": "1.0.0",
-  "description": "Guides your coding agent to the right decision: every non-trivial task goes through the department that owns it (frontend, backend, data, security, QA, devops, architecture, UX/UI, product, devex), with project memory, official docs and verification; the agent still decides. Stack- and agent-agnostic, layered loading to save tokens, learns with use.",
+  "description": "A supply chain for your coding agent's work: every task goes through the department that owns it (frontend, backend, data, security, QA, devops, architecture, UX/UI, product, devex), you decide among the optimal options, evidence and gates are checked, and a hash-chained record ties inputs, decision and commits. Stack- and agent-agnostic, layered loading to save tokens, learns with use.",
   "author": {
     "name": "LiriRaid",
     "url": "https://github.com/LiriRaid"

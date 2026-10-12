@@ -6,6 +6,8 @@
 // and new entries go after the existing ones. A file that is not valid JSON is never written; a backup .waymark-bak is
 // made first. Coexistence mode guest or skills-only (~/.waymark/coexistence.md) → no hooks at all. Claude Code also gets
 // the status line (planStatusLine), which measures each task's quota %.
+// Each agent's file, format (nested or flat), event names, matcher and extra events come from agents/agents.json
+// (docs/adr/0022); an agent listed there without an adapter gets no hooks until one is written (dept-devex procedures).
 // Codex (`--agent codex`): ~/.codex/hooks.json (CODEX_HOME, WAYMARK_CODEX_HOOKS overrides it), the same four scripts with
 // `--agent codex`, PreToolUse matcher "Bash|apply_patch", commandWindows = command. Codex skips a new or changed hook until
 // the user trusts it in /hooks (learn.chatgpt.com/docs/hooks): say so after --apply.
@@ -22,46 +24,39 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claudeDir, codexHome, geminiHome, opencodeDir, cursorDir } from './agents/paths.mjs';
+import { KNOWN, known, agentDir } from './agents/paths.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url)).replace(/\\/g, '/');
 export const HOOKS = [
   { event: 'SessionStart', file: 'session-hook.mjs' },
   { event: 'UserPromptSubmit', file: 'rule0-hook.mjs' },
-  { event: 'PreToolUse', file: 'tool-hook.mjs', matcher: true }, // the agent's tools: MATCHER
+  { event: 'PreToolUse', file: 'tool-hook.mjs', matcher: true }, // the agent's tools: hooks.matcher in agents.json
   { event: 'Stop', file: 'stop-hook.mjs' },
-  { event: 'PostToolUse', file: 'tool-hook.mjs', matcher: true, only: ['gemini', 'cursor'] }, // the pack after the first edit where the pre-tool hook cannot add context
-  { event: 'PostToolUseFailure', file: 'tool-hook.mjs', only: ['cursor'] }, // Cursor: a failed tool (its error) for the journal
-  { event: 'AfterAgentResponse', file: 'tool-hook.mjs', only: ['cursor'] }, // Cursor: the reply's text for the journal
+  // only for the agents whose hooks.extra names them (agents.json):
+  { event: 'PostToolUse', file: 'tool-hook.mjs', matcher: true, extra: true }, // the pack after the first edit where the pre-tool hook cannot add context
+  { event: 'PostToolUseFailure', file: 'tool-hook.mjs', extra: true }, // Cursor: a failed tool (its error) for the journal
+  { event: 'AfterAgentResponse', file: 'tool-hook.mjs', extra: true }, // Cursor: the reply's text for the journal
 ];
-const SETTINGS = {
-  claude: () => process.env.WAYMARK_CLAUDE_SETTINGS || path.join(claudeDir(), 'settings.json'),
-  codex: () => process.env.WAYMARK_CODEX_HOOKS || path.join(codexHome(), 'hooks.json'),
-  gemini: () => process.env.WAYMARK_GEMINI_SETTINGS || path.join(geminiHome(), 'settings.json'),
-  cursor: () => process.env.WAYMARK_CURSOR_HOOKS || path.join(cursorDir(), 'hooks.json'),
-};
+// The agents whose hooks Waymark writes: an adapter module and a hooks file in agents.json (a plugin is PLUGIN).
+const hooksOf = (agent) => { const a = known(agent); return a?.adapter && a.hooks ? a.hooks : null; };
+const SETTINGS = Object.fromEntries(KNOWN.filter((a) => a.adapter && a.hooks && a.hooks.format !== 'plugin')
+  .map((a) => [a.key, () => process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file)]));
 export const settingsFile = (agent) => SETTINGS[agent]?.() || null;
-export const PLUGIN = () => process.env.WAYMARK_OPENCODE_PLUGIN || path.join(opencodeDir(), 'plugins', 'waymark.js');
-// The core's event names → each agent's (Claude Code and Codex share them).
-const EVENTS = {
-  gemini: { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' },
-  cursor: { SessionStart: 'sessionStart', UserPromptSubmit: 'beforeSubmitPrompt', PreToolUse: 'preToolUse', PostToolUse: 'postToolUse', PostToolUseFailure: 'postToolUseFailure', AfterAgentResponse: 'afterAgentResponse', Stop: 'stop' },
-};
-const MATCHER = { claude: 'Bash|PowerShell|Edit|Write|NotebookEdit', codex: 'Bash|apply_patch', gemini: 'run_shell_command|write_file|replace', cursor: null }; // PreToolUse tools per agent
-const FLAT = new Set(['cursor']); // an entry is the hook itself ({command, matcher?}), not {matcher, hooks: [...]}
+export const PLUGIN = () => { const a = known('opencode'); return process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file); };
 const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.replace('.', '\\.')}`).test(String(h?.command || ''));
 
 // → { settings, steps } without touching the input: the settings with the four hooks in place and what changed.
 export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
-  const s = structuredClone(input || {}), steps = [], flat = FLAT.has(agent);
+  const spec = hooksOf(agent) || hooksOf('claude'), flat = spec.format === 'flat'; // flat: an entry is the hook itself ({command, matcher?}), not {matcher, hooks: [...]}
+  const s = structuredClone(input || {}), steps = [];
   if (flat) s.version ??= 1;
   s.hooks = s.hooks || {};
   const inner = (e) => (flat ? [e] : e.hooks || []);
-  for (const h of HOOKS.filter((x) => !x.only || x.only.includes(agent))) {
+  for (const h of HOOKS.filter((x) => !x.extra || spec.extra?.includes(x.event))) {
     const command = `node "${scripts}/${h.file}"${agent === 'claude' ? '' : ` --agent ${agent}`}`;
-    const matcher = h.matcher ? (agent in MATCHER ? MATCHER[agent] : MATCHER.claude) : null;
-    const windows = agent === 'codex' ? { commandWindows: command } : {}; // Codex's Windows override, the same command
-    const event = EVENTS[agent]?.[h.event] || h.event;
+    const matcher = h.matcher ? (spec.matcher ?? null) : null; // null: every tool
+    const windows = spec.commandWindows ? { commandWindows: command } : {}; // Codex's Windows override, the same command
+    const event = spec.events?.[h.event] || h.event; // the core's event names → the agent's
     const list = (s.hooks[event] = Array.isArray(s.hooks[event]) ? s.hooks[event] : []);
     const hits = list.filter((e) => inner(e).some(ours(h.file)));
     if (!hits.length) {
@@ -137,7 +132,11 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     console.log(`installed${have !== null ? ` (backup ${file}.waymark-bak)` : ''}. Restart OpenCode.`);
     process.exit(0);
   }
-  if (!SETTINGS[agent]) { console.log(`Agent "${agent}": no adapter yet. Supported: ${Object.keys(SETTINGS).join(', ')}.`); process.exit(1); }
+  if (!SETTINGS[agent]) {
+    const a = known(agent);
+    console.log(`Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), 'opencode'].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
+    process.exit(1);
+  }
   const mode = coexistMode();
   if (['guest', 'skills-only', 'other-leads'].includes(mode)) { console.log(`Coexistence mode ${mode}: the orchestrator's hooks own the turn; no Waymark hooks are registered.`); process.exit(0); }
   const file = SETTINGS[agent](), raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';

@@ -22,7 +22,7 @@
   - A deny is `permission: deny` plus `agent_message`.
   - A missing Cierre is `stop`'s `followup_message`, and `loop_count > 0` counts as already blocked.
   - No decision is `{}`, never `permission: allow`, which would skip Cursor's own approval.
-- **Unknown agents** get the pointer block only. The block's "hooks installed but no card" alarm applies only where hooks are installed. A new agent costs one module in `scripts/agents/` plus its entries in `install-hooks.mjs` and `connect-agents.mjs`.
+- **Unknown agents** get the pointer block only. The block's "hooks installed but no card" alarm applies only where hooks are installed. A new agent costs one module in `scripts/agents/` plus its entries in `install-hooks.mjs` and `connect-agents.mjs` (since `0022`: one entry in `agents/agents.json`; unknown agents are detected).
 - **`check`** names every agent found without Waymark's hooks (Claude Code when its folder exists) and offers `install-hooks --agent <agent>`. It names nothing in guest, skills-only or other-leads modes.
 - **Paths** come from one module (`scripts/agents/paths.mjs`), read on each call. Backups go to `~/.waymark-backups`. A project skill versioned in git under `.claude/skills` stays there, and `check` says so.
 - **Uninstall is a script** (`uninstall.mjs`): a plan first, then `--apply` with a backup of each file. It removes the hooks of every agent, Claude Code's status line (giving back the user's own), the OpenCode plugin and the marked blocks. It then runs `skill-fit --restore` and `mcp-fit --restore`. Skills, `~/.waymark` and the MCP servers stay for the user to decide.

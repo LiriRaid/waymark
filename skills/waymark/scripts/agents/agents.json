@@ -1,0 +1,75 @@
+{
+  "_doc": "Every coding agent Waymark knows (docs/adr/0022). dir: '~/' is the home folder, '$XDG/' is XDG_CONFIG_HOME or ~/.config; env moves the whole folder. instructions: the global instructions file inside dir (null: none). marks: files the agent itself writes, when the folder is shared. skills: true when it reads ~/.agents/skills, else the folder it reads. hooks: its user-level hooks (file inside dir, format nested | flat | plugin | own); adapter: the module in this folder that runs Waymark's hooks for it (null: none yet, dept-devex procedures → Add an agent). Checked against each agent's documentation on the date in checked.",
+  "agents": [
+    {
+      "key": "claude", "name": "Claude Code", "primary": true, "dir": "~/.claude", "env": "CLAUDE_CONFIG_DIR", "instructions": "CLAUDE.md", "skills": "~/.claude/skills",
+      "hooks": { "file": "settings.json", "override": "WAYMARK_CLAUDE_SETTINGS", "format": "nested", "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit" },
+      "adapter": "claude", "docs": "https://code.claude.com/docs/en/hooks", "checked": "2026-10-12"
+    },
+    {
+      "key": "codex", "name": "Codex", "dir": "~/.codex", "env": "CODEX_HOME", "instructions": "AGENTS.md", "skills": true,
+      "hooks": { "file": "hooks.json", "override": "WAYMARK_CODEX_HOOKS", "format": "nested", "matcher": "Bash|apply_patch", "commandWindows": true },
+      "adapter": "codex", "docs": "https://learn.chatgpt.com/docs/hooks", "checked": "2026-10-12"
+    },
+    {
+      "key": "gemini", "name": "Gemini CLI", "dir": "~/.gemini", "env": "GEMINI_CLI_HOME", "instructions": "GEMINI.md", "skills": true,
+      "marks": ["settings.json", "projects.json", "installation_id", "oauth_creds.json", "tmp"],
+      "hooks": { "file": "settings.json", "override": "WAYMARK_GEMINI_SETTINGS", "format": "nested", "matcher": "run_shell_command|write_file|replace", "extra": ["PostToolUse"],
+        "events": { "SessionStart": "SessionStart", "UserPromptSubmit": "BeforeAgent", "PreToolUse": "BeforeTool", "PostToolUse": "AfterTool", "Stop": "AfterAgent" } },
+      "adapter": "gemini", "docs": "https://github.com/google-gemini/gemini-cli", "checked": "2026-10-12"
+    },
+    {
+      "key": "opencode", "name": "OpenCode", "dir": "$XDG/opencode", "instructions": "AGENTS.md", "skills": true,
+      "hooks": { "file": "plugins/waymark.js", "override": "WAYMARK_OPENCODE_PLUGIN", "format": "plugin" },
+      "adapter": "opencode", "docs": "https://opencode.ai/docs/plugins", "checked": "2026-10-12"
+    },
+    {
+      "key": "cursor", "name": "Cursor", "dir": "~/.cursor", "env": "CURSOR_CONFIG_DIR", "instructions": null, "skills": true,
+      "hooks": { "file": "hooks.json", "override": "WAYMARK_CURSOR_HOOKS", "format": "flat", "matcher": null, "extra": ["PostToolUse", "PostToolUseFailure", "AfterAgentResponse"],
+        "events": { "SessionStart": "sessionStart", "UserPromptSubmit": "beforeSubmitPrompt", "PreToolUse": "preToolUse", "PostToolUse": "postToolUse", "PostToolUseFailure": "postToolUseFailure", "AfterAgentResponse": "afterAgentResponse", "Stop": "stop" } },
+      "adapter": "cursor", "docs": "https://cursor.com/docs/hooks", "checked": "2026-10-12"
+    },
+    {
+      "key": "antigravity", "name": "Antigravity", "dir": "~/.gemini", "instructions": "GEMINI.md", "skills": "~/.gemini/config/skills",
+      "marks": ["antigravity", "antigravity-ide", "antigravity-cli"],
+      "hooks": { "file": "config/hooks.json", "format": "own" },
+      "adapter": null, "docs": "https://antigravity.google/docs/hooks/", "checked": "2026-10-12"
+    },
+    {
+      "key": "kiro", "name": "Kiro", "dir": "~/.kiro", "env": "KIRO_HOME", "instructions": "steering/AGENTS.md", "skills": "~/.kiro/skills",
+      "hooks": { "file": "hooks/waymark.json", "format": "own" },
+      "adapter": null, "docs": "https://kiro.dev/docs/hooks/", "checked": "2026-10-12"
+    },
+    {
+      "key": "copilot", "name": "Copilot CLI", "dir": "~/.copilot", "env": "COPILOT_HOME", "instructions": "copilot-instructions.md", "skills": true,
+      "marks": ["config.json", "session-state", "logs"],
+      "hooks": { "file": "hooks/waymark.json", "format": "flat" },
+      "adapter": null, "docs": "https://docs.github.com/en/copilot/reference/hooks-reference", "checked": "2026-10-12"
+    },
+    {
+      "key": "windsurf", "name": "Windsurf", "dir": "~/.codeium/windsurf", "instructions": "memories/global_rules.md", "skills": true,
+      "hooks": { "file": "hooks.json", "format": "flat" },
+      "adapter": null, "docs": "https://docs.devin.ai/desktop/cascade/hooks", "checked": "2026-10-12"
+    },
+    {
+      "key": "qwen", "name": "Qwen Code", "dir": "~/.qwen", "env": "QWEN_HOME", "instructions": "QWEN.md", "skills": "~/.qwen/skills",
+      "hooks": { "file": "settings.json", "format": "nested" },
+      "adapter": null, "docs": "https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/", "checked": "2026-10-12"
+    },
+    {
+      "key": "droid", "name": "Droid", "dir": "~/.factory", "instructions": "AGENTS.md", "skills": true,
+      "hooks": { "file": "hooks.json", "format": "nested" },
+      "adapter": null, "docs": "https://docs.factory.com/cli/configuration/hooks-guide", "checked": "2026-10-12"
+    },
+    {
+      "key": "amp", "name": "Amp", "dir": "$XDG/amp", "instructions": "AGENTS.md", "skills": true,
+      "hooks": { "file": "plugins/waymark.ts", "format": "plugin" },
+      "adapter": null, "docs": "https://ampcode.com/docs/customize/plugins", "checked": "2026-10-12"
+    },
+    {
+      "key": "crush", "name": "Crush", "dir": "$XDG/crush", "instructions": "CRUSH.md", "skills": true,
+      "hooks": { "file": "crush.json", "format": "flat" },
+      "adapter": null, "docs": "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md", "checked": "2026-10-12"
+    }
+  ]
+}

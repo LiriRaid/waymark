@@ -39,6 +39,7 @@ In `procedures.md` (same folder), one section per task:
 - Generate a project skill
 - Private layer maintenance
 - Add a stack, architecture or department
+- Add an agent
 - CLAUDE.md hygiene
 - Settings, MCP and memory
 - Documentation (Diátaxis)

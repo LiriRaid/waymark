@@ -17,7 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { settingsFile, PLUGIN } from './install-hooks.mjs';
-import { AGENTS, stripWaymark } from './connect-agents.mjs';
+import { AGENTS, unknownAgents, stripWaymark } from './connect-agents.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -61,7 +61,7 @@ export function planUninstall() {
   }
   const plugin = PLUGIN();
   if (OURS.test(read(plugin) || '') || /const SCRIPTS = "[^"]*waymark[\\/]+scripts"/.test(read(plugin) || '')) steps.push({ agent: 'opencode', file: plugin, what: 'remove the Waymark plugin', write: () => fs.rmSync(plugin) });
-  const instructions = [['claude', path.join(path.dirname(settingsFile('claude')), 'CLAUDE.md')], ...AGENTS().filter((a) => a.file).map((a) => [a.key, path.join(a.dir, a.file)])];
+  const instructions = [['claude', path.join(path.dirname(settingsFile('claude')), 'CLAUDE.md')], ...[...AGENTS(), ...unknownAgents()].filter((a) => a.file).map((a) => [a.key, path.join(a.dir, a.file)])]; // the pointer connect-agents gave an unknown agent too
   for (const [agent, file] of instructions) {
     const text = read(file);
     if (text === null || !/<!-- waymark:(begin|pointer) -->/.test(text)) continue;

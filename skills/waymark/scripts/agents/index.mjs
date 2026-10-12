@@ -1,6 +1,7 @@
 // Waymark · the agent a hook runs for (docs/adr/0008): `--agent <name>` on the hook's command line, Claude Code by
 // default so installs registered before 2.0 keep working. One module per agent in this folder (same exports as
-// claude.mjs); a new agent costs one module here, its entry in install-hooks.mjs and connect-agents.mjs.
+// claude.mjs); a new agent costs one module here and its entry in agents.json (docs/adr/0022; dept-devex procedures →
+// Add an agent, from templates/agent-adapter.template.mjs).
 import * as claude from './claude.mjs';
 import * as codex from './codex.mjs';
 import * as cursor from './cursor.mjs';

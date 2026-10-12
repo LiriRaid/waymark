@@ -156,8 +156,8 @@ export function mergeMethods(cwd) {
   return `notes: ${repo} allows ${['squash', 'rebase'].filter((_, i) => flags[i]).join(' and ')} merges, which re-create the commits and leave the task records (git notes) behind. Merge pull requests with a merge commit, or allow only that (the user's setting: ask first): gh api -X PATCH repos/${repo} -F allow_squash_merge=false -F allow_rebase_merge=false`;
 }
 
-function agents() {
-  const fresh = found().filter((a) => !a.connected);
+function agents(list = found()) {
+  const fresh = list.filter((a) => !a.connected && a.path && !a.shares); // an instructions file to write the block in
   const stale = fresh.filter((a) => a.full && /waymark:(pointer|begin)/.test(read(a.path)));
   if (stale.length === fresh.length && stale.length) return `connect: ${stale.map((a) => a.name).join(', ')} run${stale.length > 1 ? '' : 's'} Waymark's hooks but ${stale.length > 1 ? 'have' : 'has'} the pointer or an older Rule 0 block in ${stale.map((a) => a.path.replace(/\\/g, '/')).join(', ')}: offer to write the current block: node "${script('connect-agents.mjs')}" --apply`;
   return fresh.length ? `connect: other agents not connected to the project memory: ${fresh.map((a) => `${a.name} (${a.path.replace(/\\/g, '/')}${a.guestOf.length ? `; ${a.guestOf.join(', ')} governs it: Waymark joins as its guest` : ''})`).join(', ')}. One marked line in each one's instructions file so it reads .waymark/tasks.md first: node "${script('connect-agents.mjs')}" shows the plan, --apply on yes (backup first).` : '';
@@ -165,12 +165,22 @@ function agents() {
 
 // Agents on this machine whose hooks do not run Waymark (Claude Code when its folder exists, and every agent connect-agents
 // finds): their tasks are neither recorded nor checked. None in a coexistence where the orchestrator owns the hooks.
-export function hookless() {
-  const mode = read(path.join(HOME(), 'coexistence.md')).match(/^Mode:\s*(\S+)/m)?.[1];
-  if (['guest', 'skills-only', 'other-leads'].includes(mode)) return '';
+export function hookless(list = found()) {
+  if (orchestrated()) return '';
   const have = new Set(registered().map((r) => r.agent));
-  const missing = [...(fs.existsSync(claudeDir()) ? [{ name: 'Claude Code', key: 'claude' }] : []), ...found()].filter((a) => !have.has(a.key));
+  const missing = [...(fs.existsSync(claudeDir()) ? [{ name: 'Claude Code', key: 'claude' }] : []), ...list.filter((a) => a.adapter)].filter((a) => !have.has(a.key));
   return missing.length ? `hooks: ${missing.map((a) => `${a.name} (--agent ${a.key})`).join(', ')} on this machine without Waymark's hooks: tasks there are neither recorded nor checked. Offer each: node "${script('install-hooks.mjs')}" --agent <agent> shows its plan, --apply on yes.` : '';
+}
+const orchestrated = () => ['guest', 'skills-only', 'other-leads'].includes(read(path.join(HOME(), 'coexistence.md')).match(/^Mode:\s*(\S+)/m)?.[1]);
+
+// Agents on this machine with no adapter (docs/adr/0022): one agents.json lists with documented hooks, and the unknown
+// ones. Waymark cannot run their hooks until a module is written for each (dept-devex procedures → Add an agent).
+export function adapterless(all = found()) {
+  if (orchestrated()) return '';
+  const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
+  if (!list.length) return '';
+  const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
+  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to write its adapter with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs, scripts/agents/agents.json).`;
 }
 
 // Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change
@@ -236,8 +246,11 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => learnedLayer(cwd));
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
-  await add(agents);
-  await add(hookless);
+  let machine = null; // the agents on this machine, scanned once for the three lines below
+  const onMachine = () => (machine ??= found());
+  await add(() => agents(onMachine()));
+  await add(() => hookless(onMachine()));
+  await add(() => adapterless(onMachine()));
   await add(() => projectSkills(cwd));
   await add(() => hooksHealth());
   await add(() => hookErrors());

@@ -220,7 +220,7 @@ git diff
 - **Stack**: copy `templates/stack.template.md` → `stacks/<slug>.md`, add its detection signal to `waymark/SKILL.md` §6.
 - **Architecture**: copy `templates/architecture.template.md`.
 - **Department**: copy `templates/department.template.md` → `skills/dept-<name>/SKILL.md`, add it to the core table and to `sync.mjs`.
-- **Agent**: one module in `skills/waymark/scripts/agents/` (the exports of `claude.mjs`: transcript reader, tool input, output shapes) plus its entry in `install-hooks.mjs` and `connect-agents.mjs`, and `adapters/<agent>.md` with its paths and MCP registration (`adapters/cursor.md` is the latest example). An agent without a module still gets the pointer block, with no hooks.
+- **Agent**: every agent Waymark knows is one entry in [`skills/waymark/scripts/agents/agents.json`](skills/waymark/scripts/agents/agents.json) (folder, instructions file, skills folder, hooks, docs). An agent installed later, or one Waymark does not know (a hidden home folder with an instructions file, `skills/` or hooks), is reported by `waymark.mjs check` and said once in the session card; it gets the pointer block first. Its hooks cost one module in `skills/waymark/scripts/agents/` from `templates/agent-adapter.template.mjs` (the exports of `claude.mjs`), its `adapter` in `agents.json` and `adapters/<agent>.md`: `dept-devex` procedures → *Add an agent* (`docs/adr/0022`).
 
 ## License
 

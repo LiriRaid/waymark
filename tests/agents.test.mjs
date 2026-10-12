@@ -75,7 +75,9 @@ test('paths: CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME, CURSOR_CONFIG_DIR, CODEX_HOME a
   assert.equal(o.plugin, at('xdg', 'opencode', 'plugins', 'waymark.js'));
   assert.equal(o.claude, at('claude', 'settings.json'));
   assert.equal(o.cursor, at('cursor', 'hooks.json'));
-  assert.deepEqual(Object.fromEntries(o.agents), { Codex: at('codex'), 'Gemini CLI': at('gemini'), OpenCode: at('xdg', 'opencode'), Cursor: at('cursor') });
+  const dirs = Object.fromEntries(o.agents);
+  assert.deepEqual({ Codex: dirs.Codex, 'Gemini CLI': dirs['Gemini CLI'], OpenCode: dirs.OpenCode, Cursor: dirs.Cursor }, { Codex: at('codex'), 'Gemini CLI': at('gemini'), OpenCode: at('xdg', 'opencode'), Cursor: at('cursor') });
+  assert.equal(dirs.Antigravity, path.join(agentsHome, '.gemini'), 'GEMINI_CLI_HOME moves Gemini CLI only; Antigravity documents no variable');
   assert.equal(o.claudeMd, at('claude', 'CLAUDE.md'));
   assert.equal(o.sessions, 1, 'transcripts under CLAUDE_CONFIG_DIR/projects');
   assert.equal(o.opencodeMd, at('xdg', 'opencode', 'AGENTS.md'));

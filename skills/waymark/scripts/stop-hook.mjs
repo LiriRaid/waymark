@@ -71,6 +71,34 @@ export function cdPaths(command) {
   return out.length ? ` ${out.join(' ')}` : '';
 }
 const cmdOf = (t) => String(t.input.command || '');
+
+// The commits this turn made with a task's ID, in every repo it committed in: the session's, and the one a commit
+// command entered (`cd <repo> && git commit`, `git -C <repo> commit`). The ID may be the Cierre's, or an earlier
+// recorded task's (its work committed now); it is read anywhere in the message, not only in the last paragraph.
+// → the commit hashes (the trailer testigo).
+export function turnCommits(tools, cwd, claimed, ids, since = 0) {
+  const dirs = new Set([path.resolve(cwd)]);
+  for (const t of tools.filter((x) => shell(x) && /\bgit\b[\s\S]*\scommit\b/.test(cmdOf(x)))) {
+    let dir = null;
+    for (const part of cmdOf(t).split(/&&|\|\||[;|\n]/)) {
+      const cd = part.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:\/d\s+|-Path\s+)?["']?([^"']+?)["']?\s*$/i);
+      if (cd) { dir = cd[1]; continue; }
+      const c = part.match(/\bgit\s+-C\s+["']?([^"'\s]+)["']?[^|;&]*\scommit\b/);
+      if (c) dirs.add(path.resolve(cwd, c[1]));
+      else if (dir && /\bgit\b[^|;&]*\scommit\b/.test(part)) dirs.add(path.resolve(cwd, dir.replace(/^\/([a-z])\//i, '$1:/')));
+    }
+  }
+  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
+  const out = [];
+  for (const dir of dirs) {
+    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 1500 });
+    if (r.status !== 0) continue;
+    for (const [h, msg] of r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))) {
+      if (h && String(msg || '').split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))) out.push(h);
+    }
+  }
+  return [...new Set(out)];
+}
 // The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
 // is not a test or gate run.
 const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
@@ -389,7 +417,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
     red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
     preexisting: observed.worktree || /no comprobado \(.{3,}\)/i.test(exc) ? [] : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
-    trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
+    trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
     chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
   };
@@ -521,6 +549,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
       ctx.commits = commitsFor(cwd, claimed);
+      try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);

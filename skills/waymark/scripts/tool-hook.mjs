@@ -80,13 +80,30 @@ export function checkTrailer(command, cwd = process.cwd()) {
   return why ? `Waymark: the trailer "Waymark-Task: ${id}" ${why}, so the end-of-turn hook would record this task as ${ids.next} and the commit would disagree with its record. Commit with "Waymark-Task: ${ids.next}" and use the same ID in the Cierre heading.` : null;
 }
 
+// A commit whose message carries no "Waymark-Task:" leaves its task's record unlinked: denied once per session and task
+// ID, with the ID to add; sent again without it, it goes through (the user may not want a trailer in that repo). Not
+// judged: --amend --no-edit (no message written) and -F <file> (a message the hook cannot see). → the reason, or null.
+export function missingTrailer(command, session = 'unknown', cwd = process.cwd(), stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.trailer-gate.json')) {
+  const c = String(command || '');
+  if (!/\bgit\b[^|;&\n]*\scommit(?![\w-])/.test(c) || /Waymark-Task:/.test(c) || /--amend\b[\s\S]*--no-edit|--no-edit[\s\S]*--amend/.test(c)) return null;
+  if (/(?:\s-F|\s--file)[\s=]+(?!-(?:\s|$))\S/.test(c)) return null;
+  const ids = taskIds(cwd), key = `${session || 'unknown'}:${ids.next}`;
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+  if (seen[key]) return null;
+  for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
+  seen[key] = Date.now();
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  return `Waymark: this commit has no "Waymark-Task: <task ID>" in its message, so the task's record and the commit stay unlinked. Add it as the message's last paragraph, next to Co-Authored-By: "Waymark-Task: ${ids.next}"${ids.followUp ? ` (or "${ids.followUp}" when it continues ${ids.last})` : ''}, and use the same ID in the Cierre heading. Sent again without it, the commit goes through.`;
+}
+
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
   if (c.command !== undefined) {
-    const trailer = checkTrailer(c.command, cwd);
+    const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
   }

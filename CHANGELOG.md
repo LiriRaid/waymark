@@ -2,14 +2,16 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
-## 2.0.2 — the quota % measured, three false ✘ fixed
+## 2.0.2 — the quota % measured, false ✘ from work in another repo fixed
 - **Measured quota** (`docs/adr/0019`): Waymark's status line for Claude Code (`statusline.mjs`) reads the real % of the 5-hour window that Claude Code passes to it (Pro and Max). It shows `5h 23% · 7d 41% · contexto 18%`. The per-prompt hook keeps the reading at the task's start, and the end-of-turn line shows the difference as `≈ X% de la cuota (medido)`, with no question to the user. Another session active during the task gives `medido, con otra sesión activa` and no pair. A window reset, or no reading since the start, falls back to the estimate.
 - **Pairs on their own:** each clean measure is saved as a calibration pair, so the estimate for Codex, OpenCode and sessions without the status line improves without asking.
 - **Install:** `install-hooks.mjs` adds the status line with the hooks. A status line you already have keeps running after Waymark's (`~/.waymark/statusline.json`).
-- **Three false ✘ from a real task** (the front's session fixing the API, 7/10):
+- **False ✘ from real tasks** (the front's session fixing and committing in the API):
   - **Recordar in another repo:** a file outside the session's project gets the pack of its own repo at its first edit. Before, only the session's project counted, so editing the API from the front's session never got its memory. A folder that is no repo still gets none.
   - **Review and pack through a variable:** `W=…/waymark.mjs; node $W review …` (or PowerShell's `$W = "…"`) counts as the review or the memory search. Variables assigned in the same command are read in place.
   - **Your reply after rejecting the choice window is your decision:** when you reject the window, or choose to clarify, your next message is recorded as your decision in your words (`source: "reply"`).
+  - **A commit in another repo:** the end-of-turn hook looks for the turn's commits where they were made (`cd <repo> && git commit`, `git -C <repo> commit`). An earlier recorded task's ID counts too (its work committed now), wherever the line sits in the message.
+- **Commit without a task ID:** a `git commit` whose message has no `Waymark-Task:` is stopped once per task with the ID to add. Sent again without it, it goes through.
 
 ## 2.0.1 — agents detected as they are, dead hooks and idle sessions caught
 - **Dead hooks are reported** (`docs/adr/0018`): `waymark.mjs check` probes every hook each agent has registered, as the agent runs it, and names the ones that do not answer. The instructions block tells the agent that a session with no card and no per-prompt line has no hooks running, so it tells the user and runs `check`.

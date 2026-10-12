@@ -2732,3 +2732,41 @@ test('decision: the user\'s reply after rejecting the choice window is their dec
   const clarify = { ...rejected, toolUseResult: 'Error: The user doesn\'t want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nThe user wants to clarify these questions.' };
   assert.deepEqual(decisionsIn([ask, clarify, prompt('corrige las 4')]).map((d) => d.chosen), ['corrige las 4'], 'the user chose to clarify first (Claude Code 2.1.x)');
 });
+
+// A commit with no trailer leaves its task's record unlinked (YaloAtiendo-Chat 2026-10-12 · T2c): stopped once per task
+// with the ID to add; sent again without it, it goes through (the user may not want one there).
+test('commit trailer: a commit with none is stopped once with the ID to add', async () => {
+  const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const repo = memRepo('no-trailer'), day = new Date().toLocaleDateString('sv'), state = path.join(home, `trailer-${++n}.json`);
+  appendRecord(repo, { id: `${day} · T1`, files: [path.join(repo, 'a.ts')], commits: [] });
+  const heredoc = "git add a.ts && git commit -q -F - <<'EOF'\nfeat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF";
+  const deny = missingTrailer(heredoc, 's1', repo, state);
+  assert.match(deny || '', new RegExp(`no "Waymark-Task: <task ID>"[\\s\\S]*Waymark-Task: ${day} · T2[\\s\\S]*${day} · T1b`));
+  assert.equal(missingTrailer(heredoc, 's1', repo, state), null, 'once per task: sent again, it goes through');
+  assert.match(missingTrailer('git commit -m "fix: y"', 's2', repo, state) || '', /Waymark-Task/, 'another session is asked too');
+  assert.equal(missingTrailer(`git commit -m "fix: y" -m "Waymark-Task: ${day} · T2"`, 's3', repo, state), null, 'with a trailer: checkTrailer judges it');
+  assert.equal(missingTrailer('git commit --amend --no-edit', 's4', repo, state), null, 'the message is not being written');
+  assert.equal(missingTrailer('git commit -F msg.txt', 's5', repo, state), null, 'a message file the hook cannot see');
+  assert.equal(missingTrailer('git log --oneline -1 && git status', 's6', repo, state), null, 'no commit');
+});
+
+// The turn's commits are looked for where they were made (`cd <repo> && git commit`), and an earlier recorded task's ID
+// counts: its work committed now (YaloAtiendo-Chat 2026-10-12 · T2c committed T2b's work in the API's repo).
+test('commit trailer: a commit made in another repo with an earlier task\'s ID counts', async () => {
+  const { turnCommits } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const session = memRepo('sess-commit'), api = tmpRepo('api-commit'), day = new Date().toLocaleDateString('sv');
+  appendRecord(session, { id: `${day} · T1`, files: [path.join(api, 'a.ts')], commits: [] });
+  fs.writeFileSync(path.join(api, 'old.ts'), '1\n'); gitT(api, 'add', '.'); gitT(api, 'commit', '-q', '-m', 'old', '-m', `Waymark-Task: ${day} · T1`, '--date', '2020-01-01T00:00:00');
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--amend', '--no-edit', '-q'], { cwd: api, env: { ...process.env, GIT_COMMITTER_DATE: '2020-01-01T00:00:00' } });
+  const since = Date.now() - 1000;
+  fs.writeFileSync(path.join(api, 'a.ts'), '1\n'); gitT(api, 'add', '.');
+  gitT(api, 'commit', '-q', '-m', 'feat: deep link', '-m', `Waymark-Task: ${day} · T1`, '-m', 'Co-Authored-By: Claude <noreply@anthropic.com>');
+  const sha = gitT(api, 'rev-parse', 'HEAD').stdout.trim();
+  const tools = [{ name: 'Bash', input: { command: `cd ${api.replace(/\\/g, '/')} && git add a.ts && git commit -q -F - <<'EOF'\nfeat: deep link\nEOF` } }];
+  const ids = taskIds(session);
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'in the API repo, an earlier recorded task\'s ID, made this turn');
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, Date.now() + 180000), [], 'nothing made since the turn started (a minute of slack)');
+  fs.writeFileSync(path.join(api, 'b.ts'), '1\n'); gitT(api, 'add', '.');
+  gitT(api, 'commit', '-q', '-m', 'x', '-m', `Waymark-Task: ${day} · T9`);
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
+});

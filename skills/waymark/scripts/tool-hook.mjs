@@ -16,14 +16,15 @@ import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, shellRuns, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
-import { agentFrom } from './agents/index.mjs';
+import { agentFrom, parseHook } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 
-// Files the routine itself writes (memory, learnings, scratch) never need the opener.
+// Files the routine itself writes (memory, learnings, scratch) never need the opener. The OS temp dir is the one Node
+// reports (TMPDIR on macOS, /var/folders/…; TEMP on Windows).
 const exempt = (file) => {
-  const f = norm(file), home = norm(os.homedir());
-  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || f.includes('/scratchpad/');
+  const f = norm(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()).replace(/\/+$/, '');
+  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || (tmp && f.startsWith(`${tmp}/`)) || f.includes('/scratchpad/');
 };
 
 // Decision gate: deny once per prompt (state keyed by session + prompt uuid), never for L0 or exempt files. A turn routed
@@ -204,7 +205,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done) return;
     done = true;
     try {
-      const hook = JSON.parse(input), after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
+      const hook = parseHook(input, agent);
+      if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+      const after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
       if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       if (!after) {
         const deny = gate(hook, agent);
@@ -214,9 +217,11 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         if (c?.command !== undefined && changesProject(c.command)) for (const d of commandRepos(c.command, hook.cwd || process.cwd())) addRepoSnapshot(hook.session_id, d);
       }
       if (after || agent.preContext) {
-        const text = await packContext(hook, agent);
-        if (text) process.stdout.write(JSON.stringify(agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text)));
+        // the per-prompt reminder an agent kept for the turn's first tool result (Cursor), then the pack
+        const text = [after ? agent.takePrompt?.(hook) : '', await packContext(hook, agent)].filter(Boolean).join('\n\n');
+        if (text) { process.stdout.write(JSON.stringify(agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text))); return; }
       }
+      if (agent.out.pass) process.stdout.write(JSON.stringify(agent.out.pass(hook.hook_event_name)));
     } catch (e) { logHookError('tool-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Waymark · registers the four hooks of the chain in the agent's settings (docs/adr/0008), instead of a manual merge.
 // Usage: node install-hooks.mjs [--apply] [--agent claude]   (shows the plan by default; --apply after the user's yes)
-// Claude Code: ~/.claude/settings.json (WAYMARK_CLAUDE_SETTINGS overrides it). Only Waymark's own entries (a command that
+// Claude Code: ~/.claude/settings.json (CLAUDE_CONFIG_DIR, WAYMARK_CLAUDE_SETTINGS overrides it). Only Waymark's own entries (a command that
 // runs waymark/scripts/<hook>.mjs) are added, updated (path, matcher) or de-duplicated; every other key and hook stays,
 // and new entries go after the existing ones. A file that is not valid JSON is never written; a backup .waymark-bak is
 // made first. Coexistence mode guest or skills-only (~/.waymark/coexistence.md) → no hooks at all. Claude Code also gets
@@ -12,11 +12,17 @@
 // Gemini CLI (`--agent gemini`): ~/.gemini/settings.json (GEMINI_CLI_HOME, WAYMARK_GEMINI_SETTINGS overrides it), its own
 // event names (BeforeAgent, BeforeTool, AfterAgent), BeforeTool matcher "run_shell_command|write_file|replace".
 // OpenCode (`--agent opencode`): no command hooks; agents/opencode-plugin.js is copied to
-// ~/.config/opencode/plugins/waymark.js (WAYMARK_OPENCODE_PLUGIN overrides it) with this scripts folder in place.
+// ~/.config/opencode/plugins/waymark.js (XDG_CONFIG_HOME, WAYMARK_OPENCODE_PLUGIN overrides it) with this scripts folder
+// in place.
+// Cursor (`--agent cursor`, docs/adr/0021): ~/.cursor/hooks.json (CURSOR_CONFIG_DIR, WAYMARK_CURSOR_HOOKS overrides it),
+// `"version": 1` and flat entries ({command}) per event (cursor.com/docs/hooks). preToolUse and postToolUse take every
+// tool (no matcher): the adapter journals each call, reads and questions included (agents/cursor.mjs). User hooks need no
+// trust and reload when the file is saved.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { claudeDir, codexHome, geminiHome, opencodeDir, cursorDir } from './agents/paths.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url)).replace(/\\/g, '/');
 export const HOOKS = [
@@ -24,45 +30,56 @@ export const HOOKS = [
   { event: 'UserPromptSubmit', file: 'rule0-hook.mjs' },
   { event: 'PreToolUse', file: 'tool-hook.mjs', matcher: true }, // the agent's tools: MATCHER
   { event: 'Stop', file: 'stop-hook.mjs' },
-  { event: 'PostToolUse', file: 'tool-hook.mjs', matcher: true, only: ['gemini'] }, // the pack after the first edit where the pre-tool hook cannot add context
+  { event: 'PostToolUse', file: 'tool-hook.mjs', matcher: true, only: ['gemini', 'cursor'] }, // the pack after the first edit where the pre-tool hook cannot add context
+  { event: 'PostToolUseFailure', file: 'tool-hook.mjs', only: ['cursor'] }, // Cursor: a failed tool (its error) for the journal
+  { event: 'AfterAgentResponse', file: 'tool-hook.mjs', only: ['cursor'] }, // Cursor: the reply's text for the journal
 ];
 const SETTINGS = {
-  claude: () => process.env.WAYMARK_CLAUDE_SETTINGS || path.join(os.homedir(), '.claude', 'settings.json'),
-  codex: () => process.env.WAYMARK_CODEX_HOOKS || path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'hooks.json'),
-  gemini: () => process.env.WAYMARK_GEMINI_SETTINGS || path.join(process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini'), 'settings.json'),
+  claude: () => process.env.WAYMARK_CLAUDE_SETTINGS || path.join(claudeDir(), 'settings.json'),
+  codex: () => process.env.WAYMARK_CODEX_HOOKS || path.join(codexHome(), 'hooks.json'),
+  gemini: () => process.env.WAYMARK_GEMINI_SETTINGS || path.join(geminiHome(), 'settings.json'),
+  cursor: () => process.env.WAYMARK_CURSOR_HOOKS || path.join(cursorDir(), 'hooks.json'),
 };
-export const PLUGIN = () => process.env.WAYMARK_OPENCODE_PLUGIN || path.join(os.homedir(), '.config', 'opencode', 'plugins', 'waymark.js');
+export const settingsFile = (agent) => SETTINGS[agent]?.() || null;
+export const PLUGIN = () => process.env.WAYMARK_OPENCODE_PLUGIN || path.join(opencodeDir(), 'plugins', 'waymark.js');
 // The core's event names → each agent's (Claude Code and Codex share them).
-const EVENTS = { gemini: { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' } };
-const MATCHER = { claude: 'Bash|PowerShell|Edit|Write|NotebookEdit', codex: 'Bash|apply_patch', gemini: 'run_shell_command|write_file|replace' }; // PreToolUse tools per agent
+const EVENTS = {
+  gemini: { SessionStart: 'SessionStart', UserPromptSubmit: 'BeforeAgent', PreToolUse: 'BeforeTool', PostToolUse: 'AfterTool', Stop: 'AfterAgent' },
+  cursor: { SessionStart: 'sessionStart', UserPromptSubmit: 'beforeSubmitPrompt', PreToolUse: 'preToolUse', PostToolUse: 'postToolUse', PostToolUseFailure: 'postToolUseFailure', AfterAgentResponse: 'afterAgentResponse', Stop: 'stop' },
+};
+const MATCHER = { claude: 'Bash|PowerShell|Edit|Write|NotebookEdit', codex: 'Bash|apply_patch', gemini: 'run_shell_command|write_file|replace', cursor: null }; // PreToolUse tools per agent
+const FLAT = new Set(['cursor']); // an entry is the hook itself ({command, matcher?}), not {matcher, hooks: [...]}
 const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.replace('.', '\\.')}`).test(String(h?.command || ''));
 
 // → { settings, steps } without touching the input: the settings with the four hooks in place and what changed.
 export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
-  const s = structuredClone(input || {}), steps = [];
+  const s = structuredClone(input || {}), steps = [], flat = FLAT.has(agent);
+  if (flat) s.version ??= 1;
   s.hooks = s.hooks || {};
+  const inner = (e) => (flat ? [e] : e.hooks || []);
   for (const h of HOOKS.filter((x) => !x.only || x.only.includes(agent))) {
     const command = `node "${scripts}/${h.file}"${agent === 'claude' ? '' : ` --agent ${agent}`}`;
-    const matcher = h.matcher ? MATCHER[agent] || MATCHER.claude : null;
+    const matcher = h.matcher ? (agent in MATCHER ? MATCHER[agent] : MATCHER.claude) : null;
     const windows = agent === 'codex' ? { commandWindows: command } : {}; // Codex's Windows override, the same command
     const event = EVENTS[agent]?.[h.event] || h.event;
     const list = (s.hooks[event] = Array.isArray(s.hooks[event]) ? s.hooks[event] : []);
-    const hits = list.filter((e) => (e.hooks || []).some(ours(h.file)));
+    const hits = list.filter((e) => inner(e).some(ours(h.file)));
     if (!hits.length) {
-      list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command, ...windows }] });
+      list.push(flat ? { command, ...(matcher ? { matcher } : {}) } : { ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command, ...windows }] });
       steps.push(`add ${event} → ${h.file}`);
       continue;
     }
     const [keep, ...extra] = hits;
-    const mine = keep.hooks.find(ours(h.file));
+    const mine = inner(keep).find(ours(h.file));
     if (mine.command !== command) { steps.push(`update ${event} command: ${mine.command} → ${command}`); mine.command = command; }
     if (windows.commandWindows && mine.commandWindows !== command) { steps.push(`update ${event} commandWindows → ${command}`); mine.commandWindows = command; }
-    if (matcher && keep.matcher !== matcher && keep.hooks.every(ours(h.file))) { steps.push(`update ${event} matcher: ${keep.matcher || '(none)'} → ${matcher}`); keep.matcher = matcher; }
+    if (matcher && keep.matcher !== matcher && inner(keep).every(ours(h.file))) { steps.push(`update ${event} matcher: ${keep.matcher || '(none)'} → ${matcher}`); keep.matcher = matcher; }
+    if (flat && !matcher && keep.matcher) { steps.push(`update ${event} matcher: ${keep.matcher} → (every tool)`); delete keep.matcher; }
     for (const e of extra) { // a second Waymark entry for the same hook runs it twice: drop it (or just our hook from a shared entry)
-      e.hooks = e.hooks.filter((x) => !ours(h.file)(x));
+      if (!flat) e.hooks = e.hooks.filter((x) => !ours(h.file)(x));
       steps.push(`remove duplicate ${event} → ${h.file}`);
     }
-    s.hooks[event] = list.filter((e) => (e.hooks || []).length);
+    s.hooks[event] = list.filter((e) => (flat ? !extra.includes(e) : (e.hooks || []).length));
   }
   return { settings: s, steps };
 }
@@ -85,14 +102,14 @@ export function planStatusLine(input, { scripts = SCRIPTS } = {}) {
 export const pluginText = (scripts = SCRIPTS) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents', 'opencode-plugin.js'), 'utf8').replace("'__SCRIPTS__'", JSON.stringify(scripts));
 
 // The Waymark hook commands each agent has registered: { agent, file, commands[] } for every settings file (or the
-// OpenCode plugin) that names one. → [] when no agent has them.
+// OpenCode plugin) that names one; an entry holds its hooks (Claude Code, Codex, Gemini) or is one (Cursor). → [] when no agent has them.
 export function registered() {
   const out = [];
   for (const [agent, at] of Object.entries(SETTINGS)) {
     const file = at();
     let s = null;
     try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    const commands = [...new Set(Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || []).map((h) => String(h?.command || ''))).filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
+    const commands = [...new Set(Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || [e]).map((h) => String(h?.command || ''))).filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
     if (commands.length) out.push({ agent, file, commands });
   }
   try {
@@ -140,5 +157,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     fs.writeFileSync(path.join(home, 'statusline.json'), JSON.stringify({ next: line.next }, null, 1) + '\n');
   }
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
-  console.log(`updated${raw ? ` (backup ${file}.waymark-bak)` : ''}. Start a new session.${agent === 'codex' ? ' In Codex, open /hooks and trust the four Waymark hooks: until then Codex skips them.' : ''}`);
+  console.log(`updated${raw ? ` (backup ${file}.waymark-bak)` : ''}. ${agent === 'cursor' ? 'Cursor reloads hooks.json when it changes; user hooks need no trust.' : 'Start a new session.'}${agent === 'codex' ? ' In Codex, open /hooks and trust the four Waymark hooks: until then Codex skips them.' : ''}`);
 }

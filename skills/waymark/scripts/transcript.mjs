@@ -81,6 +81,11 @@ export function pendingBackground(lines, since = 0) {
   return launched.filter((id) => !notified.includes(`<tool-use-id>${id}</tool-use-id>`));
 }
 
+// A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own
+// name ("dept-qa"), so departments, procedures and re-routes match either install.
+const PLUGIN = /^waymark:/;
+export const toolInput = (c) => (c.name === 'Skill' && PLUGIN.test(String(c.input?.skill || '')) ? { ...c.input, skill: c.input.skill.replace(PLUGIN, '') } : c.input || {});
+
 // The current turn: everything after the last prompt (and after `since`). Returns its assistant texts and tool calls
 // (main agent only).
 export function currentTurn(lines, since = 0) {
@@ -96,7 +101,7 @@ export function currentTurn(lines, since = 0) {
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {
       if (c.type === 'text' && c.text.trim()) texts.push(c.text);
-      if (c.type === 'tool_use') tools.push({ name: c.name, input: c.input || {}, id: c.id, at });
+      if (c.type === 'tool_use') tools.push({ name: c.name, input: toolInput(c), id: c.id, at });
     }
   }
   const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
@@ -108,7 +113,7 @@ export function currentTurn(lines, since = 0) {
 export function sessionTools(lines) {
   const out = [], byId = {};
   for (const d of lines) {
-    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: c.input || {}, out: '', id: c.id }; out.push(t); byId[c.id] = t; }
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: toolInput(c), out: '', id: c.id }; out.push(t); byId[c.id] = t; }
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) for (const c of d.message.content) if (c.type === 'tool_result' && byId[c.tool_use_id]) Object.assign(byId[c.tool_use_id], { out: (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 200), error: !!c.is_error }); // an edit the gate denied changed nothing
   }
   return out;
@@ -190,7 +195,7 @@ export function sessionState(lines) {
 const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*(?:\||or)\s*Q)?|Q)\b(?:\s*·\s*((?:dept-)?(?:architecture|backend|data|devex|devops|frontend|product|qa|security|ux-ui))\b(?!-))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
 const reroute = (tools = []) => {
-  const r = tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
+  const r = tools.map((t) => ({ ...t, input: toolInput(t) })).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
   return r.length ? { level: Number(String(r[r.length - 1].input.args).trim()[1]), dept: String(r[r.length - 1].input.skill) } : null;
 };
 export function routedLevel(texts, tools) {

@@ -15,9 +15,10 @@ import path from 'node:path';
 import { readTail } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
 import { patchFiles } from './codex.mjs';
+import { opencodeDir } from './paths.mjs';
 
 export const name = 'opencode';
-export const instructions = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+export const instructions = path.join(opencodeDir(), 'AGENTS.md');
 export const preContext = false; // tool.execute.before cannot add context: the plugin appends the pack to the result (tool.execute.after)
 export const lacks = []; // no code-review skill in OpenCode: its review is waymark.mjs review
 export const out = claudeOut; // the plugin reads these shapes; a prompt brake ({decision: block}) is a toast and a throw from chat.message

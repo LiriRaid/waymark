@@ -24,7 +24,9 @@ export function engramBin() {
     return !p ? null : p.endsWith('.mjs') ? [process.execPath, p] : [p];
   }
   if (found !== undefined) return found;
-  const candidates = ['engram', path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'engram', 'engram.exe'), path.join(os.homedir(), 'go', 'bin', 'engram')];
+  // PATH first; then where its installers put it when a hook's PATH lacks that folder (Windows, Homebrew, Go, ~/.local)
+  const candidates = ['engram', path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'engram', 'engram.exe'), '/opt/homebrew/bin/engram', '/usr/local/bin/engram',
+    path.join(os.homedir(), '.local', 'bin', 'engram'), path.join(os.homedir(), 'go', 'bin', 'engram')];
   found = null;
   for (const c of candidates) if (spawnSync(c, ['version'], { encoding: 'utf8', timeout: 3000, env: ENV() }).status === 0) { found = [c]; break; }
   return found;

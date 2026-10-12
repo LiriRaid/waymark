@@ -18,7 +18,8 @@ import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
-import { agentFrom } from './agents/index.mjs';
+import { agentFrom, parseHook } from './agents/index.mjs';
+import { instructionsBlock } from './connect-agents.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -134,7 +135,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done) return;
     done = true;
     let cwd = process.cwd(), sessionId = null;
-    try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } } catch {}
+    const h = parseHook(input, agent, { lenient: true });
+    if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+    if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; }
+    cwd = h.cwd || cwd; sessionId = h.session_id || null;
     let text = '', held = '';
     // the remote's records a fetch brought (the refspec of `waymark.mjs notes setup`) join the local notes before the card
     let joined = false;
@@ -162,6 +166,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (held) text += `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${held}`;
     try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}
     try { const c = coexistence(); if (c) text = (text ? text + '\n' : '') + c; } catch {}
+    // an agent with no instructions file of its own (Cursor): the Rule 0 block comes first, never cut by the cap
+    const guest = /\nMode:\s*(guest|other-leads|skills-only)\b/.test('\n' + read(path.join(HOME, 'coexistence.md')));
+    try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}
     if (text) process.stdout.write(JSON.stringify(agent.out.context('SessionStart', text)));
   };
   process.stdin.on('data', (d) => { input += d; });

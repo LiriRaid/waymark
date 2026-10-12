@@ -7,7 +7,7 @@
 // Claude Code 2.1.287: a deny rule hides the server from ToolSearch and drops its names/instructions from context.
 // Only the rules this script added are ever removed (tracked in ~/.waymark/mcp-fit.json). Takes effect in the next
 // session. Generic servers (docs, memory, anything not tied to a framework) are never blocked.
-// Usage: node mcp-fit.mjs [--apply] [--project <path>] [--json]   (plans by default; --apply after the user's yes)
+// Usage: node mcp-fit.mjs [--apply | --restore] [--project <path>] [--json]   (plans by default; --apply after the user's yes)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const HOME = os.homedir();
 const LOCAL = process.env.WAYMARK_HOME || path.join(HOME, '.waymark');
-const CLAUDE_JSON = process.env.WAYMARK_CLAUDE_JSON || path.join(HOME, '.claude.json');
+const CLAUDE_JSON = process.env.WAYMARK_CLAUDE_JSON || (process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(HOME, '.claude.json'));
 const MAP = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skill-map.json');
 const STATE = path.join(LOCAL, 'mcp-fit.json');
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
@@ -120,8 +120,34 @@ function applyFit(f, state) {
   state[norm(f.project)] = [...ours];
 }
 
+// --restore (uninstall.mjs): every deny rule this script added, out of each project's settings.local.json; the user's own
+// rules stay. The state keys are normalized (lowercase): the project's real folder comes from the known projects, so a
+// case-sensitive filesystem finds it. A project whose settings cannot be read stays in the state. → { changed, left }.
+export function restoreFits(state = readJson(STATE) || {}) {
+  const changed = [], left = {}, known = knownProjects();
+  for (const [key, servers] of Object.entries(state)) {
+    const project = known.find((p) => norm(p) === key) || key, file = settingsFile(project), s = readJson(file);
+    if (!s) { if (fs.existsSync(file) || !fs.existsSync(project)) left[key] = servers; continue; }
+    const drop = new Set(servers.map(ruleOf)), deny = (s.permissions?.deny || []).filter((r) => !drop.has(r));
+    if (deny.length === (s.permissions?.deny || []).length) continue;
+    fs.copyFileSync(file, file + '.waymark-bak');
+    s.permissions.deny = deny;
+    fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n');
+    changed.push(file);
+  }
+  return { changed, left };
+}
+
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  if (args.includes('--restore')) {
+    const { changed, left } = restoreFits();
+    fs.mkdirSync(LOCAL, { recursive: true });
+    fs.writeFileSync(STATE, JSON.stringify(left, null, 2) + '\n');
+    console.log(changed.length ? `Restored (backup .waymark-bak): ${changed.join(', ')}. Next session.` : 'Nothing to restore: no deny rule of mcp-fit is left.');
+    if (Object.keys(left).length) console.log(`Not restored (settings.local.json unreadable or folder not found): ${Object.keys(left).join(', ')}. Fix it and re-run --restore.`);
+    process.exit(0);
+  }
   const apply = args.includes('--apply'), asJson = args.includes('--json');
   const only = args.includes('--project') ? path.resolve(args[args.indexOf('--project') + 1]) : null;
   const state = readJson(STATE) || {};

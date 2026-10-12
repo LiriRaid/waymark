@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
 import { taskIds, saveSnapshot, markOpen, markTaskStart, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
-import { agentFrom } from './agents/index.mjs';
+import { agentFrom, parseHook } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -111,7 +111,9 @@ export function reminder(hook, agent) {
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
-  return agent.out.context('UserPromptSubmit', (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR));
+  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
+  return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }
 
 // Real paths on both sides: Node runs a script reached through a link (~/.claude/skills → ~/.agents/skills) from its
@@ -122,10 +124,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const run = () => {
     if (done) return;
     done = true;
-    let hook = {};
-    try { hook = JSON.parse(input); } catch {}
+    const hook = parseHook(input, agent, { lenient: true });
+    if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
-    try { const out = reminder(hook, agent); if (out) process.stdout.write(JSON.stringify(out)); } catch (e) { logHookError('rule0-hook', e); }
+    try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) process.stdout.write(JSON.stringify(out)); } catch (e) { logHookError('rule0-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

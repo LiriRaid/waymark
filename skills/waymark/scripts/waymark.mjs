@@ -3,7 +3,7 @@
 // the hooks, so every agent runs the same four short hooks. Run it from the project folder:
 //   node waymark.mjs [check]            read-only report of what is pending (default)
 //   node waymark.mjs sync               refresh skill-registry.md (sync.mjs) and remember the skills seen here
-//   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks [args]   the existing scripts, args passed on
+//   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks | uninstall [args]   the existing scripts, args passed on
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
 //   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin)
@@ -18,7 +18,8 @@
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
-// agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
+// agents not connected or without Waymark's hooks (Claude Code included), project skills versioned in .claude/skills, an
+// agent framework that appeared or vanished, and a large idle session in this folder. It
 // writes nothing but the time of the check (~/.waymark/.check.json, read by the session hook's weekly pointer).
 // Every item is offered to the user with the choice window; its command runs only after their yes.
 import fs from 'node:fs';
@@ -34,8 +35,10 @@ import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
+import { claudeDir } from './agents/paths.mjs';
 import { engramBin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
+import { trackedProjectSkills } from './skill-links.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +51,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -160,6 +163,24 @@ function agents() {
   return fresh.length ? `connect: other agents not connected to the project memory: ${fresh.map((a) => `${a.name} (${a.path.replace(/\\/g, '/')}${a.guestOf.length ? `; ${a.guestOf.join(', ')} governs it: Waymark joins as its guest` : ''})`).join(', ')}. One marked line in each one's instructions file so it reads .waymark/tasks.md first: node "${script('connect-agents.mjs')}" shows the plan, --apply on yes (backup first).` : '';
 }
 
+// Agents on this machine whose hooks do not run Waymark (Claude Code when its folder exists, and every agent connect-agents
+// finds): their tasks are neither recorded nor checked. None in a coexistence where the orchestrator owns the hooks.
+export function hookless() {
+  const mode = read(path.join(HOME(), 'coexistence.md')).match(/^Mode:\s*(\S+)/m)?.[1];
+  if (['guest', 'skills-only', 'other-leads'].includes(mode)) return '';
+  const have = new Set(registered().map((r) => r.agent));
+  const missing = [...(fs.existsSync(claudeDir()) ? [{ name: 'Claude Code', key: 'claude' }] : []), ...found()].filter((a) => !have.has(a.key));
+  return missing.length ? `hooks: ${missing.map((a) => `${a.name} (--agent ${a.key})`).join(', ')} on this machine without Waymark's hooks: tasks there are neither recorded nor checked. Offer each: node "${script('install-hooks.mjs')}" --agent <agent> shows its plan, --apply on yes.` : '';
+}
+
+// Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change
+// the repository), so Claude Code reads them but the other agents do not.
+export function projectSkills(cwd) {
+  const home = projectHome(cwd);
+  const names = home.dir && !home.legacy ? trackedProjectSkills(home.root) : [];
+  return names.length ? `project skills: ${names.join(', ')} versioned in git in .claude/skills, left in place (only Claude Code reads them there). To share them with every agent, move them to .agents/skills in a commit of the user's choice.` : '';
+}
+
 // Framework namespaces marked in the agents' instructions files (`<!-- name:section -->`, `<!-- BEGIN name -->`).
 export function foreignMarkers() {
   const files = read(path.join(HOME(), 'agent.md')).split('\n').filter((l) => l.startsWith('|') && !/^\|\s*(Agent|---|<agent>)/.test(l))
@@ -216,6 +237,8 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
   await add(agents);
+  await add(hookless);
+  await add(() => projectSkills(cwd));
   await add(() => hooksHealth());
   await add(() => hookErrors());
   await add(() => mergeMethods(cwd));

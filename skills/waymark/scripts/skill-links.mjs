@@ -4,16 +4,20 @@
 // - project skills: every skill of <project>/.agents/skills, linked from <project>/.claude/skills by the session hook;
 // - Waymark's skills: ~/.agents/skills, linked from ~/.claude/skills by the installer (`node skill-links.mjs --user`).
 // A real folder found on Claude Code's side (a skill written there, or an old copy) moves to .agents/skills, the newer
-// content winning; the folder it replaces goes to ~/.waymark/backups, never deleted. Where no link can be made, a copy
-// is kept instead. The .claude side exists only where Claude Code is installed. CLI: --user [--apply].
+// content winning; the folder it replaces goes to ~/.waymark-backups (every Waymark backup), never deleted. Where no
+// link can be made, a copy is kept instead. A project skill versioned in git under .claude/skills stays where it is
+// (moving it would change the repository; `waymark.mjs check` says so). The .claude side exists only where Claude Code
+// is installed. CLI: --user [--apply].
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const SHARED = path.join('.agents', 'skills'), CLAUDE = path.join('.claude', 'skills');
 const hasClaude = () => fs.existsSync(path.join(os.homedir(), '.claude'));
-const backupRoot = (scope) => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'backups', `skills-${new Date().toISOString().slice(0, 10)}`, scope);
+const BACKUPS = () => process.env.WAYMARK_BACKUPS || path.join(path.dirname(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark')), '.waymark-backups');
+const backupRoot = (scope) => path.join(BACKUPS(), `${new Date().toISOString().slice(0, 10)}-skills`, scope);
 
 const present = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
 const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
@@ -57,9 +61,10 @@ function canLink(dir) {
   return ok;
 }
 
-// Links each shared skill (`names` only, when given) from `agent` to `shared`. → the actions taken, one line each.
-export function linkSkills(shared, agent, { names = null, claude = true, backup, apply = true } = {}) {
-  const done = [], want = (n) => !names || names.has(n);
+// Links each shared skill (`names` only, when given; never the `keep` ones) from `agent` to `shared`. → the actions
+// taken, one line each.
+export function linkSkills(shared, agent, { names = null, keep = new Set(), claude = true, backup, apply = true } = {}) {
+  const done = [], want = (n) => (!names || names.has(n)) && !keep.has(n);
   const all = new Set([...entries(shared).filter((n) => isSkill(path.join(shared, n))), ...entries(agent).filter((n) => !n.startsWith('.'))]);
   for (const name of [...all].filter(want).sort()) {
     const s = path.join(shared, name), a = path.join(agent, name);
@@ -95,9 +100,18 @@ function linkOrCopy(s, a) {
   try { makeLink(s, a); } catch { fs.cpSync(s, a, { recursive: true, preserveTimestamps: true }); }
 }
 
-// Project skills: <root>/.agents/skills, linked from <root>/.claude/skills where Claude Code is installed.
+// The skills of <root>/.claude/skills that git tracks (real folders, not links). → their names.
+export function trackedProjectSkills(root) {
+  const r = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '--', CLAUDE.replace(/\\/g, '/')], { cwd: root, encoding: 'utf8', timeout: 3000 }); // names as they are, accents too
+  if (r.status !== 0) return [];
+  const names = new Set(r.stdout.split('\n').map((f) => f.split('/')[2]).filter(Boolean));
+  return [...names].filter((n) => !isLink(path.join(root, CLAUDE, n))).sort();
+}
+
+// Project skills: <root>/.agents/skills, linked from <root>/.claude/skills where Claude Code is installed; a skill
+// versioned in git there stays as it is.
 export function linkProjectSkills(root, { claude = hasClaude(), backup = backupRoot(path.basename(root)) } = {}) {
-  return linkSkills(path.join(root, SHARED), path.join(root, CLAUDE), { claude, backup });
+  return linkSkills(path.join(root, SHARED), path.join(root, CLAUDE), { claude, backup, keep: new Set(trackedProjectSkills(root)) });
 }
 
 // Waymark's own skills at user level: the folders of the repository's skills/ (this script's grandparent).

@@ -2,7 +2,7 @@
 // Copies the live, installed skills back into this repository so improvements learned while working
 // can be reviewed and published.
 // Usage: node scripts/export.mjs [<skills-dir>] [--strip-learned]
-//   <skills-dir>     installed skills folder (default: ~/.claude/skills)
+//   <skills-dir>     installed skills folder (default: ~/.agents/skills, the one real copy every agent reads)
 //   --strip-learned  empty the "Learned rules / Learned notes" lists (personal experience) in the export
 // The private layer ~/.waymark/ is never exported. Review the diff with git before committing.
 import fs from 'node:fs';
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const strip = args.includes('--strip-learned');
-const live = path.resolve(args.find((a) => !a.startsWith('--')) || path.join(os.homedir(), '.claude', 'skills'));
+const live = path.resolve(args.find((a) => !a.startsWith('--')) || path.join(os.homedir(), '.agents', 'skills'));
 const out = path.join(repo, 'skills');
 const mapFile = path.join(live, 'waymark', 'skill-map.json');
 if (!fs.existsSync(mapFile)) { console.error(`No Waymark found in ${live}`); process.exit(1); }

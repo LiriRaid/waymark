@@ -53,7 +53,7 @@ There is no installer script. [`INSTALL.md`](INSTALL.md) is written **for the ag
 
 It can configure every agent on the machine in one run (Claude Code, Codex, OpenCode, Gemini CLI, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: `.waymark/tasks.md` and the git notes say where the work stands, and engram what each task learned.
 
-When a new version is published, `waymark.mjs check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it. Node.js 18+ is needed only for `sync.mjs`.
+When a new version is published, `waymark.mjs check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it (`uninstall.mjs`). Node.js 18+ is required: the skill links, the hooks, the status line and every script run on it.
 
 ## Built to save tokens
 
@@ -90,14 +90,14 @@ Say *"evalúa tu trabajo"* at the end of a task: the agent audits it with `refer
 ### Measure it
 
 ```bash
-node ~/.claude/skills/waymark/scripts/measure.mjs --turns 3-5
+node "$HOME/.agents/skills/waymark/scripts/measure.mjs" --turns 3-5
 ```
 
 It reads the agent's own session transcript (offline, no model call) and shows, per prompt: the context it started with (its growth is what every later response re-reads), responses, tool calls, images, new vs cached input tokens, output and sub-agent tokens; the fixed context the session started with; and for a range of prompts (one task) the number of **attempts**. Note the plan-quota % before and after a task to relate tokens to your limits.
 
 ## How it triggers
 
-Three layers keep the agent on track, without an orchestrator: each skill's `description` (the trigger, with the phrases people actually type), the instructions block (Rule 0: every request runs recall → department → skills → verify → learn; questions run in read-only consult mode), and a tiny per-prompt **Rule 0 reminder hook** (`scripts/rule0-hook.mjs`, installed by default where the agent supports hooks). The hook runs locally, adds ~120 tokens per prompt (~35 once the previous reply followed the routine) and blocks nothing. Every reply starts with `Waymark → L<n> · <dept>`, so you can see at a glance that the routine ran.
+Three layers keep the agent on track, without an orchestrator: each skill's `description` (the trigger, with the phrases people actually type), the instructions block (Rule 0: every request runs recall → department → skills → verify → learn; questions run in read-only consult mode), and a tiny per-prompt **Rule 0 reminder hook** (`scripts/rule0-hook.mjs`, installed by default where the agent supports hooks). The hook runs locally and adds ~120 tokens per prompt (~60 once the previous reply followed the routine; the task ID and the git status stay). It stops a message only once, before the model, when resuming a very large or idle session would re-write its whole context (`docs/adr/0016`, `0018`); the end-of-turn hook stops a turn once when a routine step is missing. Every reply starts with `Waymark → L<n> · <dept>`, so you can see at a glance that the routine ran.
 
 ```
 "quiero crear un modal"      → dept-frontend → brief → ui-build → gates → learn
@@ -170,7 +170,7 @@ Nothing personal ships in this repository: no stack, no preferences, no projects
 | File | Fills itself when… |
 |---|---|
 | `profile.md` | a project of a new stack, package manager or architecture is detected |
-| `projects.md` (index) + `<project>/.waymark/memory.md` | you work in a project for the first time; it is the project manual (identity, map, gates, conventions), local and never committed. What each task learned goes to engram, saved by the end-of-turn hook and committed in `.engram/` |
+| `projects.md` (index) + `<project>/.waymark/memory.md` | you work in a project for the first time; it is the project manual (identity, map, gates, conventions), local and never committed. What each task learned goes to engram, saved by the end-of-turn hook on this machine and never committed (`docs/adr/0017`) |
 | `preferences.md` | you correct how the agent answers or delivers code |
 | `subagents.md` | a search or delegation rule proves wrong or missing |
 | `agent.md` | the installer records where your agent keeps skills and instructions |
@@ -184,7 +184,7 @@ Waymark is not an orchestrator: an orchestrator decides *who* does the work, Way
 
 | On this machine | Waymark |
 |---|---|
-| no orchestrator | leads: Rule 0 block, both hooks, full routine |
+| no orchestrator | leads: Rule 0 block, the hooks in every agent, full routine |
 | an orchestrator already installed (e.g. gentle-ai) | **guest**: no hooks, no block; its departments reach the orchestrator through the orchestrator's own skill registry, its memory through engram |
 | Waymark first, an orchestrator later | keeps leading; the newcomer's rules are sorted into **adopted**, **fallback** (its skills back Waymark up) or **resolved**, and you are asked once whether Waymark should step down to guest |
 
@@ -209,7 +209,7 @@ When a list grows long, the agent folds it into the skill body, so the skills ev
 Your installed skills get better as you use them. To publish those improvements:
 
 ```bash
-node scripts/export.mjs ~/.claude/skills --strip-learned
+node scripts/export.mjs "$HOME/.agents/skills" --strip-learned
 git diff
 ```
 
@@ -220,7 +220,7 @@ git diff
 - **Stack**: copy `templates/stack.template.md` → `stacks/<slug>.md`, add its detection signal to `waymark/SKILL.md` §6.
 - **Architecture**: copy `templates/architecture.template.md`.
 - **Department**: copy `templates/department.template.md` → `skills/dept-<name>/SKILL.md`, add it to the core table and to `sync.mjs`.
-- **Agent**: add `adapters/<agent>.md` with its paths and MCP registration.
+- **Agent**: one module in `skills/waymark/scripts/agents/` (the exports of `claude.mjs`: transcript reader, tool input, output shapes) plus its entry in `install-hooks.mjs` and `connect-agents.mjs`, and `adapters/<agent>.md` with its paths and MCP registration (`adapters/cursor.md` is the latest example). An agent without a module still gets the pointer block, with no hooks.
 
 ## License
 

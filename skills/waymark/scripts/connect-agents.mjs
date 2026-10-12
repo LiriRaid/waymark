@@ -2,7 +2,8 @@
 // Waymark · connects the other coding agents on this machine to the project memory, without installing anything in them.
 //   node connect-agents.mjs            dry run: prints, per agent found, what would be written (nothing is written)
 //   node connect-agents.mjs --apply    writes it (backup first)
-// Per agent folder that exists (Codex, Gemini CLI, OpenCode): one marked block in its global instructions file, and a
+// Per agent folder that exists (Codex, Gemini CLI, OpenCode; Cursor has no instructions file, so nothing is written for
+// it: its session hook brings the block): one marked block in its global instructions file, and a
 // row in ~/.waymark/agent.md (*Connected agents*). An agent whose hooks run Waymark's scripts (a full install,
 // INSTALL.md §1) gets the same Rule 0 block as Claude Code (templates/instructions.md, between waymark:begin/end), kept
 // up to date on every run; the others get the pointer line below. Only the marked block is ever written; the rest of
@@ -12,19 +13,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { codexHome, geminiHome, opencodeDir, cursorDir } from './agents/paths.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const BACKUPS = () => process.env.WAYMARK_BACKUPS || path.join(path.dirname(HOME()), '.waymark-backups');
-const USER = () => process.env.WAYMARK_AGENTS_HOME || os.homedir();
 const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 
-// Global instructions file per agent (official docs: Codex AGENTS.md under CODEX_HOME, Gemini CLI GEMINI.md, OpenCode AGENTS.md).
+// Global instructions file per agent (official docs: Codex AGENTS.md under CODEX_HOME, Gemini CLI GEMINI.md, OpenCode
+// AGENTS.md; Cursor keeps its User Rules in its settings, no file: its session hook brings the block). key: install-hooks --agent.
 export const AGENTS = () => [
-  { name: 'Codex', dir: process.env.CODEX_HOME || path.join(USER(), '.codex'), file: 'AGENTS.md', hooks: 'hooks.json' },
+  { name: 'Codex', key: 'codex', dir: codexHome(), file: 'AGENTS.md', hooks: 'hooks.json' },
   // ~/.gemini is shared with Antigravity (its antigravity/ folders, and it reads GEMINI.md): only files Gemini CLI
   // itself writes mean the CLI is installed
-  { name: 'Gemini CLI', dir: process.env.GEMINI_CLI_HOME || path.join(USER(), '.gemini'), file: 'GEMINI.md', hooks: 'settings.json', marks: ['settings.json', 'projects.json', 'installation_id', 'oauth_creds.json', 'tmp'] },
-  { name: 'OpenCode', dir: path.join(USER(), '.config', 'opencode'), file: 'AGENTS.md', hooks: path.join('plugins', 'waymark.js') },
+  { name: 'Gemini CLI', key: 'gemini', dir: geminiHome(), file: 'GEMINI.md', hooks: 'settings.json', marks: ['settings.json', 'projects.json', 'installation_id', 'oauth_creds.json', 'tmp'] },
+  { name: 'OpenCode', key: 'opencode', dir: opencodeDir(), file: 'AGENTS.md', hooks: path.join('plugins', 'waymark.js') },
+  { name: 'Cursor', key: 'cursor', dir: cursorDir(), file: null, hooks: 'hooks.json' },
 ];
 export const POINTER = '<!-- waymark:pointer -->\nSi el proyecto tiene .waymark/, lee .waymark/tasks.md primero.\n<!-- /waymark:pointer -->';
 const REGISTRY = '## Connected agents (pointer only)';
@@ -33,6 +36,12 @@ const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return 
 const slash = (p) => p.replace(/\\/g, '/');
 const BLOCK = /<!-- waymark:begin -->[\s\S]*?<!-- waymark:end -->/;
 const POINTER_RE = /\n*<!-- waymark:pointer -->[\s\S]*?<!-- \/waymark:pointer -->\n?/;
+// The text without Waymark's marked blocks (Rule 0 and the pointer), the rest as it was (uninstall.mjs).
+// The blank lines that set a block apart go with it; nothing else changes.
+export const stripWaymark = (text) => String(text)
+  .replace(/(^|\n)\n*<!-- waymark:begin -->[\s\S]*?<!-- waymark:end -->\n*/g, (m, lead) => (lead ? '\n\n' : ''))
+  .replace(/(^|\n)\n*<!-- waymark:pointer -->[\s\S]*?<!-- \/waymark:pointer -->\n*/g, (m, lead) => (lead ? '\n\n' : ''))
+  .replace(/\n\n+$/, '\n');
 // The Rule 0 block, as the installer writes it into CLAUDE.md.
 export const instructionsBlock = () => read(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'instructions.md')).trim();
 // The agent's hooks run Waymark's scripts (its hooks file names them).
@@ -49,6 +58,7 @@ export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s
 // connected (block present) or not, and the orchestrator found, if any.
 export function found() {
   return AGENTS().filter((a) => fs.existsSync(a.dir) && (!a.marks || a.marks.some((m) => fs.existsSync(path.join(a.dir, m))))).map((a) => {
+    if (!a.file) return { ...a, path: null, exists: false, full: hooked(a), connected: true, guestOf: [] }; // nothing to write
     const file = path.join(a.dir, a.file), text = read(file), full = hooked(a);
     // with hooks: connected when its block is the current one; else when the pointer is there
     const connected = full ? text.match(BLOCK)?.[0] === instructionsBlock() : text.includes('<!-- waymark:pointer -->');
@@ -58,6 +68,7 @@ export function found() {
 
 // With an orchestrator the pointer still goes in, as Waymark's own block (guest: not Rule 0, never inside its blocks).
 export function planFor(a) {
+  if (!a.file) return { ...a, steps: [], skip: `no global instructions file: its session hook brings the Rule 0 block (install-hooks --agent ${a.key})` };
   if (a.connected) return { ...a, steps: [], skip: `already connected (${slash(a.path)})` };
   const guest = a.guestOf?.length ? ` as a guest of ${a.guestOf.join(', ')} (its blocks are not touched)` : '';
   if (a.full) return { ...a, steps: [
@@ -99,7 +110,7 @@ function register(a, now) {
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const write = process.argv.includes('--apply');
   const agents = found();
-  if (!agents.length) { console.log('No other agent found (~/.codex, ~/.gemini, ~/.config/opencode).'); process.exit(0); }
+  if (!agents.length) { console.log('No other agent found (~/.codex, ~/.gemini, ~/.config/opencode, ~/.cursor).'); process.exit(0); }
   let failed = 0;
   for (const a of agents) {
     const plan = planFor(a);

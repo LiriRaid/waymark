@@ -82,7 +82,9 @@ git clone --depth 1 https://github.com/LiriRaid/waymark "<tmp>/waymark"
 
 No git? Download `https://github.com/LiriRaid/waymark/archive/refs/heads/main.zip` and extract it. If the user gave you a local path to the repository, use that instead.
 
-Requirement check: `node --version` must be 18 or newer (only `sync.mjs` needs it). If Node is missing, tell the user and continue; skip §7 and say so in the report.
+Requirement check: `node --version` must be 18 or newer. Node is required: the skill links (§5), the hooks, the status line, `sync.mjs` and every `waymark.mjs` command run on it. If Node is missing, stop and tell the user to install it first (nodejs.org, or `winget install OpenJS.NodeJS.LTS`, `brew install node`).
+
+Paths in this guide start with `~`. Node does not expand it, and PowerShell expands it only for its own commands: on Windows write `"$HOME/.agents/skills/…"` (PowerShell, Git Bash) or `"%USERPROFILE%\.agents\skills\…"` (cmd), or the absolute path.
 
 ## 3. Back up **[ask if anything exists]**
 
@@ -119,7 +121,7 @@ dept-data  dept-security  dept-qa  dept-devops  dept-devex
 ui-build  ui-refine  ui-system  ui-audit  browser-verify  library-docs
 ```
 
-Copy real files into `~/.agents/skills`. Then, where Claude Code is installed, link them from `~/.claude/skills`: `node ~/.agents/skills/waymark/scripts/skill-links.mjs --user` shows the plan **[ask]**, `--apply` makes a junction (Windows) or symlink per skill. A Waymark skill still copied in `~/.claude/skills` from an older install moves to `~/.agents/skills` (the newer content wins; the replaced folder goes to `~/.waymark/backups/skills-<date>/`). Skills that are not Waymark's are never touched. From here on `<skills-dir>` = `~/.agents/skills` in every path below, the hooks included. If this is a reinstall and the user's installed copies have entries under `## Learned rules` / `## Learned notes`, or files in `patterns/`, `rules/`, `facts/` that the repository does not have, keep those entries: merge them into the new files instead of overwriting.
+Copy real files into `~/.agents/skills`. Then, where Claude Code is installed, link them from `~/.claude/skills`: `node "$HOME/.agents/skills/waymark/scripts/skill-links.mjs" --user` shows the plan **[ask]**, `--apply` makes a junction (Windows) or symlink per skill. A Waymark skill still copied in `~/.claude/skills` from an older install moves to `~/.agents/skills` (the newer content wins; the replaced folder goes to `~/.waymark-backups/<date>-skills/`). Skills that are not Waymark's are never touched. From here on `<skills-dir>` = `~/.agents/skills` in every path below, the hooks included. If this is a reinstall and the user's installed copies have entries under `## Learned rules` / `## Learned notes`, or files in `patterns/`, `rules/`, `facts/` that the repository does not have, keep those entries: merge them into the new files instead of overwriting.
 
 ## 6. Private layer and instructions
 
@@ -204,7 +206,9 @@ The agent offers each item with the choice window. `waymark.mjs sync | mcp-fit |
 - **Codex CLI:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent codex` shows the plan for `~/.codex/hooks.json` **[ask]**; then re-run it with `--apply`. Tell the user to open `/hooks` in Codex and trust the four Waymark hooks, because Codex skips them until then (`adapters/codex.md`, `docs/adr/0009`).
 - **Gemini CLI:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent gemini` shows the plan for `~/.gemini/settings.json` (its event names: SessionStart, BeforeAgent, BeforeTool, AfterAgent, plus AfterTool for the pack with the edit's result) **[ask]**; then re-run it with `--apply`. A new Gemini session picks them up.
 - **OpenCode:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent opencode` shows the plan for `~/.config/opencode/plugins/waymark.js` **[ask]** (the plugin runs the same scripts on session.created, chat.message, tool.execute.before/after and session.idle); then re-run it with `--apply` and restart OpenCode.
-- **Other agents:** the same four scripts with `--agent <name>`, once that agent has an adapter in `scripts/agents/`. Until then the instructions block and the pointer line (`connect-agents.mjs`) apply; say so in the report.
+- **Cursor:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent cursor` shows the plan for `~/.cursor/hooks.json` (`"version": 1`; sessionStart, beforeSubmitPrompt, preToolUse, postToolUse, postToolUseFailure, afterAgentResponse and stop) **[ask]**; then re-run it with `--apply`. Cursor reloads the file on save and user hooks need no trust. Cursor has no instructions file: its session card brings the Rule 0 block (`adapters/cursor.md`, `docs/adr/0021`). Cursor also runs Claude Code's hooks from `~/.claude/settings.json`; Waymark's step aside there, so nothing runs twice.
+- **Other agents:** the same scripts with `--agent <name>`, once that agent has a module in `scripts/agents/` (`adapters/generic.md`). Until then only the pointer block applies, with no hooks: say so in the report.
+- `waymark.mjs check` offers `install-hooks` for every agent found without Waymark's hooks, Claude Code included.
 - Report it under *Archivos modificados* (`settings.json — hook Rule 0 agregado`).
 
 **7.3 Sync.** Run:
@@ -221,7 +225,7 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
 
 1. Confirm these exist: `<skills-dir>/waymark/SKILL.md`, `<skills-dir>/dept-frontend/SKILL.md`, `<skills-dir>/ui-build/SKILL.md`, `~/.waymark/agent.md`, `~/.waymark/preferences.md`, and the block in `<instructions-file>` (in `guest`: `~/.waymark/coexistence.md` and the orchestrator's registry listing the skills, instead of the block).
 2. Tell the user that skills load at session start: **they must restart the agent** (new session).
-3. Smoke test for the new session: *"quiero crear un modal de confirmación"* → the agent must load `dept-frontend`, print Waymark brief, then use `ui-build`. In `guest`: the orchestrator's flow runs as before and loads `dept-frontend` from its registry, with no Waymark opener.
+3. Smoke test for the new session: *"quiero crear un modal de confirmación"* → the agent must start its reply with the `Waymark → L<n> · dept-frontend` line, load `dept-frontend`, then use `ui-build`. In `guest`: the orchestrator's flow runs as before and loads `dept-frontend` from its registry, with no Waymark opener.
 4. Report, listing **every file created or modified** (from §6 on), so the user knows what changed:
 
 ```
@@ -256,9 +260,9 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
 
 ## 10. Uninstall **[ask]**
 
-1. Back up (§3).
+1. `node "$HOME/.agents/skills/waymark/scripts/uninstall.mjs"` shows the plan for every agent: the hook entries that run Waymark's scripts (Claude Code, Codex, Gemini CLI, Cursor), Claude Code's status line (the one you had before comes back from `~/.waymark/statusline.json`), the OpenCode plugin, the marked blocks in each instructions file, and `skill-fit --restore` / `mcp-fit --restore` when they changed something. Re-run it with `--apply` after the user's yes **[ask]**: each file is backed up first to `~/.waymark-backups/<date>-uninstall/`; the rest of every file stays.
 2. Remove `waymark`, `dept-*` and the six tool skills from §5 in `~/.agents/skills`, and their links (or older copies) in `~/.claude/skills`. Remove a link, never the folder it points to through it.
-3. Remove the block between the `waymark` markers from `<instructions-file>`; leave the rest. Remove the hook entries that run `rule0-hook.mjs`, `session-hook.mjs`, `tool-hook.mjs` and `stop-hook.mjs` from the agent settings.
+3. Restart each agent.
 4. Ask whether to keep `~/.waymark/` (it is the user's memory; default: keep). A coexisting framework needs nothing: its files were never changed. In `guest`, re-run its registry refresh so it stops listing Waymark's skills.
 5. MCP servers: list the ones the install registered and ask before removing any.
 
@@ -275,14 +279,14 @@ Encontré Waymark <versión> (skills en ~/.claude/skills). Voy a:
 ```
 
 1. **Detect** the installed version per agent: `<agent skills folder>/waymark/VERSION` (missing = older than 0.3.0). 2.0 or newer → §9 instead.
-2. **Back up** (§3), adding each agent's hook file (`~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.gemini/settings.json`, `~/.config/opencode/plugins/waymark.js`).
-3. **Remove the old install:** §10 steps 2–3 in every agent. Merge nothing back: a clean 2.0 starts from the repository's skills. Learned rules the user wants kept stay in the backup; they move to engram later with `waymark.mjs learned`.
+2. **Back up** (§3), adding each agent's hook file (`~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.gemini/settings.json`, `~/.cursor/hooks.json`, `~/.config/opencode/plugins/waymark.js`).
+3. **Remove the old install:** §10 steps 1–2 in every agent, running `uninstall.mjs` from the clone of §2 (`<tmp>/waymark/skills/waymark/scripts/uninstall.mjs`). Merge nothing back: a clean 2.0 starts from the repository's skills. Learned rules the user wants kept stay in the backup; they move to engram later with `waymark.mjs learned`.
 4. **The private layer [ask]:**
-   - **Keep (Recommended):** `~/.waymark/` stays. After step 5, `node ~/.agents/skills/waymark/scripts/migrate-memory.mjs --all` shows the move of each project's memory into `<project>/.waymark/` (dry run). On a yes, re-run it with `--apply`: backup first, hash chain verified.
+   - **Keep (Recommended):** `~/.waymark/` stays. After step 5, `node "$HOME/.agents/skills/waymark/scripts/migrate-memory.mjs" --all` shows the move of each project's memory into `<project>/.waymark/` (dry run). On a yes, re-run it with `--apply`: backup first, hash chain verified.
    - **Start empty:** move `~/.waymark/` into the backup. §6.1 creates it again from the templates.
 5. **Install 2.0:** §1–§8, from a clone of `main` (§2). The skills go to `~/.agents/skills` (§5). The hooks are registered from `~/.agents/skills/waymark/scripts` (§7.2), so they never run through a link.
 6. **Verify** before the report:
-   - `echo {} | node ~/.agents/skills/waymark/scripts/rule0-hook.mjs` prints JSON with `additionalContext`. The same through `~/.claude/skills/waymark/scripts/rule0-hook.mjs` (the link) prints it too.
+   - `echo {} | node "$HOME/.agents/skills/waymark/scripts/rule0-hook.mjs"` prints JSON with `additionalContext`. The same through `"$HOME/.claude/skills/waymark/scripts/rule0-hook.mjs"` (the link) prints it too.
    - A new Claude Code session lists the Waymark skills (`/skills`).
    - Codex: trust the four hooks in `/hooks`.
    - `waymark.mjs check` reports nothing pending.

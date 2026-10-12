@@ -4,7 +4,8 @@
 // Claude Code: ~/.claude/settings.json (WAYMARK_CLAUDE_SETTINGS overrides it). Only Waymark's own entries (a command that
 // runs waymark/scripts/<hook>.mjs) are added, updated (path, matcher) or de-duplicated; every other key and hook stays,
 // and new entries go after the existing ones. A file that is not valid JSON is never written; a backup .waymark-bak is
-// made first. Coexistence mode guest or skills-only (~/.waymark/coexistence.md) → no hooks at all.
+// made first. Coexistence mode guest or skills-only (~/.waymark/coexistence.md) → no hooks at all. Claude Code also gets
+// the status line (planStatusLine), which measures each task's quota %.
 // Codex (`--agent codex`): ~/.codex/hooks.json (CODEX_HOME, WAYMARK_CODEX_HOOKS overrides it), the same four scripts with
 // `--agent codex`, PreToolUse matcher "Bash|apply_patch", commandWindows = command. Codex skips a new or changed hook until
 // the user trusts it in /hooks (learn.chatgpt.com/docs/hooks): say so after --apply.
@@ -66,6 +67,20 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
   return { settings: s, steps };
 }
 
+// Claude Code's status line (statusline.mjs): it shows the quota and context and measures each task's %. A status line
+// the user already has is not lost: `next` is its command, kept in ~/.waymark/statusline.json and run after Waymark's.
+// → { settings, steps, next } without touching the input.
+const oursLine = (c) => /waymark[\\/]+scripts[\\/]+statusline\.mjs/.test(String(c || ''));
+export function planStatusLine(input, { scripts = SCRIPTS } = {}) {
+  const s = structuredClone(input || {}), command = `node "${scripts}/statusline.mjs"`, have = s.statusLine?.command;
+  if (have === command) return { settings: s, steps: [], next: null };
+  const next = have && !oursLine(have) ? have : null;
+  s.statusLine = { type: 'command', command };
+  const steps = [!have ? 'add statusLine → statusline.mjs (5h · 7d · contexto; measures each task\'s %)'
+    : next ? `statusLine → statusline.mjs; yours (${next}) runs after it` : `update statusLine command: ${have} → ${command}`];
+  return { settings: s, steps, next };
+}
+
 // The plugin as installed: the template with this scripts folder in place.
 export const pluginText = (scripts = SCRIPTS) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents', 'opencode-plugin.js'), 'utf8').replace("'__SCRIPTS__'", JSON.stringify(scripts));
 
@@ -111,12 +126,19 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const file = SETTINGS[agent](), raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   let current = {};
   try { current = raw ? JSON.parse(raw) : {}; } catch { console.log(`${file} is not valid JSON: nothing changed. Fix it and re-run.`); process.exit(1); }
-  const { settings, steps } = planHooks(current, { agent });
-  if (!steps.length) { console.log(`${file}: the four Waymark hooks are registered.`); process.exit(0); }
+  const hooks = planHooks(current, { agent });
+  const line = agent === 'claude' ? planStatusLine(hooks.settings) : { settings: hooks.settings, steps: [], next: null };
+  const { settings } = line, steps = [...hooks.steps, ...line.steps];
+  if (!steps.length) { console.log(`${file}: the four Waymark hooks${agent === 'claude' ? ' and the status line' : ''} are registered.`); process.exit(0); }
   console.log(`${file}:\n${steps.map((s) => `  - ${s}`).join('\n')}`);
   if (!write) { console.log('\nPlan only: nothing was written. Ask the user, then re-run with --apply (backup .waymark-bak). Takes effect in the next session.'); process.exit(0); }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (raw) fs.copyFileSync(file, file + '.waymark-bak');
+  if (line.next) { // the user's status line keeps running, after Waymark's
+    const home = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'statusline.json'), JSON.stringify({ next: line.next }, null, 1) + '\n');
+  }
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
   console.log(`updated${raw ? ` (backup ${file}.waymark-bak)` : ''}. Start a new session.${agent === 'codex' ? ' In Codex, open /hooks and trust the four Waymark hooks: until then Codex skips them.' : ''}`);
 }

@@ -7,7 +7,8 @@
 // - the task ID of a new task and of a follow-up of the last recorded one (~25 tokens), from the project's provenance
 //   log; the Cierre heading carries it.
 // It also takes a git snapshot (the end-of-turn hook diffs against it) and marks the turn open in .waymark/open.json, so
-// a turn that never ends (quota, crash) still shows in tasks.md. Update checks, session size and offers live in
+// a turn that never ends (quota, crash) still shows in tasks.md. In Claude Code it also keeps the quota reading the task
+// starts from (statusline.mjs), so the end-of-turn hook measures its %. Update checks, session size and offers live in
 // `waymark.mjs check` (docs/adr/0008). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,7 @@ import { sessionState } from './transcript.mjs';
 import { taskIds, saveSnapshot, markOpen, projectHome, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom } from './agents/index.mjs';
+import { markStart } from './statusline.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // where this install's skills live
@@ -103,6 +105,7 @@ export function reminder(hook, agent) {
   try { ids = taskLine(cwd); } catch {}
   try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
+  try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Waymark · quota calibration from the user's own pairs: a closed task's tokens and the % of the quota it used (the
 // agent's own window: Claude's 5 hours, Codex's week), per model, kept in ~/.waymark/calibration.jsonl (this machine).
+// Claude Code's tasks measured by the status line (statusline.mjs) add their pair alone; the rest come from the user.
 //   node calibrate.mjs <task ID> <percent> [--project <path>]   adds the pair (tokens and model from the task's record)
 //   node calibrate.mjs --list                                   shows the pairs and the current estimate per model
 // Estimate: WAYMARK_TOKENS_PER_PCT if set; else 3+ pairs of the model with a token split → a weight for new tokens and
@@ -53,9 +54,15 @@ export function addPair(taskId, pct, cwd = process.cwd(), now = new Date()) {
   const pair = { at: now.toISOString(), task: taskId, project: home.slug, model: rec.inputs?.model || null, agent: rec.inputs?.agent || null, pct: Number(pct),
     total: rec.evaluation?.tokens || 0, ...(u.cacheRead !== undefined ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}) };
   if (!(pair.pct > 0) || !pair.total) throw new Error('the pair needs a percent > 0 and a record with tokens');
+  return appendPair(pair, now);
+}
+
+// One pair as given (the end-of-turn hook adds the measured ones: by "measured").
+export function appendPair(pair, now = new Date()) {
+  const p = { at: now.toISOString(), ...pair };
   fs.mkdirSync(HOME(), { recursive: true });
-  fs.appendFileSync(pairsFile(), JSON.stringify(pair) + '\n');
-  return pair;
+  fs.appendFileSync(pairsFile(), JSON.stringify(p) + '\n');
+  return p;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

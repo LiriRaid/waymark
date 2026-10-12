@@ -24,7 +24,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
-import { estimate } from './calibrate.mjs';
+import { estimate, appendPair } from './calibrate.mjs';
+import { measure, clearStart } from './statusline.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
@@ -70,6 +71,34 @@ export function cdPaths(command) {
   return out.length ? ` ${out.join(' ')}` : '';
 }
 const cmdOf = (t) => String(t.input.command || '');
+
+// The commits this turn made with a task's ID, in every repo it committed in: the session's, and the one a commit
+// command entered (`cd <repo> && git commit`, `git -C <repo> commit`). The ID may be the Cierre's, or an earlier
+// recorded task's (its work committed now); it is read anywhere in the message, not only in the last paragraph.
+// → the commit hashes (the trailer testigo).
+export function turnCommits(tools, cwd, claimed, ids, since = 0) {
+  const dirs = new Set([path.resolve(cwd)]);
+  for (const t of tools.filter((x) => shell(x) && /\bgit\b[\s\S]*\scommit\b/.test(cmdOf(x)))) {
+    let dir = null;
+    for (const part of cmdOf(t).split(/&&|\|\||[;|\n]/)) {
+      const cd = part.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:\/d\s+|-Path\s+)?["']?([^"']+?)["']?\s*$/i);
+      if (cd) { dir = cd[1]; continue; }
+      const c = part.match(/\bgit\s+-C\s+["']?([^"'\s]+)["']?[^|;&]*\scommit\b/);
+      if (c) dirs.add(path.resolve(cwd, c[1]));
+      else if (dir && /\bgit\b[^|;&]*\scommit\b/.test(part)) dirs.add(path.resolve(cwd, dir.replace(/^\/([a-z])\//i, '$1:/')));
+    }
+  }
+  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
+  const out = [];
+  for (const dir of dirs) {
+    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 1500 });
+    if (r.status !== 0) continue;
+    for (const [h, msg] of r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))) {
+      if (h && String(msg || '').split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))) out.push(h);
+    }
+  }
+  return [...new Set(out)];
+}
 // The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
 // is not a test or gate run.
 const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
@@ -77,8 +106,16 @@ const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
 // never inherits another task's answers. Not checked without records or without changes.
 const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFiles || !changed.length || (() => { const own = ctx.taskFiles(id); return changed.some((f) => own.has(norm(f))); })();
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
+// Variables assigned in the same command, in place: `W=…/waymark.mjs; node $W review a.ts` (sh) or `$W = "…"; node $W …`
+// (PowerShell) reads as `node …/waymark.mjs review a.ts`. A variable not assigned there stays as written.
+export function expandVars(command) {
+  const vars = {};
+  for (const m of String(command).matchAll(/(?:^|[;&|\s])\$?([A-Za-z_]\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;&|]+)/g)) vars[m[1]] = m[2].replace(/^(["'])(.*)\1$/, '$2');
+  return String(command).replace(/\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)(?!\s*=)/g, (all, a, b) => vars[a || b] ?? all);
+}
+const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:${sub})\\b`).test(expandVars(cmdOf(t)));
 // The review: the code-review skill, or `waymark.mjs review <files>` where the agent has none (Codex, Gemini CLI, OpenCode).
-const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(cmdOf(t)));
+const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(expandVars(cmdOf(t))));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
 
@@ -261,7 +298,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     memory: {
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
       // or the hook handed the pack over at the first edit (docs/adr/0015)
-      searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || (shell(t) && /waymark\.mjs["']?\s+(pack|memory|tasks)\b/.test(cmdOf(t))) || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
+      searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks') || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading
@@ -380,7 +417,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
     red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
     preexisting: observed.worktree || /no comprobado \(.{3,}\)/i.test(exc) ? [] : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
-    trailer: ctx.commits?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
+    trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
     chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
   };
@@ -418,14 +455,16 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
 }
 
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
-// all pass), the score over the applicable steps, tokens and the estimated quota.
-export function evaluate(gaps, usage, model = null) {
+// all pass), the score over the applicable steps, tokens and the quota: measured by the status line when there is a
+// clean reading (statusline.mjs, { pct, shared }), else estimated.
+export function evaluate(gaps, usage, model = null, measured = null) {
   const steps = {};
   for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = (steps[s.label] ?? true) && s.pass;
   const ok = Object.values(steps).filter(Boolean).length;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
-  return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, quotaPct: est.pct, quotaBy: est.by };
+  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct } : { quotaPct: est.pct, quotaBy: est.by };
+  return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -468,7 +507,8 @@ export function questionRecord(turn, meta = {}) {
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
-// While the model has fewer than 3 calibration pairs (no fit yet), it asks the user for the real %. Past NEW_SESSION
+// A measured % is never asked. Otherwise, while the model has fewer than 3 calibration pairs (no fit yet), it asks the
+// user for the real %. Past NEW_SESSION
 // tokens of context, it says the next task is cheaper in a new session: every response re-reads the whole context, and
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
@@ -477,7 +517,10 @@ export function summaryLine(id, ev, context = 0) {
   const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
-  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (${String(ev.quotaBy).startsWith('family:') ? `sin calibrar, factor de ${ev.quotaBy.slice(7)}` : 'estimado'})` : ''}${fresh}${ask}`;
+  const by = String(ev.quotaBy);
+  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? 'medido, con otra sesión activa' : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
+  const pct = by.startsWith('measured') && ev.quotaPct === 0 ? '<1%' : `≈ ${ev.quotaPct}%`; // below the reading's resolution
+  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null && ev.quotaPct !== undefined ? ` ${pct} de la cuota (${how})` : ''}${fresh}${ask}`;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
@@ -506,6 +549,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
       ctx.commits = commitsFor(cwd, claimed);
+      try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
@@ -531,7 +575,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
         const q = fs.existsSync(home.memory) ? questionRecord(turn, meta) : null;
-        try { if (q) appendRecord(cwd, q); } catch {}
+        try { if (q) { appendRecord(cwd, q); clearStart(h.session_id); } } catch {} // the next task counts from its own prompt
         try { refreshTasks(home, closeOpen(home, h.session_id) || !!q); } catch {}
         return;
       }
@@ -541,10 +585,17 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       }
       gaps.observed.branches = branchesOf(gaps.changed);
       // the turn's tokens plus those of the subagents it launched (a background code-review)
-      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null);
+      // the % measured by Claude Code's status line (the quota it reads is Claude's: never another agent's task)
+      let measured = null;
+      try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
+      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
-      try { appendRecord(cwd, rec); } catch {}
+      try { appendRecord(cwd, rec); clearStart(h.session_id); } catch {}
+      try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
+        const u = evaluation.usage;
+        if (measured && !measured.shared && measured.pct > 0 && evaluation.tokens) appendPair({ task: rec.id, project: home.slug, model: evaluation.model, agent: ctx.inputs?.agent || null, pct: measured.pct, total: evaluation.tokens, ...(u ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}), by: 'measured' });
+      } catch {}
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch {} // the learned layer: engram, written here, never by the agent

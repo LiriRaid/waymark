@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isPrompt } from './transcript.mjs';
+import { isPrompt, promptText } from './transcript.mjs';
 import { addNote, readNotes, noteSha, NOTES_REF } from './notes.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -457,10 +457,28 @@ export function taskStart(records, session, id) {
 }
 
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
+// A window the user rejected ("User rejected tool use") is answered by their next message: that message is their
+// decision, recorded as written (source "reply") and placed where the window was asked.
 export function decisionsIn(lines) {
-  const out = [];
+  const out = [], asks = new Map();
+  let rejected = null;
   for (const d of lines) {
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_use' && c.name === 'AskUserQuestion') asks.set(c.id, c.input?.questions || []);
     const r = d.toolUseResult;
+    if (rejected && isPrompt(d)) {
+      const q = rejected.questions[0];
+      const x = { question: q?.question || '(choice window)', chosen: answerText(promptText(d).trim()), discarded: [], source: 'reply' }; // masked like any free-text answer
+      Object.defineProperty(x, 'callId', { value: rejected.id, enumerable: false });
+      out.push(x);
+      rejected = null;
+      continue;
+    }
+    // Claude Code 2.1.x: "User rejected tool use", or "Error: The user doesn't want to proceed…" when the user chose to clarify
+    if (d.type === 'user' && !d.isSidechain && typeof r === 'string' && /^User rejected tool use|doesn't want to proceed with this tool use/.test(r)) {
+      const id = (Array.isArray(d.message?.content) ? d.message.content : []).find((c) => c.type === 'tool_result')?.tool_use_id;
+      if (asks.has(id)) rejected = { id, questions: asks.get(id) };
+      continue;
+    }
     if (d.type !== 'user' || d.isSidechain || !r || !Array.isArray(r.questions) || !r.answers) continue;
     const callId = (Array.isArray(d.message?.content) ? d.message.content : []).find((c) => c.type === 'tool_result')?.tool_use_id;
     for (const q of r.questions) {

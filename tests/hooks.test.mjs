@@ -2613,3 +2613,160 @@ test('hook health: every registered hook is probed as its agent runs it; one tha
   process.env.WAYMARK_CLAUDE_SETTINGS = settings;
   try { assert.deepEqual(registered().find((r) => r.agent === 'claude').commands, [`node "${S}/stop-hook.mjs"`], 'only Waymark\'s own commands'); } finally { process.env.WAYMARK_CLAUDE_SETTINGS = prev; }
 });
+
+// The status line measures the quota (Claude Code passes rate_limits.five_hour to it): the start at the prompt, the end
+// at the close, the difference is the task's real %; another session active in between marks it shared (not a pair).
+const status = (session, five, seven, ctx = 10, usage = 1000) => ({ session_id: session, context_window: { used_percentage: ctx, total_input_tokens: usage, total_output_tokens: 0 },
+  ...(five === null ? {} : { rate_limits: { five_hour: { used_percentage: five, resets_at: 1800000000 }, ...(seven === null ? {} : { seven_day: { used_percentage: seven, resets_at: 1800500000 } }) } }) });
+test('quota: the status line keeps the real % and shows quota and context', async () => {
+  const { recordStatus, statusText, readQuota } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const t0 = 1799990000000;
+  recordStatus(status('qa', 23.5, 41.2, 18), t0);
+  assert.equal(statusText(status('qa', 23.5, 41.2, 18)), '5h 24% · 7d 41% · contexto 18%');
+  assert.deepEqual(readQuota().latest.five, { pct: 23.5, resetsAt: 1800000000 });
+  recordStatus(status('qa', null, null, 30), t0 + 1000);
+  assert.equal(statusText(status('qa', null, null, 30)), 'contexto 30%', 'no rate_limits (API key, before the first response): context only');
+  assert.equal(readQuota().latest.five.pct, 23.5, 'a reading without rate_limits keeps the last one');
+});
+
+test('quota: a task\'s % is measured from the prompt to the close; shared, reset or stale gives no clean measure', async () => {
+  const { recordStatus, markStart, clearStart, measure } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const t0 = 1799991000000;
+  recordStatus(status('m1', 20, 40), t0);
+  markStart('m1', t0 + 1000);
+  markStart('m1', t0 + 2000); // a second prompt before the close keeps the first start
+  recordStatus(status('m1', 23.5, 41, 12, 5000), t0 + 60000);
+  assert.deepEqual(measure('m1', t0 + 61000), { pct: 3.5, shared: false });
+  recordStatus(status('other', 24, 41, 5, 100), t0 + 62000); // first sight of another session: not activity yet
+  recordStatus(status('m1', 24, 41, 12, 6000), t0 + 63000);
+  assert.deepEqual(measure('m1', t0 + 64000), { pct: 4, shared: false });
+  recordStatus(status('other', 26, 41, 6, 900), t0 + 65000); // the other session answered: its tokens moved
+  recordStatus(status('m1', 27, 41, 12, 7000), t0 + 66000);
+  assert.deepEqual(measure('m1', t0 + 67000), { pct: 7, shared: true });
+  clearStart('m1');
+  assert.equal(measure('m1', t0 + 68000), null, 'no start: nothing to measure');
+  markStart('m1', t0 + 70000);
+  assert.equal(measure('m1', t0 + 71000), null, 'no reading after the start: stale');
+  recordStatus({ ...status('m1', 2, 41, 12, 8000), rate_limits: { five_hour: { used_percentage: 2, resets_at: 1800018000 } } }, t0 + 72000);
+  assert.equal(measure('m1', t0 + 73000), null, 'the window reset during the task');
+  clearStart('m1');
+  recordStatus(status('m2', 30, 40), t0);
+  markStart('m2', 1800000500000); // the last reading's window ended before this prompt: a new window starts at 0
+  recordStatus({ ...status('m2', 1.5, 40, 12, 9000), rate_limits: { five_hour: { used_percentage: 1.5, resets_at: 1800018000 } } }, 1800000600000);
+  assert.deepEqual(measure('m2', 1800000700000), { pct: 1.5, shared: false });
+});
+
+test('quota: a measured % is shown as measured, is not asked, and a clean one becomes a calibration pair', async () => {
+  const { appendPair, readPairs } = await import(`file://${SCRIPTS}/calibrate.mjs`);
+  const gaps = { steps: [{ label: 'Decision', applies: true, pass: true }] };
+  const ev = evaluate(gaps, { total: 2930000 }, 'claude-measured-1', { pct: 3.5, shared: false });
+  assert.deepEqual([ev.quotaPct, ev.quotaBy], [3.5, 'measured']);
+  const line = summaryLine('2026-10-12 · T1', ev);
+  assert.match(line, /2\.93M tokens ≈ 3\.5% de la cuota \(medido\)/);
+  assert.doesNotMatch(line, /marcó tu cuota/, 'measured: nothing to ask');
+  const shared = summaryLine('x', evaluate(gaps, { total: 2930000 }, 'claude-measured-1', { pct: 7, shared: true }));
+  assert.match(shared, /≈ 7% de la cuota \(medido, con otra sesión activa\)/);
+  assert.doesNotMatch(shared, /marcó tu cuota/);
+  assert.match(summaryLine('x', evaluate(gaps, { total: 50000 }, 'claude-measured-1', { pct: 0, shared: false })), /<1% de la cuota \(medido\)/);
+  appendPair({ task: '2026-10-12 · T1', project: 'p', model: 'claude-measured-1', agent: 'claude', pct: 3.5, total: 2930000, by: 'measured' });
+  assert.deepEqual(readPairs('claude-measured-1').map((p) => [p.pct, p.by]), [[3.5, 'measured']]);
+});
+
+test('quota: install-hooks plans the status line and chains the user\'s own instead of replacing it', async () => {
+  const { planStatusLine } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
+  const cmd = 'node "/s/waymark/scripts/statusline.mjs"';
+  const add = planStatusLine({ model: 'x' }, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd });
+  assert.equal(add.settings.model, 'x');
+  assert.deepEqual([add.steps.length, add.next], [1, null]);
+  assert.deepEqual(planStatusLine(add.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
+  const moved = planStatusLine({ statusLine: { type: 'command', command: 'node "C:\\old\\waymark\\scripts\\statusline.mjs"' } }, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual([moved.settings.statusLine.command, moved.next], [cmd, null], 'an old path of ours is updated, nothing chained');
+  const input = { statusLine: { type: 'command', command: 'bash ~/my-line.sh', padding: 1 } };
+  const theirs = planStatusLine(input, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual([theirs.settings.statusLine.command, theirs.next], [cmd, 'bash ~/my-line.sh'], 'the user\'s line runs after ours');
+  assert.equal(input.statusLine.command, 'bash ~/my-line.sh', 'the input is not mutated');
+});
+
+// A session in one repo that edits a sibling repo (the front's session fixing the API): each file gets the pack of its
+// own repo; a folder that is no repo gets none.
+test('Recordar by the hook: a file in another repo gets that repo\'s pack', async () => {
+  const { packContext, packedFiles } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const session = memRepo('sess-front'), api = tmpRepo('sibling-api'), loose = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-loose-'));
+  temps.push(loose);
+  const state = path.join(home, `packed-sibling-${++n}.json`);
+  fs.mkdirSync(path.join(api, 'src'));
+  fs.writeFileSync(path.join(api, 'src', 'main.ts'), '1\n'); gitT(api, 'add', '.'); gitT(api, 'commit', '-q', '-m', 'docs: swagger');
+  const hook = (file) => ({ cwd: session, session_id: 'sib', tool_name: 'Edit', tool_input: { file_path: file } });
+  assert.match(await packContext(hook(path.join(api, 'src', 'main.ts')), claude, state) || '', /src\/main\.ts:\n  - [0-9a-f]{8} · docs: swagger \(no task record\)/);
+  assert.equal(packedFiles('sib', 0, state).size, 1, 'counted for the session\'s task');
+  assert.equal(await packContext(hook(path.join(api, 'src', 'main.ts')), claude, state), null, 'once per file and task');
+  assert.equal(await packContext(hook(path.join(loose, 'notes.txt')), claude, state), null, 'a folder that is no repo: nothing to pack');
+});
+
+// The agent may keep Waymark's path in a shell variable: `W=…/waymark.mjs; node $W review …` is the review.
+test('observed: review and pack run through a shell variable count', async () => {
+  const { expandVars } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  assert.equal(expandVars('cd /api; W=/s/waymark/scripts/waymark.mjs; node $W review a.ts'), 'cd /api; W=/s/waymark/scripts/waymark.mjs; node /s/waymark/scripts/waymark.mjs review a.ts');
+  assert.equal(expandVars('$W = "C:/s/waymark/scripts/waymark.mjs"; node ${W} pack a.ts'), '$W = "C:/s/waymark/scripts/waymark.mjs"; node C:/s/waymark/scripts/waymark.mjs pack a.ts');
+  assert.equal(expandVars('node $HOME/x.mjs'), 'node $HOME/x.mjs', 'a variable never assigned in the command stays');
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const W = 'W=/s/waymark/scripts/waymark.mjs; ';
+  const t = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('Bash', { command: `${W}node $W pack src/orders.service.mjs` }), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: `${W}node $W review src/orders.service.mjs` })]);
+  const g = cierreGaps(t, cierre(id), undefined, undefined, ctx);
+  assert.deepEqual([g.observed.review, g.observed.memory.searched], [true, true]);
+});
+
+// A rejected choice window followed by the user's own message: that message is their decision, recorded as written.
+test('decision: the user\'s reply after rejecting the choice window is their decision', () => {
+  const ask = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'ask-r', name: 'AskUserQuestion', input: { questions: [{ question: '¿Hasta dónde corrijo?', options: [{ label: 'Todas' }, { label: 'Solo expiresIn' }] }] } }] } };
+  const rejected = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'ask-r', is_error: true, content: 'The user doesn\'t want to proceed with this tool use.' }] }, toolUseResult: 'User rejected tool use' };
+  const ds = decisionsIn([ask, rejected, say('¿Qué quieres aclarar?'), prompt('corrige las 4')]);
+  assert.deepEqual(ds, [{ question: '¿Hasta dónde corrijo?', chosen: 'corrige las 4', discarded: [], source: 'reply' }]);
+  assert.equal(ds[0].callId, 'ask-r', 'placed where the window was asked');
+  assert.deepEqual(decisionsIn([ask, rejected]), [], 'no reply yet: no decision');
+  assert.deepEqual(decisionsIn([ask, rejected, prompt('Stop hook feedback:\nWaymark: this L2 turn…')]), [], 'a block reason fed back is not the user');
+  assert.deepEqual(decisionsIn([ask, rejected, prompt('corrige las 4'), prompt('y otra cosa')]).length, 1, 'only the first reply answers it');
+  const clarify = { ...rejected, toolUseResult: 'Error: The user doesn\'t want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nThe user wants to clarify these questions.' };
+  assert.deepEqual(decisionsIn([ask, clarify, prompt('corrige las 4')]).map((d) => d.chosen), ['corrige las 4'], 'the user chose to clarify first (Claude Code 2.1.x)');
+});
+
+// A commit with no trailer leaves its task's record unlinked (YaloAtiendo-Chat 2026-10-12 · T2c): stopped once per task
+// with the ID to add; sent again without it, it goes through (the user may not want one there).
+test('commit trailer: a commit with none is stopped once with the ID to add', async () => {
+  const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const repo = memRepo('no-trailer'), day = new Date().toLocaleDateString('sv'), state = path.join(home, `trailer-${++n}.json`);
+  appendRecord(repo, { id: `${day} · T1`, files: [path.join(repo, 'a.ts')], commits: [] });
+  const heredoc = "git add a.ts && git commit -q -F - <<'EOF'\nfeat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF";
+  const deny = missingTrailer(heredoc, 's1', repo, state);
+  assert.match(deny || '', new RegExp(`no "Waymark-Task: <task ID>"[\\s\\S]*Waymark-Task: ${day} · T2[\\s\\S]*${day} · T1b`));
+  assert.equal(missingTrailer(heredoc, 's1', repo, state), null, 'once per task: sent again, it goes through');
+  assert.match(missingTrailer('git commit -m "fix: y"', 's2', repo, state) || '', /Waymark-Task/, 'another session is asked too');
+  assert.equal(missingTrailer(`git commit -m "fix: y" -m "Waymark-Task: ${day} · T2"`, 's3', repo, state), null, 'with a trailer: checkTrailer judges it');
+  assert.equal(missingTrailer('git commit --amend --no-edit', 's4', repo, state), null, 'the message is not being written');
+  assert.equal(missingTrailer('git commit -F msg.txt', 's5', repo, state), null, 'a message file the hook cannot see');
+  assert.equal(missingTrailer('git log --oneline -1 && git status', 's6', repo, state), null, 'no commit');
+});
+
+// The turn's commits are looked for where they were made (`cd <repo> && git commit`), and an earlier recorded task's ID
+// counts: its work committed now (YaloAtiendo-Chat 2026-10-12 · T2c committed T2b's work in the API's repo).
+test('commit trailer: a commit made in another repo with an earlier task\'s ID counts', async () => {
+  const { turnCommits } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const session = memRepo('sess-commit'), api = tmpRepo('api-commit'), day = new Date().toLocaleDateString('sv');
+  appendRecord(session, { id: `${day} · T1`, files: [path.join(api, 'a.ts')], commits: [] });
+  fs.writeFileSync(path.join(api, 'old.ts'), '1\n'); gitT(api, 'add', '.'); gitT(api, 'commit', '-q', '-m', 'old', '-m', `Waymark-Task: ${day} · T1`, '--date', '2020-01-01T00:00:00');
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--amend', '--no-edit', '-q'], { cwd: api, env: { ...process.env, GIT_COMMITTER_DATE: '2020-01-01T00:00:00' } });
+  const since = Date.now() - 1000;
+  fs.writeFileSync(path.join(api, 'a.ts'), '1\n'); gitT(api, 'add', '.');
+  gitT(api, 'commit', '-q', '-m', 'feat: deep link', '-m', `Waymark-Task: ${day} · T1`, '-m', 'Co-Authored-By: Claude <noreply@anthropic.com>');
+  const sha = gitT(api, 'rev-parse', 'HEAD').stdout.trim();
+  const tools = [{ name: 'Bash', input: { command: `cd ${api.replace(/\\/g, '/')} && git add a.ts && git commit -q -F - <<'EOF'\nfeat: deep link\nEOF` } }];
+  const ids = taskIds(session);
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'in the API repo, an earlier recorded task\'s ID, made this turn');
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, Date.now() + 180000), [], 'nothing made since the turn started (a minute of slack)');
+  fs.writeFileSync(path.join(api, 'b.ts'), '1\n'); gitT(api, 'add', '.');
+  gitT(api, 'commit', '-q', '-m', 'x', '-m', `Waymark-Task: ${day} · T9`);
+  assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
+});

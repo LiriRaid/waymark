@@ -10,12 +10,13 @@
 //   with the user's answers. request_user_input_async (seen in codex 0.160's default mode: {"accepted":true}, the answer
 //   is the user's next message) → AskUserQuestion answered by that message; a rejected call (bad arguments) never counts.
 //   Without either, a turn that ended asking in the chat and the user's next message count as the decisions asked in
-//   chat, one per question line written after the turn's last action (docs/adr/0009, 0010).
+//   chat: the questions a message after the turn's last action ends asking, with options (transcript.mjs
+//   closingQuestions; docs/adr/0009, 0010), so a closing "¿Algo más?" never opens the next task.
 // - token_count → usage per response (cached input apart); turn_context → model; session_meta → Codex version.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readTail, isPrompt, clipOutput } from '../transcript.mjs';
+import { readTail, isPrompt, clipOutput, closingQuestions } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
 
 export const name = 'codex';
@@ -27,7 +28,6 @@ export const out = claudeOut; // same output shapes, the prompt brake's {decisio
 
 const SKILL = /[\\/]([A-Za-z0-9:_-]+)[\\/]SKILL\.md\b/i;
 const READS = /\b(Get-Content|gc|cat|type|sed|head|tail|more|less|bat|awk)\b/i; // a read of the file, not a Test-Path or a listing
-const QUESTION = /^[^\n]*\?[ \t*_)]*$/gm; // a line that ends with "?" (also "¿…?")
 
 const shellOf = (cmd) => {
   if (!Array.isArray(cmd)) return String(cmd || '');
@@ -90,8 +90,9 @@ export function toLines(rows) {
         const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => bare(l) && bare(reply).includes(bare(l))).join(',') || reply]));
         lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in the next message' }] }, toolUseResult: { source: 'async', questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
       }
-      // every question line the agent wrote after the turn's last action (a closing summary without "?" must not hide them)
-      const questions = !choiceInTurn && tail.length ? [...new Set([...tail.join('\n').matchAll(QUESTION)].map((m) => m[0].trim()))] : [];
+      // the questions each message after the turn's last action ends asking, with options (a later message without "?"
+      // must not hide them)
+      const questions = !choiceInTurn && tail.length ? [...new Set(tail.flatMap(closingQuestions))] : [];
       if (questions.length) { // the previous turn ended asking in the chat: this message answers it
         const id = `chat-${n}`;
         assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);

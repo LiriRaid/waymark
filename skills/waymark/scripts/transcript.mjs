@@ -25,21 +25,27 @@ export const promptText = (d) => {
   return typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
 };
 
+// The summary a context compaction writes to continue the session is no prompt either. Its shape is not documented
+// (code.claude.com/docs/en/sessions: the transcript format is internal), so both known markers are checked:
+// isCompactSummary and the summary's opening sentence.
+const COMPACTED = /^\s*This session is being continued from a previous conversation/;
 export const isPrompt = (d) => {
-  if (d.type !== 'user' || d.isMeta || d.isSidechain) return false;
+  if (d.type !== 'user' || d.isMeta || d.isSidechain || d.isCompactSummary) return false;
   const c = d.message?.content;
   if (Array.isArray(c) && c.some((x) => x.type === 'tool_result')) return false;
   const text = promptText(d);
   // A Stop-hook block reason fed back to the agent is not the user's prompt (the blocked turn's edits stay in its turn).
-  return !!text.trim() && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
+  return !!text.trim() && !COMPACTED.test(text) && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
 };
 
-// Reads the transcript tail, doubling it until it holds `prompts` user prompts or the whole file (max 64 MB): a pasted
-// image is a line of megabytes, and a turn whose prompt fell out of the tail was read as "no turn" — the gate skipped it
-// and the record counted the whole tail. read(bytes) → lines.
-export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024) {
+// Reads the transcript tail, doubling it until it holds `prompts` user prompts and, with `since` (ms, the task's start),
+// reaches back to it, or the whole file (max 64 MB): a pasted image is a line of megabytes, and a turn whose prompt fell
+// out of the tail was read as "no turn" — the gate skipped it and the record counted the whole tail. read(bytes) → lines.
+export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024, since = 0) {
+  const first = (lines) => Date.parse(lines.find((d) => d.timestamp)?.timestamp || '') || 0;
+  const short = (lines) => lines.filter(isPrompt).length < prompts || (since > 0 && first(lines) > since);
   let lines = read(start);
-  for (let bytes = start * 2; bytes <= max && lines.filter(isPrompt).length < prompts; bytes *= 2) {
+  for (let bytes = start * 2; bytes <= max && short(lines); bytes *= 2) {
     const more = read(bytes);
     if (more.length <= lines.length) break; // the whole file was already read
     lines = more;
@@ -226,4 +232,22 @@ export function routedDept(texts, tools) {
   const all = routes(texts);
   const dept = all.length ? all[all.length - 1][3] : null;
   return dept ? (dept.startsWith('dept-') ? dept : `dept-${dept}`) : null;
+}
+
+// The questions a message ends asking, when it offers options: the block of question and option lines it ends with
+// (and the line just before it, "Opciones: 1) A 2) B"), with at least 2 options among option lines ("- A", "1) A",
+// "a. A"), an inline enumeration ("1) A 2) B") or "A o B" inside a question. → the question lines, or [].
+const OPTION_LINE = /^\s*(?:[-*•]|\d+[.)]|[a-zA-Z][.)])\s+\S/;
+const QUESTION_LINE = /\?[\s*_)]*$/;
+export function closingQuestions(text) {
+  const lines = String(text || '').replace(/\*\*|__/g, '').split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
+  let i = lines.length;
+  while (i > 0 && (QUESTION_LINE.test(lines[i - 1]) || OPTION_LINE.test(lines[i - 1]))) i--;
+  const block = lines.slice(i), questions = block.filter((l) => QUESTION_LINE.test(l)).map((l) => l.trim());
+  if (!questions.length) return [];
+  const lead = i > 0 ? lines[i - 1] : '';
+  const inline = (l) => (l.match(/(?:^|\s)\d+[.)]\s+\S/g) || []).length;
+  const either = (l) => (QUESTION_LINE.test(l) && /\S\s+(?:o|u|or)\s+\S/i.test(l) ? 2 : 0);
+  const options = Math.max(block.filter((l) => OPTION_LINE.test(l)).length, ...[lead, ...block].map(inline), ...block.map(either));
+  return options >= 2 ? questions : [];
 }

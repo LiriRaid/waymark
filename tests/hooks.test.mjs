@@ -402,7 +402,7 @@ test('observed: memory, procedure and review are computed from the tool calls, n
   const opened = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('mcp__engram__mem_search', { query: 'retries' }), call('Read', { file_path: path.join(os.homedir(), '.waymark', 'projects', 'shop.md') }), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Skill', { skill: 'code-review' }), MEM(), call('mcp__engram__mem_save', { topic_key: 'waymark/tasks/proj' })]);
   const g = cierreGaps(opened, cierre(id), undefined, undefined, { ...ctx, engram: true });
   assert.deepEqual(g.missing, []);
-  assert.deepEqual(g.observed.memory, { searched: true, opened: true, written: true, saved: true, indexed: true });
+  assert.deepEqual(g.observed.memory, { searched: true, late: false, opened: true, written: true, saved: true, indexed: true });
   const noIndex = { ...opened, tools: opened.tools.filter((t) => t.name !== 'mcp__engram__mem_save') };
   assert.equal(checkCierre(noIndex, cierre(id), undefined, undefined, { ...ctx, engram: true }), null, '3e-2: one index, the git notes; no engram index required');
   assert.deepEqual(g.observed.procedure, { owner: 'dept-backend', read: ['dept-backend/procedures.md'], readBeforeChange: true });

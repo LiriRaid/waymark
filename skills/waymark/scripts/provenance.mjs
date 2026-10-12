@@ -495,7 +495,35 @@ export function taskFiles(records, id) {
 export function taskStart(records, session, id) {
   const own = /[a-z]$/.test(String(id || '').match(ID)?.[0] || '') ? base(id) : null;
   const closes = records.filter((r) => r.session === session && ID.test(String(r.id || '')) && (!own || base(r.id) !== own));
-  return Date.parse(closes.pop()?.at || '') || 0;
+  const closed = Date.parse(closes.pop()?.at || '') || 0;
+  if (own) return closed; // a follow-up reaches back to its task's start
+  const mark = taskStartMark(session);
+  return Math.max(closed, mark ? mark - 1000 : 0); // a second of slack: the prompt's line may be written before the hook runs
+}
+
+// The task's start, per session (~/.waymark/.task-starts.json): marked by the per-prompt hook at the task's first prompt
+// (a later prompt of the same task keeps it), cleared by the end-of-turn hook when a task closes and when a turn ends
+// with no task (a question, L0). Without it a session's first task was read from its last 3 prompts only.
+const startsFile = () => path.join(HOME(), '.task-starts.json');
+const readStarts = () => { try { return JSON.parse(fs.readFileSync(startsFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeStarts = (all) => {
+  for (const [k, at] of Object.entries(all)) if (Date.now() - at > 7 * 86400000) delete all[k];
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(startsFile(), JSON.stringify(all));
+};
+export const taskStartMark = (session) => readStarts()[session || 'unknown'] || 0;
+export function markTaskStart(session, now = Date.now()) {
+  const all = readStarts(), id = session || 'unknown';
+  if (all[id]) return all[id];
+  all[id] = now;
+  writeStarts(all);
+  return now;
+}
+export function clearTaskStart(session) {
+  const all = readStarts(), id = session || 'unknown';
+  if (!all[id]) return;
+  delete all[id];
+  writeStarts(all);
 }
 
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
@@ -649,19 +677,51 @@ export function snapshotDiff(before, after) {
 }
 
 // Snapshot taken by the per-prompt hook, per session (~/.waymark/.turn-snapshot.json), read by the end-of-turn hook.
+// `others`: the snapshots of other repos, each taken by the pre-tool hook before the first shell command that changes
+// files there. `paused`: the turn ended asking the user (a task in progress), so the next prompt keeps this snapshot and
+// the turn that resumes the task still sees what the paused one changed.
 const snapFile = () => path.join(HOME(), '.turn-snapshot.json');
-export function saveSnapshot(session, cwd) {
-  const snap = gitSnapshot(cwd);
-  let all = {};
-  try { all = JSON.parse(fs.readFileSync(snapFile(), 'utf8')); } catch {}
+const readSnaps = () => { try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeSnaps = (all) => {
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session || 'unknown'] = { at: Date.now(), cwd, snap };
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(snapFile(), JSON.stringify(all));
+};
+export function saveSnapshot(session, cwd) {
+  const all = readSnaps(), id = session || 'unknown';
+  if (all[id]?.paused) { all[id].paused = false; writeSnaps(all); return all[id].snap; }
+  const snap = gitSnapshot(cwd);
+  all[id] = { at: Date.now(), cwd, snap };
+  writeSnaps(all);
   return snap;
 }
 export function loadSnapshot(session) {
-  try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8'))[session || 'unknown']?.snap || null; } catch { return null; }
+  return readSnaps()[session || 'unknown']?.snap || null;
+}
+// Before a shell command changes files in another repo: that repo's snapshot, once per turn. → true when taken.
+export function addRepoSnapshot(session, dir) {
+  const all = readSnaps(), entry = all[session || 'unknown'];
+  if (!entry) return false;
+  const snap = gitSnapshot(dir);
+  if (!snap || snap.root === entry.snap?.root || entry.others?.[snap.root]) return false;
+  entry.others = { ...(entry.others || {}), [snap.root]: snap };
+  writeSnaps(all);
+  return true;
+}
+// The turn ended asking the user: the next prompt keeps the snapshot (saveSnapshot).
+export function markPaused(session) {
+  const all = readSnaps(), entry = all[session || 'unknown'];
+  if (!entry) return false;
+  entry.paused = true;
+  writeSnaps(all);
+  return true;
+}
+// Files the turn changed, by any tool: the session's repo and every other repo snapshotted during the turn.
+export function turnChanged(session, cwd) {
+  const entry = readSnaps()[session || 'unknown'];
+  const out = snapshotDiff(entry?.snap || null, gitSnapshot(cwd));
+  for (const snap of Object.values(entry?.others || {})) out.push(...snapshotDiff(snap, gitSnapshot(snap.root)));
+  return [...new Set(out)];
 }
 
 // Shell commands that change files in place (the decision gate treats them like edits). Redirects count unless they go

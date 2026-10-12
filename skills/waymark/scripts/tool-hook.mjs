@@ -15,7 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, shellRuns, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -106,14 +106,16 @@ export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
+  // read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
+  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
   if (c.command !== undefined) {
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
-    return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, readTurns((b) => agent.read(hook, b)), hook.session_id, undefined, cwd)) : null;
+    return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
   }
   const files = c.files.filter((f) => !exempt(f));
   if (!files.length) return null;
-  const lines = readTurns((b) => agent.read(hook, b)); // a long session (pasted images) keeps the turn's prompt in view
+  const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
   for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }
   return null;
 }
@@ -130,8 +132,43 @@ export function packedFiles(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];
   return new Set(st && st.since === since ? st.files : []);
 }
+// The files a shell command names, resolved against the `cd` before them in the same command: arguments that are
+// existing files and redirect targets (a new file too, when its folder exists). Heredoc bodies name nothing. → paths.
+export function commandFiles(command, cwd = process.cwd()) {
+  const out = new Set();
+  for (const p of shellRuns(command)) {
+    const dir = path.resolve(cwd, String(p.cd || '.').replace(/^["']|["']$/g, '').replace(/^\/([a-z])\//i, '$1:/'));
+    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    for (const w of words.slice(1)) {
+      if (!w || /^-|^[<>&|]|=/.test(w)) continue;
+      const abs = path.resolve(dir, w);
+      try { if (fs.statSync(abs).isFile()) out.add(abs); } catch {}
+    }
+    for (const m of String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)) {
+      const abs = path.resolve(dir, m[1] ?? m[2] ?? m[3]);
+      if (fs.existsSync(path.dirname(abs))) out.add(abs);
+    }
+  }
+  return [...out];
+}
+
+// Other repos a shell command works in: a `cd <dir>` before a part, or `git -C <dir>`; only folders inside a git repo
+// other than the session's. → their folders.
+export function commandRepos(command, cwd = process.cwd()) {
+  const top = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? norm(r.stdout.trim()) : null; };
+  const own = top(cwd), dirs = new Set();
+  for (const p of shellRuns(command)) {
+    if (p.cd) dirs.add(path.resolve(cwd, String(p.cd).replace(/^["']|["']$/g, '').replace(/^\/([a-z])\//i, '$1:/')));
+    const c = String(p.text).match(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
+    if (c) dirs.add(path.resolve(cwd, c[1] ?? c[2] ?? c[3]));
+  }
+  return [...dirs].filter((d) => { try { if (!fs.statSync(d).isDirectory()) return false; } catch { return false; } const t = top(d); return t && t !== own; });
+}
+
 export async function packContext(hook, agent, file = PACKED()) {
-  const c = agent.call(hook), cwd = hook.cwd || process.cwd();
+  const c0 = agent.call(hook), cwd = hook.cwd || process.cwd();
+  // a shell command that changes files: the files it names (what it will change is known only after it runs)
+  const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd) } : null) : c0;
   const home = projectHome(cwd);
   if (!home.dir || home.legacy) return null; // a project with Waymark's memory
   // Each file's own repo: the session's project, or another repo it edits (a front's session fixing the API). Not
@@ -172,6 +209,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (!after) {
         const deny = gate(hook, agent);
         if (deny) { process.stdout.write(JSON.stringify(agent.out.deny(deny))); return; }
+        // a shell change in another repo: its snapshot before the command runs, so the close sees what it changed there
+        const c = agent.call(hook);
+        if (c?.command !== undefined && changesProject(c.command)) for (const d of commandRepos(c.command, hook.cwd || process.cwd())) addRepoSnapshot(hook.session_id, d);
       }
       if (after || agent.preContext) {
         const text = await packContext(hook, agent);

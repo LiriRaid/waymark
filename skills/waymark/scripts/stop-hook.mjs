@@ -23,11 +23,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart } from './statusline.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, aprendidoOf, logHookError, PROBE_OK } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes } from './notes.mjs';
@@ -232,6 +232,9 @@ export function effectiveReply(texts = [], last = '') {
   return rest.trim() ? `${cierre.trimEnd()}\n\n${rest.trim()}` : cierre;
 }
 
+// A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
+export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').replace(/\*\*|__/g, '')) && closingQuestions(reply).length > 0;
+
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
   const byKey = new Map();
@@ -345,6 +348,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
       // or the hook handed the pack over at the first edit (docs/adr/0015)
       searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks') || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
+      // searched only after the first change (the pack the block asks for): it no longer blocks, recorded late
+      late: firstChange >= 0 && allTools.some((t, i) => i > firstChange && (/mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks'))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading
@@ -424,7 +429,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     // hook's own typecheck (none: not held against it).
     const own = mine ? exitFor(mine, 'gate') : null;
     const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
-    const run = !mine ? rerun() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
+    // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
+    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !/git\s+worktree\s+add/.test(cmdOf(x))).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
+    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
     observed.gate = run || null;
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !/git\s+worktree\s+add/.test(cmdOf(t)));
@@ -477,7 +484,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
-    memory: observed.memory.searched ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
+    memory: observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
     review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the task's code files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
     build: buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'],
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
@@ -510,6 +517,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (docsStep?.applies && blind.length) { // already retried without docs: too late to undo, so recorded, not blocked
     const why = blind.map((r) => `the same command failed twice and ran again without docs (${r.cmd.slice(0, 80)})`);
     docsStep.pass = false; docsStep.why = [...docsStep.why, ...why]; findings.push(...why);
+  }
+  const mem = steps.find((s) => s.id === 'memory');
+  if (mem?.applies && mem.pass && !observed.memory.searched && observed.memory.late) { // too late to inform the change: recorded, not blocked
+    const why = 'the project memory was searched after the task\'s first change';
+    mem.pass = false; mem.why = [why]; findings.push(why);
   }
   const proc = steps.find((s) => s.id === 'procedure');
   if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change
@@ -605,9 +617,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try {
       const h = JSON.parse(input);
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
-      const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024), cwd = h.cwd || process.cwd();
+      const cwd = h.cwd || process.cwd(), home = projectHome(cwd);
+      // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
+      const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));
       const prompts = lines.filter(isPrompt).map(promptText).slice(-3); // this task: the current prompt and the two before it
-      const home = projectHome(cwd);
       // A turn counts from its prompt, or from this session's last close when that is later (a background notification
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
@@ -626,7 +639,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
-      ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook
+      ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
@@ -654,11 +667,14 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         // the next task counts from its own prompt: a question, an L0 or an unrouted turn ended with no task (a routed task
         // that stopped before its first change keeps its start)
         const lvl = routedLevel(turn.texts, turn.tools) || ctx.inherited?.level;
-        try { if (q) appendRecord(cwd, q); if (q || !(typeof lvl === 'number' && lvl > 0)) clearStart(h.session_id); } catch (e) { logHookError('stop-hook question', e); }
+        try { if (q) appendRecord(cwd, q); if (q || !(typeof lvl === 'number' && lvl > 0)) { clearStart(h.session_id); clearTaskStart(h.session_id); } } catch (e) { logHookError('stop-hook question', e); }
         try { if (q?.learned && home.dir && !home.legacy) saveQuestion(home, q); } catch (e) { logHookError('stop-hook engram', e); }
         try { refreshTasks(home, closeOpen(home, h.session_id) || !!q); } catch {}
         return;
       }
+      // a reply with no Cierre that ends asking the user, with options: the task is in progress (a pause, not an end); the
+      // next prompt keeps this turn's snapshot and the task's start, and the turn that ends it is judged
+      if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
       if (gaps.missing.length && !h.stop_hook_active) {
         process.stdout.write(JSON.stringify(agent.out.block(blockReason(gaps))));
         return;
@@ -671,7 +687,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
-      try { appendRecord(cwd, rec); clearStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
+      try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
         const u = evaluation.usage;
         if (measured && !measured.shared && measured.pct > 0 && evaluation.tokens) appendPair({ task: rec.id, project: home.slug, model: evaluation.model, agent: ctx.inputs?.agent || null, pct: measured.pct, total: evaluation.tokens, ...(u ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}), by: 'measured' });

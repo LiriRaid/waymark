@@ -16,7 +16,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, markOpen, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, markOpen, markTaskStart, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -106,6 +106,7 @@ export function reminder(hook, agent) {
   try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
   try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
+  try { markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}

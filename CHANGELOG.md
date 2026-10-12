@@ -2,6 +2,10 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.1 — agents detected as they are
+- **Gemini CLI only when it is installed:** `~/.gemini` is shared with Antigravity, so the install and `waymark.mjs check` count Gemini CLI only when the folder has one of the CLI's own files (`settings.json`, `projects.json`, `installation_id`, `oauth_creds.json`, `tmp/`). Antigravity's `antigravity/` and `GEMINI.md` alone no longer count.
+- **`_name` folders are not skills:** `sync` and `check` skip folders that start with `_`. That is where another framework keeps shared files, such as gentle-ai's `_shared` in `~/.codex/skills`, and they no longer appear as an unassigned skill.
+
 ## 2.0.0 — a supply chain of the agent's work
 Waymark is now a supply chain of the agent's work: every task goes through defined stages and comes out with a verifiable record of its inputs, the user's decision, the evidence, the gates and the commits it produced (README → *A supply chain of the agent's work*; `docs/adr/0001`, `0002`). **The user decides, never the agent:** the old "the agent still decides" is gone. Step 1 of 4:
 - **The user decides every real decision, at any level:** whenever there are 2+ valid ways, the agent lists the optimal options in the choice window (files, risk, cost) and marks the recommended one, which may not be what the user needs; the user picks. The pre-tool hook denies the first L1–L3 edit of a prompt once when nothing was asked; the retry passes for a single real way (`Decisión: única (<why>)`) or a choice the user already wrote (`del usuario ("<their words>")`).

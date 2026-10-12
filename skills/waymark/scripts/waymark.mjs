@@ -68,7 +68,7 @@ async function update() {
 export function skillNames(cwd) {
   const roots = [path.resolve(SCRIPTS, '..', '..'), ...['.claude', '.agents', '.codex', '.cursor', '.gemini', '.config/opencode'].map((d) => path.join(os.homedir(), ...d.split('/'), 'skills')),
     ...['.claude', '.agents', '.codex', '.cursor', '.gemini', '.opencode'].map((d) => path.join(cwd, d, 'skills'))];
-  return [...new Set(roots)].flatMap((r) => { try { return fs.readdirSync(r).filter((n) => fs.existsSync(path.join(r, n, 'SKILL.md'))).map((n) => `${norm(r)}/${n}`); } catch { return []; } }).sort();
+  return [...new Set(roots)].flatMap((r) => { try { return fs.readdirSync(r).filter((n) => !/^[._]/.test(n) && fs.existsSync(path.join(r, n, 'SKILL.md'))).map((n) => `${norm(r)}/${n}`); } catch { return []; } }).sort();
 }
 const sigFile = () => path.join(HOME(), '.skills-signature.json');
 

@@ -21,7 +21,9 @@ const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getH
 // Global instructions file per agent (official docs: Codex AGENTS.md under CODEX_HOME, Gemini CLI GEMINI.md, OpenCode AGENTS.md).
 export const AGENTS = () => [
   { name: 'Codex', dir: process.env.CODEX_HOME || path.join(USER(), '.codex'), file: 'AGENTS.md', hooks: 'hooks.json' },
-  { name: 'Gemini CLI', dir: process.env.GEMINI_CLI_HOME || path.join(USER(), '.gemini'), file: 'GEMINI.md', hooks: 'settings.json' },
+  // ~/.gemini is shared with Antigravity (its antigravity/ folders, and it reads GEMINI.md): only files Gemini CLI
+  // itself writes mean the CLI is installed
+  { name: 'Gemini CLI', dir: process.env.GEMINI_CLI_HOME || path.join(USER(), '.gemini'), file: 'GEMINI.md', hooks: 'settings.json', marks: ['settings.json', 'projects.json', 'installation_id', 'oauth_creds.json', 'tmp'] },
   { name: 'OpenCode', dir: path.join(USER(), '.config', 'opencode'), file: 'AGENTS.md', hooks: path.join('plugins', 'waymark.js') },
 ];
 export const POINTER = '<!-- waymark:pointer -->\nSi el proyecto tiene .waymark/, lee .waymark/tasks.md primero.\n<!-- /waymark:pointer -->';
@@ -43,9 +45,10 @@ const hooked = (a) => {
 // Another framework's marked blocks (`<!-- gentle-ai:persona -->`): an orchestrator already governs that agent.
 export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s*([\w.-]+):[\w.-]+/g)].map((m) => m[1]).filter((n) => n !== 'waymark'))];
 
-// Agents whose folder exists, with their state: connected (block present) or not, and the orchestrator found, if any.
+// Agents whose folder exists (with one of the agent's own files, when the folder is shared), with their state:
+// connected (block present) or not, and the orchestrator found, if any.
 export function found() {
-  return AGENTS().filter((a) => fs.existsSync(a.dir)).map((a) => {
+  return AGENTS().filter((a) => fs.existsSync(a.dir) && (!a.marks || a.marks.some((m) => fs.existsSync(path.join(a.dir, m))))).map((a) => {
     const file = path.join(a.dir, a.file), text = read(file), full = hooked(a);
     // with hooks: connected when its block is the current one; else when the pointer is there
     const connected = full ? text.match(BLOCK)?.[0] === instructionsBlock() : text.includes('<!-- waymark:pointer -->');

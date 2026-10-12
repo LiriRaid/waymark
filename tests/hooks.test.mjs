@@ -898,9 +898,11 @@ test('connect-agents: one marked pointer block per agent found, backup first, re
 
 test('connect-agents: with an orchestrator in the file, Waymark joins as its guest and never touches its blocks', async () => {
   const { found, planFor, apply: connect } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
-  fs.mkdirSync(path.join(agentsHome, '.gemini'), { recursive: true });
+  fs.mkdirSync(path.join(agentsHome, '.gemini', 'antigravity'), { recursive: true });
   const theirs = '<!-- gentle-ai:persona -->\nYou are the orchestrator.\n<!-- /gentle-ai:persona -->\n';
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), theirs);
+  assert.ok(!found().some((a) => a.name === 'Gemini CLI'), 'Antigravity alone (antigravity/ + GEMINI.md) is not Gemini CLI');
+  fs.writeFileSync(path.join(agentsHome, '.gemini', 'projects.json'), '{}');
   const g = found().find((a) => a.name === 'Gemini CLI');
   assert.deepEqual(g.guestOf, ['gentle-ai']);
   assert.match(planFor(g).steps[0], /as a guest of gentle-ai/);
@@ -2559,6 +2561,8 @@ test('sync: a project skill reached through Claude Code\'s link and through its 
   fs.mkdirSync(path.join(proj, '.agents/skills/proj-section'), { recursive: true });
   fs.writeFileSync(path.join(proj, '.agents/skills/proj-section/SKILL.md'), '---\nname: proj-section\ndescription: Proyecto proj. Agregar una sección.\n---\n');
   makeLink(path.join(proj, '.agents/skills/proj-section'), path.join(proj, '.claude/skills/proj-section'));
+  fs.mkdirSync(path.join(proj, '.agents/skills/_shared'), { recursive: true }); // another framework's shared files
+  fs.writeFileSync(path.join(proj, '.agents/skills/_shared/SKILL.md'), '---\nname: _shared\ndescription: shared files\n---\n');
   fs.mkdirSync(path.join(priv, 'projects'), { recursive: true });
   fs.writeFileSync(path.join(priv, 'projects', 'proj.md'), `# Project: proj\n\nPath: ${proj}\n`);
   const r = spawnSync(process.execPath, [path.join(tmp, 'skills/waymark/scripts/sync.mjs')], { encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: priv } });
@@ -2566,6 +2570,7 @@ test('sync: a project skill reached through Claude Code\'s link and through its 
   const rows = fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8').split('\n').filter((l) => l.startsWith('| `proj-section`'));
   assert.equal(rows.length, 1);
   assert.match(rows[0], /\.agents\/skills\/proj-section\/SKILL\.md/, 'the real folder, not the link');
+  assert.doesNotMatch(fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8'), /_shared/, 'a "_name" folder is never a skill');
 });
 
 test('a script reached through a link runs (Waymark installed in ~/.agents/skills, registered through ~/.claude/skills)', async () => {

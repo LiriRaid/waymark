@@ -113,20 +113,28 @@ export async function packContext(hook, agent, file = PACKED()) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   const home = projectHome(cwd);
   if (!home.dir || home.legacy) return null; // a project with Waymark's memory
-  // the project's own files: not outside its root (scratch), not Waymark's or engram's memory
+  // Each file's own repo: the session's project, or another repo it edits (a front's session fixing the API). Not
+  // Waymark's or engram's memory, and not a folder that is no repo (scratch, temp).
   const root = norm(home.root);
-  const files = (c?.files || []).filter((f) => { const p = norm(path.resolve(cwd, f)); return p.startsWith(`${root}/`) && !/\/\.(waymark|engram)\//.test(p); });
+  const repoOf = (abs) => {
+    if (norm(abs).startsWith(`${root}/`)) return home.root;
+    const h = projectHome(path.dirname(abs));
+    return h.dir && !h.legacy && (fs.existsSync(path.join(h.root, '.git')) || fs.existsSync(h.memory)) ? h.root : null;
+  };
+  const files = (c?.files || []).map((f) => path.resolve(cwd, f)).filter((p) => !/\/\.(waymark|engram)\//.test(norm(p)) && repoOf(p));
   if (!files.length) return null;
   let records = [];
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
-  const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(path.resolve(cwd, f))));
+  const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
   if (!fresh.length) return null;
   const { pack } = await import('./waymark.mjs');
-  const text = pack(cwd, fresh);
+  const byRepo = new Map();
+  for (const f of fresh) { const r = repoOf(f); byRepo.set(r, [...(byRepo.get(r) || []), f]); }
+  const text = [...byRepo].map(([r, list]) => pack(r, list)).join('\n');
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map((f) => norm(path.resolve(cwd, f)))] };
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   return `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}`;
 }

@@ -78,8 +78,16 @@ const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
 // never inherits another task's answers. Not checked without records or without changes.
 const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFiles || !changed.length || (() => { const own = ctx.taskFiles(id); return changed.some((f) => own.has(norm(f))); })();
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
+// Variables assigned in the same command, in place: `W=…/waymark.mjs; node $W review a.ts` (sh) or `$W = "…"; node $W …`
+// (PowerShell) reads as `node …/waymark.mjs review a.ts`. A variable not assigned there stays as written.
+export function expandVars(command) {
+  const vars = {};
+  for (const m of String(command).matchAll(/(?:^|[;&|\s])\$?([A-Za-z_]\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;&|]+)/g)) vars[m[1]] = m[2].replace(/^(["'])(.*)\1$/, '$2');
+  return String(command).replace(/\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)(?!\s*=)/g, (all, a, b) => vars[a || b] ?? all);
+}
+const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:${sub})\\b`).test(expandVars(cmdOf(t)));
 // The review: the code-review skill, or `waymark.mjs review <files>` where the agent has none (Codex, Gemini CLI, OpenCode).
-const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(cmdOf(t)));
+const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(expandVars(cmdOf(t))));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
 
@@ -262,7 +270,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     memory: {
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
       // or the hook handed the pack over at the first edit (docs/adr/0015)
-      searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || (shell(t) && /waymark\.mjs["']?\s+(pack|memory|tasks)\b/.test(cmdOf(t))) || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
+      searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks') || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading

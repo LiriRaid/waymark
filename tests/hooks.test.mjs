@@ -2687,3 +2687,48 @@ test('quota: install-hooks plans the status line and chains the user\'s own inst
   assert.deepEqual([theirs.settings.statusLine.command, theirs.next], [cmd, 'bash ~/my-line.sh'], 'the user\'s line runs after ours');
   assert.equal(input.statusLine.command, 'bash ~/my-line.sh', 'the input is not mutated');
 });
+
+// A session in one repo that edits a sibling repo (the front's session fixing the API): each file gets the pack of its
+// own repo; a folder that is no repo gets none.
+test('Recordar by the hook: a file in another repo gets that repo\'s pack', async () => {
+  const { packContext, packedFiles } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const session = memRepo('sess-front'), api = tmpRepo('sibling-api'), loose = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-loose-'));
+  temps.push(loose);
+  const state = path.join(home, `packed-sibling-${++n}.json`);
+  fs.mkdirSync(path.join(api, 'src'));
+  fs.writeFileSync(path.join(api, 'src', 'main.ts'), '1\n'); gitT(api, 'add', '.'); gitT(api, 'commit', '-q', '-m', 'docs: swagger');
+  const hook = (file) => ({ cwd: session, session_id: 'sib', tool_name: 'Edit', tool_input: { file_path: file } });
+  assert.match(await packContext(hook(path.join(api, 'src', 'main.ts')), claude, state) || '', /src\/main\.ts:\n  - [0-9a-f]{8} · docs: swagger \(no task record\)/);
+  assert.equal(packedFiles('sib', 0, state).size, 1, 'counted for the session\'s task');
+  assert.equal(await packContext(hook(path.join(api, 'src', 'main.ts')), claude, state), null, 'once per file and task');
+  assert.equal(await packContext(hook(path.join(loose, 'notes.txt')), claude, state), null, 'a folder that is no repo: nothing to pack');
+});
+
+// The agent may keep Waymark's path in a shell variable: `W=…/waymark.mjs; node $W review …` is the review.
+test('observed: review and pack run through a shell variable count', async () => {
+  const { expandVars } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  assert.equal(expandVars('cd /api; W=/s/waymark/scripts/waymark.mjs; node $W review a.ts'), 'cd /api; W=/s/waymark/scripts/waymark.mjs; node /s/waymark/scripts/waymark.mjs review a.ts');
+  assert.equal(expandVars('$W = "C:/s/waymark/scripts/waymark.mjs"; node ${W} pack a.ts'), '$W = "C:/s/waymark/scripts/waymark.mjs"; node C:/s/waymark/scripts/waymark.mjs pack a.ts');
+  assert.equal(expandVars('node $HOME/x.mjs'), 'node $HOME/x.mjs', 'a variable never assigned in the command stays');
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const W = 'W=/s/waymark/scripts/waymark.mjs; ';
+  const t = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('Bash', { command: `${W}node $W pack src/orders.service.mjs` }), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: `${W}node $W review src/orders.service.mjs` })]);
+  const g = cierreGaps(t, cierre(id), undefined, undefined, ctx);
+  assert.deepEqual([g.observed.review, g.observed.memory.searched], [true, true]);
+});
+
+// A rejected choice window followed by the user's own message: that message is their decision, recorded as written.
+test('decision: the user\'s reply after rejecting the choice window is their decision', () => {
+  const ask = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'ask-r', name: 'AskUserQuestion', input: { questions: [{ question: '¿Hasta dónde corrijo?', options: [{ label: 'Todas' }, { label: 'Solo expiresIn' }] }] } }] } };
+  const rejected = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'ask-r', is_error: true, content: 'The user doesn\'t want to proceed with this tool use.' }] }, toolUseResult: 'User rejected tool use' };
+  const ds = decisionsIn([ask, rejected, say('¿Qué quieres aclarar?'), prompt('corrige las 4')]);
+  assert.deepEqual(ds, [{ question: '¿Hasta dónde corrijo?', chosen: 'corrige las 4', discarded: [], source: 'reply' }]);
+  assert.equal(ds[0].callId, 'ask-r', 'placed where the window was asked');
+  assert.deepEqual(decisionsIn([ask, rejected]), [], 'no reply yet: no decision');
+  assert.deepEqual(decisionsIn([ask, rejected, prompt('Stop hook feedback:\nWaymark: this L2 turn…')]), [], 'a block reason fed back is not the user');
+  assert.deepEqual(decisionsIn([ask, rejected, prompt('corrige las 4'), prompt('y otra cosa')]).length, 1, 'only the first reply answers it');
+  const clarify = { ...rejected, toolUseResult: 'Error: The user doesn\'t want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). To tell you how to proceed, the user said:\nThe user wants to clarify these questions.' };
+  assert.deepEqual(decisionsIn([ask, clarify, prompt('corrige las 4')]).map((d) => d.chosen), ['corrige las 4'], 'the user chose to clarify first (Claude Code 2.1.x)');
+});

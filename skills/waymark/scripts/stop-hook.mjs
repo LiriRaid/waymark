@@ -24,7 +24,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
-import { estimate } from './calibrate.mjs';
+import { estimate, appendPair } from './calibrate.mjs';
+import { measure, clearStart } from './statusline.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
@@ -418,14 +419,16 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
 }
 
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
-// all pass), the score over the applicable steps, tokens and the estimated quota.
-export function evaluate(gaps, usage, model = null) {
+// all pass), the score over the applicable steps, tokens and the quota: measured by the status line when there is a
+// clean reading (statusline.mjs, { pct, shared }), else estimated.
+export function evaluate(gaps, usage, model = null, measured = null) {
   const steps = {};
   for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = (steps[s.label] ?? true) && s.pass;
   const ok = Object.values(steps).filter(Boolean).length;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
-  return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, quotaPct: est.pct, quotaBy: est.by };
+  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct } : { quotaPct: est.pct, quotaBy: est.by };
+  return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -468,7 +471,8 @@ export function questionRecord(turn, meta = {}) {
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
-// While the model has fewer than 3 calibration pairs (no fit yet), it asks the user for the real %. Past NEW_SESSION
+// A measured % is never asked. Otherwise, while the model has fewer than 3 calibration pairs (no fit yet), it asks the
+// user for the real %. Past NEW_SESSION
 // tokens of context, it says the next task is cheaper in a new session: every response re-reads the whole context, and
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
@@ -477,7 +481,10 @@ export function summaryLine(id, ev, context = 0) {
   const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
-  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null ? ` ≈ ${ev.quotaPct}% de la cuota (${String(ev.quotaBy).startsWith('family:') ? `sin calibrar, factor de ${ev.quotaBy.slice(7)}` : 'estimado'})` : ''}${fresh}${ask}`;
+  const by = String(ev.quotaBy);
+  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? 'medido, con otra sesión activa' : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
+  const pct = by.startsWith('measured') && ev.quotaPct === 0 ? '<1%' : `≈ ${ev.quotaPct}%`; // below the reading's resolution
+  return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null && ev.quotaPct !== undefined ? ` ${pct} de la cuota (${how})` : ''}${fresh}${ask}`;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
@@ -531,7 +538,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
         const q = fs.existsSync(home.memory) ? questionRecord(turn, meta) : null;
-        try { if (q) appendRecord(cwd, q); } catch {}
+        try { if (q) { appendRecord(cwd, q); clearStart(h.session_id); } } catch {} // the next task counts from its own prompt
         try { refreshTasks(home, closeOpen(home, h.session_id) || !!q); } catch {}
         return;
       }
@@ -541,10 +548,17 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       }
       gaps.observed.branches = branchesOf(gaps.changed);
       // the turn's tokens plus those of the subagents it launched (a background code-review)
-      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null);
+      // the % measured by Claude Code's status line (the quota it reads is Claude's: never another agent's task)
+      let measured = null;
+      try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
+      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
-      try { appendRecord(cwd, rec); } catch {}
+      try { appendRecord(cwd, rec); clearStart(h.session_id); } catch {}
+      try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
+        const u = evaluation.usage;
+        if (measured && !measured.shared && measured.pct > 0 && evaluation.tokens) appendPair({ task: rec.id, project: home.slug, model: evaluation.model, agent: ctx.inputs?.agent || null, pct: measured.pct, total: evaluation.tokens, ...(u ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}), by: 'measured' });
+      } catch {}
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch {} // the learned layer: engram, written here, never by the agent

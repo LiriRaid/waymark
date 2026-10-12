@@ -2613,3 +2613,77 @@ test('hook health: every registered hook is probed as its agent runs it; one tha
   process.env.WAYMARK_CLAUDE_SETTINGS = settings;
   try { assert.deepEqual(registered().find((r) => r.agent === 'claude').commands, [`node "${S}/stop-hook.mjs"`], 'only Waymark\'s own commands'); } finally { process.env.WAYMARK_CLAUDE_SETTINGS = prev; }
 });
+
+// The status line measures the quota (Claude Code passes rate_limits.five_hour to it): the start at the prompt, the end
+// at the close, the difference is the task's real %; another session active in between marks it shared (not a pair).
+const status = (session, five, seven, ctx = 10, usage = 1000) => ({ session_id: session, context_window: { used_percentage: ctx, total_input_tokens: usage, total_output_tokens: 0 },
+  ...(five === null ? {} : { rate_limits: { five_hour: { used_percentage: five, resets_at: 1800000000 }, ...(seven === null ? {} : { seven_day: { used_percentage: seven, resets_at: 1800500000 } }) } }) });
+test('quota: the status line keeps the real % and shows quota and context', async () => {
+  const { recordStatus, statusText, readQuota } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const t0 = 1799990000000;
+  recordStatus(status('qa', 23.5, 41.2, 18), t0);
+  assert.equal(statusText(status('qa', 23.5, 41.2, 18)), '5h 24% · 7d 41% · contexto 18%');
+  assert.deepEqual(readQuota().latest.five, { pct: 23.5, resetsAt: 1800000000 });
+  recordStatus(status('qa', null, null, 30), t0 + 1000);
+  assert.equal(statusText(status('qa', null, null, 30)), 'contexto 30%', 'no rate_limits (API key, before the first response): context only');
+  assert.equal(readQuota().latest.five.pct, 23.5, 'a reading without rate_limits keeps the last one');
+});
+
+test('quota: a task\'s % is measured from the prompt to the close; shared, reset or stale gives no clean measure', async () => {
+  const { recordStatus, markStart, clearStart, measure } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const t0 = 1799991000000;
+  recordStatus(status('m1', 20, 40), t0);
+  markStart('m1', t0 + 1000);
+  markStart('m1', t0 + 2000); // a second prompt before the close keeps the first start
+  recordStatus(status('m1', 23.5, 41, 12, 5000), t0 + 60000);
+  assert.deepEqual(measure('m1', t0 + 61000), { pct: 3.5, shared: false });
+  recordStatus(status('other', 24, 41, 5, 100), t0 + 62000); // first sight of another session: not activity yet
+  recordStatus(status('m1', 24, 41, 12, 6000), t0 + 63000);
+  assert.deepEqual(measure('m1', t0 + 64000), { pct: 4, shared: false });
+  recordStatus(status('other', 26, 41, 6, 900), t0 + 65000); // the other session answered: its tokens moved
+  recordStatus(status('m1', 27, 41, 12, 7000), t0 + 66000);
+  assert.deepEqual(measure('m1', t0 + 67000), { pct: 7, shared: true });
+  clearStart('m1');
+  assert.equal(measure('m1', t0 + 68000), null, 'no start: nothing to measure');
+  markStart('m1', t0 + 70000);
+  assert.equal(measure('m1', t0 + 71000), null, 'no reading after the start: stale');
+  recordStatus({ ...status('m1', 2, 41, 12, 8000), rate_limits: { five_hour: { used_percentage: 2, resets_at: 1800018000 } } }, t0 + 72000);
+  assert.equal(measure('m1', t0 + 73000), null, 'the window reset during the task');
+  clearStart('m1');
+  recordStatus(status('m2', 30, 40), t0);
+  markStart('m2', 1800000500000); // the last reading's window ended before this prompt: a new window starts at 0
+  recordStatus({ ...status('m2', 1.5, 40, 12, 9000), rate_limits: { five_hour: { used_percentage: 1.5, resets_at: 1800018000 } } }, 1800000600000);
+  assert.deepEqual(measure('m2', 1800000700000), { pct: 1.5, shared: false });
+});
+
+test('quota: a measured % is shown as measured, is not asked, and a clean one becomes a calibration pair', async () => {
+  const { appendPair, readPairs } = await import(`file://${SCRIPTS}/calibrate.mjs`);
+  const gaps = { steps: [{ label: 'Decision', applies: true, pass: true }] };
+  const ev = evaluate(gaps, { total: 2930000 }, 'claude-measured-1', { pct: 3.5, shared: false });
+  assert.deepEqual([ev.quotaPct, ev.quotaBy], [3.5, 'measured']);
+  const line = summaryLine('2026-10-12 · T1', ev);
+  assert.match(line, /2\.93M tokens ≈ 3\.5% de la cuota \(medido\)/);
+  assert.doesNotMatch(line, /marcó tu cuota/, 'measured: nothing to ask');
+  const shared = summaryLine('x', evaluate(gaps, { total: 2930000 }, 'claude-measured-1', { pct: 7, shared: true }));
+  assert.match(shared, /≈ 7% de la cuota \(medido, con otra sesión activa\)/);
+  assert.doesNotMatch(shared, /marcó tu cuota/);
+  assert.match(summaryLine('x', evaluate(gaps, { total: 50000 }, 'claude-measured-1', { pct: 0, shared: false })), /<1% de la cuota \(medido\)/);
+  appendPair({ task: '2026-10-12 · T1', project: 'p', model: 'claude-measured-1', agent: 'claude', pct: 3.5, total: 2930000, by: 'measured' });
+  assert.deepEqual(readPairs('claude-measured-1').map((p) => [p.pct, p.by]), [[3.5, 'measured']]);
+});
+
+test('quota: install-hooks plans the status line and chains the user\'s own instead of replacing it', async () => {
+  const { planStatusLine } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
+  const cmd = 'node "/s/waymark/scripts/statusline.mjs"';
+  const add = planStatusLine({ model: 'x' }, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd });
+  assert.equal(add.settings.model, 'x');
+  assert.deepEqual([add.steps.length, add.next], [1, null]);
+  assert.deepEqual(planStatusLine(add.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
+  const moved = planStatusLine({ statusLine: { type: 'command', command: 'node "C:\\old\\waymark\\scripts\\statusline.mjs"' } }, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual([moved.settings.statusLine.command, moved.next], [cmd, null], 'an old path of ours is updated, nothing chained');
+  const input = { statusLine: { type: 'command', command: 'bash ~/my-line.sh', padding: 1 } };
+  const theirs = planStatusLine(input, { scripts: '/s/waymark/scripts' });
+  assert.deepEqual([theirs.settings.statusLine.command, theirs.next], [cmd, 'bash ~/my-line.sh'], 'the user\'s line runs after ours');
+  assert.equal(input.statusLine.command, 'bash ~/my-line.sh', 'the input is not mutated');
+});

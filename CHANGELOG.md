@@ -2,6 +2,11 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## Unreleased — the quota % measured, not guessed
+- **Measured quota** (`docs/adr/0019`): Waymark's status line for Claude Code (`statusline.mjs`) reads the real % of the 5-hour window that Claude Code passes to it (Pro and Max). It shows `5h 23% · 7d 41% · contexto 18%`. The per-prompt hook keeps the reading at the task's start, and the end-of-turn line shows the difference as `≈ X% de la cuota (medido)`, with no question to the user. Another session active during the task gives `medido, con otra sesión activa` and no pair. A window reset, or no reading since the start, falls back to the estimate.
+- **Pairs on their own:** each clean measure is saved as a calibration pair, so the estimate for Codex, OpenCode and sessions without the status line improves without asking.
+- **Install:** `install-hooks.mjs` adds the status line with the hooks. A status line you already have keeps running after Waymark's (`~/.waymark/statusline.json`).
+
 ## 2.0.1 — agents detected as they are, dead hooks and idle sessions caught
 - **Dead hooks are reported** (`docs/adr/0018`): `waymark.mjs check` probes every hook each agent has registered, as the agent runs it, and names the ones that do not answer. The instructions block tells the agent that a session with no card and no per-prompt line has no hooks running, so it tells the user and runs `check`.
 - **Idle brake:** a message to a session past 100k tokens, idle for more than an hour, is stopped before the model once per idle stretch, like the size brake. Its prompt cache has expired, and the first response would re-write the whole context: 431k tokens re-written cost about 9% of the quota.

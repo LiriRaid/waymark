@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, PROBE_OK } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, logHookError, PROBE_OK } from './provenance.mjs';
 import { repairNotes, noteLateCommits } from './notes.mjs';
 import { importChunks, learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
@@ -151,8 +151,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         // a project skill lives once in .agents/skills (every agent); Claude Code gets a link in .claude/skills
         const linked = home.dir && !home.legacy ? linkProjectSkills(home.root) : [];
         if (linked.length) text += `\nProject skills (one copy in .agents/skills, linked for Claude Code): ${linked.join('; ')}`;
-      } catch {}
-    } catch { text = ''; }
+      } catch (e) { logHookError('session-hook', e); }
+    } catch (e) { logHookError('session-hook', e); text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
     // after the cap: the user's own words are never cut by it
     if (held) text += `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${held}`;

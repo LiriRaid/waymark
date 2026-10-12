@@ -16,7 +16,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, markOpen, projectHome, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, markOpen, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -124,7 +124,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     let hook = {};
     try { hook = JSON.parse(input); } catch {}
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
-    try { const out = reminder(hook, agent); if (out) process.stdout.write(JSON.stringify(out)); } catch {}
+    try { const out = reminder(hook, agent); if (out) process.stdout.write(JSON.stringify(out)); } catch (e) { logHookError('rule0-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

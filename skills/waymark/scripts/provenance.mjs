@@ -25,6 +25,19 @@ const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 export const ID = /\b(20\d\d-\d\d-\d\d) · T(\d+)([a-z]?)\b/;
 
+// A hook's own failure never reaches the agent (a hook must not break the turn): it is appended to
+// ~/.waymark/hook-errors.log (the newest 200 lines) and `waymark.mjs check` reports it.
+export const hookErrorsFile = () => path.join(HOME(), 'hook-errors.log');
+export function logHookError(where, err) {
+  try {
+    const file = hookErrorsFile(), line = `${new Date().toISOString()} ${where} ${String(err?.stack || err).split('\n').slice(0, 3).map((l) => l.trim()).join(' · ')}`.slice(0, 600);
+    let old = [];
+    try { old = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); } catch {}
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, [...old.slice(-199), line].join('\n') + '\n');
+  } catch {}
+}
+
 const slugOf = (dir) => (path.basename(norm(dir)) || 'project').replace(/[^a-z0-9._-]+/g, '-');
 
 // The pre-0007 memory file whose `Path:` holds cwd (longest match), skipping files already migrated (`Moved:`).
@@ -230,8 +243,9 @@ export function writeTaskLine(home, rec, now = new Date()) {
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
   const learned = aprendidoOf(cierre);
   if (!learned || /^ninguno/i.test(learned)) return false;
-  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '');
-  // a task done leaves Work in progress (its Aprendido is in its record); one still open keeps its line
+  // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
+  // unresolved, keeps its line
+  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') && !rec.unresolved?.length;
   return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
@@ -363,7 +377,7 @@ export function tasksMarkdown(home, now = new Date()) {
       .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
-    ...(lastRec.evaluation ? [(() => { const failed = Object.entries(lastRec.evaluation.steps || {}).filter(([, v]) => !v).map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}`; })()] : []), ''] : [];
+    ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
   const rows = records.slice(-8).reverse()
     .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
@@ -658,6 +672,93 @@ export function mutatesFiles(command) {
   }
   return false;
 }
+// What a shell command runs, part by part (the chain split outside quotes and heredoc bodies): each part is judged by
+// its executable, never by a word in its arguments, so `git commit -m "fix build"` and `ls build` check nothing.
+// Env assignments, `time`, the call operator and runners (npx, pnpm exec, bundle exec, python -m…) are skipped;
+// `bash -c "<cmd>"`, `cmd /c <cmd>` and `pwsh -Command "<cmd>"` are judged inside. → [{ text, gate, build, test, sep, cd }]
+// sep: the separator after the part ('&&', '||', ';', '|', '\n' or '' at the end); cd: the folder a `cd` before it
+// entered in the same command (null: the session's).
+const TOKEN = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
+const tokens = (s) => [...String(s).matchAll(TOKEN)].map((m) => m[1] ?? m[2] ?? m[3]);
+const RUNNER = { npx: 1, pnpx: 1, bunx: 1, time: 1, call: 1, '&': 1, exec: 1, env: 1 };
+const RUNNER2 = /^(pnpm (exec|dlx)|yarn (exec|dlx)|bundle exec|poetry run|uv run|pipenv run|python3? -m|py -m|npm exec)$/;
+const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|phpstan|typecheck)$/;
+const TESTERS = /^(vitest|jest|karma|mocha|pytest|rspec|phpunit|ava|tap|playwright|cypress|nyc|c8)$/;
+const SCRIPT_TEST = /(^|[:_-])(test|tests|spec|e2e|unit|vitest|jest)([:_-]|$)/i;
+const SCRIPT_BUILD = /(^|[:_-])build([:_-]|$)/i;
+const SCRIPT_GATE = /(typecheck|type-check|tsc|lint|check|types)/i;
+function classify(words) {
+  let w = words.filter((x) => x !== '');
+  for (let guard = 0; guard < 4 && w.length; guard++) {
+    while (w.length && /^[A-Za-z_]\w*=/.test(w[0])) w = w.slice(1); // FOO=1 cmd, env FOO=1 cmd
+    const head = String(w[0] || '').toLowerCase();
+    if (RUNNER[head]) { w = w.slice(1); while (w.length && /^-/.test(w[0])) w = w.slice(/^(-p|--package)$/.test(w[0]) ? 2 : 1); continue; }
+    if (RUNNER2.test(`${head} ${String(w[1] || '').toLowerCase()}`)) { w = w.slice(2); continue; }
+    break;
+  }
+  const prog = path.basename(String(w[0] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.(cmd|exe|ps1|bat)$/, '');
+  let a = w.slice(1), dir = null;
+  // a package manager's own flags before its command: pnpm --filter web build, npm --prefix ../api run build (a folder
+  // flag is where the command runs)
+  if (/^(npm|pnpm|yarn|bun)$/.test(prog)) {
+    while (a.length && /^-/.test(a[0])) {
+      const flag = String(a[0]).toLowerCase(), takes = /^(-c|--dir|--prefix|--cwd|-w|--workspace|-f|--filter)$/.test(flag);
+      if (/^(-c|--dir|--prefix|--cwd)$/.test(flag) && a[1]) dir = a[1];
+      a = a.slice(takes ? 2 : 1);
+    }
+    if (prog === 'yarn' && /^workspace$/i.test(a[0] || '')) a = a.slice(2);
+  }
+  const sub = String(a[0] || '').toLowerCase(), subs = a.map((x) => String(x).toLowerCase());
+  const out = { gate: false, build: false, test: false, ...(dir ? { dir } : {}) };
+  // a build script run by its interpreter or by path: node build.mjs, bash scripts/build.sh, ./build.ps1
+  const script = /^(node|bash|sh|zsh|pwsh|powershell|python3?|py|deno)$/.test(prog) ? subs.find((x) => !x.startsWith('-')) : String(w[0] || '').toLowerCase();
+  if (script && /^build(\.[a-z0-9]+)?$/.test(path.basename(script.replace(/\\/g, '/')))) { out.gate = out.build = true; return out; }
+  if (/^(bash|sh|zsh|dash)$/.test(prog) && sub === '-c') return { inner: a[1] };
+  if (prog === 'cmd' && /^\/[ck]$/.test(sub)) return { inner: a.slice(1).join(' ') };
+  if (/^(pwsh|powershell)$/.test(prog)) { const i = subs.findIndex((x) => /^-(c|command)$/.test(x)); if (i >= 0) return { inner: a.slice(i + 1).join(' ') }; }
+  if (LINTERS.test(prog)) { out.gate = true; out.build = prog === 'tsc' && subs.includes('-b'); }
+  else if (TESTERS.test(prog)) out.test = true;
+  else if (/^(npm|pnpm|yarn|bun)$/.test(prog)) {
+    const script = /^(run|run-script)$/.test(sub) ? String(a[1] || '') : sub;
+    if (/^(t|test|tst)$/.test(sub) || SCRIPT_TEST.test(script)) out.test = true;
+    else if (!/^(install|i|ci|add|remove|uninstall|update|init|create|publish|pack|link|exec|dlx|x|outdated|audit|view|info|config|cache|why|ls|list)$/.test(sub)) {
+      out.build = SCRIPT_BUILD.test(script);
+      out.gate = out.build || SCRIPT_GATE.test(script);
+    }
+  } else if (prog === 'node' || prog === 'deno') {
+    if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
+    else if (subs.includes('--test') || sub === 'test') out.test = true;
+  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php)$/.test(prog)) {
+    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : sub;
+    if (/^(test|spec)$/.test(verb)) out.test = true;
+    else if (/^(build|package|verify)$/.test(verb)) out.gate = out.build = true;
+    else if (/^(lint|vet|check|clippy|compile)$/.test(verb)) out.gate = true;
+  }
+  return out;
+}
+export function shellRuns(command, depth = 0) {
+  const c = String(command || ''), full = shellSkeleton(c, { quotes: false }), mask = shellSkeleton(c);
+  const out = [];
+  let from = 0, cd = null;
+  const push = (to, sep) => {
+    const text = full.slice(from, to).trim().replace(/^[({]\s*/, '').replace(/\s*[)}]$/, ''); // a subshell or group: (cd x && npm test)
+    from = to + sep.length;
+    if (!text) return;
+    const words = tokens(text), dir = /^(cd|pushd|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
+    if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
+    const k = classify(words), at = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
+    if (k.inner !== undefined && depth < 2) {
+      const inner = shellRuns(k.inner, depth + 1);
+      out.push({ text, gate: inner.some((p) => p.gate), build: inner.some((p) => p.build), test: inner.some((p) => p.test), sep, cd });
+      return;
+    }
+    out.push({ text, gate: !!k.gate, build: !!k.build, test: !!k.test, sep, cd: at });
+  };
+  for (const m of mask.matchAll(/&&|\|\||[;|\n]/g)) push(m.index, m[0]);
+  push(full.length, '');
+  return out;
+}
+
 // A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory.
 export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(String(command || '')) && !/(\.waymark[\\/]|\.claude[\\/]projects)/i.test(String(command || ''));
 

@@ -62,8 +62,9 @@ export function statusText(input) {
   return [five && `5h ${Math.round(five.pct)}%`, seven && `7d ${Math.round(seven.pct)}%`, Number.isFinite(ctx) && `contexto ${Math.round(ctx)}%`].filter(Boolean).join(' · ');
 }
 
-// The task's start: the reading at its first prompt (a later prompt of the same task keeps it). A reading whose window
-// ended before this prompt means a new window, which starts at 0.
+// The task's start: the reading at its first prompt (a later prompt of the same task keeps it). The end-of-turn hook clears
+// it when a task closes and when a turn ends with no task (a question, L0), so it never measures the next task. A reading
+// whose window ended before this prompt means a new window, which starts at 0.
 export function markStart(session, now = Date.now()) {
   const st = readQuota(), five = st.latest?.five, id = session || 'unknown';
   if (st.starts[id] || !five) return null;

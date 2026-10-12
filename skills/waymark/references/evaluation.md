@@ -8,7 +8,7 @@ Every closed task is already evaluated automatically: the end-of-turn hook judge
 - `observed`: what the hooks computed (memory, procedure read, gates after the last change with time and failure, tests, browser, code-review, docs, branches, time). Cite it instead of re-deriving.
 - `decisions`: the user's answers in the choice window as recorded, each with its `position` (before / after the task's first change). A decision applied without a question in the transcript is a decision taken alone.
 - **Declared ≠ done:** check the Cierre's own claims (Resultado, Evidencia, Aprendido and its exception lines) against the calls: an "inferida de la doc" with no docs call, a "hecho" with a testigo ✘, an Aprendido that is not in the project memory file, a `Secretos: no (…)` on a real value. Each is a false declaration.
-- **User decisions win, per task:** a check the user asked to skip is ✔ when the Cierre quotes their words (`omitido (usuario: "…")`) and those words are in their messages.
+- **User decisions win, per task:** a check the user asked to skip is ✔ when the Cierre quotes their words (`omitido (usuario: "…")`) and those words (3 or more) are in their messages. An exception line (`no comprobado (…)`, `Tests: no (…)`, `Build: no (…)`, `Secretos: no (…)`) is `exception` (⚠) in `evaluation.steps`: declared, not proven, never a ✔ in the score.
 
 ## 2. Right decision: did it get there without guessing?
 - **Understood the ask:** the element the user meant (screenshot included); no correction needed for fixing the right thing in the wrong place or layer.

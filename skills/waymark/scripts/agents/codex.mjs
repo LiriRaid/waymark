@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readTail, isPrompt } from '../transcript.mjs';
+import { readTail, isPrompt, clipOutput } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
 
 export const name = 'codex';
@@ -45,7 +45,7 @@ export function toLines(rows) {
   const lines = [], asked = new Map();
   let version = null, model = null, lastTotal = 0, tail = [], choiceInTurn = false, pendingAsync = [], n = 0;
   const assistant = (ts, content, extra = {}) => lines.push({ type: 'assistant', timestamp: ts, version, message: { id: `cx-${n++}`, model, content, ...extra } });
-  const result = (ts, id, isError, text) => lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(text || '').slice(0, 400) }] } });
+  const result = (ts, id, isError, text) => lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: clipOutput(text) }] } });
   for (const d of rows) {
     const p = d.payload || {}, ts = d.timestamp;
     if (d.type === 'session_meta') { version = p.cli_version || version; continue; }
@@ -105,7 +105,8 @@ export function toLines(rows) {
     } else if (/^(CommandExecution|FileChange|McpToolCall|WebSearch)$/.test(it.type)) tail = []; // an action: what follows is the turn's final stretch
     if (it.type === 'CommandExecution') {
       const command = shellOf(it.command), started = new Date((Date.parse(ts) || 0) - ((it.duration?.secs || 0) * 1000)).toISOString();
-      const skill = READS.test(command) && command.match(SKILL)?.[1];
+      // code-review is no read in Codex: its review is `waymark.mjs review <files>` (reading the skill reviews nothing)
+      const skill = READS.test(command) && command.match(SKILL)?.[1] !== 'code-review' && command.match(SKILL)?.[1];
       if (skill) assistant(started, [{ type: 'tool_use', name: 'Skill', id: `${it.id}-skill`, input: { skill } }]);
       assistant(started, [{ type: 'tool_use', name: 'Bash', id: it.id, input: { command } }]);
       result(ts, it.id, (it.exit_code ?? 0) !== 0 || it.status === 'failed', it.aggregated_output);

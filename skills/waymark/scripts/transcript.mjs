@@ -5,6 +5,9 @@ import fs from 'node:fs';
 
 const TAIL = 2 * 1024 * 1024; // bytes read from the end of a transcript by the hooks
 
+// A command's output as the testigos read it: its start and its end (a summary such as "Found 2 errors" or "fail 1" comes
+// last), 800 characters at most.
+export const clipOutput = (s) => { s = String(s || ''); return s.length > 800 ? `${s.slice(0, 400)}\n…\n${s.slice(-400)}` : s; };
 export const parseLines = (text) => text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 
 export function readTail(file, bytes = TAIL) {
@@ -82,7 +85,7 @@ export function currentTurn(lines, since = 0) {
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) {
-      for (const c of d.message.content) if (c.type === 'tool_result') results[c.tool_use_id] = { at, error: !!c.is_error, text: (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 400) };
+      for (const c of d.message.content) if (c.type === 'tool_result') results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')) };
     }
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {

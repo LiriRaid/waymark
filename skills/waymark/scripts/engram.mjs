@@ -50,13 +50,16 @@ const projectOf = (home) => { try { return JSON.parse(fs.readFileSync(configFile
 const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
 const aprendido = (cierre) => String(cierre || '').replace(/\*\*|__/g, '').match(/^\s*Aprendido:[ \t]*(.+)$/im)?.[1]?.trim() || '';
 
-// The memory of a closed task: title "<id> · <prompt>", the Aprendido first. → true when saved.
+// The memory of a closed task: title "<id> · <prompt>", the Aprendido first. A task closed with testigos left unresolved
+// is saved as "sin verificar" with the steps that failed, so the lesson is kept but never read as proven. → true when saved.
 export function saveLearned(home, rec) {
   const learned = aprendido(rec?.cierre);
   if (!rec?.id || !learned || !engramBin()) return false;
   const project = ensureConfig(home);
   const decisions = (rec.decisions || []).map((d) => d.chosen).filter(Boolean);
+  const unverified = rec.unresolved?.length ? Object.entries(rec.evaluation?.steps || {}).filter(([, v]) => v === false).map(([k]) => k) : [];
   const content = [
+    rec.unresolved?.length ? `Sin verificar: ${unverified.join(', ') || rec.unresolved.length}` : '',
     `Aprendido: ${learned}`,
     decisions.length ? `Decisión: ${clip(decisions.join(' · '), 300)}` : '',
     rec.files?.length ? `Archivos: ${[...new Set(rec.files.map((f) => path.basename(f)))].slice(0, 12).join(', ')}` : '',
@@ -64,7 +67,7 @@ export function saveLearned(home, rec) {
     `Agente: ${rec.agent || '?'}`,
   ].filter(Boolean).join('\n');
   // never a secret in engram: its store is gzipped or SQLite, where the secrets testigo cannot read it
-  const r = run(home, ['save', maskSecrets(`${rec.id} · ${clip(rec.prompt, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
+  const r = run(home, ['save', maskSecrets(`${rec.id} · ${rec.unresolved?.length ? 'sin verificar · ' : ''}${clip(rec.prompt, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
   return !!r?.ok;
 }
 

@@ -15,7 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles, PROBE_OK } from './provenance.mjs';
+import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -58,13 +58,17 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   return null;
 }
 
+// A git commit the shell runs, read on the command's skeleton (heredoc and here-string bodies blanked): a file written
+// through a heredoc that mentions `git commit` is no commit. The message and its trailer are read on the whole command.
+const isCommit = (command) => /\bgit\b[^|;&\n]*\scommit(?![\w-])/.test(shellSkeleton(command, { quotes: false }));
+
 // Commit trailer: a "Waymark-Task: <id>" the end-of-turn hook would record under another ID (a follow-up letter whose
 // task shares no staged file, or an ID never offered) is denied with the right one, so a commit and its record carry
 // the same ID. A recorded task's ID passes (its work committed by a later task); nothing staged yet → no evidence, no
 // denial. → the denial reason, or null.
 export function checkTrailer(command, cwd = process.cwd()) {
   const id = String(command || '').match(/Waymark-Task:\s*(20\d\d-\d\d-\d\d · T\d+[a-z]?)/)?.[1];
-  if (!id || !/\bgit\b[\s\S]*\bcommit\b/.test(command)) return null;
+  if (!id || !isCommit(command)) return null;
   const ids = taskIds(cwd);
   if (ids.known.has(id)) return null;
   const home = projectHome(cwd);
@@ -85,7 +89,7 @@ export function checkTrailer(command, cwd = process.cwd()) {
 // judged: --amend --no-edit (no message written) and -F <file> (a message the hook cannot see). → the reason, or null.
 export function missingTrailer(command, session = 'unknown', cwd = process.cwd(), stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.trailer-gate.json')) {
   const c = String(command || '');
-  if (!/\bgit\b[^|;&\n]*\scommit(?![\w-])/.test(c) || /Waymark-Task:/.test(c) || /--amend\b[\s\S]*--no-edit|--no-edit[\s\S]*--amend/.test(c)) return null;
+  if (!isCommit(c) || /Waymark-Task:/.test(c) || /--amend\b[\s\S]*--no-edit|--no-edit[\s\S]*--amend/.test(c)) return null;
   if (/(?:\s-F|\s--file)[\s=]+(?!-(?:\s|$))\S/.test(c)) return null;
   const ids = taskIds(cwd), key = `${session || 'unknown'}:${ids.next}`;
   let seen = {};
@@ -173,7 +177,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         const text = await packContext(hook, agent);
         if (text) process.stdout.write(JSON.stringify(agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text)));
       }
-    } catch {}
+    } catch (e) { logHookError('tool-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

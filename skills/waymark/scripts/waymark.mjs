@@ -25,7 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
 import { incidentsAt } from './incidents.mjs';
 import { pushNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
@@ -215,6 +215,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => suggestedRules(cwd));
   await add(agents);
   await add(() => hooksHealth());
+  await add(() => hookErrors());
   await add(() => mergeMethods(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
@@ -224,6 +225,15 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
     fs.writeFileSync(path.join(HOME(), '.check.json'), JSON.stringify({ ...st, checkedAt: Date.now() }));
   } catch {}
   return items;
+}
+
+// A hook's own failures (provenance.mjs logHookError) of the last 7 days: their count and the newest. → the line, or ''.
+export function hookErrors(now = Date.now()) {
+  let lines = [];
+  try { lines = fs.readFileSync(hookErrorsFile(), 'utf8').split('\n').filter(Boolean); } catch { return ''; }
+  const recent = lines.filter((l) => now - (Date.parse(l.split(' ')[0]) || 0) < 7 * 86400000);
+  if (!recent.length) return '';
+  return `hooks: ${recent.length} error${recent.length > 1 ? 's' : ''} in the last 7 days (${hookErrorsFile().replace(/\\/g, '/')}); newest: ${recent[recent.length - 1].slice(0, 200)}`;
 }
 
 // The package manager memory.md names (Identity, Quality gates) against the repo's own: package.json `packageManager`,

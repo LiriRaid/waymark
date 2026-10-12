@@ -86,6 +86,9 @@ export function workspaceSiblings(root) {
 }
 export const logFile = (cwd) => projectHome(cwd).log;
 
+// What each hook answers to {"waymark_probe": true}: proof that it runs from the path it is registered with (waymark.mjs check).
+export const PROBE_OK = '{"waymark_probe":"ok"}';
+
 // The agents' local folders kept out of git (docs/adr/0017): Waymark's memory, engram's store, the project skills
 // (.agents/skills, every agent) and Claude Code's link to them. Each line is added once.
 export const LOCAL_DIRS = [

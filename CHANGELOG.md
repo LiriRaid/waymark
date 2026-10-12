@@ -2,7 +2,10 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
-## 2.0.1 — agents detected as they are
+## 2.0.1 — agents detected as they are, dead hooks and idle sessions caught
+- **Dead hooks are reported** (`docs/adr/0018`): `waymark.mjs check` probes every hook each agent has registered, as the agent runs it, and names the ones that do not answer. The instructions block tells the agent that a session with no card and no per-prompt line has no hooks running, so it tells the user and runs `check`.
+- **Idle brake:** a message to a session past 100k tokens, idle for more than an hour, is stopped before the model once per idle stretch, like the size brake. Its prompt cache has expired, and the first response would re-write the whole context: 431k tokens re-written cost about 9% of the quota.
+- **Notes and merges:** `check` reports a GitHub repo with task records that allows squash or rebase merges. Those merges re-create the commits and leave the git notes behind. INSTALL says to merge with a merge commit.
 - **Gemini CLI only when it is installed:** `~/.gemini` is shared with Antigravity, so the install and `waymark.mjs check` count Gemini CLI only when the folder has one of the CLI's own files (`settings.json`, `projects.json`, `installation_id`, `oauth_creds.json`, `tmp/`). Antigravity's `antigravity/` and `GEMINI.md` alone no longer count.
 - **`_name` folders are not skills:** `sync` and `check` skip folders that start with `_`. That is where another framework keeps shared files, such as gentle-ai's `_shared` in `~/.codex/skills`, and they no longer appear as an unassigned skill.
 

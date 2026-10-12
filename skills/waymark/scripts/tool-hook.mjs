@@ -15,7 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles } from './provenance.mjs';
+import { taskLines, taskStart, askedChoice, changesProject, projectHome, readRecords, taskIds, validId, taskFiles, PROBE_OK } from './provenance.mjs';
 import { agentFrom } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
@@ -139,6 +139,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     done = true;
     try {
       const hook = JSON.parse(input), after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
+      if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       if (!after) {
         const deny = gate(hook, agent);
         if (deny) { process.stdout.write(JSON.stringify(agent.out.deny(deny))); return; }

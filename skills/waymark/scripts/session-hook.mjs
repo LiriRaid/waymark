@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, PROBE_OK } from './provenance.mjs';
 import { repairNotes, noteLateCommits } from './notes.mjs';
 import { importChunks, learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
@@ -134,7 +134,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done) return;
     done = true;
     let cwd = process.cwd(), sessionId = null;
-    try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; } catch {}
+    try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } } catch {}
     let text = '', held = '';
     try {
       text = CARD_HEAD + digest(cwd, agent.name);

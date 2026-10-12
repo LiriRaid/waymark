@@ -15,7 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, markOpen, projectHome } from './provenance.mjs';
+import { taskIds, saveSnapshot, markOpen, projectHome, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom } from './agents/index.mjs';
 
@@ -53,28 +53,42 @@ const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 // .waymark/next-prompt.md and the next session's card brings it; sending it again here continues. Agents whose
 // prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder instead.
 // WAYMARK_BRAKE_TOKENS tunes it (0 = off).
+// Idle brake (docs/adr/0018): the prompt cache lasts about an hour, so the first message to a session idle longer than
+// that re-writes its whole context, which costs far more than reading it (431k re-written ≈ 9% of the quota). A session
+// past IDLE_TOKENS idle over IDLE_MINUTES is braked the same way, once per idle stretch. WAYMARK_IDLE_TOKENS and
+// WAYMARK_IDLE_MINUTES tune it (0 = off).
 export const BRAKE_TOKENS = Number(process.env.WAYMARK_BRAKE_TOKENS ?? 300000);
+export const IDLE_TOKENS = Number(process.env.WAYMARK_IDLE_TOKENS ?? 100000);
+export const IDLE_MINUTES = Number(process.env.WAYMARK_IDLE_MINUTES ?? 60);
 export const NEXT_PROMPT = 'next-prompt.md';
-export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json')) {
-  if (!BRAKE_TOKENS || (st.context || 0) < BRAKE_TOKENS || !String(hook.prompt || '').trim()) return null;
+export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'), now = Date.now()) {
+  const context = st.context || 0, idleMin = st.lastAt ? (now - st.lastAt) / 60000 : 0;
+  const big = BRAKE_TOKENS && context >= BRAKE_TOKENS;
+  const idle = IDLE_TOKENS && IDLE_MINUTES && context >= IDLE_TOKENS && idleMin > IDLE_MINUTES;
+  if ((!big && !idle) || !String(hook.prompt || '').trim()) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-  const session = hook.session_id || 'unknown', k = `${Math.round(st.context / 1000)}k`;
-  if (seen[session]) { // braked once already: the user chose to continue here, so this session's held message is not for a new one
+  const session = hook.session_id || 'unknown', k = `${Math.round(context / 1000)}k`;
+  // the idle stretch is named by the last response before it: a resend (no response since) finds it seen and continues
+  const key = idle ? `${session}:idle:${st.lastAt}` : session;
+  if (seen[key] || (!idle && seen[session])) { // braked already: the user chose to continue here, so this session's held message is not for a new one
     try {
       const home = projectHome(hook.cwd || process.cwd()), file = path.join(home.dir, NEXT_PROMPT);
       if (home.dir && !home.legacy && fs.readFileSync(file, 'utf8').split('\n')[0].includes(`· session ${session} -->`)) fs.rmSync(file, { force: true });
     } catch {}
     return null;
   }
-  for (const [s, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[s];
-  seen[session] = Date.now();
+  for (const [s, at] of Object.entries(seen)) if (now - at > 7 * 86400000) delete seen[s];
+  seen[key] = now;
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
-  if (!agent.out.blockPrompt) return { line: ` Context: this session holds ~${k} tokens and every response re-reads them; before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
+  const why = idle
+    ? `this session holds ~${k} tokens of context and was idle ${idleMin >= 120 ? `${Math.round(idleMin / 60)} h` : `${Math.round(idleMin)} min`}: its cache expired, so the next response re-writes all of it, which costs far more than a new session.`
+    : `this session holds ~${k} tokens of context and every response re-reads all of it.`;
+  if (!agent.out.blockPrompt) return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
   const home = projectHome(hook.cwd || process.cwd());
   let kept = '';
-  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date().toISOString()} · held by the context brake (~${k}) · session ${session} -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
-  return { block: agent.out.blockPrompt(`Waymark: this session holds ~${k} tokens of context and every response re-reads all of it. Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
+  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date(now).toISOString()} · held by the context brake (~${k}${idle ? ', idle' : ''}) · session ${session} -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
+  return { block: agent.out.blockPrompt(`Waymark: ${why} Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
 }
 
 export function reminder(hook, agent) {
@@ -106,6 +120,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     done = true;
     let hook = {};
     try { hook = JSON.parse(input); } catch {}
+    if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
     try { const out = reminder(hook, agent); if (out) process.stdout.write(JSON.stringify(out)); } catch {}
   };
   process.stdin.on('data', (d) => { input += d; });

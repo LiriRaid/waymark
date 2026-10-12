@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate } from './calibrate.mjs';
 import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
 import { pushNotes, noteLateCommits } from './notes.mjs';
@@ -488,6 +488,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     done = true;
     try {
       const h = JSON.parse(input);
+      if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024), cwd = h.cwd || process.cwd();
       const prompts = lines.filter(isPrompt).map(promptText).slice(-3); // this task: the current prompt and the two before it
       const home = projectHome(cwd);

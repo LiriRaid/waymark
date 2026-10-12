@@ -868,7 +868,8 @@ test('open.json: the per-prompt hook marks the turn started; the end of the turn
 });
 
 // `waymark.mjs check` with no network call that can succeed and no real ~/.claude.json or transcripts.
-const offline = () => Object.assign(process.env, { WAYMARK_REPO: 'invalid/none', WAYMARK_CLAUDE_JSON: path.join(home, 'none.json'), WAYMARK_CLAUDE_PROJECTS: path.join(home, 'none') });
+const offline = () => Object.assign(process.env, { WAYMARK_REPO: 'invalid/none', WAYMARK_CLAUDE_JSON: path.join(home, 'none.json'), WAYMARK_CLAUDE_PROJECTS: path.join(home, 'none'), WAYMARK_NO_GH: '1',
+  WAYMARK_CLAUDE_SETTINGS: path.join(home, 'none-settings.json'), WAYMARK_CODEX_HOOKS: path.join(home, 'none-hooks.json'), WAYMARK_GEMINI_SETTINGS: path.join(home, 'none-gemini.json'), WAYMARK_OPENCODE_PLUGIN: path.join(home, 'none-plugin.js') });
 
 test('connect-agents: one marked pointer block per agent found, backup first, registry row; waymark check reports it until connected', async () => {
   const { found, planFor, apply: connect, POINTER } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
@@ -898,9 +899,11 @@ test('connect-agents: one marked pointer block per agent found, backup first, re
 
 test('connect-agents: with an orchestrator in the file, Waymark joins as its guest and never touches its blocks', async () => {
   const { found, planFor, apply: connect } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
-  fs.mkdirSync(path.join(agentsHome, '.gemini'), { recursive: true });
+  fs.mkdirSync(path.join(agentsHome, '.gemini', 'antigravity'), { recursive: true });
   const theirs = '<!-- gentle-ai:persona -->\nYou are the orchestrator.\n<!-- /gentle-ai:persona -->\n';
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), theirs);
+  assert.ok(!found().some((a) => a.name === 'Gemini CLI'), 'Antigravity alone (antigravity/ + GEMINI.md) is not Gemini CLI');
+  fs.writeFileSync(path.join(agentsHome, '.gemini', 'projects.json'), '{}');
   const g = found().find((a) => a.name === 'Gemini CLI');
   assert.deepEqual(g.guestOf, ['gentle-ai']);
   assert.match(planFor(g).steps[0], /as a guest of gentle-ai/);
@@ -2488,6 +2491,15 @@ test('context brake: a message to a session at 300k is stopped before the model 
   assert.match(fs.readFileSync(path.join(projectHome(repo).dir, 'next-prompt.md'), 'utf8'), /otra cosa/, 'another braked session continuing never removes s5\'s held message');
   assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per session: resent, it continues');
   assert.equal(heldPrompt(projectHome(repo)), '', 'resent here: the held copy is gone, no new session gets it');
+  // idle brake: the cache expired, so resuming re-writes the whole context; braked once per idle stretch
+  const t0 = Date.parse('2026-10-12T10:00:00Z'), H = 3600000;
+  assert.equal(brake(hook('s7'), claude, { context: 90000, lastAt: t0 }, state, t0 + 5 * H), null, 'under 100k: never braked for idleness');
+  assert.equal(brake(hook('s7'), claude, { context: 150000, lastAt: t0 }, state, t0 + 30 * 60000), null, 'under an hour idle: the cache still holds');
+  const idle = brake(hook('s7', 'sigo'), claude, { context: 150000, lastAt: t0 }, state, t0 + 2 * H);
+  assert.match(idle.block.reason, /~150k tokens of context and was idle 2 h: its cache expired[\s\S]*Open a new session/);
+  assert.equal(brake(hook('s7', 'sigo'), claude, { context: 150000, lastAt: t0 }, state, t0 + 2 * H + 60000), null, 'resent in the same idle stretch: it continues');
+  assert.equal(brake(hook('s7', 'más tarde'), claude, { context: 160000, lastAt: t0 + 3 * H }, state, t0 + 5 * H).block.decision, 'block', 'a new idle stretch brakes again, even after the size brake or an earlier one');
+  assert.match(brake(hook('s8'), { out: {} }, { context: 150000, lastAt: t0 }, state, t0 + 2 * H).line, /idle 2 h: its cache expired/, 'an agent that cannot stop a prompt gets one line');
   assert.equal(brake(hook('s2'), codex, { context: 300000 }, state).block.decision, 'block', 'Codex 0.160 takes the same shape');
   const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
   assert.equal(brake(hook('s3'), gemini, { context: 300000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
@@ -2559,6 +2571,8 @@ test('sync: a project skill reached through Claude Code\'s link and through its 
   fs.mkdirSync(path.join(proj, '.agents/skills/proj-section'), { recursive: true });
   fs.writeFileSync(path.join(proj, '.agents/skills/proj-section/SKILL.md'), '---\nname: proj-section\ndescription: Proyecto proj. Agregar una sección.\n---\n');
   makeLink(path.join(proj, '.agents/skills/proj-section'), path.join(proj, '.claude/skills/proj-section'));
+  fs.mkdirSync(path.join(proj, '.agents/skills/_shared'), { recursive: true }); // another framework's shared files
+  fs.writeFileSync(path.join(proj, '.agents/skills/_shared/SKILL.md'), '---\nname: _shared\ndescription: shared files\n---\n');
   fs.mkdirSync(path.join(priv, 'projects'), { recursive: true });
   fs.writeFileSync(path.join(priv, 'projects', 'proj.md'), `# Project: proj\n\nPath: ${proj}\n`);
   const r = spawnSync(process.execPath, [path.join(tmp, 'skills/waymark/scripts/sync.mjs')], { encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: priv } });
@@ -2566,6 +2580,7 @@ test('sync: a project skill reached through Claude Code\'s link and through its 
   const rows = fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8').split('\n').filter((l) => l.startsWith('| `proj-section`'));
   assert.equal(rows.length, 1);
   assert.match(rows[0], /\.agents\/skills\/proj-section\/SKILL\.md/, 'the real folder, not the link');
+  assert.doesNotMatch(fs.readFileSync(path.join(tmp, 'skills/waymark/skill-registry.md'), 'utf8'), /_shared/, 'a "_name" folder is never a skill');
 });
 
 test('a script reached through a link runs (Waymark installed in ~/.agents/skills, registered through ~/.claude/skills)', async () => {
@@ -2581,4 +2596,20 @@ test('a script reached through a link runs (Waymark installed in ~/.agents/skill
     const r = spawnSync(process.execPath, [path.join(linked, 'scripts', hook)], { cwd: tmp, input: '{}', encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
     assert.match(r.stdout, /additionalContext/, `${hook} through the link`);
   }
+});
+
+test('hook health: every registered hook is probed as its agent runs it; one that does not answer (moved, linked, gone) is reported', async () => {
+  const { hooksHealth } = await import(`file://${SCRIPTS}/waymark.mjs`);
+  const { registered } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
+  const S = SCRIPTS.replace(/\\/g, '/');
+  const cmds = (agent) => ['session-hook', 'rule0-hook', 'tool-hook', 'stop-hook'].map((f) => `node "${S}/${f}.mjs"${agent === 'claude' ? '' : ` --agent ${agent}`}`);
+  assert.equal(hooksHealth(['claude', 'codex', 'gemini', 'opencode'].map((agent) => ({ agent, commands: cmds(agent) }))), '', 'all four answer in every agent');
+  assert.match(hooksHealth([{ agent: 'codex', commands: [`node "${S}/gone/stop-hook.mjs" --agent codex`] }]), /^hooks: not answering: codex stop-hook\.mjs — tasks there are not recorded/);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-probe-'));
+  temps.push(tmp);
+  const settings = path.join(tmp, 'probe-settings.json');
+  fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "${S}/stop-hook.mjs"` }, { type: 'command', command: 'echo theirs' }] }] } }));
+  const prev = process.env.WAYMARK_CLAUDE_SETTINGS;
+  process.env.WAYMARK_CLAUDE_SETTINGS = settings;
+  try { assert.deepEqual(registered().find((r) => r.agent === 'claude').commands, [`node "${S}/stop-hook.mjs"`], 'only Waymark\'s own commands'); } finally { process.env.WAYMARK_CLAUDE_SETTINGS = prev; }
 });

@@ -30,6 +30,7 @@ import { incidentsAt } from './incidents.mjs';
 import { pushNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
+import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { engramBin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
@@ -68,7 +69,7 @@ async function update() {
 export function skillNames(cwd) {
   const roots = [path.resolve(SCRIPTS, '..', '..'), ...['.claude', '.agents', '.codex', '.cursor', '.gemini', '.config/opencode'].map((d) => path.join(os.homedir(), ...d.split('/'), 'skills')),
     ...['.claude', '.agents', '.codex', '.cursor', '.gemini', '.opencode'].map((d) => path.join(cwd, d, 'skills'))];
-  return [...new Set(roots)].flatMap((r) => { try { return fs.readdirSync(r).filter((n) => fs.existsSync(path.join(r, n, 'SKILL.md'))).map((n) => `${norm(r)}/${n}`); } catch { return []; } }).sort();
+  return [...new Set(roots)].flatMap((r) => { try { return fs.readdirSync(r).filter((n) => !/^[._]/.test(n) && fs.existsSync(path.join(r, n, 'SKILL.md'))).map((n) => `${norm(r)}/${n}`); } catch { return []; } }).sort();
 }
 const sigFile = () => path.join(HOME(), '.skills-signature.json');
 
@@ -117,6 +118,37 @@ function learnedLayer(cwd) {
     if (n) out.push(`learned: ${home.memory.replace(/\\/g, '/')} still holds ${n} learned entries (Solved problems, Gotchas, Decisions), which now live in engram: node "${script('waymark.mjs')}" learned shows the plan, --apply on yes (history.md keeps their text).`);
   } catch {}
   return out.join('\n');
+}
+
+// Each registered hook run as its agent runs it, with a probe: a hook that does not answer runs nothing (a moved or
+// linked install, a path that no longer exists), and then no task is recorded.
+export function hooksHealth(list = registered()) {
+  const dead = [];
+  for (const { agent, commands } of list) {
+    for (const c of commands) {
+      const m = c.match(/node\s+"([^"]+)"(.*)$/) || c.match(/node\s+(\S+)(.*)$/);
+      if (!m) continue;
+      const r = spawnSync(process.execPath, [m[1], ...m[2].trim().split(/\s+/).filter(Boolean)], { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
+      if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(m[1])}`);
+    }
+  }
+  return dead.length ? `hooks: not answering: ${[...new Set(dead)].join(', ')} — tasks there are not recorded. Re-register them: node "${script('install-hooks.mjs')}" --agent <agent> (plan), then --apply.` : '';
+}
+
+// The task records ride as git notes on their commits; a squash or rebase merge on GitHub re-creates the commits and
+// leaves the notes behind. → the pending line when the project's GitHub repo allows either (read-only gh api call).
+export function mergeMethods(cwd) {
+  if (process.env.WAYMARK_NO_GH) return '';
+  const root = projectHome(cwd).root;
+  if (spawnSync('git', ['show-ref', '--verify', '--quiet', 'refs/notes/waymark'], { cwd: root, timeout: 3000 }).status !== 0) return '';
+  const url = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '';
+  const repo = url.trim().match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1];
+  if (!repo) return '';
+  const r = spawnSync('gh', ['api', `repos/${repo}`, '--jq', '[.allow_squash_merge, .allow_rebase_merge] | @json'], { encoding: 'utf8', timeout: 8000 });
+  let flags = null;
+  try { flags = JSON.parse(String(r.stdout || '').trim()); } catch { return ''; }
+  if (!Array.isArray(flags) || !flags.some(Boolean)) return '';
+  return `notes: ${repo} allows ${['squash', 'rebase'].filter((_, i) => flags[i]).join(' and ')} merges, which re-create the commits and leave the task records (git notes) behind. Merge pull requests with a merge commit, or allow only that (the user's setting: ask first): gh api -X PATCH repos/${repo} -F allow_squash_merge=false -F allow_rebase_merge=false`;
 }
 
 function agents() {
@@ -182,6 +214,8 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
   await add(agents);
+  await add(() => hooksHealth());
+  await add(() => mergeMethods(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {

@@ -69,6 +69,24 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
 // The plugin as installed: the template with this scripts folder in place.
 export const pluginText = (scripts = SCRIPTS) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents', 'opencode-plugin.js'), 'utf8').replace("'__SCRIPTS__'", JSON.stringify(scripts));
 
+// The Waymark hook commands each agent has registered: { agent, file, commands[] } for every settings file (or the
+// OpenCode plugin) that names one. → [] when no agent has them.
+export function registered() {
+  const out = [];
+  for (const [agent, at] of Object.entries(SETTINGS)) {
+    const file = at();
+    let s = null;
+    try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+    const commands = [...new Set(Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || []).map((h) => String(h?.command || ''))).filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
+    if (commands.length) out.push({ agent, file, commands });
+  }
+  try {
+    const file = PLUGIN(), text = fs.readFileSync(file, 'utf8'), scripts = text.match(/const SCRIPTS = "([^"]+)"/)?.[1];
+    if (scripts) out.push({ agent: 'opencode', file, commands: ['session-hook.mjs', 'rule0-hook.mjs', 'tool-hook.mjs', 'stop-hook.mjs'].map((f) => `node "${scripts}/${f}" --agent opencode`) });
+  } catch {}
+  return out;
+}
+
 function coexistMode() {
   try { return fs.readFileSync(path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'coexistence.md'), 'utf8').match(/^Mode:\s*(\S+)/m)?.[1] || ''; } catch { return ''; }
 }

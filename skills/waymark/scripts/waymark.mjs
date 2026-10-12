@@ -6,7 +6,9 @@
 //   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks [args]   the existing scripts, args passed on
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
-//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
+//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin)
+//   node waymark.mjs notes setup [<remote>] on the user's yes: a fetch refspec so fetches bring the remote's records
+//                                           (into refs/notes/remotes/<remote>/waymark, merged at session start), then a fetch
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
@@ -27,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
 import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
 import { incidentsAt } from './incidents.mjs';
-import { pushNotes } from './notes.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
@@ -217,6 +219,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => hooksHealth());
   await add(() => hookErrors());
   await add(() => mergeMethods(cwd));
+  await add(() => notesState(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -225,6 +228,16 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
     fs.writeFileSync(path.join(HOME(), '.check.json'), JSON.stringify({ ...st, checkedAt: Date.now() }));
   } catch {}
   return items;
+}
+
+// The task records (git notes) against origin, without network: a project whose fetches do not bring them (a clone
+// brings branches only) and note commits not pushed yet. → the pending lines, or ''.
+export function notesState(cwd) {
+  const home = projectHome(cwd), root = home.root;
+  if (!home.dir || home.legacy || !hasRemote(root)) return '';
+  if (!hasFetchSpec(root)) return `notes: fetches from origin here do not bring the task records (git notes; a clone brings branches only), so another machine's tasks are missing from tasks.md and the card. Offer, with the choice window: node "${script('waymark.mjs')}" notes setup — adds one fetch refspec to .git/config (into refs/notes/remotes/origin/waymark, never over the local notes), fetches and merges.`;
+  const n = unpushedNotes(root);
+  return n > 0 ? `notes: ${n} commit${n > 1 ? 's' : ''} of task records (git notes) not pushed to origin. Offer: node "${script('waymark.mjs')}" notes push` : '';
 }
 
 // A hook's own failures (provenance.mjs logHookError) of the last 7 days: their count and the newest. → the line, or ''.
@@ -374,6 +387,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done.length) refreshTasks(home, true);
     console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
     process.exitCode = done.length ? 0 : 1;
+  } else if (sub === 'notes' && rest[0] === 'setup') {
+    const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
+    console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
+    process.exitCode = r.ok ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
     const r = pushNotes(process.cwd(), rest[1] || 'origin');
     console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
@@ -387,7 +404,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

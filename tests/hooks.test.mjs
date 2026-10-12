@@ -2303,7 +2303,7 @@ if (a[0] === 'sync' && a[1] !== '--import') { fs.mkdirSync('.engram/chunks', { r
 };
 const withEngram = async (bin, fn) => { const prev = process.env.WAYMARK_ENGRAM; process.env.WAYMARK_ENGRAM = bin; try { return await fn(); } finally { process.env.WAYMARK_ENGRAM = prev; } };
 
-test('engram layer: the close saves the Aprendido under the project slug (config pinned), nothing is exported or staged for git, chunks import once, the card reads the latest', async () => {
+test('engram layer: the close saves the Aprendido under the project slug (config pinned), nothing is exported or staged for git, the card reads the latest', async () => {
   const e = await import(`file://${SCRIPTS}/engram.mjs`);
   const repo = memRepo('engram-layer'), h = projectHome(repo), fake = fakeEngram();
   await withEngram(fake.bin, async () => {
@@ -2311,14 +2311,11 @@ test('engram layer: the close saves the Aprendido under the project slug (config
     assert.equal(e.saveLearned(h, rec), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repo, '.engram', 'config.json'), 'utf8')), { project_name: h.slug });
     const save = fake.calls().find((c) => c[0] === 'save');
-    assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · contador en rojo', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
-    assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
+    assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · reusar el rojo de errores ← html:89', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
+    assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nPedido: contador en rojo\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
     assert.equal(e.saveLearned(h, { ...rec, cierre: 'Resultado: hecho' }), false, 'no Aprendido, nothing to learn');
     assert.equal(e.stageForCommit, undefined, 'the learned memory stays local (docs/adr/0017)');
     assert.ok(!fake.calls().some((c) => c[0] === 'sync'), 'no export to .engram/');
-    fs.writeFileSync(path.join(repo, '.engram', 'manifest.json'), '{}');
-    const state = path.join(home, 'engram-import-test.json');
-    assert.deepEqual([e.importChunks(h, state), e.importChunks(h, state)], [true, false], 'once per manifest change');
     assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
   });
   assert.deepEqual([e.saveLearned(h, { id: 'x', cierre: 'Aprendido: y' }), e.learnedLines(h)], [false, []], 'no engram: a no-op, Waymark keeps git and memory.md');

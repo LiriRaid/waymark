@@ -1,8 +1,9 @@
 // Waymark · the learned-memory layer (docs/adr/0015, 0017). The hooks write and read engram through its CLI, so every
 // agent on this machine shares one learned memory whether or not it has engram's MCP server:
-// - saveLearned: at each close, the task's Aprendido, decisions, files and commit (`engram save`, topic = task ID, so a
-//   re-close of the same task updates its memory instead of adding one);
-// - importChunks: at session start, `engram sync --import` loads chunks a repo still carries in .engram/;
+// - saveLearned: at each close, the task's Aprendido, request, decisions, files and commit (`engram save`, titled with
+//   the Aprendido; topic = the task's ID without its follow-up letter, so a re-close or a follow-up updates the task's
+//   memory instead of adding one);
+// - saveQuestion: a Q whose reply ends with an Aprendido line, marked Q (one topic per question);
 // - learnedLines: the project's latest memories, for the context card.
 // The memory stays local: .engram/ is git-ignored and nothing is exported to it. The project name is Waymark's slug,
 // pinned in .engram/config.json so engram's own MCP server resolves the same name.
@@ -12,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { maskSecrets } from './provenance.mjs';
+import { maskSecrets, ID } from './provenance.mjs';
 
 const ENV = () => ({ ...process.env, ENGRAM_NO_UPDATE_CHECK: '1' });
 let found;
@@ -50,8 +51,12 @@ const projectOf = (home) => { try { return JSON.parse(fs.readFileSync(configFile
 const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
 const aprendido = (cierre) => String(cierre || '').replace(/\*\*|__/g, '').match(/^\s*Aprendido:[ \t]*(.+)$/im)?.[1]?.trim() || '';
 
-// The memory of a closed task: title "<id> · <prompt>", the Aprendido first. A task closed with testigos left unresolved
-// is saved as "sin verificar" with the steps that failed, so the lesson is kept but never read as proven. → true when saved.
+// The task a follow-up belongs to: its ID without the follow-up letter.
+const taskOf = (id) => { const m = String(id).match(ID); return m ? `${m[1]} · T${m[2]}` : String(id); };
+
+// The memory of a closed task: title "<id> · <Aprendido>", the Aprendido first and the request below it. A task closed
+// with testigos left unresolved is saved as "sin verificar" with the steps that failed, so the lesson is kept but never
+// read as proven. → true when saved.
 export function saveLearned(home, rec) {
   const learned = aprendido(rec?.cierre);
   if (!rec?.id || !learned || !engramBin()) return false;
@@ -61,37 +66,43 @@ export function saveLearned(home, rec) {
   const content = [
     rec.unresolved?.length ? `Sin verificar: ${unverified.join(', ') || rec.unresolved.length}` : '',
     `Aprendido: ${learned}`,
+    rec.prompt ? `Pedido: ${clip(rec.prompt, 160)}` : '',
     decisions.length ? `Decisión: ${clip(decisions.join(' · '), 300)}` : '',
     rec.files?.length ? `Archivos: ${[...new Set(rec.files.map((f) => path.basename(f)))].slice(0, 12).join(', ')}` : '',
     rec.commits?.length ? `Commit: ${rec.commits.map((c) => c.slice(0, 8)).join(', ')}` : '',
     `Agente: ${rec.agent || '?'}`,
   ].filter(Boolean).join('\n');
   // never a secret in engram: its store is gzipped or SQLite, where the secrets testigo cannot read it
-  const r = run(home, ['save', maskSecrets(`${rec.id} · ${rec.unresolved?.length ? 'sin verificar · ' : ''}${clip(rec.prompt, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${rec.id}`]);
+  const r = run(home, ['save', maskSecrets(`${rec.id} · ${rec.unresolved?.length ? 'sin verificar · ' : ''}${clip(learned, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/${taskOf(rec.id)}`]);
   return !!r?.ok;
 }
 
-// At session start: import chunks the repo brought, once per manifest change (state in WAYMARK_HOME).
-export function importChunks(home, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.engram-import.json')) {
-  const manifest = path.join(home.root, '.engram', 'manifest.json');
-  let mtime = 0;
-  try { mtime = fs.statSync(manifest).mtimeMs; } catch { return false; }
-  let st = {};
-  try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-  const key = home.root.replace(/\\/g, '/').toLowerCase();
-  if (st[key] === mtime || !engramBin()) return false;
-  const r = run(home, ['sync', '--import'], 10000);
-  if (r?.ok) { st[key] = mtime; try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(st)); } catch {} }
+// The lesson of a question (questionRecord's `learned`): title "Q · <date> · <Aprendido>". → true when saved.
+export function saveQuestion(home, q) {
+  if (!q?.learned || !engramBin()) return false;
+  const project = ensureConfig(home), day = String(q.at || new Date().toISOString()).slice(0, 10);
+  const content = [`Aprendido: ${q.learned}`, q.prompt ? `Pregunta: ${clip(q.prompt, 160)}` : '', `Agente: ${q.agent || '?'}`].filter(Boolean).join('\n');
+  const r = run(home, ['save', maskSecrets(`Q · ${day} · ${clip(q.learned, 70)}`), maskSecrets(content), '--type', 'learning', '--project', project, '--topic', `waymark/Q/${q.at || day}`]);
   return !!r?.ok;
 }
 
-// The project's latest memories, newest first: "<title>: <content>" (from `engram context <project>`). → lines.
-export function learnedLines(home, n = 3, width = 150) {
+// The project's latest memories, newest first: "<title>: <content>" (from `engram context <project>`). A task's memory
+// titled "<id> · <Aprendido>" shows "<id> · <the whole Aprendido>"; the task in `skip` (the card's last closed, already
+// shown there) is left out. → lines.
+export function learnedLines(home, n = 3, width = 150, skip = null) {
   if (!engramBin()) return [];
   const r = run(home, ['context', projectOf(home)]);
   if (!r?.ok) return [];
   const obs = (r.out.split(/^### Recent Observations\s*$/m)[1] || '').split('\n').map((l) => l.match(/^- \[[^\]]*\] \*\*(.+?)\*\*:\s*(.*)$/)).filter(Boolean);
   // a memory whose body repeats its title (moved from memory.md: "[date] <title>…") shows the body alone
   const same = (title, body) => body.replace(/^\[[^\]]*\]\s*/, '').startsWith(title.replace(/…$/, ''));
-  return obs.slice(0, n).map(([, title, body]) => clip(same(title, body) ? body : `${title}: ${body}`, width));
+  const line = (title, body) => {
+    const id = title.match(ID)?.[0];
+    const rest = id && title.startsWith(id) ? title.slice(id.length).replace(/^\s*·\s*/, '') : '';
+    const mark = rest.startsWith('sin verificar · ') ? 'sin verificar · ' : '';
+    const lesson = rest.slice(mark.length).replace(/…$/, '');
+    if (lesson && body.startsWith(`Aprendido: ${lesson}`)) return `${id} · ${mark}${body.slice('Aprendido: '.length)}`;
+    return same(title, body) ? body : `${title}: ${body}`;
+  };
+  return obs.filter(([, title]) => !skip || title.match(ID)?.[0] !== skip).slice(0, n).map(([, title, body]) => clip(line(title, body), width));
 }

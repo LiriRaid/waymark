@@ -2,7 +2,7 @@
 
 Part of the `waymark` core skill. Paths are relative to the core skill folder (`<skills-dir>/waymark/`). Read only when the instructions file or a department points here.
 
-Run at the end of every L1+ task (Exit → Learn). **Work in progress** is written by the end-of-turn hook, never by hand: one line per task, `- ✔|▶ [<task ID>] <Aprendido>` (≤200 characters; ✔ when Resultado is hecho, the newest 5 kept), taken from the Cierre's Aprendido. A follow-up replaces its task's line; longer or older lines move whole to `history.md`. `tasks.md` is generated from those lines and the records (git notes + `provenance.jsonl`); a line without an ID at its head is a note.
+Run at the end of every L1+ task (Exit → Learn). **Work in progress** is written by the end-of-turn hook, never by hand: one line per task, `- ✔|▶ [<task ID>] <Aprendido>` (≤200 characters), taken from the Cierre's Aprendido, while the task is open (▶: parcial, bloqueado, or hecho with a testigo unresolved); a task done leaves the section, its whole record stays in git and `tasks.md`. A follow-up replaces its task's line; longer or older lines move whole to `history.md`. `tasks.md` is generated from those lines and the records (git notes + `provenance.jsonl`); a line without an ID at its head is a note.
 
 After each L1+ task, collect what was **non-obvious and new**: something you had to discover, a correction from the user, a command or flag that was needed, a library quirk, a mistake you made. Discard anything already stated anywhere in Waymark.
 
@@ -33,12 +33,12 @@ Format: `- [YYYY-MM-DD] <lesson> — <why> (source: <project>)`.
 
 **5. Project skills.** When the same project-specific procedure has been done twice (project memory → *Repeated procedures*), or the user asks, generate a skill **inside the project**: `<project>/.agents/skills/<slug>-<topic>/SKILL.md`, its `name` equal to the folder, from `templates/project-skill.template.md`, with the trigger phrases the user actually used. That is the only real copy: every agent reads it, and the session hook links it into `.claude/skills` for Claude Code. Never write it into an agent's own folder. Both folders stay out of git, like `.waymark/` (docs/adr/0017). Register it in project memory and run `node scripts/sync.mjs`. Ask before writing into the repository.
 
-**6. Three layers (docs/adr/0015).** git holds what was done (commits, notes); engram what was learned (the hook saves each Aprendido in engram's local store; `.engram/` stays out of git, docs/adr/0017); memory.md the project manual. Never `mem_save` by hand what the Cierre holds.
+**6. Three layers (docs/adr/0015).** git holds what was done (commits, notes); engram what was learned (the hook saves each Aprendido in engram's local store, titled with it; a follow-up writes its task's topic, so it replaces that task's lesson; a Q whose reply ends with an `Aprendido:` line is saved too, marked Q; `.engram/` stays out of git, docs/adr/0017); memory.md the project manual. Never `mem_save` by hand what the Cierre holds.
 
 **7. Memory hygiene (memory points, the code decides).** Persistent memory makes an agent hallucinate when it is stale, retrieved for the wrong project, too large, or holds guesses written as facts. So:
 - Write only what was verified, with its evidence (`decision ← evidence`, `file:line`, the command that proved it) and the date; a hypothesis is written as one (`hipótesis: …`) or not at all.
 - When a memory entry and the code disagree, the code wins: fix or delete the entry in the same task and say so.
-- A learned memory whose file, component or dependency no longer exists, or whose fix was reverted, is corrected in a later Cierre (same topic) or deleted with `engram`. *Work in progress* entries the session hook flags as old are confirmed with the user or closed (`Status: idle`).
+- A learned memory whose file, component or dependency no longer exists, or whose fix was reverted, is corrected in a follow-up's Cierre (`<task ID>b`: same topic, it replaces the lesson) or deleted with `engram`. *Work in progress* entries the session hook flags as old are confirmed with the user or closed (`Status: idle`).
 - The code is the source of truth, then git (what was done), then engram (what was learned). memory.md holds only the manual: Identity, map, gates, conventions.
 - Keep memory.md short: conventions every task needs; one-off lessons belong in engram.
 

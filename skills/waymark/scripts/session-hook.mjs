@@ -13,8 +13,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, logHookError, PROBE_OK } from './provenance.mjs';
-import { repairNotes, noteLateCommits } from './notes.mjs';
-import { importChunks, learnedLines } from './engram.mjs';
+import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes } from './notes.mjs';
+import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
@@ -72,7 +72,7 @@ export function digest(cwd, agentName = 'claude') {
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) { importChunks(home); learned = learnedLines(home); } } catch {}
+  try { if (!home.legacy) learned = learnedLines(home, 3, 150, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
   const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
   out.push(`Commands (W = ${cmd}): the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
@@ -80,7 +80,7 @@ export function digest(cwd, agentName = 'claude') {
   // the card's cap trims this before the commands
   try {
     const sib = workspaceSiblings(home.root).slice(0, 4).map((h) => {
-      const closed = readTaskRecords(h, { last: 3 }).filter((r) => r.id).slice(-3).reverse(); // the newest 3, newest first
+      const closed = readTaskRecords(h).filter((r) => r.id).slice(-3).reverse(); // the newest 3, newest first
       const openIds = section('\n' + read(h.memory), 'Work in progress').map((l) => l.match(/^-\s*▶\s*\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
       const lines = closed.map((r) => `  - ${r.id} · ${r.agent || '?'} · ${clip(aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')) || '', 120)}`);
       return `- ${path.basename(h.root)}${openIds.length ? ` (open ▶ ${openIds.join(', ')})` : ''}:${lines.length ? `\n${lines.join('\n')}` : ' no task closed yet'}`;
@@ -136,8 +136,12 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     let cwd = process.cwd(), sessionId = null;
     try { const h = JSON.parse(input); cwd = h.cwd || cwd; sessionId = h.session_id || null; if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } } catch {}
     let text = '', held = '';
+    // the remote's records a fetch brought (the refspec of `waymark.mjs notes setup`) join the local notes before the card
+    let joined = false;
+    try { const root = projectHome(cwd).root; joined = hasFetchSpec(root) && mergeNotes(root); } catch (e) { logHookError('session-hook notes', e); }
     try {
       text = CARD_HEAD + digest(cwd, agent.name);
+      if (joined) text += '\nNotes: the records the remote brought joined the local ones (git notes merge).';
       // a note a rebase or amend left on the old commit follows the task to its new commit
       try {
         const home = projectHome(cwd), records = home.dir && !home.legacy ? readRecords(home.log) : [];

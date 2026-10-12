@@ -281,7 +281,7 @@ export function tidyWip(home, now = new Date()) {
 // The section, rewritten: the task's line (when given) in place of its task's lines, then every line moved whole to
 // history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
 // that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
-// closed (✔) lines beyond the newest 5. A note (no ID at its head) is never moved except when over 200 characters.
+// every closed (✔) line (DONE_KEPT: a task done lives in its record). A note (no ID at its head) is never moved except when over 200 characters.
 function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
@@ -335,17 +335,39 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
 // The git note a log line points to ({ commit, sha }), or null: only an object with a commit counts.
 export const gitNote = (r) => (r?.note && typeof r.note === 'object' && typeof r.note.commit === 'string' ? r.note : null);
 
-// Every record of the log with its note read back: a stub becomes the whole record (note fields, then the stub's).
-// With `last`: only the last N task records are read back (the others stay stubs).
-export function readTaskRecords(home, { last = Infinity } = {}) {
-  const records = readRecords(home.log);
-  const tasks = records.filter((r) => r.id), wanted = new Set(tasks.slice(Math.max(0, tasks.length - last)).filter(gitNote));
-  if (!wanted.size) return records;
-  const notes = readNotes(home.root, [...wanted].map((r) => r.note.commit));
-  return records.map((r) => {
-    if (!wanted.has(r)) return r;
-    try { return { ...JSON.parse(notes.get(r.note.commit)), ...r }; } catch { return { ...r, noteMissing: true }; }
+// One task close: its ID and the session that closed it (two machines can give the same ID the same day).
+const closeKey = (r) => `${r.id}|${r.session || ''}`;
+// In date order; records without a date, and ties, keep their order.
+const byDate = (list) => list.map((r, i) => [r, i]).sort(([a, i], [b, j]) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0) || i - j).map(([r]) => r);
+
+// The task records that live only as notes (a clone, another machine, a log started over): every note whose close
+// (ID + session) has no line in `records`, one per close (a rebase copies a note), each with `fromNote: <commit>`.
+// Not chained: git hashes them.
+function noteOnly(notes, records) {
+  const inLog = new Set(records.filter((r) => r.id).map(closeKey)), out = new Map();
+  for (const [commit, text] of notes) {
+    let r = null;
+    try { r = JSON.parse(text); } catch { continue; }
+    if (r?.id && ID.test(String(r.id)) && !inLog.has(closeKey(r)) && !out.has(closeKey(r))) out.set(closeKey(r), { ...r, fromNote: commit });
+  }
+  return [...out.values()];
+}
+
+// Every task record, from the log and from the notes (one git list and one batch read), in date order: a stub becomes
+// the whole record (note fields, then the stub's); a whole log line that a later commit also carries as a note (same
+// close) takes the note's fields; a record that is only a note joins.
+export function readTaskRecords(home) {
+  const records = readRecords(home.log), notes = readNotes(home.root);
+  const byClose = new Map();
+  for (const [, text] of notes) { try { const r = JSON.parse(text); if (r?.id && !byClose.has(closeKey(r))) byClose.set(closeKey(r), r); } catch {} }
+  const merged = records.map((r) => {
+    const gn = gitNote(r);
+    if (gn) { try { return { ...JSON.parse(notes.get(gn.commit)), ...r }; } catch { return { ...r, noteMissing: true }; } }
+    const n = r.id && byClose.get(closeKey(r));
+    return n ? { ...r, ...n, prev: r.prev, hash: r.hash } : r;
   });
+  const only = noteOnly(notes, records);
+  return only.length ? byDate([...merged, ...only]) : merged;
 }
 
 // tasks.md from memory.md (Work in progress) and the records (done tasks). The agent never edits it (docs/adr/0007).
@@ -365,7 +387,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const result = (r, later = []) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : '');
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
-  const all = readTaskRecords(home, { last: 8 }), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
+  const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
   const questions = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q').length; // since the last close
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
   const source = (r) => (gitNote(r) ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
@@ -420,8 +442,14 @@ export function readRecords(file) {
 const localDay = (now) => now.toLocaleDateString('sv'); // YYYY-MM-DD in local time
 const base = (id) => { const m = String(id).match(ID); return m ? `${m[1]} · T${m[2]}` : null; };
 
+// The log's records plus those that are only notes (their IDs are taken too: a clone never reuses one).
+const knownRecords = (cwd) => {
+  const records = readLog(cwd);
+  try { const only = noteOnly(readNotes(projectHome(cwd).root), records); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
+};
+
 // The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded.
-export function taskIds(cwd, now = new Date(), records = readLog(cwd)) {
+export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   const day = localDay(now);
   const n = Math.max(0, ...records.map((r) => String(r.id || '').match(ID)).filter((m) => m && m[1] === day).map((m) => Number(m[2])));
   const known = new Set(records.map((r) => r.id).filter(Boolean));

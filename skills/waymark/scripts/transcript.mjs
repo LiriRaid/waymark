@@ -5,6 +5,9 @@ import fs from 'node:fs';
 
 const TAIL = 2 * 1024 * 1024; // bytes read from the end of a transcript by the hooks
 
+// A command's output as the testigos read it: its start and its end (a summary such as "Found 2 errors" or "fail 1" comes
+// last), 800 characters at most.
+export const clipOutput = (s) => { s = String(s || ''); return s.length > 800 ? `${s.slice(0, 400)}\n…\n${s.slice(-400)}` : s; };
 export const parseLines = (text) => text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 
 export function readTail(file, bytes = TAIL) {
@@ -22,21 +25,27 @@ export const promptText = (d) => {
   return typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
 };
 
+// The summary a context compaction writes to continue the session is no prompt either. Its shape is not documented
+// (code.claude.com/docs/en/sessions: the transcript format is internal), so both known markers are checked:
+// isCompactSummary and the summary's opening sentence.
+const COMPACTED = /^\s*This session is being continued from a previous conversation/;
 export const isPrompt = (d) => {
-  if (d.type !== 'user' || d.isMeta || d.isSidechain) return false;
+  if (d.type !== 'user' || d.isMeta || d.isSidechain || d.isCompactSummary) return false;
   const c = d.message?.content;
   if (Array.isArray(c) && c.some((x) => x.type === 'tool_result')) return false;
   const text = promptText(d);
   // A Stop-hook block reason fed back to the agent is not the user's prompt (the blocked turn's edits stay in its turn).
-  return !!text.trim() && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
+  return !!text.trim() && !COMPACTED.test(text) && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
 };
 
-// Reads the transcript tail, doubling it until it holds `prompts` user prompts or the whole file (max 64 MB): a pasted
-// image is a line of megabytes, and a turn whose prompt fell out of the tail was read as "no turn" — the gate skipped it
-// and the record counted the whole tail. read(bytes) → lines.
-export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024) {
+// Reads the transcript tail, doubling it until it holds `prompts` user prompts and, with `since` (ms, the task's start),
+// reaches back to it, or the whole file (max 64 MB): a pasted image is a line of megabytes, and a turn whose prompt fell
+// out of the tail was read as "no turn" — the gate skipped it and the record counted the whole tail. read(bytes) → lines.
+export function readTurns(read, prompts = 3, start = TAIL, max = 64 * 1024 * 1024, since = 0) {
+  const first = (lines) => Date.parse(lines.find((d) => d.timestamp)?.timestamp || '') || 0;
+  const short = (lines) => lines.filter(isPrompt).length < prompts || (since > 0 && first(lines) > since);
   let lines = read(start);
-  for (let bytes = start * 2; bytes <= max && lines.filter(isPrompt).length < prompts; bytes *= 2) {
+  for (let bytes = start * 2; bytes <= max && short(lines); bytes *= 2) {
     const more = read(bytes);
     if (more.length <= lines.length) break; // the whole file was already read
     lines = more;
@@ -72,6 +81,11 @@ export function pendingBackground(lines, since = 0) {
   return launched.filter((id) => !notified.includes(`<tool-use-id>${id}</tool-use-id>`));
 }
 
+// A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own
+// name ("dept-qa"), so departments, procedures and re-routes match either install.
+const PLUGIN = /^waymark:/;
+export const toolInput = (c) => (c.name === 'Skill' && PLUGIN.test(String(c.input?.skill || '')) ? { ...c.input, skill: c.input.skill.replace(PLUGIN, '') } : c.input || {});
+
 // The current turn: everything after the last prompt (and after `since`). Returns its assistant texts and tool calls
 // (main agent only).
 export function currentTurn(lines, since = 0) {
@@ -82,12 +96,12 @@ export function currentTurn(lines, since = 0) {
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) {
-      for (const c of d.message.content) if (c.type === 'tool_result') results[c.tool_use_id] = { at, error: !!c.is_error, text: (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 400) };
+      for (const c of d.message.content) if (c.type === 'tool_result') results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')) };
     }
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {
       if (c.type === 'text' && c.text.trim()) texts.push(c.text);
-      if (c.type === 'tool_use') tools.push({ name: c.name, input: c.input || {}, id: c.id, at });
+      if (c.type === 'tool_use') tools.push({ name: c.name, input: toolInput(c), id: c.id, at });
     }
   }
   const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
@@ -99,7 +113,7 @@ export function currentTurn(lines, since = 0) {
 export function sessionTools(lines) {
   const out = [], byId = {};
   for (const d of lines) {
-    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: c.input || {}, out: '', id: c.id }; out.push(t); byId[c.id] = t; }
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'tool_use') { const t = { name: c.name, input: toolInput(c), out: '', id: c.id }; out.push(t); byId[c.id] = t; }
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) for (const c of d.message.content) if (c.type === 'tool_result' && byId[c.tool_use_id]) Object.assign(byId[c.tool_use_id], { out: (typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')).slice(0, 200), error: !!c.is_error }); // an edit the gate denied changed nothing
   }
   return out;
@@ -181,7 +195,7 @@ export function sessionState(lines) {
 const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*(?:\||or)\s*Q)?|Q)\b(?:\s*·\s*((?:dept-)?(?:architecture|backend|data|devex|devops|frontend|product|qa|security|ux-ui))\b(?!-))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
 const reroute = (tools = []) => {
-  const r = tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
+  const r = tools.map((t) => ({ ...t, input: toolInput(t) })).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
   return r.length ? { level: Number(String(r[r.length - 1].input.args).trim()[1]), dept: String(r[r.length - 1].input.skill) } : null;
 };
 export function routedLevel(texts, tools) {
@@ -223,4 +237,22 @@ export function routedDept(texts, tools) {
   const all = routes(texts);
   const dept = all.length ? all[all.length - 1][3] : null;
   return dept ? (dept.startsWith('dept-') ? dept : `dept-${dept}`) : null;
+}
+
+// The questions a message ends asking, when it offers options: the block of question and option lines it ends with
+// (and the line just before it, "Opciones: 1) A 2) B"), with at least 2 options among option lines ("- A", "1) A",
+// "a. A"), an inline enumeration ("1) A 2) B") or "A o B" inside a question. → the question lines, or [].
+const OPTION_LINE = /^\s*(?:[-*•]|\d+[.)]|[a-zA-Z][.)])\s+\S/;
+const QUESTION_LINE = /\?[\s*_)]*$/;
+export function closingQuestions(text) {
+  const lines = String(text || '').replace(/\*\*|__/g, '').split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
+  let i = lines.length;
+  while (i > 0 && (QUESTION_LINE.test(lines[i - 1]) || OPTION_LINE.test(lines[i - 1]))) i--;
+  const block = lines.slice(i), questions = block.filter((l) => QUESTION_LINE.test(l)).map((l) => l.trim());
+  if (!questions.length) return [];
+  const lead = i > 0 ? lines[i - 1] : '';
+  const inline = (l) => (l.match(/(?:^|\s)\d+[.)]\s+\S/g) || []).length;
+  const either = (l) => (QUESTION_LINE.test(l) && /\S\s+(?:o|u|or)\s+\S/i.test(l) ? 2 : 0);
+  const options = Math.max(block.filter((l) => OPTION_LINE.test(l)).length, ...[lead, ...block].map(inline), ...block.map(either));
+  return options >= 2 ? questions : [];
 }

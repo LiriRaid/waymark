@@ -7,9 +7,9 @@
 // - instructions / sessions(): the user's instructions file (hashed into the record) and the transcripts of a folder.
 // - lacks / note(skillsDir): routine steps the agent has no capability for, and one line on how it does the rest.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { readTail } from '../transcript.mjs';
+import { claudeDir } from './paths.mjs';
 
 export const name = 'claude';
 
@@ -30,7 +30,7 @@ export const out = {
   notice: (text) => ({ systemMessage: text }), // shown to the user, not added to the model's context
 };
 
-export const instructions = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+export const instructions = path.join(claudeDir(), 'CLAUDE.md');
 export const preContext = true; // a pre-tool hook can add context and let the tool run (additionalContext, no permissionDecision)
 export const lacks = []; // routine steps this agent cannot do (recorded as not applicable); Claude Code has them all
 export const note = () => ''; // how this agent does what the routine names in Claude terms (added to the reminder and the gate)
@@ -38,7 +38,7 @@ export const note = () => ''; // how this agent does what the routine names in C
 // Transcripts of the sessions opened in cwd, newest first (Claude Code names the folder after cwd, every
 // non-alphanumeric character as "-").
 export function sessions(cwd) {
-  const dir = path.join(process.env.WAYMARK_CLAUDE_PROJECTS || path.join(os.homedir(), '.claude', 'projects'), String(cwd).replace(/[^a-zA-Z0-9]/g, '-'));
+  const dir = path.join(process.env.WAYMARK_CLAUDE_PROJECTS || path.join(claudeDir(), 'projects'), String(cwd).replace(/[^a-zA-Z0-9]/g, '-'));
   try {
     return fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).map((n) => path.join(dir, n))
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);

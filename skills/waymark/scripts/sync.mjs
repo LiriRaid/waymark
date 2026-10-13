@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { discoverMcp } from './agents/paths.mjs'; // every agent's MCP config, where its environment variables put it
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = os.homedir();
@@ -122,19 +123,6 @@ function discover() {
   return { skills: [...seen.values()].filter((s) => !OWN.test(s.name)), projects };
 }
 
-function discoverMcp() {
-  const names = new Set();
-  const add = (o) => { for (const n of Object.keys(o || {})) names.add(n); };
-  const claude = readJson(path.join(HOME, '.claude.json')) || {};
-  add(claude.mcpServers);
-  for (const p of Object.values(claude.projects || {})) add(p?.mcpServers);
-  add(readJson(path.join(HOME, '.cursor', 'mcp.json'))?.mcpServers);
-  add(readJson(path.join(HOME, '.gemini', 'settings.json'))?.mcpServers);
-  add(readJson(path.join(HOME, '.config', 'opencode', 'opencode.json'))?.mcp);
-  const codex = readText(path.join(HOME, '.codex', 'config.toml')) || '';
-  for (const m of codex.matchAll(/^\[mcp_servers\.("?)([^"\]]+)\1\]/gm)) names.add(m[2]);
-  return names;
-}
 
 function autoAssign(skill) {
   if (REPLACED[skill.name]) return ['replaced'];

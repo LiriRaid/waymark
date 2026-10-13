@@ -2,12 +2,12 @@
 
 | Key | Value |
 |---|---|
-| `<skills-dir>` | `~/.claude/skills` |
+| `<skills-dir>` | `~/.agents/skills`, one real copy for every agent (`docs/adr/0017`); Claude Code reads only `~/.claude/skills`, so each Waymark skill gets a link there (`skill-links.mjs --user`: a junction on Windows, a symlink elsewhere). `~/.claude/skills` holds real folders only for skills the user wants in Claude Code alone |
 | `<project-skills-dir>` | `.agents/skills`, linked from `.claude/skills` (the only one Claude Code reads) by the session hook: a junction on Windows, a symlink elsewhere (`docs/adr/0017`) |
 | `<instructions-file>` | `~/.claude/CLAUDE.md` |
 | `<project-instructions-file>` | `CLAUDE.md` at the project root |
 | Skill loading | native (`Skill` tool, triggered by each skill's `description`) |
-| Hooks | `~/.claude/settings.json`: `UserPromptSubmit` → `rule0-hook.mjs`, `SessionStart` → `session-hook.mjs`, `PreToolUse` (matcher `Bash|PowerShell|Edit|Write|NotebookEdit`) → `tool-hook.mjs`, `Stop` → `stop-hook.mjs`, written by `install-hooks.mjs` (INSTALL §7.2) |
+| Hooks | `~/.claude/settings.json` (`CLAUDE_CONFIG_DIR` moves the whole folder): `UserPromptSubmit` → `rule0-hook.mjs`, `SessionStart` → `session-hook.mjs`, `PreToolUse` (matcher `Bash|PowerShell|Edit|Write|NotebookEdit`) → `tool-hook.mjs`, `Stop` → `stop-hook.mjs`, and `statusLine` → `statusline.mjs` (quota and context; a status line you had runs after it, `~/.waymark/statusline.json`), written by `install-hooks.mjs` (INSTALL §7.2) |
 | Hook adapter | `skills/waymark/scripts/agents/claude.mjs` (the default; `docs/adr/0008`): transcript reader, pre-tool input, output shapes, `~/.claude/CLAUDE.md`, `~/.claude/projects/<cwd>` |
 | Restart needed | yes, start a new session after installing |
 
@@ -28,4 +28,4 @@ These exist natively in Claude Code: `Explore` / `Plan` / `general-purpose` agen
 
 ## Alternative: plugin
 
-The repository also contains `.claude-plugin/`. `/plugin marketplace add LiriRaid/waymark` then `/plugin install waymark@waymark` installs the skills with a `waymark:` prefix. Use the plugin **or** the copy install, never both (every skill would appear twice). The private layer and instructions block (INSTALL §6) are still required. Not tested yet.
+The repository also contains `.claude-plugin/`. `/plugin marketplace add LiriRaid/waymark` then `/plugin install waymark@waymark` installs the skills with a `waymark:` prefix; the hooks read `waymark:dept-qa` as `dept-qa`. Use the plugin **or** the copy install, never both (every skill would appear twice). The private layer, instructions block and hooks (INSTALL §6–§7) are still required. Not tested yet.

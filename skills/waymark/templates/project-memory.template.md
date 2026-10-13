@@ -5,7 +5,7 @@ Updated: <YYYY-MM-DD>
 
 ## Work in progress
 Read first at Recall. **One line per task, written by the end-of-turn hook from the Cierre's Aprendido** (≤200 characters); never edit these lines by hand. tasks.md is generated from them; a line without an ID at its head counts as a note. Any agent can resume from here.
-<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) or "- ✔ [<task ID>] <Aprendido>" (hecho; the newest 5 stay). A follow-up replaces its task's line; older ✔ lines and lines over 200 characters move whole to history.md. The whole record: `waymark.mjs tasks <task ID>`. -->
+<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) while the task is open; a task done (hecho) leaves this section, its record stays in git and tasks.md. A follow-up replaces its task's line; lines over 200 characters and open lines older than 14 days move whole to history.md. The whole record: `waymark.mjs tasks <task ID>`. -->
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)
@@ -14,7 +14,7 @@ Read first at Recall. **One line per task, written by the end-of-turn hook from 
 - Related projects: <e.g. backend API at ../api>
 
 ## Project map
-Filled by the minimal project scan (waymark `references/project-detection.md`); extended when a task explores a new area.
+Filled by the minimal project scan (waymark `references/project-detection.md`); extended when a task explores a new area. The end-of-turn hook adds and keeps *Areas* (one line per folder a task touched, docs/adr/0023).
 - Source root and layout: <e.g. src/app/{core,shared,features}>
 - Path aliases: <e.g. @core/* → src/app/core/*>
 - How this project builds: <composes shared pieces (e.g. every modal wraps app-modal) | builds per feature | mixed>
@@ -37,7 +37,7 @@ Filled by the minimal project scan (waymark `references/project-detection.md`); 
 | test (related) | | |
 | test (full) | | |
 | build | | |
-<!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. -->
+<!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. The end-of-turn hook dates a row whose command passed after the last change, and fills an empty row with the gate that passed; it never replaces a command. -->
 
 ## Design system
 Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refine.
@@ -53,7 +53,7 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 - …
 
 ## Repeated procedures
-Count how often a project-specific procedure happens. At 2 → propose a project skill.
+The end-of-turn hook counts the same run of 3 to 5 action commands across tasks (docs/adr/0023). At 2 → the session card proposes a project skill; write its name in *Project skill* once it exists.
 | Procedure | Times | Project skill |
 |---|---|---|
 

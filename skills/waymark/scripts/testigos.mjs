@@ -83,8 +83,8 @@ export function rerunGate(codeFiles, home) {
 }
 
 // What the testigo "sin secretos" reads besides what Waymark writes: the project memory
-// when the turn wrote it, the lines the task added to its files (untracked files whole) and the task's commits.
-// → [{ where, text }]
+// when the turn wrote it, the lines the task added to its files (untracked files whole) and the turn's commits (a hash in
+// cwd's repo, or { h, dir } for a commit in another repo). → [{ where, text }]
 export function secretSources(files, commits, cwd, memoryFile, since = 0) {
   const out = [];
   try { if (memoryFile && fs.statSync(memoryFile).mtimeMs >= since - 1000) out.push({ where: 'memory.md', text: read(memoryFile) }); } catch {}
@@ -101,7 +101,10 @@ export function secretSources(files, commits, cwd, memoryFile, since = 0) {
     for (const f of untracked) if (fs.statSync(path.join(root, f)).size < 1024 * 1024) out.push({ where: f, text: read(path.join(root, f)) });
     out.push(...addedLines(git(root, 'diff', 'HEAD', '--unified=0', '--no-color', '--', ...rel.filter((f) => !untracked.has(f))).stdout || ''));
   }
-  for (const h of commits || []) out.push(...addedLines(git(cwd, 'show', '--format=', '--unified=0', '--no-color', h).stdout || '', `commit ${h.slice(0, 8)} `));
+  for (const c of commits || []) {
+    const h = typeof c === 'string' ? c : c.h, dir = typeof c === 'string' ? cwd : c.dir || cwd;
+    out.push(...addedLines(git(dir, 'show', '--format=', '--unified=0', '--no-color', h).stdout || '', `commit ${h.slice(0, 8)} `));
+  }
   return out;
 }
 // A unified diff → [{ where: <file>, text: <its added lines> }]
@@ -133,6 +136,6 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const run = gate ? runGate(gate, top(cwd) || cwd) : null;
   console.log(run ? `${mark(run.ok)} typecheck now (${run.from}): ${run.cmd} · ${run.timedOut ? `over ${GATE_MS / 1000} s` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
   const rec = readTaskRecords(home).find((r) => r.id === id);
-  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
+  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'exception' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
   process.exit(chain.ok && !hits.length && (!run || run.ok) ? 0 : 1);
 }

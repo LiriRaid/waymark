@@ -1,8 +1,11 @@
 // Waymark · task records as git notes (docs/adr/0012). A committed task's whole record is a note on its last commit under
 // refs/notes/waymark; provenance.jsonl keeps a chained stub with the note's sha256, so an edited or lost note shows up in
-// verifyChain. Notes travel when the agent pushes the task (the end-of-turn hook pushes the notes ref to the same remote)
-// or with `waymark.mjs notes push`, and follow a rebased or amended commit (repairNotes); a task committed later by
-// another task gets its record as a note too (noteLateCommits); git's config is never changed.
+// verifyChain. Notes travel when the agent pushes (the end-of-turn hook pushes the notes ref to the same remote while it
+// has note commits the remote lacks) or with `waymark.mjs notes push`, and follow a rebased or amended commit
+// (repairNotes); a task committed later by another task gets its record as a note too (noteLateCommits). A clone
+// brings branches only: `waymark.mjs notes setup` (after the user's yes, the one change to git's config) adds a fetch
+// refspec into a tracking ref, refs/notes/remotes/<remote>/waymark, so a fetch never overwrites notes not pushed yet;
+// the session hook merges that ref into the local one (mergeNotes, a conflict keeps the local note).
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
@@ -95,8 +98,54 @@ export function noteLateCommits(cwd, records) {
   return added;
 }
 
-// Pushes the notes ref to a remote (default origin). → { ok, output }
+// Pushes the notes ref to a remote (default origin). With the fetch refspec, git moves the tracking ref too. → { ok, output }
 export function pushNotes(cwd, remote = 'origin') {
   const r = git(cwd, ['push', remote, `${NOTES_REF}:${NOTES_REF}`], { encoding: 'utf8', timeout: 60000 });
   return { ok: r.status === 0, output: `${r.stdout || ''}${r.stderr || ''}`.trim() };
+}
+
+// The remote's notes as last fetched or pushed: a ref of their own, never the local one.
+export const trackRef = (remote = 'origin') => `refs/notes/remotes/${remote}/waymark`;
+const fetchSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`;
+const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
+export const hasRemote = (cwd, remote = 'origin') => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
+export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;
+
+// Joins the remote's notes (the tracking ref) into the local ref when the remote has note commits the local lacks.
+// A note both sides wrote on the same commit keeps the local one (strategy ours: its stub in the log hashes it).
+// → true when merged.
+export function mergeNotes(cwd, remote = 'origin') {
+  const theirs = refSha(cwd, trackRef(remote));
+  if (!theirs) return false;
+  const ours = refSha(cwd, NOTES_REF);
+  if (ours && (ours === theirs || git(cwd, ['merge-base', '--is-ancestor', theirs, ours]).status === 0)) return false;
+  const merge = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${NOTES_REF}`, 'merge', '-q', '-s', 'ours', trackRef(remote)], { encoding: 'utf8' });
+  let r = merge();
+  if (r.status !== 0 && /identity|who you are|empty ident/i.test(r.stderr || '')) r = merge(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']);
+  return r.status === 0;
+}
+
+// Note commits of the local ref the remote lacks (against the tracking ref, no network). → a count, 0 with no local
+// notes, or null when it cannot be known (no tracking ref yet).
+export function unpushedNotes(cwd, remote = 'origin') {
+  const ours = refSha(cwd, NOTES_REF);
+  if (!ours) return 0;
+  if (!refSha(cwd, trackRef(remote))) return null;
+  const r = git(cwd, ['rev-list', '--count', `${trackRef(remote)}..${NOTES_REF}`], { encoding: 'utf8' });
+  return r.status === 0 ? Number(r.stdout.trim()) : null;
+}
+// The hook pushes the notes after a push it saw when the remote may lack some (unknown counts as lacking).
+export const shouldPushNotes = (cwd, remote = 'origin') => { const n = unpushedNotes(cwd, remote); return n === null || n > 0; };
+
+// Run on the user's yes (`waymark.mjs notes setup`): the fetch refspec into the tracking ref (added once), a fetch of the
+// notes and the merge. → { ok, added, merged, output }
+export function notesSetup(cwd, remote = 'origin') {
+  if (!hasRemote(cwd, remote)) return { ok: false, added: false, merged: false, output: `no remote ${remote}` };
+  const added = !hasFetchSpec(cwd, remote);
+  if (added && git(cwd, ['config', '--add', `remote.${remote}.fetch`, fetchSpec(remote)]).status !== 0) return { ok: false, added: false, merged: false, output: 'git config failed' };
+  const f = git(cwd, ['fetch', remote, fetchSpec(remote)], { encoding: 'utf8', timeout: 60000 });
+  const output = `${f.stdout || ''}${f.stderr || ''}`.trim();
+  // a remote with no notes yet answers "couldn't find remote ref": the refspec stays for when it has them
+  if (f.status !== 0 && !/couldn't find remote ref/i.test(output)) return { ok: false, added, merged: false, output };
+  return { ok: true, added, merged: mergeNotes(cwd, remote), output };
 }

@@ -13,12 +13,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { claudeDir } from './agents/paths.mjs';
 
 const HOME = os.homedir();
 const LOCAL = process.env.WAYMARK_HOME || path.join(HOME, '.waymark');
-const PROJECTS = process.env.WAYMARK_CLAUDE_PROJECTS || path.join(HOME, '.claude', 'projects');
-const SETTINGS = process.env.WAYMARK_CLAUDE_SETTINGS || path.join(HOME, '.claude', 'settings.json');
-const PLUGINS = process.env.WAYMARK_CLAUDE_PLUGINS || path.join(HOME, '.claude', 'plugins', 'installed_plugins.json');
+const PROJECTS = process.env.WAYMARK_CLAUDE_PROJECTS || path.join(claudeDir(), 'projects');
+const SETTINGS = process.env.WAYMARK_CLAUDE_SETTINGS || path.join(claudeDir(), 'settings.json');
+const PLUGINS = process.env.WAYMARK_CLAUDE_PLUGINS || path.join(claudeDir(), 'plugins', 'installed_plugins.json');
 const SKILLS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAP = path.join(SKILLS_ROOT, 'waymark', 'skill-map.json');
 const STATE = path.join(LOCAL, 'skill-fit.json');

@@ -402,7 +402,7 @@ test('observed: memory, procedure and review are computed from the tool calls, n
   const opened = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('mcp__engram__mem_search', { query: 'retries' }), call('Read', { file_path: path.join(os.homedir(), '.waymark', 'projects', 'shop.md') }), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Skill', { skill: 'code-review' }), MEM(), call('mcp__engram__mem_save', { topic_key: 'waymark/tasks/proj' })]);
   const g = cierreGaps(opened, cierre(id), undefined, undefined, { ...ctx, engram: true });
   assert.deepEqual(g.missing, []);
-  assert.deepEqual(g.observed.memory, { searched: true, opened: true, written: true, saved: true, indexed: true });
+  assert.deepEqual(g.observed.memory, { searched: true, late: false, opened: true, written: true, saved: true, indexed: true });
   const noIndex = { ...opened, tools: opened.tools.filter((t) => t.name !== 'mcp__engram__mem_save') };
   assert.equal(checkCierre(noIndex, cierre(id), undefined, undefined, { ...ctx, engram: true }), null, '3e-2: one index, the git notes; no engram index required');
   assert.deepEqual(g.observed.procedure, { owner: 'dept-backend', read: ['dept-backend/procedures.md'], readBeforeChange: true });
@@ -919,13 +919,13 @@ test('session hook: new location points to tasks.md; the bridge says old locatio
   const run = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd }), env, encoding: 'utf8' }).stdout).hookSpecificOutput.additionalContext;
   const repo = tmpRepo('session');
   const old = oldMemory('sess', repo);
-  assert.match(run(repo), /old location; read; full file there; `waymark\.mjs check` offers the move/);
+  assert.match(run(repo), /old location; read; full file there; W check offers the move\)\. W = node "[^"]+waymark\.mjs"\./);
   assert.ok((await check(repo)).some((t) => /^migrate: .*migrate-memory\.mjs" --project /.test(t)));
   fs.rmSync(old);
   assert.ok(!(await check(repo)).some((t) => t.startsWith('migrate:')), 'nothing left in the old location');
   fs.mkdirSync(path.join(repo, '.waymark'));
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n- ▶ C\n');
-  assert.match(run(repo), /Project memory: .*\.waymark\/memory\.md \(read; full file there\)\. Where the work stands: .*\.waymark\/tasks\.md[\s\S]*- ▶ C/);
+  assert.match(run(repo), /Project memory: .*\.waymark\/memory\.md \(read; full file there\) and tasks\.md next to it \(where the work stands\)\. W = node "[^"]+waymark\.mjs"\.[\s\S]*- ▶ C/);
   assert.match(run(tmpRepo('fresh')), /Project memory: none .* Create .*\.waymark\/memory\.md/);
 });
 
@@ -1781,7 +1781,7 @@ test('done: the user confirms tasks that work: they leave Work in progress, a ch
   const wip = ['- ▶ [2026-10-04 · T4c] que el usuario recargue y confirme', '- ▶ [2026-10-04 · T3] skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'].join('\n');
   const repo = memRepo('done', wip + '\n'), h = projectHome(repo), NOW = new Date(2026, 9, 5, 12, 0);
   const digest = spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
-  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9\. In your first reply ask the user once, in the choice window \(multi-select\), which of them already work; close those with node "[^"]+waymark\.mjs" done/);
+  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9 \(W check asks the user which already work\)\./);
   assert.deepEqual(P.confirmTasks(h, ['2026-10-04 · T4c', '2026-10-04 · T3', '2026-10-04 · T7'], { note: 'ya las vi, funcionan', now: NOW }), ['2026-10-04 · T4c', '2026-10-04 · T3']);
   const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
   assert.deepEqual(lines, ['- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'], 'confirmed tasks leave Work in progress; the confirm record keeps them');
@@ -1885,13 +1885,14 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   fs.appendFileSync(path.join(repo, '.waymark', 'memory.md'), '\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| build | npm run build | x |\n\n## Solved problems\n- a\n- b\n');
   appendRecord(repo, { id: '2026-10-05 · T1', agent: 'codex', at: '2026-10-05T10:00:00Z', commits: [], cierre: '## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: tooltips ← user; next: spec', evaluation: { steps: { Decision: true, Enrutar: false }, score: '1/2' }, unresolved: ['the routing line names no owner department'] });
   const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
-  assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: waymark\.mjs tasks "2026-10-05 · T1"\)/);
-  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2\./, 'an older pending line is open too');
+  assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: W tasks "2026-10-05 · T1"\)/);
+  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2 \(W check/, 'an older pending line is open too');
   assert.match(card, /Notes:\n- Gotcha: a note/);
   assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
-  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /W = node "[^"]+waymark\.mjs"\./);
+  assert.match(card, /Commands: the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2303,7 +2304,7 @@ if (a[0] === 'sync' && a[1] !== '--import') { fs.mkdirSync('.engram/chunks', { r
 };
 const withEngram = async (bin, fn) => { const prev = process.env.WAYMARK_ENGRAM; process.env.WAYMARK_ENGRAM = bin; try { return await fn(); } finally { process.env.WAYMARK_ENGRAM = prev; } };
 
-test('engram layer: the close saves the Aprendido under the project slug (config pinned), nothing is exported or staged for git, chunks import once, the card reads the latest', async () => {
+test('engram layer: the close saves the Aprendido under the project slug (config pinned), nothing is exported or staged for git, the card reads the latest', async () => {
   const e = await import(`file://${SCRIPTS}/engram.mjs`);
   const repo = memRepo('engram-layer'), h = projectHome(repo), fake = fakeEngram();
   await withEngram(fake.bin, async () => {
@@ -2311,15 +2312,12 @@ test('engram layer: the close saves the Aprendido under the project slug (config
     assert.equal(e.saveLearned(h, rec), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repo, '.engram', 'config.json'), 'utf8')), { project_name: h.slug });
     const save = fake.calls().find((c) => c[0] === 'save');
-    assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · contador en rojo', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
-    assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
+    assert.deepEqual([save[1], save[save.indexOf('--project') + 1], save[save.indexOf('--topic') + 1], save[save.indexOf('--type') + 1]], ['2026-10-06 · T1 · reusar el rojo de errores ← html:89', h.slug, 'waymark/2026-10-06 · T1', 'learning']);
+    assert.match(save[2], /^Aprendido: reusar el rojo de errores ← html:89\nPedido: contador en rojo\nDecisión: Rojo al pasar 500\nArchivos: a\.ts\nCommit: abcdef12\nAgente: codex$/);
     assert.equal(e.saveLearned(h, { ...rec, cierre: 'Resultado: hecho' }), false, 'no Aprendido, nothing to learn');
     assert.equal(e.stageForCommit, undefined, 'the learned memory stays local (docs/adr/0017)');
     assert.ok(!fake.calls().some((c) => c[0] === 'sync'), 'no export to .engram/');
-    fs.writeFileSync(path.join(repo, '.engram', 'manifest.json'), '{}');
-    const state = path.join(home, 'engram-import-test.json');
-    assert.deepEqual([e.importChunks(h, state), e.importChunks(h, state)], [true, false], 'once per manifest change');
-    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
+    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · el ahorro vive en la entity', '2026-10-06 · T3 · grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
   });
   assert.deepEqual([e.saveLearned(h, { id: 'x', cierre: 'Aprendido: y' }), e.learnedLines(h)], [false, []], 'no engram: a no-op, Waymark keeps git and memory.md');
 });
@@ -2630,7 +2628,7 @@ test('quota: the status line keeps the real % and shows quota and context', asyn
 });
 
 test('quota: a task\'s % is measured from the prompt to the close; shared, reset or stale gives no clean measure', async () => {
-  const { recordStatus, markStart, clearStart, measure } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const { recordStatus, markStart, clearStart, measure, quotaFile } = await import(`file://${SCRIPTS}/statusline.mjs`);
   const t0 = 1799991000000;
   recordStatus(status('m1', 20, 40), t0);
   markStart('m1', t0 + 1000);
@@ -2650,6 +2648,7 @@ test('quota: a task\'s % is measured from the prompt to the close; shared, reset
   recordStatus({ ...status('m1', 2, 41, 12, 8000), rate_limits: { five_hour: { used_percentage: 2, resets_at: 1800018000 } } }, t0 + 72000);
   assert.equal(measure('m1', t0 + 73000), null, 'the window reset during the task');
   clearStart('m1');
+  fs.rmSync(quotaFile(), { force: true }); // a machine whose newest reading is m2's (m1's later window would win)
   recordStatus(status('m2', 30, 40), t0);
   markStart('m2', 1800000500000); // the last reading's window ended before this prompt: a new window starts at 0
   recordStatus({ ...status('m2', 1.5, 40, 12, 9000), rate_limits: { five_hour: { used_percentage: 1.5, resets_at: 1800018000 } } }, 1800000600000);
@@ -2676,7 +2675,7 @@ test('quota: install-hooks plans the status line and chains the user\'s own inst
   const { planStatusLine } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   const cmd = 'node "/s/waymark/scripts/statusline.mjs"';
   const add = planStatusLine({ model: 'x' }, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd });
+  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd, refreshInterval: 30 });
   assert.equal(add.settings.model, 'x');
   assert.deepEqual([add.steps.length, add.next], [1, null]);
   assert.deepEqual(planStatusLine(add.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');

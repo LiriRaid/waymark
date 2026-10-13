@@ -10,12 +10,13 @@
 //   with the user's answers. request_user_input_async (seen in codex 0.160's default mode: {"accepted":true}, the answer
 //   is the user's next message) → AskUserQuestion answered by that message; a rejected call (bad arguments) never counts.
 //   Without either, a turn that ended asking in the chat and the user's next message count as the decisions asked in
-//   chat, one per question line written after the turn's last action (docs/adr/0009, 0010).
+//   chat: the questions a message after the turn's last action ends asking, with options (transcript.mjs
+//   closingQuestions; docs/adr/0009, 0010), so a closing "¿Algo más?" never opens the next task.
 // - token_count → usage per response (cached input apart); turn_context → model; session_meta → Codex version.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readTail, isPrompt } from '../transcript.mjs';
+import { readTail, isPrompt, clipOutput, closingQuestions } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
 
 export const name = 'codex';
@@ -27,7 +28,6 @@ export const out = claudeOut; // same output shapes, the prompt brake's {decisio
 
 const SKILL = /[\\/]([A-Za-z0-9:_-]+)[\\/]SKILL\.md\b/i;
 const READS = /\b(Get-Content|gc|cat|type|sed|head|tail|more|less|bat|awk)\b/i; // a read of the file, not a Test-Path or a listing
-const QUESTION = /^[^\n]*\?[ \t*_)]*$/gm; // a line that ends with "?" (also "¿…?")
 
 const shellOf = (cmd) => {
   if (!Array.isArray(cmd)) return String(cmd || '');
@@ -45,7 +45,7 @@ export function toLines(rows) {
   const lines = [], asked = new Map();
   let version = null, model = null, lastTotal = 0, tail = [], choiceInTurn = false, pendingAsync = [], n = 0;
   const assistant = (ts, content, extra = {}) => lines.push({ type: 'assistant', timestamp: ts, version, message: { id: `cx-${n++}`, model, content, ...extra } });
-  const result = (ts, id, isError, text) => lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(text || '').slice(0, 400) }] } });
+  const result = (ts, id, isError, text) => lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: clipOutput(text) }] } });
   for (const d of rows) {
     const p = d.payload || {}, ts = d.timestamp;
     if (d.type === 'session_meta') { version = p.cli_version || version; continue; }
@@ -90,8 +90,9 @@ export function toLines(rows) {
         const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => bare(l) && bare(reply).includes(bare(l))).join(',') || reply]));
         lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in the next message' }] }, toolUseResult: { source: 'async', questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
       }
-      // every question line the agent wrote after the turn's last action (a closing summary without "?" must not hide them)
-      const questions = !choiceInTurn && tail.length ? [...new Set([...tail.join('\n').matchAll(QUESTION)].map((m) => m[0].trim()))] : [];
+      // the questions each message after the turn's last action ends asking, with options (a later message without "?"
+      // must not hide them)
+      const questions = !choiceInTurn && tail.length ? [...new Set(tail.flatMap(closingQuestions))] : [];
       if (questions.length) { // the previous turn ended asking in the chat: this message answers it
         const id = `chat-${n}`;
         assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);
@@ -105,7 +106,8 @@ export function toLines(rows) {
     } else if (/^(CommandExecution|FileChange|McpToolCall|WebSearch)$/.test(it.type)) tail = []; // an action: what follows is the turn's final stretch
     if (it.type === 'CommandExecution') {
       const command = shellOf(it.command), started = new Date((Date.parse(ts) || 0) - ((it.duration?.secs || 0) * 1000)).toISOString();
-      const skill = READS.test(command) && command.match(SKILL)?.[1];
+      // code-review is no read in Codex: its review is `waymark.mjs review <files>` (reading the skill reviews nothing)
+      const skill = READS.test(command) && command.match(SKILL)?.[1] !== 'code-review' && command.match(SKILL)?.[1];
       if (skill) assistant(started, [{ type: 'tool_use', name: 'Skill', id: `${it.id}-skill`, input: { skill } }]);
       assistant(started, [{ type: 'tool_use', name: 'Bash', id: it.id, input: { command } }]);
       result(ts, it.id, (it.exit_code ?? 0) !== 0 || it.status === 'failed', it.aggregated_output);

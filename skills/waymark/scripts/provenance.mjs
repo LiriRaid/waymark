@@ -25,6 +25,19 @@ const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 export const ID = /\b(20\d\d-\d\d-\d\d) · T(\d+)([a-z]?)\b/;
 
+// A hook's own failure never reaches the agent (a hook must not break the turn): it is appended to
+// ~/.waymark/hook-errors.log (the newest 200 lines) and `waymark.mjs check` reports it.
+export const hookErrorsFile = () => path.join(HOME(), 'hook-errors.log');
+export function logHookError(where, err) {
+  try {
+    const file = hookErrorsFile(), line = `${new Date().toISOString()} ${where} ${String(err?.stack || err).split('\n').slice(0, 3).map((l) => l.trim()).join(' · ')}`.slice(0, 600);
+    let old = [];
+    try { old = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); } catch {}
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, [...old.slice(-199), line].join('\n') + '\n');
+  } catch {}
+}
+
 const slugOf = (dir) => (path.basename(norm(dir)) || 'project').replace(/[^a-z0-9._-]+/g, '-');
 
 // The pre-0007 memory file whose `Path:` holds cwd (longest match), skipping files already migrated (`Moved:`).
@@ -230,8 +243,9 @@ export function writeTaskLine(home, rec, now = new Date()) {
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
   const learned = aprendidoOf(cierre);
   if (!learned || /^ninguno/i.test(learned)) return false;
-  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '');
-  // a task done leaves Work in progress (its Aprendido is in its record); one still open keeps its line
+  // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
+  // unresolved, keeps its line
+  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') && !rec.unresolved?.length;
   return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
@@ -267,7 +281,7 @@ export function tidyWip(home, now = new Date()) {
 // The section, rewritten: the task's line (when given) in place of its task's lines, then every line moved whole to
 // history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
 // that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
-// closed (✔) lines beyond the newest 5. A note (no ID at its head) is never moved except when over 200 characters.
+// every closed (✔) line (DONE_KEPT: a task done lives in its record). A note (no ID at its head) is never moved except when over 200 characters.
 function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
@@ -321,17 +335,39 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
 // The git note a log line points to ({ commit, sha }), or null: only an object with a commit counts.
 export const gitNote = (r) => (r?.note && typeof r.note === 'object' && typeof r.note.commit === 'string' ? r.note : null);
 
-// Every record of the log with its note read back: a stub becomes the whole record (note fields, then the stub's).
-// With `last`: only the last N task records are read back (the others stay stubs).
-export function readTaskRecords(home, { last = Infinity } = {}) {
-  const records = readRecords(home.log);
-  const tasks = records.filter((r) => r.id), wanted = new Set(tasks.slice(Math.max(0, tasks.length - last)).filter(gitNote));
-  if (!wanted.size) return records;
-  const notes = readNotes(home.root, [...wanted].map((r) => r.note.commit));
-  return records.map((r) => {
-    if (!wanted.has(r)) return r;
-    try { return { ...JSON.parse(notes.get(r.note.commit)), ...r }; } catch { return { ...r, noteMissing: true }; }
+// One task close: its ID and the session that closed it (two machines can give the same ID the same day).
+const closeKey = (r) => `${r.id}|${r.session || ''}`;
+// In date order; records without a date, and ties, keep their order.
+const byDate = (list) => list.map((r, i) => [r, i]).sort(([a, i], [b, j]) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0) || i - j).map(([r]) => r);
+
+// The task records that live only as notes (a clone, another machine, a log started over): every note whose close
+// (ID + session) has no line in `records`, one per close (a rebase copies a note), each with `fromNote: <commit>`.
+// Not chained: git hashes them.
+function noteOnly(notes, records) {
+  const inLog = new Set(records.filter((r) => r.id).map(closeKey)), out = new Map();
+  for (const [commit, text] of notes) {
+    let r = null;
+    try { r = JSON.parse(text); } catch { continue; }
+    if (r?.id && ID.test(String(r.id)) && !inLog.has(closeKey(r)) && !out.has(closeKey(r))) out.set(closeKey(r), { ...r, fromNote: commit });
+  }
+  return [...out.values()];
+}
+
+// Every task record, from the log and from the notes (one git list and one batch read), in date order: a stub becomes
+// the whole record (note fields, then the stub's); a whole log line that a later commit also carries as a note (same
+// close) takes the note's fields; a record that is only a note joins.
+export function readTaskRecords(home) {
+  const records = readRecords(home.log), notes = readNotes(home.root);
+  const byClose = new Map();
+  for (const [, text] of notes) { try { const r = JSON.parse(text); if (r?.id && !byClose.has(closeKey(r))) byClose.set(closeKey(r), r); } catch {} }
+  const merged = records.map((r) => {
+    const gn = gitNote(r);
+    if (gn) { try { return { ...JSON.parse(notes.get(gn.commit)), ...r }; } catch { return { ...r, noteMissing: true }; } }
+    const n = r.id && byClose.get(closeKey(r));
+    return n ? { ...r, ...n, prev: r.prev, hash: r.hash } : r;
   });
+  const only = noteOnly(notes, records);
+  return only.length ? byDate([...merged, ...only]) : merged;
 }
 
 // tasks.md from memory.md (Work in progress) and the records (done tasks). The agent never edits it (docs/adr/0007).
@@ -351,7 +387,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const result = (r, later = []) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : '');
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
-  const all = readTaskRecords(home, { last: 8 }), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
+  const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
   const questions = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q').length; // since the last close
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
   const source = (r) => (gitNote(r) ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
@@ -363,7 +399,7 @@ export function tasksMarkdown(home, now = new Date()) {
       .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
-    ...(lastRec.evaluation ? [(() => { const failed = Object.entries(lastRec.evaluation.steps || {}).filter(([, v]) => !v).map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}`; })()] : []), ''] : [];
+    ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
   const rows = records.slice(-8).reverse()
     .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
@@ -406,8 +442,14 @@ export function readRecords(file) {
 const localDay = (now) => now.toLocaleDateString('sv'); // YYYY-MM-DD in local time
 const base = (id) => { const m = String(id).match(ID); return m ? `${m[1]} · T${m[2]}` : null; };
 
+// The log's records plus those that are only notes (their IDs are taken too: a clone never reuses one).
+const knownRecords = (cwd) => {
+  const records = readLog(cwd);
+  try { const only = noteOnly(readNotes(projectHome(cwd).root), records); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
+};
+
 // The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded.
-export function taskIds(cwd, now = new Date(), records = readLog(cwd)) {
+export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   const day = localDay(now);
   const n = Math.max(0, ...records.map((r) => String(r.id || '').match(ID)).filter((m) => m && m[1] === day).map((m) => Number(m[2])));
   const known = new Set(records.map((r) => r.id).filter(Boolean));
@@ -453,7 +495,35 @@ export function taskFiles(records, id) {
 export function taskStart(records, session, id) {
   const own = /[a-z]$/.test(String(id || '').match(ID)?.[0] || '') ? base(id) : null;
   const closes = records.filter((r) => r.session === session && ID.test(String(r.id || '')) && (!own || base(r.id) !== own));
-  return Date.parse(closes.pop()?.at || '') || 0;
+  const closed = Date.parse(closes.pop()?.at || '') || 0;
+  if (own) return closed; // a follow-up reaches back to its task's start
+  const mark = taskStartMark(session);
+  return Math.max(closed, mark ? mark - 1000 : 0); // a second of slack: the prompt's line may be written before the hook runs
+}
+
+// The task's start, per session (~/.waymark/.task-starts.json): marked by the per-prompt hook at the task's first prompt
+// (a later prompt of the same task keeps it), cleared by the end-of-turn hook when a task closes and when a turn ends
+// with no task (a question, L0). Without it a session's first task was read from its last 3 prompts only.
+const startsFile = () => path.join(HOME(), '.task-starts.json');
+const readStarts = () => { try { return JSON.parse(fs.readFileSync(startsFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeStarts = (all) => {
+  for (const [k, at] of Object.entries(all)) if (Date.now() - at > 7 * 86400000) delete all[k];
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(startsFile(), JSON.stringify(all));
+};
+export const taskStartMark = (session) => readStarts()[session || 'unknown'] || 0;
+export function markTaskStart(session, now = Date.now()) {
+  const all = readStarts(), id = session || 'unknown';
+  if (all[id]) return all[id];
+  all[id] = now;
+  writeStarts(all);
+  return now;
+}
+export function clearTaskStart(session) {
+  const all = readStarts(), id = session || 'unknown';
+  if (!all[id]) return;
+  delete all[id];
+  writeStarts(all);
 }
 
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
@@ -607,19 +677,51 @@ export function snapshotDiff(before, after) {
 }
 
 // Snapshot taken by the per-prompt hook, per session (~/.waymark/.turn-snapshot.json), read by the end-of-turn hook.
+// `others`: the snapshots of other repos, each taken by the pre-tool hook before the first shell command that changes
+// files there. `paused`: the turn ended asking the user (a task in progress), so the next prompt keeps this snapshot and
+// the turn that resumes the task still sees what the paused one changed.
 const snapFile = () => path.join(HOME(), '.turn-snapshot.json');
-export function saveSnapshot(session, cwd) {
-  const snap = gitSnapshot(cwd);
-  let all = {};
-  try { all = JSON.parse(fs.readFileSync(snapFile(), 'utf8')); } catch {}
+const readSnaps = () => { try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeSnaps = (all) => {
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session || 'unknown'] = { at: Date.now(), cwd, snap };
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(snapFile(), JSON.stringify(all));
+};
+export function saveSnapshot(session, cwd) {
+  const all = readSnaps(), id = session || 'unknown';
+  if (all[id]?.paused) { all[id].paused = false; writeSnaps(all); return all[id].snap; }
+  const snap = gitSnapshot(cwd);
+  all[id] = { at: Date.now(), cwd, snap };
+  writeSnaps(all);
   return snap;
 }
 export function loadSnapshot(session) {
-  try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8'))[session || 'unknown']?.snap || null; } catch { return null; }
+  return readSnaps()[session || 'unknown']?.snap || null;
+}
+// Before a shell command changes files in another repo: that repo's snapshot, once per turn. → true when taken.
+export function addRepoSnapshot(session, dir) {
+  const all = readSnaps(), entry = all[session || 'unknown'];
+  if (!entry) return false;
+  const snap = gitSnapshot(dir);
+  if (!snap || snap.root === entry.snap?.root || entry.others?.[snap.root]) return false;
+  entry.others = { ...(entry.others || {}), [snap.root]: snap };
+  writeSnaps(all);
+  return true;
+}
+// The turn ended asking the user: the next prompt keeps the snapshot (saveSnapshot).
+export function markPaused(session) {
+  const all = readSnaps(), entry = all[session || 'unknown'];
+  if (!entry) return false;
+  entry.paused = true;
+  writeSnaps(all);
+  return true;
+}
+// Files the turn changed, by any tool: the session's repo and every other repo snapshotted during the turn.
+export function turnChanged(session, cwd) {
+  const entry = readSnaps()[session || 'unknown'];
+  const out = snapshotDiff(entry?.snap || null, gitSnapshot(cwd));
+  for (const snap of Object.values(entry?.others || {})) out.push(...snapshotDiff(snap, gitSnapshot(snap.root)));
+  return [...new Set(out)];
 }
 
 // Shell commands that change files in place (the decision gate treats them like edits). Redirects count unless they go
@@ -658,6 +760,93 @@ export function mutatesFiles(command) {
   }
   return false;
 }
+// What a shell command runs, part by part (the chain split outside quotes and heredoc bodies): each part is judged by
+// its executable, never by a word in its arguments, so `git commit -m "fix build"` and `ls build` check nothing.
+// Env assignments, `time`, the call operator and runners (npx, pnpm exec, bundle exec, python -m…) are skipped;
+// `bash -c "<cmd>"`, `cmd /c <cmd>` and `pwsh -Command "<cmd>"` are judged inside. → [{ text, gate, build, test, sep, cd }]
+// sep: the separator after the part ('&&', '||', ';', '|', '\n' or '' at the end); cd: the folder a `cd` before it
+// entered in the same command (null: the session's).
+const TOKEN = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
+const tokens = (s) => [...String(s).matchAll(TOKEN)].map((m) => m[1] ?? m[2] ?? m[3]);
+const RUNNER = { npx: 1, pnpx: 1, bunx: 1, time: 1, call: 1, '&': 1, exec: 1, env: 1 };
+const RUNNER2 = /^(pnpm (exec|dlx)|yarn (exec|dlx)|bundle exec|poetry run|uv run|pipenv run|python3? -m|py -m|npm exec)$/;
+const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|phpstan|typecheck)$/;
+const TESTERS = /^(vitest|jest|karma|mocha|pytest|rspec|phpunit|ava|tap|playwright|cypress|nyc|c8)$/;
+const SCRIPT_TEST = /(^|[:_-])(test|tests|spec|e2e|unit|vitest|jest)([:_-]|$)/i;
+const SCRIPT_BUILD = /(^|[:_-])build([:_-]|$)/i;
+const SCRIPT_GATE = /(typecheck|type-check|tsc|lint|check|types)/i;
+function classify(words) {
+  let w = words.filter((x) => x !== '');
+  for (let guard = 0; guard < 4 && w.length; guard++) {
+    while (w.length && /^[A-Za-z_]\w*=/.test(w[0])) w = w.slice(1); // FOO=1 cmd, env FOO=1 cmd
+    const head = String(w[0] || '').toLowerCase();
+    if (RUNNER[head]) { w = w.slice(1); while (w.length && /^-/.test(w[0])) w = w.slice(/^(-p|--package)$/.test(w[0]) ? 2 : 1); continue; }
+    if (RUNNER2.test(`${head} ${String(w[1] || '').toLowerCase()}`)) { w = w.slice(2); continue; }
+    break;
+  }
+  const prog = path.basename(String(w[0] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.(cmd|exe|ps1|bat)$/, '');
+  let a = w.slice(1), dir = null;
+  // a package manager's own flags before its command: pnpm --filter web build, npm --prefix ../api run build (a folder
+  // flag is where the command runs)
+  if (/^(npm|pnpm|yarn|bun)$/.test(prog)) {
+    while (a.length && /^-/.test(a[0])) {
+      const flag = String(a[0]).toLowerCase(), takes = /^(-c|--dir|--prefix|--cwd|-w|--workspace|-f|--filter)$/.test(flag);
+      if (/^(-c|--dir|--prefix|--cwd)$/.test(flag) && a[1]) dir = a[1];
+      a = a.slice(takes ? 2 : 1);
+    }
+    if (prog === 'yarn' && /^workspace$/i.test(a[0] || '')) a = a.slice(2);
+  }
+  const sub = String(a[0] || '').toLowerCase(), subs = a.map((x) => String(x).toLowerCase());
+  const out = { gate: false, build: false, test: false, ...(dir ? { dir } : {}) };
+  // a build script run by its interpreter or by path: node build.mjs, bash scripts/build.sh, ./build.ps1
+  const script = /^(node|bash|sh|zsh|pwsh|powershell|python3?|py|deno)$/.test(prog) ? subs.find((x) => !x.startsWith('-')) : String(w[0] || '').toLowerCase();
+  if (script && /^build(\.[a-z0-9]+)?$/.test(path.basename(script.replace(/\\/g, '/')))) { out.gate = out.build = true; return out; }
+  if (/^(bash|sh|zsh|dash)$/.test(prog) && sub === '-c') return { inner: a[1] };
+  if (prog === 'cmd' && /^\/[ck]$/.test(sub)) return { inner: a.slice(1).join(' ') };
+  if (/^(pwsh|powershell)$/.test(prog)) { const i = subs.findIndex((x) => /^-(c|command)$/.test(x)); if (i >= 0) return { inner: a.slice(i + 1).join(' ') }; }
+  if (LINTERS.test(prog)) { out.gate = true; out.build = prog === 'tsc' && subs.includes('-b'); }
+  else if (TESTERS.test(prog)) out.test = true;
+  else if (/^(npm|pnpm|yarn|bun)$/.test(prog)) {
+    const script = /^(run|run-script)$/.test(sub) ? String(a[1] || '') : sub;
+    if (/^(t|test|tst)$/.test(sub) || SCRIPT_TEST.test(script)) out.test = true;
+    else if (!/^(install|i|ci|add|remove|uninstall|update|init|create|publish|pack|link|exec|dlx|x|outdated|audit|view|info|config|cache|why|ls|list)$/.test(sub)) {
+      out.build = SCRIPT_BUILD.test(script);
+      out.gate = out.build || SCRIPT_GATE.test(script);
+    }
+  } else if (prog === 'node' || prog === 'deno') {
+    if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
+    else if (subs.includes('--test') || sub === 'test') out.test = true;
+  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php)$/.test(prog)) {
+    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : sub;
+    if (/^(test|spec)$/.test(verb)) out.test = true;
+    else if (/^(build|package|verify)$/.test(verb)) out.gate = out.build = true;
+    else if (/^(lint|vet|check|clippy|compile)$/.test(verb)) out.gate = true;
+  }
+  return out;
+}
+export function shellRuns(command, depth = 0) {
+  const c = String(command || ''), full = shellSkeleton(c, { quotes: false }), mask = shellSkeleton(c);
+  const out = [];
+  let from = 0, cd = null;
+  const push = (to, sep) => {
+    const text = full.slice(from, to).trim().replace(/^[({]\s*/, '').replace(/\s*[)}]$/, ''); // a subshell or group: (cd x && npm test)
+    from = to + sep.length;
+    if (!text) return;
+    const words = tokens(text), dir = /^(cd|pushd|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
+    if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
+    const k = classify(words), at = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
+    if (k.inner !== undefined && depth < 2) {
+      const inner = shellRuns(k.inner, depth + 1);
+      out.push({ text, gate: inner.some((p) => p.gate), build: inner.some((p) => p.build), test: inner.some((p) => p.test), sep, cd });
+      return;
+    }
+    out.push({ text, gate: !!k.gate, build: !!k.build, test: !!k.test, sep, cd: at });
+  };
+  for (const m of mask.matchAll(/&&|\|\||[;|\n]/g)) push(m.index, m[0]);
+  push(full.length, '');
+  return out;
+}
+
 // A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory.
 export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(String(command || '')) && !/(\.waymark[\\/]|\.claude[\\/]projects)/i.test(String(command || ''));
 

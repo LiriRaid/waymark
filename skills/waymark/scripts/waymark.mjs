@@ -3,10 +3,12 @@
 // the hooks, so every agent runs the same four short hooks. Run it from the project folder:
 //   node waymark.mjs [check]            read-only report of what is pending (default)
 //   node waymark.mjs sync               refresh skill-registry.md (sync.mjs) and remember the skills seen here
-//   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks [args]   the existing scripts, args passed on
+//   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks | uninstall [args]   the existing scripts, args passed on
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
-//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin); git's config is never changed
+//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin)
+//   node waymark.mjs notes setup [<remote>] on the user's yes: a fetch refspec so fetches bring the remote's records
+//                                           (into refs/notes/remotes/<remote>/waymark, merged at session start), then a fetch
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
@@ -16,7 +18,8 @@
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
-// agents not connected, an agent framework that appeared or vanished, and a large idle session in this folder. It
+// agents not connected or without Waymark's hooks (Claude Code included), project skills versioned in .claude/skills, an
+// agent framework that appeared or vanished, and a large idle session in this folder. It
 // writes nothing but the time of the check (~/.waymark/.check.json, read by the session hook's weekly pointer).
 // Every item is offered to the user with the choice window; its command runs only after their yes.
 import fs from 'node:fs';
@@ -25,15 +28,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, ID } from './provenance.mjs';
-import { incidentsAt } from './incidents.mjs';
-import { pushNotes } from './notes.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
+import { incidentsAt, incidents } from './incidents.mjs';
+import { proposals, ownerOf } from './learn.mjs';
+import { openIds } from './session-hook.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
+import { claudeDir } from './agents/paths.mjs';
 import { engramBin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
+import { trackedProjectSkills } from './skill-links.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -46,7 +53,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -151,11 +158,39 @@ export function mergeMethods(cwd) {
   return `notes: ${repo} allows ${['squash', 'rebase'].filter((_, i) => flags[i]).join(' and ')} merges, which re-create the commits and leave the task records (git notes) behind. Merge pull requests with a merge commit, or allow only that (the user's setting: ask first): gh api -X PATCH repos/${repo} -F allow_squash_merge=false -F allow_rebase_merge=false`;
 }
 
-function agents() {
-  const fresh = found().filter((a) => !a.connected);
+function agents(list = found()) {
+  const fresh = list.filter((a) => !a.connected && a.path && !a.shares); // an instructions file to write the block in
   const stale = fresh.filter((a) => a.full && /waymark:(pointer|begin)/.test(read(a.path)));
   if (stale.length === fresh.length && stale.length) return `connect: ${stale.map((a) => a.name).join(', ')} run${stale.length > 1 ? '' : 's'} Waymark's hooks but ${stale.length > 1 ? 'have' : 'has'} the pointer or an older Rule 0 block in ${stale.map((a) => a.path.replace(/\\/g, '/')).join(', ')}: offer to write the current block: node "${script('connect-agents.mjs')}" --apply`;
   return fresh.length ? `connect: other agents not connected to the project memory: ${fresh.map((a) => `${a.name} (${a.path.replace(/\\/g, '/')}${a.guestOf.length ? `; ${a.guestOf.join(', ')} governs it: Waymark joins as its guest` : ''})`).join(', ')}. One marked line in each one's instructions file so it reads .waymark/tasks.md first: node "${script('connect-agents.mjs')}" shows the plan, --apply on yes (backup first).` : '';
+}
+
+// Agents on this machine whose hooks do not run Waymark (Claude Code when its folder exists, and every agent connect-agents
+// finds): their tasks are neither recorded nor checked. None in a coexistence where the orchestrator owns the hooks.
+export function hookless(list = found()) {
+  if (orchestrated()) return '';
+  const have = new Set(registered().map((r) => r.agent));
+  const missing = [...(fs.existsSync(claudeDir()) ? [{ name: 'Claude Code', key: 'claude' }] : []), ...list.filter((a) => a.adapter)].filter((a) => !have.has(a.key));
+  return missing.length ? `hooks: ${missing.map((a) => `${a.name} (--agent ${a.key})`).join(', ')} on this machine without Waymark's hooks: tasks there are neither recorded nor checked. Offer each: node "${script('install-hooks.mjs')}" --agent <agent> shows its plan, --apply on yes.` : '';
+}
+const orchestrated = () => ['guest', 'skills-only', 'other-leads'].includes(read(path.join(HOME(), 'coexistence.md')).match(/^Mode:\s*(\S+)/m)?.[1]);
+
+// Agents on this machine with no adapter (docs/adr/0022): one agents.json lists with documented hooks, and the unknown
+// ones. Waymark cannot run their hooks until a module is written for each (dept-devex procedures → Add an agent).
+export function adapterless(all = found()) {
+  if (orchestrated()) return '';
+  const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
+  if (!list.length) return '';
+  const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
+  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to write its adapter with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs, scripts/agents/agents.json).`;
+}
+
+// Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change
+// the repository), so Claude Code reads them but the other agents do not.
+export function projectSkills(cwd) {
+  const home = projectHome(cwd);
+  const names = home.dir && !home.legacy ? trackedProjectSkills(home.root) : [];
+  return names.length ? `project skills: ${names.join(', ')} versioned in git in .claude/skills, left in place (only Claude Code reads them there). To share them with every agent, move them to .agents/skills in a commit of the user's choice.` : '';
 }
 
 // Framework namespaces marked in the agents' instructions files (`<!-- name:section -->`, `<!-- BEGIN name -->`).
@@ -213,9 +248,18 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => learnedLayer(cwd));
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
-  await add(agents);
+  await add(() => learnProposals(cwd));
+  await add(() => openTasks(cwd));
+  let machine = null; // the agents on this machine, scanned once for the three lines below
+  const onMachine = () => (machine ??= found());
+  await add(() => agents(onMachine()));
+  await add(() => hookless(onMachine()));
+  await add(() => adapterless(onMachine()));
+  await add(() => projectSkills(cwd));
   await add(() => hooksHealth());
+  await add(() => hookErrors());
   await add(() => mergeMethods(cwd));
+  await add(() => notesState(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -224,6 +268,25 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
     fs.writeFileSync(path.join(HOME(), '.check.json'), JSON.stringify({ ...st, checkedAt: Date.now() }));
   } catch {}
   return items;
+}
+
+// The task records (git notes) against origin, without network: a project whose fetches do not bring them (a clone
+// brings branches only) and note commits not pushed yet. → the pending lines, or ''.
+export function notesState(cwd) {
+  const home = projectHome(cwd), root = home.root;
+  if (!home.dir || home.legacy || !hasRemote(root)) return '';
+  if (!hasFetchSpec(root)) return `notes: fetches from origin here do not bring the task records (git notes; a clone brings branches only), so another machine's tasks are missing from tasks.md and the card. Offer, with the choice window: node "${script('waymark.mjs')}" notes setup — adds one fetch refspec to .git/config (into refs/notes/remotes/origin/waymark, never over the local notes), fetches and merges.`;
+  const n = unpushedNotes(root);
+  return n > 0 ? `notes: ${n} commit${n > 1 ? 's' : ''} of task records (git notes) not pushed to origin. Offer: node "${script('waymark.mjs')}" notes push` : '';
+}
+
+// A hook's own failures (provenance.mjs logHookError) of the last 7 days: their count and the newest. → the line, or ''.
+export function hookErrors(now = Date.now()) {
+  let lines = [];
+  try { lines = fs.readFileSync(hookErrorsFile(), 'utf8').split('\n').filter(Boolean); } catch { return ''; }
+  const recent = lines.filter((l) => now - (Date.parse(l.split(' ')[0]) || 0) < 7 * 86400000);
+  if (!recent.length) return '';
+  return `hooks: ${recent.length} error${recent.length > 1 ? 's' : ''} in the last 7 days (${hookErrorsFile().replace(/\\/g, '/')}); newest: ${recent[recent.length - 1].slice(0, 200)}`;
 }
 
 // The package manager memory.md names (Identity, Quality gates) against the repo's own: package.json `packageManager`,
@@ -243,8 +306,27 @@ export function packageManager(cwd) {
 
 // A testigo that failed 3 times or more in this project: offer to turn its lesson into a department or stack rule.
 export function suggestedRules(cwd) {
-  const { rules } = incidentsAt(cwd);
-  return rules.length ? `rule: ${rules.map((r) => `${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]})`).join('; ')} in this project. Offer to add the lesson as a rule of the owner department or the stack profile (${script('waymark.mjs')} incidents shows the causes); write it only after the user's yes.` : '';
+  const records = readTaskRecords(projectHome(cwd)), { rules } = incidents(records);
+  const owner = (r) => { const d = ownerOf(records, r.ids); return d ? ` → ${d} (${d}/SKILL.md → Learned rules)` : ''; };
+  return rules.length ? `rule: ${rules.map((r) => `${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]})${owner(r)}`).join('; ')} in this project. Offer to add the lesson as a Learned rule of the owner department, or to the stack profile (${script('waymark.mjs')} incidents shows the causes); write it only after the user's yes.` : '';
+}
+
+// A repeated procedure with no project skill, and a correction the user repeated (docs/adr/0023): proposed, never written.
+export function learnProposals(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return '';
+  const all = proposals(home, readTaskRecords(home)), lines = [];
+  for (const p of all.filter((x) => x.kind === 'skill')) lines.push(`procedure: ${p.text.replace(/^project skill for /, '')}. Offer a project skill for it with the user's yes; the count is in memory.md → Repeated procedures.`);
+  for (const p of all.filter((x) => x.kind === 'preference')) lines.push(`preference: ${p.text.replace(/^preference /, '')}. The user corrected this more than once: offer to add it to ~/.waymark/preferences.md with their yes.`);
+  return lines.join('\n');
+}
+
+// The tasks still open (▶, or an older pending "[<id>]") in Work in progress: the card lists them, check asks the user
+// which already work. → the pending line, or ''.
+export function openTasks(cwd) {
+  const home = projectHome(cwd);
+  const open = openIds(section('\n' + read(home.memory), 'Work in progress'));
+  return open.length ? `open: ${open.join(', ')} in Work in progress. Ask the user once, in the choice window (multi-select), which already work; close those with node "${script('waymark.mjs')}" done "<ID>"… --note "<their words>".` : '';
 }
 
 // Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a
@@ -364,6 +446,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done.length) refreshTasks(home, true);
     console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
     process.exitCode = done.length ? 0 : 1;
+  } else if (sub === 'notes' && rest[0] === 'setup') {
+    const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
+    console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
+    process.exitCode = r.ok ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
     const r = pushNotes(process.cwd(), rest[1] || 'origin');
     console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
@@ -377,7 +463,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

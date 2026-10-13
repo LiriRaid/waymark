@@ -23,16 +23,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart } from './statusline.mjs';
-import { agentFrom } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, gitSnapshot, snapshotDiff, loadSnapshot, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, gitNote, PROBE_OK } from './provenance.mjs';
+import { agentFrom, parseHook } from './agents/index.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
-import { pushNotes, noteLateCommits } from './notes.mjs';
-import { saveLearned } from './engram.mjs';
+import { pushNotes, noteLateCommits, shouldPushNotes } from './notes.mjs';
+import { saveLearned, saveQuestion } from './engram.mjs';
 import { packedFiles } from './tool-hook.mjs';
+import { learn } from './learn.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
@@ -43,10 +44,10 @@ const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
 const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$|_spec\.rb$|_test\.(go|py)$|^test_.*\.py$/i;
-const TEST = /\b(test|tests|vitest|jest|karma|mocha|pytest|rspec|go test|dotnet test|mvn test|gradle test)\b/i;
-const GATE = /\b(tsc|typecheck|type-check|lint|eslint|ng build|build|go vet|mypy|ruff|rubocop|cargo (check|clippy)|node --check)\b/i;
 const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i; // <project>/.waymark/memory.md or the pre-0007 ~/.waymark/projects/<slug>.md (tasks.md is generated)
-const BUILD = /\b(ng build|vite build|next build|nuxt build|astro build|(npm|pnpm|yarn|bun)( run)? build|go build|cargo build|dotnet build|mvn (package|verify)|gradle build|tsc -b)\b/i;
+// A command's output that shows a failure, read only when its exit is not the gate's or the test's own (a pipe, a `;`).
+// Only the tools' own summary lines, never a count anywhere (a test titled "reports 2 errors" passes).
+const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems?\b|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed/im;
 // The catalog of testigos: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006, 0012).
 // A missing or invalid catalog never disables the hook: a minimal one keeps the chain (decision, gate, Cierre) and
 // the record says the catalog could not be read.
@@ -77,27 +78,42 @@ const cmdOf = (t) => String(t.input.command || '');
 // recorded task's (its work committed now); it is read anywhere in the message, not only in the last paragraph.
 // → the commit hashes (the trailer testigo).
 export function turnCommits(tools, cwd, claimed, ids, since = 0) {
-  const dirs = new Set([path.resolve(cwd)]);
+  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
+  return [...new Set(commitsSince(new Set([path.resolve(cwd), ...commitRepos(tools, cwd)]), since)
+    .filter((c) => String(c.msg).split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))).map((c) => c.h))];
+}
+// The repos the turn's commit commands ran in: the session's, a `cd <repo> &&` before the commit, or `git -C <repo>`.
+function commitRepos(tools, cwd) {
+  const dirs = new Set();
   for (const t of tools.filter((x) => shell(x) && /\bgit\b[\s\S]*\scommit\b/.test(cmdOf(x)))) {
     let dir = null;
-    for (const part of cmdOf(t).split(/&&|\|\||[;|\n]/)) {
+    for (const part of bare(t).split(/&&|\|\||[;|\n]/)) {
       const cd = part.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:\/d\s+|-Path\s+)?["']?([^"']+?)["']?\s*$/i);
       if (cd) { dir = cd[1]; continue; }
       const c = part.match(/\bgit\s+-C\s+["']?([^"'\s]+)["']?[^|;&]*\scommit\b/);
       if (c) dirs.add(path.resolve(cwd, c[1]));
-      else if (dir && /\bgit\b[^|;&]*\scommit\b/.test(part)) dirs.add(path.resolve(cwd, dir.replace(/^\/([a-z])\//i, '$1:/')));
+      else if (/\bgit\b[^|;&]*\scommit\b/.test(part)) dirs.add(path.resolve(cwd, (dir || '.').replace(/^\/([a-z])\//i, '$1:/')));
     }
   }
-  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
+  return dirs;
+}
+// → [{ h, dir, msg }] committed in those repos since the turn started (a minute of slack); mine: only by the repo's git
+// user (commits a pull or rebase brought in keep their own committer).
+function commitsSince(dirs, since, mine = false) {
   const out = [];
   for (const dir of dirs) {
-    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 1500 });
+    const me = mine && spawnSync('git', ['config', 'user.email'], { cwd: dir, encoding: 'utf8', timeout: 1500 }).stdout?.trim().toLowerCase();
+    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%ce%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 1500 });
     if (r.status !== 0) continue;
-    for (const [h, msg] of r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))) {
-      if (h && String(msg || '').split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))) out.push(h);
-    }
+    for (const [h, ce, msg] of r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))) if (h && (!me || String(ce).toLowerCase() === me)) out.push({ h, dir, msg: msg || '' });
   }
-  return [...new Set(out)];
+  return out;
+}
+// Every commit the turn made, with or without a trailer and in any repo it committed in (the testigo "sin secretos").
+// → [{ h, dir }]
+export function turnCommitsAll(tools, cwd, since = 0) {
+  const seen = new Set();
+  return commitsSince(commitRepos(tools, cwd), since, true).filter((c) => !seen.has(c.h) && seen.add(c.h)).map(({ h, dir }) => ({ h, dir }));
 }
 // The command as the shell runs it: heredoc bodies and here-strings blanked, so a spec written through `cat > x.spec.ts <<'EOF'`
 // is not a test or gate run.
@@ -115,7 +131,26 @@ export function expandVars(command) {
 }
 const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:${sub})\\b`).test(expandVars(cmdOf(t)));
 // The review: the code-review skill, or `waymark.mjs review <files>` where the agent has none (Codex, Gemini CLI, OpenCode).
-const reviewed = (tools) => skillCalled(tools, /(^|:)code-review$/) || tools.some((t) => shell(t) && /waymark\.mjs["']?\s+review\s+\S/.test(expandVars(cmdOf(t))));
+// It counts when it ran without error after the first code change of those calls and covers the changed code: code-review
+// reads the whole diff, `waymark.mjs review` must name every changed code file. Applying its findings afterwards needs no
+// second review.
+function reviewed(tools, codeFiles, failed = (t) => !!t.error) {
+  const first = tools.findIndex((t) => (EDITS.test(t.name) && !failed(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
+  const after = tools.slice(first + 1).filter((t) => !failed(t));
+  if (skillCalled(after, /(^|:)code-review$/)) return true;
+  const named = after.filter(shell).flatMap((t) => (expandVars(cmdOf(t)).match(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/)?.[1].match(/"[^"]*"|'[^']*'|\S+/g) || []).map((a) => a.replace(/^["']|["']$/g, '')));
+  const covers = (f) => named.some((a) => { const x = norm(a).replace(/^\.\//, ''); return norm(f) === x || norm(f).endsWith(`/${x}`); });
+  return named.length > 0 && codeFiles.every(covers);
+}
+// The repo that holds a folder on disk (its git top level), or null; cached per close.
+const repos = new Map();
+function repoOf(dir) {
+  if (!dir || !fs.existsSync(dir)) return null;
+  if (!repos.has(norm(dir))) { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); repos.set(norm(dir), r.status === 0 ? norm(r.stdout.trim()) : null); }
+  return repos.get(norm(dir));
+}
+// A Git Bash path (/c/Users/…) as Windows reads it; others unchanged.
+const winPath = (p) => (process.platform === 'win32' ? String(p).replace(/^\/([a-z])\//i, '$1:/') : String(p));
 
 export { sessionTools }; // moved to transcript.mjs (shared with tool-hook.mjs); kept here for existing importers
 
@@ -138,13 +173,16 @@ function memoryHolds(file, since, id) {
 }
 
 const plain = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-// "<Field>: omitido (usuario: "<words>")": the words are in the user's messages or are a whole option they picked (a
-// fragment of the option that accepted the check, e.g. "navegador", does not count).
+// "<Field>: omitido (usuario: "<words>")": at least 3 words (or 12 characters), which are in the user's messages or are a
+// whole option they picked (a fragment of the option that accepted the check, e.g. "navegador", does not count).
+// → 'ok', null (no skip line) or { quote, short? }.
 function userSkip(reply, field, prompts, labels = []) {
   const m = reply.match(new RegExp(`${field}:\\s*omitido \\(usuario:\\s*[“"«]([^”"»]{3,200})[”"»]`, 'i'));
   if (!m) return null;
   const q = plain(m[1]);
-  return prompts.some((p) => plain(p).includes(q)) || labels.some((l) => l === q || l.replace(/\s*\(recomendad[oa]\)$/, '') === q) ? 'ok' : m[1];
+  if (labels.some((l) => l === q || l.replace(/\s*\(recomendad[oa]\)$/, '') === q)) return 'ok'; // a whole option they picked
+  if (q.split(' ').length < 3 && q.length < 12) return { quote: m[1], short: true };
+  return prompts.some((p) => plain(p).includes(q)) ? 'ok' : { quote: m[1] };
 }
 // A Cierre field: its line; a value that ends with ":" continues on the next lines up to the next field ("Evidencia:"
 // with what was seen below it). An empty field never takes the next line. Decisión and Sub-decisiones are not read but
@@ -194,6 +232,9 @@ export function effectiveReply(texts = [], last = '') {
   }
   return rest.trim() ? `${cierre.trimEnd()}\n\n${rest.trim()}` : cierre;
 }
+
+// A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
+export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').replace(/\*\*|__/g, '')) && closingQuestions(reply).length > 0;
 
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
@@ -249,14 +290,23 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const firstRealChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !(result(t)?.error || t.error));
   const procBeforeChange = allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
-  // A command that writes Waymark's own memory is not a gate, even when its text says "build" or "tests".
-  // Each part of a chained command (&&, ;, |) is judged alone: "npx tsc --noEmit && grep T1 .waymark/memory.md" is a gate.
-  // A part after a `cd` into a .waymark folder runs in Waymark's own memory, so it is no gate either.
-  const parts = (t) => {
-    const all = bare(t).split(/&&|\|\||[;|\n]/), inside = all.findIndex((p) => /^\s*cd\s+["']?[^"'\s]*\.waymark(?=["'\s\\/]|$)/.test(p));
-    return (inside >= 0 ? all.slice(0, inside) : all).filter((p) => !/\.waymark[\\/]/.test(p));
+  // Each part of a chained command (&&, ;, |) is judged alone, by its executable (provenance.mjs shellRuns): "npx tsc
+  // --noEmit && grep T1 .waymark/memory.md" is a gate, `git commit -m "fix build"` is none. A part that writes Waymark's
+  // own memory, or runs after a `cd` into a .waymark folder, is no gate even when its text says "build" or "tests".
+  const parsed = new Map(), runsAll = (t) => { const c = cmdOf(t); if (!parsed.has(c)) parsed.set(c, shellRuns(c)); return parsed.get(c); }; // each command parsed once
+  const runsOf = (t) => (shell(t) ? runsAll(t).filter((p) => !/\.waymark([\\/]|$)/.test(String(p.cd || '').replace(/["']/g, '')) && !/\.waymark[\\/]/.test(p.text)) : []);
+  const gateCmd = (t) => runsOf(t).some((p) => p.gate);
+  const testCmd = (t) => runsOf(t).some((p) => p.test);
+  const output = (t) => String(result(t)?.text || t.out || '');
+  // The exit of a shell call belongs to its last part of a kind when only '&&' follows it (a 0 exit passed it) or when it
+  // is the last part (a non-0 exit is its own). → true (passed) / false (failed) / null (another part's exit: a pipe, a
+  // `;`), and then a failure in its output decides.
+  const exitFor = (t, kind) => {
+    const all = runsAll(t), i = all.map((p) => p[kind]).lastIndexOf(true);
+    if (i < 0) return null;
+    return result(t)?.error || t.error ? (i === all.length - 1 ? false : null) : all.slice(i, -1).every((p) => p.sep === '&&') ? true : null;
   };
-  const gateCmd = (t) => shell(t) && parts(t).some((p) => GATE.test(p));
+  const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && FAIL_OUT.test(output(t))); };
   // Test-first, measured from the spec: the spec written first, run (red) before the next edit of code. Config, scaffolding
   // made by commands (`ng new`, installs) and the spec itself are not the code it tests.
   const codeEdit = (t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !SPEC.test(path.basename(fileOf(t)));
@@ -272,7 +322,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // a rerun with nothing changed and a failure of the environment are no failed attempts.
   const failedRuns = new Map(), lastRun = new Map();
   turn.tools.forEach((t, i) => {
-    if (!shell(t) || !parts(t).some((p) => GATE.test(p) || TEST.test(p))) return;
+    if (!runsOf(t).some((p) => p.gate || p.test)) return;
     const key = cmdKey(t), from = lastRun.has(key) ? lastRun.get(key) : -1;
     lastRun.set(key, i);
     const attempt = turn.tools.slice(from + 1, i).some((x) => codeEdit(x) || shellChange(x));
@@ -282,7 +332,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const next = turn.tools.findIndex((t, i) => i > at[1] && shell(t) && cmdKey(t) === cmd);
     return { cmd, docs: turn.tools.some((t, i) => i > at[1] && (next < 0 || i < next) && DOCS(t)), late: next >= 0 };
   });
-  const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => shell(t) && parts(t).some((p) => GATE.test(p) || TEST.test(p)));
+  const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => runsOf(t).some((p) => p.gate || p.test));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   const code = changed.filter((f) => !NOT_CODE.test(f));
@@ -299,6 +349,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
       // or the hook handed the pack over at the first edit (docs/adr/0015)
       searched: (ctx.packed || 0) > 0 || before((t) => /mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks') || (t.name === 'Read' && /[\\/]\.waymark[\\/](memory|tasks)\.md$/.test(String(t.input.file_path || '')))),
+      // searched only after the first change (the pack the block asks for): it no longer blocks, recorded late
+      late: firstChange >= 0 && allTools.some((t, i) => i > firstChange && (/mcp__engram__mem_(search|context)/.test(t.name) || waymarkCmd(t, 'pack|memory|tasks'))),
       opened: before((t) => t.name === 'Read' && /[\\/]\.waymark[\\/]/.test(String(t.input.file_path || ''))),
       // by Edit/Write, or by any tool (a script run through the shell): memory.md changed during the turn and holds the
       // task ID of the Cierre heading
@@ -309,9 +361,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
     gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}) })),
     tests: {
-      specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some((t) => shell(t) && TEST.test(bare(t))),
+      specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
       // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
-      red: allTools.some((t, i) => i >= base && shell(t) && TEST.test(bare(t)) && (/git\s+worktree\s+add/.test(cmdOf(t)) || (firstSpecEdit >= 0 && !codeBeforeSpec && i > firstSpecEdit && (codeAfterSpec < 0 || i < codeAfterSpec)))),
+      red: allTools.some((t, i) => i >= base && testCmd(t) && (/git\s+worktree\s+add/.test(cmdOf(t)) || (firstSpecEdit >= 0 && !codeBeforeSpec && i > firstSpecEdit && (codeAfterSpec < 0 || i < codeAfterSpec)))),
     },
     build: noBuild ? { none: ctx.noBuild } : null, // the project declares no build (memory.md Quality gates)
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
@@ -321,7 +373,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
-    review: reviewed(turn.tools) || reviewed(ctx.taskTools || []),
+    review: reviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error)) || reviewed(ctx.taskTools || [], code),
     docs: turn.tools.filter(DOCS).length,
     retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
@@ -335,7 +387,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   for (const f of ['Tests', 'Review']) {
     const s = userSkip(reply, f, prompts, chosenLabels);
     if (s === 'ok') skip[f] = true;
-    else if (s) extras.push(`${f}: skip quoted as the user's ("${s}") but those words are not in the user's messages nor an option they picked`);
+    else if (s?.short) extras.push(`${f}: skip quoted as the user's ("${s.quote}") is too short: quote at least 3 of their words`);
+    else if (s) extras.push(`${f}: skip quoted as the user's ("${s.quote}") but those words are not in the user's messages nor an option they picked`);
   }
   const hasCierre = CIERRE.test(reply);
   // The exception lines (Tests: no, Build: no, no comprobado, Secretos: no) answer a block: written before the hook
@@ -358,23 +411,40 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   let lateDecision = false;
   if (ctx.decisions && !ctx.decisions.length) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick');
   else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
+  // The exception lines (docs/adr/0012): written after a block, they let the step pass as ⚠ "excepción declarada", never
+  // as ✔ (nothing ran to prove it). → the line, or undefined.
+  const excLine = (re) => exc.match(re)?.[0]?.trim().slice(0, 160);
+  const noComp = excLine(/no comprobado \(.{3,}\)/i), testsNo = excLine(/Tests:\s*no \(.{3,}\)/i), buildNo = excLine(/Build:\s*no \(.{3,}\)/i), secretsNo = excLine(/Secretos:\s*no \(.{3,}\)/i);
+  const excepted = {};
   // Testigo gate: the exit of the agent's last gate after its last code change; with none, the repo typecheck the hook
-  // re-runs (ctx.rerun, testigos.mjs: 40 s, never the full build). A failing gate blocks once; "no comprobado (<why>)"
+  // re-runs (ctx.rerun, testigos.mjs: 40 s, never the full build). A test that failed after the last code change (and did
+  // not pass in a later run) leaves it ✘ too, whatever ran after it. A failing gate blocks once; "no comprobado (<why>)"
   // says the failure is not this task's.
   const gate = [];
+  const redTests = [];
   if (lastCode >= 0) {
     const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t)).pop(); // a gate that never ran checked nothing
     const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
-    // The exit belongs to the gate only when the gate is the command's last part: "build | grep -i error" exits 1 on a
-    // clean build. A failure the gate may not own is decided by the hook's own typecheck (none: not held against it).
-    const tail = (mine ? bare(mine) : '').split(/&&|\|\||[;|\n]/).map((p) => p.trim()).filter(Boolean).pop() || '';
-    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: !result(mine)?.error, s: secs(mine) === null ? null : Math.round(secs(mine)) };
-    const run = !mine ? rerun() : agentRun.ok || GATE.test(tail) ? agentRun : rerun() || { ...agentRun, ok: true, exitNotTheGate: true };
+    // The exit is the gate's only when nothing but '&&' follows it, or it is the last part: "build | grep -i error" exits 1
+    // on a clean build and "tsc; echo done" exits 0 on a red one. Otherwise a failure in its output decides, then the
+    // hook's own typecheck (none: not held against it).
+    const own = mine ? exitFor(mine, 'gate') : null;
+    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
+    // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
+    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !/git\s+worktree\s+add/.test(cmdOf(x))).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
+    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
     observed.gate = run || null;
+    // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
+    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !/git\s+worktree\s+add/.test(cmdOf(t)));
+    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
+    observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
     if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
-    else if (!run.ok && !/no comprobado \(.{3,}\)/i.test(exc)) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    else if (!run.ok && noComp) excepted.gate = noComp;
+    else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    if (redTests.length && noComp) excepted.gate = noComp;
+    else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 160)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
   }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   const cierre = [];
@@ -395,11 +465,17 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   }
   const near = code.length ? specsNear(code) : null;
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
-  const buildAfter = lastCode >= 0 && turn.tools.slice(lastCode + 1).some((t) => shell(t) && BUILD.test(bare(t)));
+  // Testigo build: a build that passed (exit 0, or no failure in its output when its exit is another part's), after the
+  // last code change, in the repo of each changed code file (known only for files and folders on disk).
+  const builds = lastCode < 0 ? [] : turn.tools.slice(lastCode + 1).filter((t) => runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))));
+  const repoAt = ctx.repoOf || repoOf;
+  const buildRepos = builds.map((t) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd); });
+  const codeRepos = code.map((f) => repoAt(path.dirname(f)));
+  const buildAfter = builds.length > 0 && (!ctx.cwd || [...buildRepos, ...codeRepos].some((r) => !r) || codeRepos.every((r) => buildRepos.includes(r)));
   const when = {
     engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
-    repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false,
+    repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
     specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
   };
   const procedure = [];
@@ -409,16 +485,16 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
-    memory: observed.memory.searched ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
-    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review, or node waymark.mjs review <files> where the agent has no code-review, on the task's files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
-    build: buildAfter || /Build:\s*no \(.{3,}\)/i.test(exc) ? [] : ['L2+ with code: run the build once now, after the last change (or write Build: no (<why>) if the project has none)'],
+    memory: observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
+    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the task's code files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
+    build: buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'],
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
-    spec: observed.tests.specsChanged.length || /Tests:\s*no \(/i.test(exc) ? [] : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
-    red: observed.tests.red || /Tests:\s*no \(.{3,}\)/i.test(exc) ? [] : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
-    preexisting: observed.worktree || /no comprobado \(.{3,}\)/i.test(exc) ? [] : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
+    spec: observed.tests.specsChanged.length ? [] : testsNo ? (excepted.spec = testsNo, []) : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
+    red: observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
+    preexisting: observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
-    secrets: observed.secrets.length && !/Secretos:\s*no \(.{3,}\)/i.test(exc) ? [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`] : [],
+    secrets: !observed.secrets.length ? [] : secretsNo ? (excepted.secrets = secretsNo, []) : [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`],
     chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
   };
   const steps = ROUTINE.testigos.map((s) => {
@@ -429,7 +505,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const ordered = (s.id === 'decision' || s.id === 'memory') && !changed.length;
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked && !ordered;
     const why = applies ? fails[s.id] || [] : [];
-    return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
+    return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(applies && !why.length && excepted[s.id] ? { exception: excepted[s.id] } : {}), ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
   });
   const missing = steps.filter((s) => s.applies && s.enforce === 'block').flatMap((s) => s.why);
   const findings = [...steps.filter((s) => s.applies && s.enforce !== 'block').flatMap((s) => s.why), ...extras];
@@ -442,6 +518,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (docsStep?.applies && blind.length) { // already retried without docs: too late to undo, so recorded, not blocked
     const why = blind.map((r) => `the same command failed twice and ran again without docs (${r.cmd.slice(0, 80)})`);
     docsStep.pass = false; docsStep.why = [...docsStep.why, ...why]; findings.push(...why);
+  }
+  const mem = steps.find((s) => s.id === 'memory');
+  if (mem?.applies && mem.pass && !observed.memory.searched && observed.memory.late) { // too late to inform the change: recorded, not blocked
+    const why = 'the project memory was searched after the task\'s first change';
+    mem.pass = false; mem.why = [why]; findings.push(why);
   }
   const proc = steps.find((s) => s.id === 'procedure');
   if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change
@@ -457,14 +538,17 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
 // all pass), the score over the applicable steps, tokens and the quota: measured by the status line when there is a
 // clean reading (statusline.mjs, { pct, shared }), else estimated.
+// A step that passed on a declared exception is 'exception' (⚠): not a ✘, never counted as a ✔ in the score.
 export function evaluate(gaps, usage, model = null, measured = null) {
   const steps = {};
-  for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = (steps[s.label] ?? true) && s.pass;
-  const ok = Object.values(steps).filter(Boolean).length;
+  const worst = (a, b) => (a === false || b === false ? false : a === 'exception' || b === 'exception' ? 'exception' : true);
+  for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = worst(steps[s.label] ?? true, s.pass === false ? false : s.exception ? 'exception' : true);
+  const ok = Object.values(steps).filter((v) => v === true).length, exceptions = Object.values(steps).filter((v) => v === 'exception').length;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
-  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct } : { quotaPct: est.pct, quotaBy: est.by };
-  return { steps, score: `${ok}/${Object.keys(steps).length}`, tokens: usage?.total || 0, ...split, model, ...quota };
+  // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
+  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
+  return { steps, score: `${ok}/${Object.keys(steps).length}${exceptions ? ` · ${exceptions} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -501,9 +585,12 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
 }
 
 // The record of a turn routed Q that changed nothing, or null: no task ID, so it never shifts T<n> or the follow-up offered.
+// A reply that ends with an "Aprendido:" line keeps it as `learned` (the hook saves it to engram, marked Q).
 export function questionRecord(turn, meta = {}) {
   if (!turn.found || routedLevel(turn.texts, turn.tools) !== 'Q') return null;
-  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)) };
+  const tail = String(turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
+  const learned = /^\s*Aprendido:/im.test(tail) ? maskSecrets(aprendidoOf(tail)).slice(0, 600) : '';
+  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), ...(learned ? { learned } : {}) };
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
@@ -513,12 +600,13 @@ export function questionRecord(turn, meta = {}) {
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
 export function summaryLine(id, ev, context = 0) {
-  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v ? '✔' : '✘'}`).join(' · ');
+  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
   const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
   const by = String(ev.quotaBy);
-  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? 'medido, con otra sesión activa' : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
+  const own = ev.quotaOwn !== undefined ? `; esta sesión ${ev.quotaOwn > 0 && ev.quotaOwn < 1 ? '<1' : `≈ ${ev.quotaOwn}`}%, prorrateado por costo` : '';
+  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? `medido, con otra sesión activa${own}` : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
   const pct = by.startsWith('measured') && ev.quotaPct === 0 ? '<1%' : `≈ ${ev.quotaPct}%`; // below the reading's resolution
   return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null && ev.quotaPct !== undefined ? ` ${pct} de la cuota (${how})` : ''}${fresh}${ask}`;
 }
@@ -530,11 +618,13 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done) return;
     done = true;
     try {
-      const h = JSON.parse(input);
+      const h = parseHook(input, agent);
+      if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
-      const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024), cwd = h.cwd || process.cwd();
+      const cwd = h.cwd || process.cwd(), home = projectHome(cwd);
+      // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
+      const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));
       const prompts = lines.filter(isPrompt).map(promptText).slice(-3); // this task: the current prompt and the two before it
-      const home = projectHome(cwd);
       // A turn counts from its prompt, or from this session's last close when that is later (a background notification
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
@@ -547,13 +637,13 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
-      ctx.gitChanged = snapshotDiff(loadSnapshot(h.session_id), gitSnapshot(cwd)); // taken by the per-prompt hook
+      ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
@@ -565,7 +655,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       ctx.rerun = (files) => (rerun ??= rerunGate(files, home)); // once per close, even when the turn is judged twice
       ctx.noBuild = buildNone(home.memory);
       ctx.root = home.root;
-      ctx.scanSecrets = (files) => secretSources(files, ctx.commits, cwd, home.memory, turn.startedAt);
+      // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
+      let turnAll = [];
+      try { if (turn.startedAt) turnAll = turnCommitsAll(turn.tools, cwd, turn.startedAt); } catch (e) { logHookError('stop-hook commits', e); }
+      ctx.scanSecrets = (files) => secretSources(files, [...ctx.commits.filter((c) => !turnAll.some((x) => x.h === c)), ...turnAll], cwd, home.memory, turn.startedAt);
       ctx.chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null);
       let gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       if (gaps?.renamed) { // a new task after all: judged over its own stretch, not the claimed task's
@@ -575,10 +668,17 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const meta = { agent: agent.name, session: h.session_id, cwd };
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
         const q = fs.existsSync(home.memory) ? questionRecord(turn, meta) : null;
-        try { if (q) { appendRecord(cwd, q); clearStart(h.session_id); } } catch {} // the next task counts from its own prompt
+        // the next task counts from its own prompt: a question, an L0 or an unrouted turn ended with no task (a routed task
+        // that stopped before its first change keeps its start)
+        const lvl = routedLevel(turn.texts, turn.tools) || ctx.inherited?.level;
+        try { if (q) appendRecord(cwd, q); if (q || !(typeof lvl === 'number' && lvl > 0)) { clearStart(h.session_id); clearTaskStart(h.session_id); } } catch (e) { logHookError('stop-hook question', e); }
+        try { if (q?.learned && home.dir && !home.legacy) saveQuestion(home, q); } catch (e) { logHookError('stop-hook engram', e); }
         try { refreshTasks(home, closeOpen(home, h.session_id) || !!q); } catch {}
         return;
       }
+      // a reply with no Cierre that ends asking the user, with options: the task is in progress (a pause, not an end); the
+      // next prompt keeps this turn's snapshot and the task's start, and the turn that ends it is judged
+      if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
       if (gaps.missing.length && !h.stop_hook_active) {
         process.stdout.write(JSON.stringify(agent.out.block(blockReason(gaps))));
         return;
@@ -591,34 +691,35 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
-      try { appendRecord(cwd, rec); clearStart(h.session_id); } catch {}
+      try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
         const u = evaluation.usage;
         if (measured && !measured.shared && measured.pct > 0 && evaluation.tokens) appendPair({ task: rec.id, project: home.slug, model: evaluation.model, agent: ctx.inputs?.agent || null, pct: measured.pct, total: evaluation.tokens, ...(u ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}), by: 'measured' });
       } catch {}
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
-      try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch {} // the learned layer: engram, written here, never by the agent
-      // the agent pushed the task (the user asked): its note goes to the same remote, now that it exists
+      try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch (e) { logHookError('stop-hook engram', e); } // the learned layer: engram, written here, never by the agent
+      // the agent pushed (the user asked): the notes the remote lacks go to the same remote, this task's included
       let pushed = '';
       try {
         const push = turn.tools.filter((t) => shell(t) && /\bgit\b[^|;&\n]*\spush\b/.test(bare(t)) && !turn.results?.[t.id]?.error && !/refs\/notes/.test(cmdOf(t))).pop();
-        if (push && (rec.commits || []).length) {
-          const remote = cmdOf(push).match(/\bpush\s+(?:-{1,2}[\w-]+\s+)*([\w.-]+)/)?.[1] || 'origin';
+        const remote = push && (cmdOf(push).match(/\bpush\s+(?:-{1,2}[\w-]+\s+)*([\w.-]+)/)?.[1] || 'origin');
+        if (push && shouldPushNotes(home.root, remote)) {
           const r = pushNotes(home.root, remote);
           pushed = r.ok ? ` · notas subidas a ${remote}` : ` · notas sin subir (${(r.output.split('\n').pop() || 'error').slice(0, 80)}): waymark.mjs notes push`;
         }
       } catch {}
-      try { writeTaskLine(home, rec); } catch {} // the task's Work in progress line, from its Aprendido
+      try { writeTaskLine(home, rec); } catch (e) { logHookError('stop-hook memory', e); } // the task's Work in progress line, from its Aprendido
+      try { if (home.dir && !home.legacy) learn(home, rec, readTaskRecords(home)); } catch (e) { logHookError('stop-hook learn', e); } // what it observed: gates, areas, procedures (docs/adr/0023)
       try { if (home.dir && !home.legacy) syncIdentity(home.memory, stackOf(home.root)); } catch {} // Identity names the repo's package manager
       try { saveSnapshot(h.session_id, cwd); } catch {} // a turn resumed without a prompt diffs from this close, not the last prompt
       try { closeOpen(home, h.session_id, rec.id); } catch {}
-      try { refreshTasks(home, true); } catch {} // tasks.md: where the work stands, for any agent (docs/adr/0007)
+      try { refreshTasks(home, true); } catch (e) { logHookError('stop-hook tasks', e); } // tasks.md: where the work stands, for any agent (docs/adr/0007)
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context) + moved + pushed)));
-    } catch {}
+    } catch (e) { logHookError('stop-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

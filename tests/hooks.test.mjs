@@ -1375,6 +1375,14 @@ test('T2o background: a skill still running in the background holds the close; i
   assert.deepEqual(pendingBackground(bash), [], 'a background shell command (a dev server) is never waited for');
 });
 
+test('2.0.7 background: an agent launched in the background (isAsync) holds the close too; its notification releases it', () => {
+  const launch = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_ag1', content: 'Async agent launched successfully.' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a79f' } };
+  const turn = [prompt('corre el security-review'), say('Waymark → Q · dept-security · skills: security-review'), call('Agent', { description: 'review', run_in_background: true }), launch, say('La revisión sigue corriendo en segundo plano.')];
+  assert.deepEqual(pendingBackground(turn), ['toolu_ag1']);
+  const notified = [...turn, { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>a79f</task-id>\n<tool-use-id>toolu_ag1</tool-use-id>\n<status>completed</status>\n</task-notification>' } }, say('# Security review')];
+  assert.deepEqual(pendingBackground(notified), []);
+});
+
 test('T2o stop hook: no block and no record while the background review runs', () => {
   const { cwd, log } = fresh();
   const transcript = path.join(home, `t-bg-${n}.jsonl`);
@@ -2260,6 +2268,22 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   const skills = (command) => cx.toLines([row('session_meta', { cli_version: '0.160.0' }), cxUser('t9', 'i9', 'x'), cxCmd('t9', command)]).flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c.name === 'Skill').map((c) => c.input.skill));
   assert.deepEqual(skills("Test-Path 'C:\\Users\\u\\.claude\\skills\\code-review\\SKILL.md'"), [], 'checking that it exists is not invoking it');
   assert.deepEqual(skills("Get-Content -Path 'C:\\Users\\u\\.claude\\skills\\dept-frontend\\SKILL.md'"), ['dept-frontend']);
+});
+
+// 2.0.7: YaloAtiendo's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
+// && … review <front files>`) and the testigo read only the first call.
+test('review: every waymark.mjs review in one command counts; the message names the code files left unreviewed', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), web = '/work/web/src/app/login.ts';
+  const base = [prompt('pkce en api y front'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
+    ...askWithId('q1', '¿Cómo?', ['PKCE', 'Otro'], 'PKCE'), call('Edit', { file_path: FILE }), call('Edit', { file_path: web }), call('Bash', { command: 'npm run build' })];
+  const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
+  const api = 'cd "/work/proj" && node "C:/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs 2>&1 | tail -40';
+  const left = judge([...base, call('Bash', { command: api })]);
+  assert.equal(left.observed.review, false);
+  assert.match(left.missing.find((m) => /no review ran/.test(m)) || '', /\(login\.ts\)/, 'the file left, not the first code files');
+  const both = judge([...base, call('Bash', { command: `${api}; cd ../web && node "C:/s/waymark/scripts/waymark.mjs" review src/app/login.ts 2>&1 | tail -40` })]);
+  assert.equal(both.observed.review, true, 'the second call of the same command covers the front');
 });
 
 test('waymark.mjs review: the diff of the task\'s files (new ones included) and the checklist', () => {

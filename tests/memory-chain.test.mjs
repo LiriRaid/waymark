@@ -222,6 +222,33 @@ test('a Q that ends with an Aprendido line goes to engram marked Q; one without 
   withEngram(fake.bin, () => assert.equal(engram.saveQuestion(h, none), false));
 });
 
+// 2.0.7: a Q keeps what it answered and the skills it ran, and tasks.md lists the questions since the last close, so a
+// "¿por dónde voy?" does not take a security-review that already ran for still pending.
+test('a Q keeps its answer (the final reply without the routing line) and its skills; tasks.md lists the Qs since the last close', () => {
+  const repo = tmp('q-answer'); gitT(repo, 'init', '-q'); withMemory(repo);
+  const said = (text, tools = []) => ({ type: 'assistant', message: { content: [{ type: 'text', text }, ...tools.map((t) => ({ type: 'tool_use', id: t, name: 'Skill', input: { skill: t } }))] } });
+  const turn = currentTurn([{ type: 'user', message: { role: 'user', content: 'corre el security-review de auth' } },
+    said('Waymark → Q · dept-security · skills: security-review', ['dept-security', 'security-review']),
+    said('La revisión sigue corriendo en segundo plano.'),
+    said('# Security review: auth de T1\n\n**No encontré vulnerabilidades** con confianza ≥ 8/10.\n\n## Lo que revisé\n- logout')]);
+  const q = questionRecord(turn, { agent: 'claude', session: 's', cwd: repo });
+  assert.deepEqual(q.skills, ['security-review'], 'the department is its own field');
+  assert.equal(q.answer, 'Security review: auth de T1 · No encontré vulnerabilidades con confianza ≥ 8/10. · Lo que revisé · logout');
+  const learned = questionRecord(currentTurn([{ type: 'user', message: { role: 'user', content: '¿dónde?' } }, said('Waymark → Q · dept-frontend · skills: ninguna\n\nEn `store.ts:12`.\n\nAprendido: vive en el store ← store.ts:12')]), { agent: 'claude', session: 's', cwd: repo });
+  assert.equal(learned.answer, 'vive en el store ← store.ts:12', 'the Aprendido, when the reply has one');
+  const closing = questionRecord(currentTurn([{ type: 'user', message: { role: 'user', content: '¿por dónde voy?' } }, said('Waymark → Q · dept-qa · skills: ninguna\n\nVas después del cierre de T1: los commits están subidos y el review corrió sin hallazgos.'), said('¿Con cuál seguimos?')]), { agent: 'claude', session: 's', cwd: repo });
+  assert.match(closing.answer, /^Vas después del cierre de T1/, 'a closing question on its own is not the answer');
+  appendRecord(repo, { id: `${day} · T1`, agent: 'claude', at: '2026-10-13T16:36:00.000Z', session: 's', prompt: 'p', cierre: 'Resultado: hecho\nAprendido: x' });
+  for (let i = 0; i < 6; i++) appendRecord(repo, { ...q, at: `2026-10-13T16:4${i}:00.000Z`, prompt: `pregunta ${i} ${'larga '.repeat(30)}` });
+  const md = tasksMarkdown(projectHome(repo));
+  assert.match(md, /## Preguntas \(Q\) desde el último cierre: 6 \(las últimas 5; provenance\.jsonl, kind "Q"\)\n/);
+  const rows = md.split('\n').filter((l) => /^- (?:\d\d-\d\d )?\d\d:\d\d · dept-security · security-review · "pregunta \d/.test(l));
+  assert.equal(rows.length, 5, md);
+  assert.ok(rows[0].includes('"pregunta 1 ') && rows[4].includes('"pregunta 5 '), 'the newest five, oldest first');
+  assert.match(rows[4], /…" → Security review: auth de T1 · No encontré vulnerabilidades/);
+  assert.ok(rows.every((l) => l.length <= 300), 'one line each');
+});
+
 test('card: the last closed task\'s Aprendido shows once (not again under Learned); a Learned line is "<id> · <Aprendido>"', () => {
   const repo = tmp('card'); gitT(repo, 'init', '-q'); withMemory(repo);
   appendRecord(repo, { id: `${day} · T2`, agent: 'claude', at: new Date().toISOString(), session: 's', prompt: 'p', cierre: 'Resultado: hecho\nAprendido: la lección nueva' });

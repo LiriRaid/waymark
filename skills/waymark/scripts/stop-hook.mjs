@@ -16,7 +16,8 @@
 //   Aprendido (≤200 characters), regenerates tasks.md, and the user sees a one-line summary (systemMessage, 0 model
 //   tokens). The record names the agent that did the work.
 // - A turn routed Q (analysis only, no change) in a project with memory gets a short record {kind: "Q"} with no task ID:
-//   it leaves a trace without taking a T<n>.
+//   it leaves a trace without taking a T<n>, with what it answered and the skills it ran (tasks.md lists the last five).
+//   A turn that launched an agent or skill in the background is recorded when its notification ends it.
 // It never blocks twice in a row (stop_hook_active). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -132,15 +133,17 @@ export function expandVars(command) {
 const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:${sub})\\b`).test(expandVars(cmdOf(t)));
 // The review: the code-review skill, or `waymark.mjs review <files>` where the agent has none (Codex, Gemini CLI, OpenCode).
 // It counts when it ran without error after the first code change of those calls and covers the changed code: code-review
-// reads the whole diff, `waymark.mjs review` must name every changed code file. Applying its findings afterwards needs no
-// second review.
-function reviewed(tools, codeFiles, failed = (t) => !!t.error) {
+// reads the whole diff, `waymark.mjs review` must name every changed code file: every call counts, also several in one
+// command (one repo after another: `… review <api files>; cd ../web && … review <front files>`); a redirect such as
+// `2>&1` is not a file. Applying its findings afterwards needs no second review. Returns the code files left unreviewed.
+function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
   const first = tools.findIndex((t) => (EDITS.test(t.name) && !failed(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
   const after = tools.slice(first + 1).filter((t) => !failed(t));
-  if (skillCalled(after, /(^|:)code-review$/)) return true;
-  const named = after.filter(shell).flatMap((t) => (expandVars(cmdOf(t)).match(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/)?.[1].match(/"[^"]*"|'[^']*'|\S+/g) || []).map((a) => a.replace(/^["']|["']$/g, '')));
+  if (skillCalled(after, /(^|:)code-review$/)) return [];
+  const named = after.filter(shell).flatMap((t) => [...expandVars(cmdOf(t)).matchAll(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/g)]
+    .flatMap((m) => m[1].match(/"[^"]*"|'[^']*'|\S+/g) || []).filter((a) => !/^\d*>/.test(a)).map((a) => a.replace(/^["']|["']$/g, '')));
   const covers = (f) => named.some((a) => { const x = norm(a).replace(/^\.\//, ''); return norm(f) === x || norm(f).endsWith(`/${x}`); });
-  return named.length > 0 && codeFiles.every(covers);
+  return codeFiles.filter((f) => !covers(f));
 }
 // The repo that holds a folder on disk (its git top level), or null; cached per close.
 const repos = new Map();
@@ -336,6 +339,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   const code = changed.filter((f) => !NOT_CODE.test(f));
+  // the code files no review covered, in this turn or earlier in the same task (a follow-up that applies the review's
+  // findings needs no second review)
+  const turnLeft = unreviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error));
+  const taskLeft = turnLeft.length ? unreviewed(ctx.taskTools || [], code) : [];
+  const reviewLeft = turnLeft.filter((f) => taskLeft.includes(f));
   // "build | none" holds for the project that declares it: code changed in another repo still needs its build
   const noBuild = !!ctx.noBuild && (!ctx.root || code.every((f) => norm(f).startsWith(norm(ctx.root).replace(/\/$/, '') + '/')));
   // The choice window waiting for the user is the user's time, not the agent's (a question left open overnight would
@@ -373,7 +381,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
-    review: reviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error)) || reviewed(ctx.taskTools || [], code),
+    review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
     retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
@@ -486,7 +494,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const fails = {
     decision, gate, cierre,
     memory: observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
-    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the task's code files (${code.slice(0, 4).map((f) => path.basename(f)).join(', ')}${code.length > 4 ? '…' : ''})`],
+    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`],
     build: buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'],
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
@@ -585,12 +593,23 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
 }
 
 // The record of a turn routed Q that changed nothing, or null: no task ID, so it never shifts T<n> or the follow-up offered.
-// A reply that ends with an "Aprendido:" line keeps it as `learned` (the hook saves it to engram, marked Q).
+// A reply that ends with an "Aprendido:" line keeps it as `learned` (the hook saves it to engram, marked Q). `answer` is
+// what tasks.md shows of it: the Aprendido, or else the start of the final reply as one line (no routing line, no
+// markdown), so a question that ran a review is not taken for still pending; `skills` are the ones it ran besides its
+// department.
 export function questionRecord(turn, meta = {}) {
   if (!turn.found || routedLevel(turn.texts, turn.tools) !== 'Q') return null;
   const tail = String(turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
   const learned = /^\s*Aprendido:/im.test(tail) ? maskSecrets(aprendidoOf(tail)).slice(0, 600) : '';
-  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), ...(learned ? { learned } : {}) };
+  const oneLine = (t) => String(t).split('\n').filter((l) => !/^\s*Waymark\s*→/.test(l))
+    .map((l) => l.replace(/\*\*|__|`/g, '').replace(/^\s*(?:#{1,6}|[-*+]|\d+\.)\s+/, '').trim()).filter(Boolean).join(' · ');
+  // the last block with substance: a closing line of its own ("¿Con cuál seguimos?") is not the answer
+  const blocks = [...turn.texts].reverse().map(oneLine).filter(Boolean);
+  const final = blocks.find((b) => b.length >= 60) || blocks[0] || '';
+  const answer = maskSecrets(learned || final).slice(0, 300);
+  const skills = [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')).filter((s) => s && !/^dept-/.test(s)))];
+  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)),
+    ...(skills.length ? { skills } : {}), ...(answer ? { answer } : {}), ...(learned ? { learned } : {}) };
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).

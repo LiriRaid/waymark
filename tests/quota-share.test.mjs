@@ -184,3 +184,40 @@ test('the end-of-turn and tool hooks record a desktop session\'s spend', () => {
     assert.equal(Q.readQuota().sessions.desk.cost, 3);
   } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
 });
+
+// 2.0.7 — the line shows the session's tokens: every response of its transcript and its subagents', cache included (the
+// number each task's evaluation gives, so the session's is the sum of its tasks'), read from where the last update stopped.
+const used = (id, at, u) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(), message: { id, model: 'claude-opus-5-5', usage: u } }) + '\n';
+
+test('the line shows the session\'s tokens, cache and subagents included, each response once', () => {
+  const prev = process.env.WAYMARK_HOME, fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-tok-'));
+  process.env.WAYMARK_HOME = fresh;
+  try {
+    const t0 = 1799998000000, file = path.join(fresh, 'k.jsonl'), line = (five, cost) => ({ ...st('k', five, cost), transcript_path: file });
+    fs.writeFileSync(file, used('r1', t0, { input_tokens: 1000, cache_creation_input_tokens: 49000, cache_read_input_tokens: 0, output_tokens: 200000 }));
+    Q.recordStatus(line(10, 1), t0 + 1000);
+    assert.equal(Q.readQuota().sessions.k.tokens, 250000);
+    assert.equal(Q.statusText(line(10, 1), Q.readQuota()), '5h 10% · tokens 250k · contexto 10%');
+    // a response streamed as two lines counts once; a cache read counts (it is in each task's evaluation too)
+    fs.appendFileSync(file, used('r2', t0 + 2000, { input_tokens: 0, cache_read_input_tokens: 1150000, output_tokens: 0 }) + used('r2', t0 + 2001, { input_tokens: 0, cache_read_input_tokens: 1150000, output_tokens: 0 }));
+    fs.mkdirSync(path.join(fresh, 'k', 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(fresh, 'k', 'subagents', 'agent-1.jsonl'), used('s1', t0 + 2500, { input_tokens: 100000, output_tokens: 0 }));
+    Q.recordStatus(line(13, 4), t0 + 3000);
+    Q.recordStatus(line(13, 4), t0 + 3500); // nothing new: nothing counted twice
+    assert.equal(Q.readQuota().sessions.k.tokens, 1500000);
+    assert.equal(Q.statusText(line(13, 4), Q.readQuota()), '5h 13% · esta sesión ≈3% · tokens 1.5M · contexto 10%');
+    // a line still being written is read when it is whole
+    const r3 = used('r3', t0 + 4000, { input_tokens: 999, output_tokens: 0 });
+    fs.appendFileSync(file, r3.slice(0, 30));
+    Q.recordStatus(line(13, 4), t0 + 4500);
+    assert.equal(Q.readQuota().sessions.k.tokens, 1500000);
+    fs.appendFileSync(file, r3.slice(30));
+    Q.recordStatus(line(13, 4), t0 + 5000);
+    assert.equal(Q.readQuota().sessions.k.tokens, 1500999);
+    assert.equal(Q.statusText(st('none', 13, 4), Q.readQuota()), '5h 13% · contexto 10%', 'no transcript: no tokens');
+    // a transcript rewritten shorter is counted again from the start, not added to the old count
+    fs.writeFileSync(file, used('n1', t0 + 6000, { input_tokens: 0, output_tokens: 7000 }));
+    Q.recordStatus(line(13, 4), t0 + 6500);
+    assert.equal(Q.readQuota().sessions.k.tokens, 107000, 'the rewritten transcript plus its subagent');
+  } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
+});

@@ -168,7 +168,7 @@ export function planStatusLine(input, { scripts = SCRIPTS } = {}) {
   if (have === command && s.statusLine.refreshInterval === REFRESH) return { settings: s, steps: [], next: null };
   const next = have && !oursLine(have) ? have : null;
   s.statusLine = { type: 'command', command, refreshInterval: REFRESH };
-  const steps = [!have ? 'add statusLine → statusline.mjs (5h · esta sesión · 7d · contexto; measures each task\'s %)'
+  const steps = [!have ? 'add statusLine → statusline.mjs (5h · esta sesión · tokens · 7d · contexto; measures each task\'s %)'
     : next ? `statusLine → statusline.mjs; yours (${next}) runs after it`
       : have === command ? `statusLine: refreshInterval ${REFRESH} s (a quiet terminal shows the other sessions' use)` : `update statusLine command: ${have} → ${command}`];
   return { settings: s, steps, next };

@@ -2628,7 +2628,7 @@ test('quota: the status line keeps the real % and shows quota and context', asyn
 });
 
 test('quota: a task\'s % is measured from the prompt to the close; shared, reset or stale gives no clean measure', async () => {
-  const { recordStatus, markStart, clearStart, measure } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const { recordStatus, markStart, clearStart, measure, quotaFile } = await import(`file://${SCRIPTS}/statusline.mjs`);
   const t0 = 1799991000000;
   recordStatus(status('m1', 20, 40), t0);
   markStart('m1', t0 + 1000);
@@ -2648,6 +2648,7 @@ test('quota: a task\'s % is measured from the prompt to the close; shared, reset
   recordStatus({ ...status('m1', 2, 41, 12, 8000), rate_limits: { five_hour: { used_percentage: 2, resets_at: 1800018000 } } }, t0 + 72000);
   assert.equal(measure('m1', t0 + 73000), null, 'the window reset during the task');
   clearStart('m1');
+  fs.rmSync(quotaFile(), { force: true }); // a machine whose newest reading is m2's (m1's later window would win)
   recordStatus(status('m2', 30, 40), t0);
   markStart('m2', 1800000500000); // the last reading's window ended before this prompt: a new window starts at 0
   recordStatus({ ...status('m2', 1.5, 40, 12, 9000), rate_limits: { five_hour: { used_percentage: 1.5, resets_at: 1800018000 } } }, 1800000600000);

@@ -95,7 +95,10 @@ function record(input, now) {
     if (s !== prev) { st.sessions[id] = s; changed = true; }
   }
   const fresh = five && (!id || readingKey(five) !== st.sessions[id]?.seen); // a re-run brings the session's same reading
-  if (fresh) {
+  // a reading from a window older than the newest one (a session idle across the reset, first seen by the timer)
+  const older = fresh && st.latest?.five && !sameWindow(st.latest.five, five) && (five.resetsAt || 0) < (st.latest.five.resetsAt || 0);
+  if (older) { st.sessions[id].seen = readingKey(five); changed = true; }
+  else if (fresh) {
     const prev = st.latest?.five, same = sameWindow(prev, five);
     if (!same) { for (const s of Object.values(st.sessions)) s.own = 0; st.outside = null; }
     const dp = same ? five.pct - prev.pct : five.pct;

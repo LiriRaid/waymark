@@ -70,3 +70,11 @@ test('install-hooks gives Waymark\'s status line refreshInterval 30, so a quiet 
   assert.deepEqual([old.settings.statusLine.refreshInterval, old.steps.length], [30, 1], 'an install without it gets it');
   assert.deepEqual(planStatusLine(add.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
 });
+
+test('a session first seen with a reading from an older window (idle across the reset) changes nothing', () => {
+  const t0 = 1799993000000, before = Q.readQuota();
+  Q.recordStatus(st('old', 80, 2, RESET), t0); // its last response was in the window that already reset
+  const now = Q.readQuota();
+  assert.deepEqual([now.latest.five, own('c'), own('d')], [before.latest.five, own('c'), own('d')]);
+  assert.equal(own('c'), 6, 'the shares of the current window stay');
+});

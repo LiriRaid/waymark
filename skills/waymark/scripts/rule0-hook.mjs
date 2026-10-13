@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
 import { taskIds, saveSnapshot, markOpen, markTaskStart, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
-import { agentFrom, parseHook } from './agents/index.mjs';
+import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
@@ -127,7 +127,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const hook = parseHook(input, agent, { lenient: true });
     if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
-    try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) process.stdout.write(JSON.stringify(out)); } catch (e) { logHookError('rule0-hook', e); }
+    try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) answer(agent, out); } catch (e) { logHookError('rule0-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', run);

@@ -23,6 +23,11 @@
 // Copilot CLI (`--agent copilot`, docs/adr/0022): ~/.copilot/hooks/waymark.json (COPILOT_HOME, WAYMARK_COPILOT_HOOKS overrides
 // it), `"version": 1` and flat entries under Claude Code's event names, which give Claude's payload (agents/copilot.mjs).
 // User hooks need no trust (docs.github.com/en/copilot/reference/hooks-reference).
+// Kiro (`--agent kiro`): ~/.kiro/hooks/waymark.json (KIRO_HOME, WAYMARK_KIRO_HOOKS overrides it), {"version": "v1", "hooks":
+// [{name, trigger, action}]}, no matcher (agents/kiro.mjs journals every tool). Global hooks are documented for its CLI V3.
+// Antigravity (`--agent antigravity`): a hook named "waymark" in ~/.gemini/config/hooks.json (WAYMARK_ANTIGRAVITY_HOOKS
+// overrides it), the user's named hooks kept; its prompt event is PreInvocation (agents/antigravity.mjs). Both run each
+// script with `--event <core event>` (OWN below).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,9 +53,79 @@ export const settingsFile = (agent) => SETTINGS[agent]?.() || null;
 export const PLUGIN = () => { const a = known('opencode'); return process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file); };
 const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.replace('.', '\\.')}`).test(String(h?.command || ''));
 
+// Agents whose hooks file has its own shape (agents.json format "own"). commands(s) → [event, command] of Waymark's
+// entries; put(s, want) rebuilds them in place, after the user's hooks, which stay; strip(s) → { next, removed, empty }
+// (empty: nothing but Waymark's was in the file). Their commands carry `--event <core event>`: the payload may not name it.
+const OURS_ANY = (c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(String(c || ''));
+const handlers = (list) => (Array.isArray(list) ? list : []).flatMap((e) => (Array.isArray(e?.hooks) ? e.hooks : [e]));
+const OWN = {
+  // Kiro (kiro.dev/docs/hooks): {"version": "v1", "hooks": [{name, trigger, matcher?, action: {type: "command", command}}]}
+  kiro: {
+    commands: (s) => (Array.isArray(s.hooks) ? s.hooks : []).filter((h) => OURS_ANY(h?.action?.command)).map((h) => [h.trigger, h.action.command]),
+    put: (s, want) => {
+      s.version ??= 'v1';
+      s.hooks = [...(Array.isArray(s.hooks) ? s.hooks : []).filter((h) => !OURS_ANY(h?.action?.command)),
+        ...want.map((w) => ({ name: `waymark-${w.event}`, trigger: w.event, action: { type: 'command', command: w.command } }))];
+    },
+    strip: (s) => {
+      const all = Array.isArray(s.hooks) ? s.hooks : [], kept = all.filter((h) => !OURS_ANY(h?.action?.command));
+      return { next: { ...s, hooks: kept }, removed: all.length - kept.length, empty: !kept.length && Object.keys(s).every((k) => ['version', 'hooks'].includes(k)) };
+    },
+  },
+  // Antigravity (antigravity.google/docs/hooks): {"<hook name>": {enabled?, SessionStart: [handler], PreInvocation: […],
+  // PreToolUse: [{matcher, hooks: [handler]}], PostToolUse: […], Stop: […]}}, handler {type: "command", command, timeout?}
+  // (30 s by default: the session and end-of-turn hooks get 60). Waymark's hook is "waymark".
+  antigravity: {
+    commands: (s) => Object.entries(s.waymark || {}).flatMap(([event, list]) => handlers(list).filter((h) => OURS_ANY(h?.command)).map((h) => [event, h.command])),
+    put: (s, want) => {
+      const { next } = OWN.antigravity.strip(s), enabled = s.waymark?.enabled; // Waymark's handlers anywhere else in the file go too
+      for (const k of Object.keys(s)) delete s[k];
+      Object.assign(s, next, { waymark: { ...(enabled !== undefined ? { enabled } : {}), ...Object.fromEntries(want.map((w) => {
+        const handler = { type: 'command', command: w.command, ...(/^(SessionStart|Stop)$/.test(w.event) ? { timeout: 60 } : {}) };
+        return [w.event, /ToolUse$/.test(w.event) ? [{ matcher: '*', hooks: [handler] }] : [handler]];
+      })) } });
+    },
+    strip: (s) => {
+      const next = structuredClone(s);
+      let removed = 0;
+      for (const [name, hook] of Object.entries(next)) {
+        if (!hook || typeof hook !== 'object') continue;
+        const had = removed;
+        for (const [event, list] of Object.entries(hook)) {
+          if (!Array.isArray(list)) continue;
+          const kept = list.map((e) => {
+            if (Array.isArray(e?.hooks)) { const hs = e.hooks.filter((h) => !OURS_ANY(h?.command)); removed += e.hooks.length - hs.length; return hs.length ? { ...e, hooks: hs } : null; }
+            if (OURS_ANY(e?.command)) { removed++; return null; }
+            return e;
+          }).filter(Boolean);
+          if (kept.length) hook[event] = kept; else delete hook[event];
+        }
+        if (removed > had && !Object.values(hook).some(Array.isArray)) delete next[name]; // only a hook Waymark emptied
+      }
+      return { next, removed, empty: !Object.keys(next).length };
+    },
+  },
+};
+export const withoutOwn = (agent, s) => OWN[agent].strip(s || {});
+
+function planOwn(input, { scripts, agent, spec }) {
+  const s = structuredClone(input || {}), own = OWN[agent];
+  const want = HOOKS.filter((x) => !x.extra || spec.extra?.includes(x.event))
+    .map((h) => ({ event: spec.events?.[h.event] || h.event, file: h.file, command: `node "${scripts}/${h.file}" --agent ${agent} --event ${h.event}` }));
+  const before = own.commands(s);
+  own.put(s, want);
+  if (JSON.stringify(s) === JSON.stringify(input || {})) return { settings: s, steps: [] };
+  const steps = want.filter((w) => !before.some(([e, c]) => e === w.event && c === w.command))
+    .map((w) => `${before.some(([e]) => e === w.event) ? 'update' : 'add'} ${w.event} → ${w.file}`);
+  if (before.length > want.length) steps.push(`remove ${before.length - want.length} duplicate Waymark hook${before.length - want.length > 1 ? 's' : ''}`);
+  if (!steps.length) steps.push('update the Waymark hooks\' entries');
+  return { settings: s, steps };
+}
+
 // → { settings, steps } without touching the input: the settings with the four hooks in place and what changed.
 export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
   const spec = hooksOf(agent) || hooksOf('claude'), flat = spec.format === 'flat'; // flat: an entry is the hook itself ({command, matcher?}), not {matcher, hooks: [...]}
+  if (spec.format === 'own') return planOwn(input, { scripts, agent, spec });
   const s = structuredClone(input || {}), steps = [];
   if (flat) s.version ??= 1;
   s.hooks = s.hooks || {};
@@ -110,7 +185,8 @@ export function registered() {
     const file = at();
     let s = null;
     try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    const commands = [...new Set(Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || [e]).map((h) => String(h?.command || ''))).filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
+    const all = OWN[agent] ? OWN[agent].commands(s || {}).map(([, c]) => c) : Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || [e]).map((h) => String(h?.command || '')));
+    const commands = [...new Set(all.filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
     if (commands.length) out.push({ agent, file, commands });
   }
   try {

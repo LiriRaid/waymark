@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, shellRuns, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
-import { agentFrom, parseHook } from './agents/index.mjs';
+import { agentFrom, parseHook, answer } from './agents/index.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 
@@ -211,7 +211,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       if (!after) {
         const deny = gate(hook, agent);
-        if (deny) { process.stdout.write(JSON.stringify(agent.out.deny(deny))); return; }
+        if (deny) { answer(agent, agent.out.deny(deny)); return; }
         // a shell change in another repo: its snapshot before the command runs, so the close sees what it changed there
         const c = agent.call(hook);
         if (c?.command !== undefined && changesProject(c.command)) for (const d of commandRepos(c.command, hook.cwd || process.cwd())) addRepoSnapshot(hook.session_id, d);
@@ -219,9 +219,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (after || agent.preContext) {
         // the per-prompt reminder an agent kept for the turn's first tool result (Cursor), then the pack
         const text = [after ? agent.takePrompt?.(hook) : '', await packContext(hook, agent)].filter(Boolean).join('\n\n');
-        if (text) { process.stdout.write(JSON.stringify(agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text))); return; }
+        if (text) { answer(agent, agent.out.context(after ? 'PostToolUse' : 'PreToolUse', text)); return; }
       }
-      if (agent.out.pass) process.stdout.write(JSON.stringify(agent.out.pass(hook.hook_event_name)));
+      if (agent.out.pass) answer(agent, agent.out.pass(hook.hook_event_name));
     } catch (e) { logHookError('tool-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

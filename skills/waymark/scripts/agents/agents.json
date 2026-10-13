@@ -32,13 +32,14 @@
     {
       "key": "antigravity", "name": "Antigravity", "dir": "~/.gemini", "instructions": "GEMINI.md", "skills": "~/.gemini/config/skills",
       "marks": ["antigravity", "antigravity-ide", "antigravity-cli"],
-      "hooks": { "file": "config/hooks.json", "format": "own" },
-      "adapter": null, "docs": "https://antigravity.google/docs/hooks/", "checked": "2026-10-12"
+      "hooks": { "file": "config/hooks.json", "override": "WAYMARK_ANTIGRAVITY_HOOKS", "format": "own", "matcher": null, "extra": ["PostToolUse"],
+        "events": { "SessionStart": "SessionStart", "UserPromptSubmit": "PreInvocation", "PreToolUse": "PreToolUse", "PostToolUse": "PostToolUse", "Stop": "Stop" } },
+      "adapter": "antigravity", "docs": "https://antigravity.google/docs/hooks/", "checked": "2026-10-13"
     },
     {
       "key": "kiro", "name": "Kiro", "dir": "~/.kiro", "env": "KIRO_HOME", "instructions": "steering/AGENTS.md", "skills": "~/.kiro/skills",
-      "hooks": { "file": "hooks/waymark.json", "format": "own" },
-      "adapter": null, "docs": "https://kiro.dev/docs/hooks/", "checked": "2026-10-12"
+      "hooks": { "file": "hooks/waymark.json", "override": "WAYMARK_KIRO_HOOKS", "format": "own", "matcher": null, "extra": ["PostToolUse"] },
+      "adapter": "kiro", "docs": "https://kiro.dev/docs/hooks/", "checked": "2026-10-13"
     },
     {
       "key": "copilot", "name": "Copilot CLI", "dir": "~/.copilot", "env": "COPILOT_HOME", "instructions": "copilot-instructions.md", "skills": true,

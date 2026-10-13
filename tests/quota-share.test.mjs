@@ -78,3 +78,30 @@ test('a session first seen with a reading from an older window (idle across the 
   assert.deepEqual([now.latest.five, own('c'), own('d')], [before.latest.five, own('c'), own('d')]);
   assert.equal(own('c'), 6, 'the shares of the current window stay');
 });
+
+test('the first reading with none before it (a new install, a wiped file) is a baseline: no session takes the window\'s past', () => {
+  const prev = process.env.WAYMARK_HOME, fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-base-'));
+  process.env.WAYMARK_HOME = fresh;
+  try {
+    const t0 = 1799995000000;
+    Q.recordStatus(st('e', null, 0.5), t0); // before its first response: no reading yet
+    Q.recordStatus(st('e', null, 2), t0 + 1000); // it spends
+    Q.recordStatus(st('e', 70, 3), t0 + 2000); // the first reading: 70% of a window Waymark did not see begin
+    assert.equal(own('e'), 0, 'the 70% was spent before Waymark watched: not this session\'s');
+    assert.equal(Q.readQuota().outside.pct, 70);
+    assert.equal(Q.statusText(st('e', 70, 3), Q.readQuota()), '5h 70% · contexto 10%');
+    Q.recordStatus(st('e', 74, 5), t0 + 3000); // +4%, e spent 2
+    assert.equal(own('e'), 4, 'only the rises after the baseline are its own');
+    assert.equal(Q.statusText(st('e', 74, 5), Q.readQuota()), '5h 74% · esta sesión ≈4% · contexto 10%');
+    // the next day: the window reset hours ago, unseen (claude.ai, the desktop app), and a new terminal reads 40%
+    const next = RESET + 9 * 3600, day = (RESET + 8 * 3600) * 1000; // the next window opened 4 h after the reset
+    Q.recordStatus(st('f', null, 0.2), day);
+    Q.recordStatus(st('f', null, 1), day + 1000);
+    Q.recordStatus(st('f', 40, 2, next), day + 2000);
+    assert.deepEqual([own('f'), Q.readQuota().outside.pct], [0, 40], 'a new window first read long after its reset is a baseline too');
+    // a reset seen happen: the first reading of the new window comes minutes after it, and is split as before
+    const soon = (next + 60) * 1000;
+    Q.recordStatus(st('f', 3, 4, next + 18000), soon);
+    assert.equal(own('f'), 3, 'read within 10 minutes of the reset: the new window starts at 0 and its % is this session\'s');
+  } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
+});

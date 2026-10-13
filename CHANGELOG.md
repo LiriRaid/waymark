@@ -2,6 +2,14 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.5 — Kiro and Antigravity join the chain, and each session's share of the quota is its own
+- **Kiro and Antigravity with their hooks** (`docs/adr/0022`, `adapters/kiro.md`, `adapters/antigravity.md`):
+  - `install-hooks --agent kiro` writes `~/.kiro/hooks/waymark.json` (`"version": "v1"`). `install-hooks --agent antigravity` adds a hook named `waymark` to `~/.gemini/config/hooks.json` and keeps the user's own hooks. Each command carries `--event`, because Antigravity's payload names no event.
+  - Neither agent's hooks carry the reply, and neither documents its transcript, so the turn is a journal of their hooks (`agents/journal.mjs`). The Cierre is not checked there, and on Kiro the choice window is not checked either: it has no question tool. Gates, review, build, spec, secrets, procedure and memory are checked from the tool calls.
+  - Kiro reads plain text and exit codes, so the hooks answer through `answer()` (`agents/index.mjs`), which uses an adapter's `emit()` when it has one. Every other agent's answer is unchanged.
+  - Both were built from the documentation; their first live session checks the points in their `adapters/*.md`. The uninstall removes their hooks, and `check` offers them like any agent's.
+- **Fix: "esta sesión" showed the whole 5-hour window.** The first reading with no reading before it (a new install, a wiped `~/.waymark`) counted the window's entire % as a rise, and a session that had already spent took all of it, so its share equaled the 5h figure. That reading is now a baseline: what the window held goes to outside, and only the rises after it are split among the sessions. The same goes for a new window first read more than 10 minutes after the last reset (its start went unseen: claude.ai, the desktop app); a reset seen happen still starts the shares at 0.
+
 ## 2.0.4 — Copilot CLI joins the chain, and the task records travel on their own
 - **Copilot CLI with its hooks** (`docs/adr/0022`, `adapters/copilot.md`):
   - `install-hooks --agent copilot` writes `~/.copilot/hooks/waymark.json` under Claude Code's event names, so Copilot sends Claude's payload. User hooks need no trust.

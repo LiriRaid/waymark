@@ -10,7 +10,9 @@
 //   cumulative cost (`cost.total_cost_usd`, list price), the cost already paid for and its share (own) of the window;
 // - outside: the share of the window no Claude Code session paid for (claude.ai, Codex, another machine).
 // Each rise of the reading is split among the sessions by the cost each spent since it was last paid for (docs/adr/0019,
-// shares per session): a prorated estimate, never a calibration pair.
+// shares per session): a prorated estimate, never a calibration pair. The first reading with none before it, or of a new
+// window read more than 10 minutes after the last reset, is a baseline: what the window held then goes to outside, and no
+// session takes it.
 // ~/.waymark/.quota-starts.json holds, per session, the reading when its task started: set by the per-prompt hook and
 // cleared when the task closes. A file of its own, so a status update never overwrites a start written meanwhile.
 // The end-of-turn hook subtracts start from latest: the task's real %, with no question to the user (measure()).
@@ -28,6 +30,7 @@ export const quotaFile = () => path.join(HOME(), '.quota.json');
 const startsFile = () => path.join(HOME(), '.quota-starts.json');
 const KEEP = 7 * 86400000; // sessions and starts older than a week are dropped
 const RESET_SLACK = 120; // seconds: the same window's resets_at may move a little between readings
+const SEEN_RESET = 600; // seconds: a new window's first reading within this of the last reset saw the reset happen
 const round = (x) => Math.round(x * 10) / 10;
 
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { return {}; } };
@@ -101,8 +104,16 @@ function record(input, now) {
   else if (fresh) {
     const prev = st.latest?.five, same = sameWindow(prev, five);
     if (!same) { for (const s of Object.values(st.sessions)) s.own = 0; st.outside = null; }
-    const dp = same ? five.pct - prev.pct : five.pct;
-    if (dp > 0) attribute(st, dp);
+    // no reading before (a new install, a wiped file), or a new window first read long after the last one reset: the
+    // window's % so far was spent while Waymark did not watch (claude.ai, the desktop app, another agent)
+    const unseen = !prev || (!same && now / 1000 - (prev.resetsAt || 0) > SEEN_RESET);
+    if (unseen) {
+      st.outside = { pct: five.pct };
+      for (const s of Object.values(st.sessions)) if (Number.isFinite(s.cost)) s.paid = s.cost;
+    } else {
+      const dp = same ? five.pct - prev.pct : five.pct; // a reset seen happen: the new window starts at 0
+      if (dp > 0) attribute(st, dp);
+    }
     st.latest = { at: now, five, ...(seven ? { seven } : {}) };
     if (id) st.sessions[id].seen = readingKey(five);
     changed = true;

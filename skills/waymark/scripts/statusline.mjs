@@ -7,7 +7,8 @@
 // - latest: the newest reading of the window (the quota is the account's: one value for every session, so a quiet
 //   terminal shows what another one read). A re-run that brings the session's same reading again is not a new one;
 // - sessions: per session, the last time its tokens moved (another session answering while a task runs = shared), its
-//   cumulative cost (`cost.total_cost_usd`, list price), the cost already paid for and its share (own) of the window;
+//   cumulative cost (`cost.total_cost_usd`, list price; a session with no status line, such as the desktop app's, gets
+//   it from the hooks: recordSpend), the cost already paid for and its share (own) of the window;
 // - outside: the share of the window no Claude Code session paid for (claude.ai, Codex, another machine).
 // Each rise of the reading is split among the sessions by the cost each spent since it was last paid for (docs/adr/0019,
 // shares per session): a prorated estimate, never a calibration pair. The first reading with none before it, or of a new
@@ -24,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { subagentDir } from './transcript.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 export const quotaFile = () => path.join(HOME(), '.quota.json');
@@ -63,6 +65,79 @@ function attribute(st, dp) {
   else st.outside = { pct: (st.outside?.pct || 0) + dp };
 }
 
+// List price in USD per million tokens (input, output, cache read) by model, first match; a cache write costs 1.25×
+// input (5 minutes) or 2× (1 hour). Only the ratio between sessions matters (each rise is prorated by cost, and a
+// status-line session's cost is Claude Code's own), so an unknown model takes the default.
+const PRICES = [
+  [/fable-5-1|mythos-5-1/, [10, 50, 0.25]], [/fable|mythos/, [10, 50, 1]],
+  [/opus-5-5/, [4, 20, 0.2]], [/opus/, [5, 25, 0.5]],
+  [/sonnet-5/, [2, 10, 0.2]], [/sonnet/, [3, 15, 0.3]],
+  [/haiku-5/, [0.1, 0.5, 0.01]], [/haiku/, [1, 5, 0.1]],
+];
+const DEFAULT_PRICE = [4, 20, 0.2];
+export function usageCost(model, u = {}) {
+  const [inp, out, read] = PRICES.find(([re]) => re.test(model || ''))?.[1] || DEFAULT_PRICE;
+  const c = u.cache_creation, hour = c?.ephemeral_1h_input_tokens || 0;
+  const minutes = c ? c.ephemeral_5m_input_tokens || 0 : u.cache_creation_input_tokens || 0;
+  return ((u.input_tokens || 0) * inp + minutes * inp * 1.25 + hour * inp * 2 + (u.cache_read_input_tokens || 0) * read + (u.output_tokens || 0) * out) / 1e6;
+}
+
+// The responses a transcript gained after `offset` (bytes): their cost, and the part answered at or before `paidUntil`
+// (ms). Whole lines only (a line still being written is read next time); each message once (a streamed response is
+// written as several lines that share message.id and usage, so the last ids read are kept across calls).
+export function transcriptCost(file, offset = 0, seen = [], paidUntil = 0) {
+  const size = fs.statSync(file).size;
+  if (size < offset) { offset = 0; seen = []; } // rewritten
+  const r = { cost: 0, paid: 0, offset, seen };
+  if (size === offset) return r;
+  const buf = Buffer.alloc(size - offset), fd = fs.openSync(file, 'r');
+  try { fs.readSync(fd, buf, 0, buf.length, offset); } finally { fs.closeSync(fd); }
+  const end = buf.lastIndexOf(10) + 1;
+  const ids = new Set(seen);
+  for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    const u = d?.type === 'assistant' ? d.message?.usage : null;
+    if (!u || ids.has(d.message.id)) continue;
+    ids.add(d.message.id);
+    const c = usageCost(d.message.model, u);
+    r.cost += c;
+    if ((Date.parse(d.timestamp || '') || 0) <= paidUntil) r.paid += c;
+  }
+  return { ...r, offset: offset + end, seen: [...ids].slice(-50) };
+}
+
+// What a session with no status line (Claude's desktop app) spent, recorded by the hooks so each rise of the window is
+// split with it too: its transcript and its subagents' at list price, read from where the last call stopped. First
+// sight: what it spent up to the newest reading is the baseline. A session the status line measures is left to it.
+export function recordSpend(session, transcript, now = Date.now()) {
+  if (!session || !transcript || !fs.existsSync(transcript)) return null;
+  const known = readQuota().sessions[session];
+  if (known && known.by !== 'hook') return null; // without the lock: a status-line session stays one (checked again below)
+  return withLock(() => {
+    const st = readQuota(), prev = st.sessions[session];
+    if (prev && prev.by !== 'hook') return null;
+    const s = prev ? { ...prev, files: { ...prev.files } } : { at: now, by: 'hook', activeAt: null, own: 0, cost: 0, paid: 0, files: {} };
+    const paidUntil = prev ? 0 : st.latest?.at ?? Infinity;
+    const dir = subagentDir(transcript);
+    let subs = [];
+    try { subs = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).map((n) => [n, path.join(dir, n)]); } catch {}
+    let spent = 0, read = !prev;
+    for (const [key, file] of [['main', transcript], ...subs]) {
+      const p = s.files[key] || {};
+      const r = transcriptCost(file, p.offset, p.seen, paidUntil);
+      s.cost += r.cost; s.paid += r.paid; spent += r.cost - r.paid;
+      if (r.offset !== (p.offset || 0)) read = true;
+      s.files[key] = { offset: r.offset, seen: r.seen };
+    }
+    if (!read) return prev; // nothing new: the file is not rewritten
+    if (spent > 0) { s.at = now; s.activeAt = now; }
+    st.sessions[session] = s;
+    writeQuota(st, now);
+    return s;
+  });
+}
+
 // Two terminals updating at once would both split the same rise: the read-split-write runs under a lock folder (taken
 // within ~300 ms, or the update goes ahead without it; one older than 5 s is a crashed run's and is removed).
 function withLock(fn) {
@@ -88,11 +163,13 @@ function record(input, now) {
   const id = input?.session_id, cw = input?.context_window || {}, cost = input?.cost?.total_cost_usd;
   if (id) {
     const sig = `${cost ?? ''}|${cw.total_input_tokens ?? ''}|${cw.total_output_tokens ?? ''}`, prev = st.sessions[id];
-    // first sight: not activity yet, and the cost spent before is the baseline (nothing attributed to it)
-    const s = !prev ? { at: now, sig, activeAt: null, own: 0 } : prev.sig !== sig ? { ...prev, at: now, sig, activeAt: now } : prev;
+    // first sight: not activity yet, and the cost spent before is the baseline (nothing attributed to it). A session the
+    // hooks recorded (recordSpend) is first seen here too: Claude Code's own cost replaces their estimate, its share stays
+    const first = !prev || prev.by === 'hook';
+    const s = first ? { at: now, sig, activeAt: null, own: prev?.own || 0 } : prev.sig !== sig ? { ...prev, at: now, sig, activeAt: now } : prev;
     if (Number.isFinite(cost)) {
       // a lower cost is a cleared session (`/clear` restarts it at $0): what it spent since then is still unpaid
-      s.paid = !prev || !Number.isFinite(prev.cost) ? cost : cost < prev.cost ? 0 : prev.paid ?? cost;
+      s.paid = first || !Number.isFinite(prev.cost) ? cost : cost < prev.cost ? 0 : prev.paid ?? cost;
       s.cost = cost;
     }
     if (s !== prev) { st.sessions[id] = s; changed = true; }

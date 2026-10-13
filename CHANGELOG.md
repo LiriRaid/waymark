@@ -2,6 +2,10 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.6 — each session's share of the quota includes the desktop app's
+- **Fix: a terminal's "esta sesión" took what the desktop app spent.** Claude's desktop app runs Waymark's hooks but not the status line, so its sessions never entered the split, and a rise they caused fell whole on the next terminal that spent anything (one $0.20 question showed `esta sesión ≈12%`). Now the per-tool and end-of-turn hooks record what such a session spends, from its transcript and its subagents' at list price for each response's model, read from where the last call stopped. Each rise of the 5-hour window is split with it too, so the terminal shows only its own part. A session the status line measures keeps Claude Code's own cost (`docs/adr/0019`, amended).
+- **Docs:** README describes the desktop app's share.
+
 ## 2.0.5 — Kiro and Antigravity join the chain, and each session's share of the quota is its own
 - **Kiro and Antigravity with their hooks** (`docs/adr/0022`, `adapters/kiro.md`, `adapters/antigravity.md`):
   - `install-hooks --agent kiro` writes `~/.kiro/hooks/waymark.json` (`"version": "v1"`). `install-hooks --agent antigravity` adds a hook named `waymark` to `~/.gemini/config/hooks.json` and keeps the user's own hooks. Each command carries `--event`, because Antigravity's payload names no event.

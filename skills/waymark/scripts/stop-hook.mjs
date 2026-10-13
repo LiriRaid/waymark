@@ -25,7 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
-import { measure, clearStart } from './statusline.mjs';
+import { measure, clearStart, recordSpend } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
@@ -621,6 +621,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const h = parseHook(input, agent);
       if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
+      // a session with no status line (the desktop app): what it spent, so the quota's rises are split with it too
+      try { if (agent.name === 'claude') recordSpend(h.session_id, h.transcript_path); } catch (e) { logHookError('stop-hook spend', e); }
       const cwd = h.cwd || process.cwd(), home = projectHome(cwd);
       // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
       const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));

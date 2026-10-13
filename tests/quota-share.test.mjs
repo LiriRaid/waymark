@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-t-'));
@@ -103,5 +104,83 @@ test('the first reading with none before it (a new install, a wiped file) is a b
     const soon = (next + 60) * 1000;
     Q.recordStatus(st('f', 3, 4, next + 18000), soon);
     assert.equal(own('f'), 3, 'read within 10 minutes of the reset: the new window starts at 0 and its % is this session\'s');
+  } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
+});
+
+// 2.0.6 — a session with no status line (the desktop app) is not invisible: the hooks record what it spends, from its
+// transcript at list price, so a rise is split with it and a terminal's share is only its own.
+const said = (id, at, out, model = 'claude-opus-5-5') => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(), message: { id, model, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: out } } }) + '\n';
+
+test('list price per response: the model\'s family, cache writes by their duration, cache reads apart', () => {
+  const m = 1e6;
+  assert.equal(Q.usageCost('claude-opus-5-5', { output_tokens: m }), 20);
+  assert.equal(Q.usageCost('claude-opus-5-5', { input_tokens: m, cache_read_input_tokens: m }), 4.2);
+  assert.equal(Q.usageCost('claude-opus-5-5', { cache_creation_input_tokens: 2 * m, cache_creation: { ephemeral_1h_input_tokens: m, ephemeral_5m_input_tokens: m } }), 8 + 5);
+  assert.equal(Q.usageCost('claude-opus-5-5', { cache_creation_input_tokens: m }), 5, 'no split: a 5-minute write');
+  assert.equal(Q.usageCost('claude-sonnet-4-6', { input_tokens: m, output_tokens: m }), 18);
+  assert.equal(Q.usageCost('claude-haiku-5-5', { output_tokens: m }), 0.5);
+  assert.equal(Q.usageCost('claude-fable-5-1[1m]', { output_tokens: m }), 50);
+  assert.equal(Q.usageCost('some-new-model', { output_tokens: m }), 20, 'an unknown model takes the default (only the ratio between sessions matters)');
+});
+
+test('a session without the status line records its spend: the terminal shows only its own share', () => {
+  const prev = process.env.WAYMARK_HOME, fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-desk-'));
+  process.env.WAYMARK_HOME = fresh;
+  try {
+    const t0 = 1799996000000, file = path.join(fresh, 'w.jsonl');
+    Q.recordStatus(st('t', 80, 1), t0); // a terminal reads 80%: the baseline
+    fs.writeFileSync(file, said('m0', t0 - 5000, 500000)); // spent before that reading: the baseline too
+    Q.recordSpend('w', file, t0 + 1000); // the desktop app's first hook
+    assert.deepEqual([Q.readQuota().sessions.w.cost, Q.readQuota().sessions.w.paid], [10, 10]);
+    // the desktop session works: 5.5 USD, one response streamed as two lines (counted once)
+    fs.appendFileSync(file, said('m1', t0 + 2000, 200000) + said('m1', t0 + 2001, 200000) + said('m2', t0 + 3000, 75000));
+    Q.recordSpend('w', file, t0 + 4000);
+    Q.recordSpend('w', file, t0 + 4500); // nothing new: nothing counted twice
+    assert.equal(Q.readQuota().sessions.w.cost, 15.5);
+    Q.recordStatus(st('t', 92, 1.5), t0 + 5000); // the terminal's question (0.5 USD) reads 92%: +12
+    assert.deepEqual([own('w'), own('t')], [11, 1]);
+    assert.equal(Q.statusText(st('t', 92, 1.5), Q.readQuota()), '5h 92% · esta sesión ≈1% · contexto 10%');
+    // a line still being written is read when it is whole
+    fs.appendFileSync(file, said('m3', t0 + 6000, 50000).slice(0, 40));
+    Q.recordSpend('w', file, t0 + 6500);
+    assert.equal(Q.readQuota().sessions.w.cost, 15.5);
+    fs.appendFileSync(file, said('m3', t0 + 6000, 50000).slice(40));
+    Q.recordSpend('w', file, t0 + 7000);
+    assert.equal(Q.readQuota().sessions.w.cost, 16.5);
+  } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
+});
+
+test('the hooks leave a status-line session to Claude Code\'s own cost; a subagent\'s responses count as the session\'s', () => {
+  const prev = process.env.WAYMARK_HOME, fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-sub-'));
+  process.env.WAYMARK_HOME = fresh;
+  try {
+    const t0 = 1799997000000, file = path.join(fresh, 'x.jsonl');
+    Q.recordStatus(st('t', 10, 1), t0);
+    fs.writeFileSync(file, said('a1', t0 + 1000, 100000));
+    assert.equal(Q.recordSpend('t', file, t0 + 2000), null, 'the status line measures it');
+    assert.equal(Q.readQuota().sessions.t.cost, 1);
+    fs.mkdirSync(path.join(fresh, 'x', 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(fresh, 'x', 'subagents', 'agent-1.jsonl'), said('s1', t0 + 1500, 1000000, 'claude-haiku-5-5'));
+    Q.recordSpend('x', file, t0 + 3000);
+    assert.equal(Q.readQuota().sessions.x.cost, 2.5, '2 USD of its own, 0.5 of its subagent');
+    // the same session seen later by a status line (a terminal opened on it): Claude Code's cost takes over
+    Q.recordStatus(st('x', 10, 3), t0 + 4000);
+    const x = Q.readQuota().sessions.x;
+    assert.deepEqual([x.cost, x.paid, x.by], [3, 3, undefined]);
+  } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
+});
+
+test('the end-of-turn and tool hooks record a desktop session\'s spend', () => {
+  const prev = process.env.WAYMARK_HOME, fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-share-hook-'));
+  try {
+    const file = path.join(fresh, 'd.jsonl');
+    fs.writeFileSync(file, said('h1', Date.now() - 1000, 100000));
+    const run = (script, extra) => spawnSync(process.execPath, [path.join(SCRIPTS, script)], { input: JSON.stringify({ session_id: 'desk', transcript_path: file, cwd: fresh, ...extra }), env: { ...process.env, WAYMARK_HOME: fresh }, encoding: 'utf8' });
+    run('tool-hook.mjs', { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: file } });
+    process.env.WAYMARK_HOME = fresh;
+    assert.equal(Q.readQuota().sessions.desk.cost, 2);
+    fs.appendFileSync(file, said('h2', Date.now(), 50000));
+    run('stop-hook.mjs', { hook_event_name: 'Stop', last_assistant_message: 'ok' });
+    assert.equal(Q.readQuota().sessions.desk.cost, 3);
   } finally { process.env.WAYMARK_HOME = prev; fs.rmSync(fresh, { recursive: true, force: true }); }
 });

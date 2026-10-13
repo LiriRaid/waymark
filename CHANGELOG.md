@@ -44,6 +44,7 @@ The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version
   - Every terminal shows `5h 41% · esta sesión ≈12%`, refreshed every 30 s even when it is quiet.
   - A task shared with another session closes with its own part, prorated by cost. Use no session paid for (claude.ai, Codex) is never charged to one.
 - **After updating**, run `waymark.mjs check`: the instructions block changed, so it offers to reconnect each agent, and it offers `notes setup` in each project with records.
+- **Docs:** README and INSTALL describe 2.0.3: the context table with its real sizes (skill descriptions, the reminder, the protocol by level), your quota per terminal, records that travel, unknown agents, what the hook learns and what it proposes. INSTALL §8 runs `check` in the new session.
 
 ## 2.0.2 — the quota % measured, false ✘ from work in another repo fixed
 - **Measured quota** (`docs/adr/0019`): Waymark's status line for Claude Code (`statusline.mjs`) reads the real % of the 5-hour window that Claude Code passes to it (Pro and Max). It shows `5h 23% · 7d 41% · contexto 18%`. The per-prompt hook keeps the reading at the task's start, and the end-of-turn line shows the difference as `≈ X% de la cuota (medido)`, with no question to the user. Another session active during the task gives `medido, con otra sesión activa` and no pair. A window reset, or no reading since the start, falls back to the estimate.

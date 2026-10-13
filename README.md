@@ -47,11 +47,11 @@ There is no installer script. [`INSTALL.md`](INSTALL.md) is written **for the ag
 3. Offers to remove the third-party skills this one replaces.
 4. Copies the skills and creates your private layer `~/.waymark/`.
 5. Writes a managed block of general working rules into each agent's instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…). The rest of that file stays as it is.
-6. Registers Waymark's hooks in each agent: settings for Claude Code, Codex and Gemini CLI, a plugin for OpenCode.
+6. Registers Waymark's hooks in each agent: settings for Claude Code, Codex and Gemini CLI, `hooks.json` for Cursor, a plugin for OpenCode. In Claude Code it also sets Waymark's status line (`5h 41% · esta sesión ≈12% · 7d … · contexto …`).
 7. Sets up engram, the learned memory every agent shares (installs it after your yes if it is missing), proposes MCP servers (`context7`; stack-specific ones only for stacks you use) and runs `sync.mjs`.
 8. Lists every file it created or modified, asks you to restart, and gives you a smoke test.
 
-It can configure every agent on the machine in one run (Claude Code, Codex, OpenCode, Gemini CLI, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: `.waymark/tasks.md` and the git notes say where the work stands, and engram what each task learned.
+It can configure every agent on the machine in one run (Claude Code, Codex, OpenCode, Gemini CLI, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: `.waymark/tasks.md` and the git notes say where the work stands, and engram what each task learned. Known agents are data (`skills/waymark/scripts/agents/agents.json`: Kiro, Copilot CLI, Windsurf, Qwen Code and others besides the five above). An agent Waymark does not know is detected by its home folder: it gets the pointer to `.waymark/tasks.md`, and writing its adapter is a procedure (`docs/adr/0022`). The task records are git notes, so they travel with the repo: `waymark.mjs notes setup` makes fetches bring them, and another machine sees what this one did (`docs/adr/0020`).
 
 When a new version is published, `waymark.mjs check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it (`uninstall.mjs`). Node.js 18+ is required: the skill links, the hooks, the status line and every script run on it.
 
@@ -62,14 +62,16 @@ Nothing is preloaded "just in case". Loading is layered:
 | Layer | Loaded | Size |
 |---|---|---|
 | Instructions block in `CLAUDE.md` / `AGENTS.md` | always | ~6.5 k chars (~1.6 k tokens): levels, routing, the testigos, memory |
-| Reminder (hook) | every prompt | ~70 tokens (~10 once the last reply followed the routine): the task ID, the repo's stack and a one-line git status |
+| Skill descriptions | every session (the agent lists them) | ~4.9 k chars (~1.2 k tokens) for Waymark's 17 skills |
+| Reminder (hook) | every prompt | ~120 tokens (~60 once the last reply followed the routine): the task ID, the repo's stack and a one-line git status |
 | Department `dept-*/SKILL.md` | once per session per department | ~5–7 k chars: rules, brief questions, tools to use, DoD |
 | Department `procedures.md` | only the section the task needs | one procedure |
-| Core `waymark/references/*`, stack and architecture profiles | only in the situations they list (first time in a project, L2+, learning, missing skill) | on demand |
-| Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, its latest learned memories (engram) and gates, injected automatically (~600 tokens) |
+| Protocol | by level: an L2 reads `references/protocol/l2.md`, an L3 also `l3.md`, a second failed attempt `stuck.md` | ~3.8 k chars at L2 (~0.9 k tokens) |
+| Core `waymark/references/*`, stack and architecture profiles | only in the situations they list (first time in a project, learning, missing skill) | on demand |
+| Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, its latest learned memories (engram) and gates, injected automatically (~400 tokens); it lists open tasks and asks nothing |
 | Project memory + *Project map* | every task | replaces re-exploring the project each session |
 
-A small L1 task loads the block plus one department and one procedure. Memory (project map, verified gate commands, engram) avoids re-discovering the same things every session.
+A small L1 task loads the block plus one department and one procedure. `node <skills-dir>/waymark/scripts/size.mjs` measures each of these for the project you run it in, including the lines the session hook may add after the card (`docs/adr/0024`). Memory (project map, verified gate commands, engram) avoids re-discovering the same things every session.
 
 The bigger saving is not the size of each attempt but the **number of attempts**: a task costs *attempts × cost per attempt*. Waymark's fields (the ask and what each screenshot points at, evidence before the fix, reuse, verified APIs, the two-strike rule) aim at one attempt per task. Large tasks keep their plan as checkpoints in the project memory, so a context compaction does not make the agent guess what was done.
 
@@ -93,7 +95,11 @@ Say *"evalúa tu trabajo"* at the end of a task: the agent audits it with `refer
 node "$HOME/.agents/skills/waymark/scripts/measure.mjs" --turns 3-5
 ```
 
-It reads the agent's own session transcript (offline, no model call) and shows, per prompt: the context it started with (its growth is what every later response re-reads), responses, tool calls, images, new vs cached input tokens, output and sub-agent tokens; the fixed context the session started with; and for a range of prompts (one task) the number of **attempts**. Note the plan-quota % before and after a task to relate tokens to your limits.
+It reads the agent's own session transcript (offline, no model call) and shows, per prompt: the context it started with (its growth is what every later response re-reads), responses, tool calls, images, new vs cached input tokens, output and sub-agent tokens; the fixed context the session started with; and for a range of prompts (one task) the number of **attempts**.
+
+### Your quota, per terminal
+
+In Claude Code with a Pro or Max plan, Waymark's status line reads the real % of the 5-hour window and measures each task's % from its first prompt to its close, with no question to you (`docs/adr/0019`). The window is your account's, so several sessions spend from the same %. Each rise is split among the open sessions by what each one spent, so every terminal shows its own part (`5h 41% · esta sesión ≈12%`). The line refreshes every 30 s, so a quiet terminal also sees what the others spent. A task that shared the window closes with `medido, con otra sesión activa; esta sesión ≈ X%, prorrateado por costo`. Use that no Claude Code session paid for (claude.ai, Codex) is never charged to one. Elsewhere the % is estimated from your measured tasks of the same model.
 
 ## How it triggers
 
@@ -192,7 +198,17 @@ You can always pick another mode and move any rule. The other framework's files 
 
 ## The learning loop
 
-After every L1+ task the agent keeps only what was **new and non-obvious** and writes it to exactly one place:
+**What the hook learns by itself** (`docs/adr/0023`): at each close it writes into the project memory only what it observed:
+- the *Quality gates* that passed after the last change (dated; a command already written is never replaced);
+- the *Areas* each task touched;
+- how many tasks repeated the same procedure.
+
+The rest is **proposed**, once in the session card and in `waymark.mjs check`, and written only after your yes:
+- a repeated procedure → a **project skill** inside that project;
+- an incident that keeps failing → a Learned rule of the owner department;
+- a correction you made in two tasks → your `preferences.md`.
+
+**What the agent learns:** after every L1+ task it keeps only what was **new and non-obvious**. The lesson goes in the Cierre's *Aprendido* (the hook saves it to engram and to the task's line in *Work in progress*), or in exactly one of these places:
 
 | The lesson is about… | It goes to |
 |---|---|
@@ -202,7 +218,7 @@ After every L1+ task the agent keeps only what was **new and non-obvious** and w
 | a department, in any stack | its `## Learned rules` |
 | unsure / seen once | `~/.waymark/learnings/dept-<dept>.md` (staging) |
 
-When a list grows long, the agent folds it into the skill body, so the skills evolve. When a project procedure has repeated twice, the agent generates a **project skill** inside that project.
+When a list grows long, the agent folds it into the skill body, so the skills evolve.
 
 ## Contributing back
 

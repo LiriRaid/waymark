@@ -17,6 +17,7 @@ import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcrip
 import { spawnSync } from 'node:child_process';
 import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, shellRuns, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
+import { recordSpend } from './statusline.mjs';
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 
@@ -209,6 +210,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
       const after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
       if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
+      // a session with no status line (the desktop app): what it spent so far, so a rise read mid-turn is split with it
+      if (agent.name === 'claude') try { recordSpend(hook.session_id, hook.transcript_path); } catch (e) { logHookError('tool-hook spend', e); }
       if (!after) {
         const deny = gate(hook, agent);
         if (deny) { answer(agent, agent.out.deny(deny)); return; }

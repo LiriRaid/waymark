@@ -140,10 +140,11 @@ export function turnUsage(lines, since = 0) {
 
 // Tokens of the subagents a turn launched (Claude Code writes each one to <session>/subagents/*.jsonl, next to the
 // session's transcript): every file with a response at or after `since`. Another agent's layout → zeros.
+export const subagentDir = (transcriptPath) => transcriptPath.replace(/\.jsonl$/i, '') + '/subagents';
 export function subagentUsage(transcriptPath, since = 0) {
   const s = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, files: 0 };
   if (!transcriptPath) return s;
-  const dir = transcriptPath.replace(/\.jsonl$/i, '') + '/subagents';
+  const dir = subagentDir(transcriptPath);
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')); } catch { return s; }
   for (const n of names) {

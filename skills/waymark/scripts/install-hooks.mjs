@@ -20,6 +20,9 @@
 // `"version": 1` and flat entries ({command}) per event (cursor.com/docs/hooks). preToolUse and postToolUse take every
 // tool (no matcher): the adapter journals each call, reads and questions included (agents/cursor.mjs). User hooks need no
 // trust and reload when the file is saved.
+// Copilot CLI (`--agent copilot`, docs/adr/0022): ~/.copilot/hooks/waymark.json (COPILOT_HOME, WAYMARK_COPILOT_HOOKS overrides
+// it), `"version": 1` and flat entries under Claude Code's event names, which give Claude's payload (agents/copilot.mjs).
+// User hooks need no trust (docs.github.com/en/copilot/reference/hooks-reference).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

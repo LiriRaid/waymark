@@ -7,7 +7,7 @@
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
 //   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin)
-//   node waymark.mjs notes setup [<remote>] on the user's yes: a fetch refspec so fetches bring the remote's records
+//   node waymark.mjs notes setup [<remote>] by hand (the session hook adds it in a repo with .waymark/): a fetch refspec so fetches bring the remote's records, fetched at once
 //                                           (into refs/notes/remotes/<remote>/waymark, merged at session start), then a fetch
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record

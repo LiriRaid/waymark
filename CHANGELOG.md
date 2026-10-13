@@ -2,6 +2,16 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.4 — Copilot CLI joins the chain, and the task records travel on their own
+- **Copilot CLI with its hooks** (`docs/adr/0022`, `adapters/copilot.md`):
+  - `install-hooks --agent copilot` writes `~/.copilot/hooks/waymark.json` under Claude Code's event names, so Copilot sends Claude's payload. User hooks need no trust.
+  - The turn is read from its session log (`session-state/<session>/events.jsonl`). `connect` gives it the full Rule 0 block, and `check` offers its hooks like any agent's.
+  - Copilot drops a command hook's per-prompt output, so the card and the block carry Rule 0 there. Built from the documentation; its first live session checks the points in `adapters/copilot.md`.
+  - The uninstall removes that file whole.
+- **Task records travel with no question** (`docs/adr/0020`, amended):
+  - In a repo with `.waymark/` and an `origin`, the session hook adds the notes fetch refspec once and says so in the card. It needs no network, and `notes setup` is no longer offered.
+  - **Fix:** 2.0.3's exact refspec made every `git fetch` fail ("couldn't find remote ref refs/notes/waymark") while the remote had no notes yet. The refspec is now a glob, which matches nothing there, and the old one is replaced where it is found.
+
 ## 2.0.3 — a supply chain you can trust: real testigos, records that travel, every agent, a project that learns
 - **Testigos without false ✔** (`docs/adr/0020`):
   - Gate, test and build are judged by each command's executable and its exit, never by a word in an argument or a commit message (`git commit -m "fix build"` is no build).

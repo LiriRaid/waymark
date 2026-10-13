@@ -4,11 +4,12 @@
 // Add an agent, from templates/agent-adapter.template.mjs).
 import * as claude from './claude.mjs';
 import * as codex from './codex.mjs';
+import * as copilot from './copilot.mjs';
 import * as cursor from './cursor.mjs';
 import * as gemini from './gemini.mjs';
 import * as opencode from './opencode.mjs';
 
-export const AGENTS = { claude, codex, cursor, gemini, opencode };
+export const AGENTS = { claude, codex, copilot, cursor, gemini, opencode };
 
 export function agentFrom(argv = process.argv) {
   const i = argv.indexOf('--agent');

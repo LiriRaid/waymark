@@ -31,6 +31,7 @@ import { readTail, sessionState } from './transcript.mjs';
 import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
+import { openIds } from './session-hook.mjs';
 import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
@@ -248,6 +249,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
   await add(() => learnProposals(cwd));
+  await add(() => openTasks(cwd));
   let machine = null; // the agents on this machine, scanned once for the three lines below
   const onMachine = () => (machine ??= found());
   await add(() => agents(onMachine()));
@@ -317,6 +319,14 @@ export function learnProposals(cwd) {
   for (const p of all.filter((x) => x.kind === 'skill')) lines.push(`procedure: ${p.text.replace(/^project skill for /, '')}. Offer a project skill for it with the user's yes; the count is in memory.md → Repeated procedures.`);
   for (const p of all.filter((x) => x.kind === 'preference')) lines.push(`preference: ${p.text.replace(/^preference /, '')}. The user corrected this more than once: offer to add it to ~/.waymark/preferences.md with their yes.`);
   return lines.join('\n');
+}
+
+// The tasks still open (▶, or an older pending "[<id>]") in Work in progress: the card lists them, check asks the user
+// which already work. → the pending line, or ''.
+export function openTasks(cwd) {
+  const home = projectHome(cwd);
+  const open = openIds(section('\n' + read(home.memory), 'Work in progress'));
+  return open.length ? `open: ${open.join(', ')} in Work in progress. Ask the user once, in the choice window (multi-select), which already work; close those with node "${script('waymark.mjs')}" done "<ID>"… --note "<their words>".` : '';
 }
 
 // Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a

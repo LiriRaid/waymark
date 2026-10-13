@@ -37,6 +37,19 @@ const section = (text, title) => {
 };
 
 export const CARD_HEAD = 'Waymark context card (already recalled). Pointers, not facts: verify in the code; the code wins, fix the entry.\n';
+// The commands script, defined once in the card as W; a line added after the card says W only when the card defined it.
+export const W_CMD = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
+const wIn = (text) => (text.includes(` W = ${W_CMD}`) ? 'W' : W_CMD);
+// The lines added after the card's cap, built here so size.mjs measures the same text.
+export const EXTRA = {
+  held: (msg) => `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${msg}`,
+  pointer: (last, w = W_CMD) => `\nWaymark check (last run: ${last}): before the task, run ${w} check — read-only: update, skills, MCP fit, migration, agents, frameworks, session size — and offer with your choice window only what it reports as pending; nothing pending → do not mention it.`,
+  agents: (names, w = W_CMD) => `\nNew agents on this machine (said once): ${names.join(', ')}. Before the task, run ${w} check and offer in your choice window what it reports for them.`,
+  proposals: (texts, w = W_CMD) => `\nProposals (said once; offer each in your choice window, write it only after the user's yes; ${w} check lists them): ${texts.join('; ')}`,
+};
+// The open tasks of Work in progress lines: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]".
+export const openIds = (lines) => lines.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
+export const HELD_MAX = 1200; // characters of the held message
 export function digest(cwd, agentName = 'claude') {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
@@ -49,18 +62,18 @@ export function digest(cwd, agentName = 'claude') {
     out.push(`Project memory: none for ${cwd}. Create ${where} now with the Minimal bootstrap (waymark/references/project-detection.md) before the first edit${home.dir ? '; the end-of-turn hook keeps .waymark/ out of git' : ''}.`);
     return out.join('\n');
   }
-  out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; \`waymark.mjs check\` offers the move).` : `Project memory: ${where} (read; full file there). Where the work stands: ${home.root.replace(/\\/g, '/')}/.waymark/tasks.md.`);
+  out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; W check offers the move). W = ${W_CMD}.` : `Project memory: ${where} (read; full file there) and tasks.md next to it (where the work stands). W = ${W_CMD}.`);
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.
   const all = readTaskRecords(home), last = all.filter((r) => r.id).pop(); // read once: the last close and the incidents
   if (last) {
     const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 180)}` : ''} (whole record: waymark.mjs tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 180)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
-  // open: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]"
-  const open = wipAll.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
-  if (open.length) out.push(`Open tasks (▶): ${open.join(', ')}. In your first reply ask the user once, in the choice window (multi-select), which of them already work; close those with node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}" done "<ID>"… --note "<their words>".`);
+  const open = openIds(wipAll);
+  // listed, not asked: `W check` asks which already work, so the first reply of a session is the user's task
+  if (open.length) out.push(`Open tasks (▶): ${open.join(', ')} (W check asks the user which already work).`);
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
   const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
   if (notes.length) out.push('Notes:\n' + notes.join('\n'));
@@ -76,8 +89,7 @@ export function digest(cwd, agentName = 'claude') {
   let learned = [];
   try { if (!home.legacy) learned = learnedLines(home, 3, 150, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  const cmd = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
-  out.push(`Commands (W = ${cmd}): the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
+  out.push(`Commands: the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -97,23 +109,22 @@ export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
   let text = '';
   try { if (now - fs.statSync(file).mtimeMs < 86400000) text = fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '').trim(); fs.rmSync(file, { force: true }); } catch {}
-  return text.length > 1200 ? text.slice(0, 1199) + '…' : text;
+  return text.length > HELD_MAX ? text.slice(0, HELD_MAX - 1) + '…' : text;
 }
 
 // One line when neither a check nor this pointer happened in the last week.
-export function checkPointer(now = Date.now()) {
+export function checkPointer(now = Date.now(), w = W_CMD) {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(CHECK_STATE, 'utf8')); } catch {}
   if (now - Math.max(st.checkedAt || 0, st.pointedAt || 0) < WEEK) return '';
   try { fs.mkdirSync(HOME, { recursive: true }); fs.writeFileSync(CHECK_STATE, JSON.stringify({ ...st, pointedAt: now })); } catch { return ''; }
-  const script = path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/');
   const last = st.checkedAt ? `${Math.floor((now - st.checkedAt) / 86400000)} days ago` : 'never';
-  return `Waymark check (last run: ${last}): before the task, run node "${script}" check — read-only: update, skills, MCP fit, migration, agents, frameworks, session size — and offer with your choice window only what it reports as pending; nothing pending → do not mention it.`;
+  return EXTRA.pointer(last, w).slice(1);
 }
 
 // Modes: waymark-leads | guest | skills-only (`other-leads` from 1.5.0 is read as guest). Only the rules the agent must
 // obey are injected; a framework that appeared or vanished is reported by `waymark.mjs check`.
-function coexistence() {
+export function coexistence() {
   const text = '\n' + read(path.join(HOME, 'coexistence.md'));
   let mode = text.match(/\nMode:\s*(waymark-leads|guest|other-leads|skills-only)\b/)?.[1];
   if (mode === 'other-leads') mode = 'guest';
@@ -164,19 +175,20 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     } catch (e) { logHookError('session-hook', e); text = ''; }
     if (text.length > MAX) text = text.slice(0, MAX) + '…';
     // after the cap: the user's own words are never cut by it
-    if (held) text += `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${held}`;
-    try { const p = checkPointer(); if (p) text += '\n' + p; } catch {}
+    if (held) text += EXTRA.held(held);
+    const w = wIn(text);
+    try { const p = checkPointer(Date.now(), w); if (p) text += '\n' + p; } catch {}
     try { const c = coexistence(); if (c) text = (text ? text + '\n' : '') + c; } catch {}
     const guest = /\nMode:\s*(guest|other-leads|skills-only)\b/.test('\n' + read(path.join(HOME, 'coexistence.md')));
     // an agent installed since the last session, not prepared yet (docs/adr/0022): said once, check has the offers
     try {
       const fresh = guest ? [] : newAgents();
-      if (fresh.length) text += `\nNew agents on this machine (said once): ${fresh.join(', ')}. Before the task, run node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}" check and offer in your choice window what it reports for them.`;
+      if (fresh.length) text += EXTRA.agents(fresh, w);
     } catch (e) { logHookError('session-hook agents', e); }
     // what the project could learn (docs/adr/0023): each proposal said once; written only after the user's yes
     try {
       const home = projectHome(cwd), fresh = guest || !home.dir || home.legacy ? [] : newProposals(home, readTaskRecords(home));
-      if (fresh.length) text += `\nProposals (said once; offer each in your choice window, write it only after the user's yes; W check lists them): ${fresh.map((p) => p.text).join('; ')}`;
+      if (fresh.length) text += EXTRA.proposals(fresh.map((p) => p.text), w);
     } catch (e) { logHookError('session-hook proposals', e); }
     // an agent with no instructions file of its own (Cursor): the Rule 0 block comes first, never cut by the cap
     try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}

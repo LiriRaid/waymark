@@ -24,7 +24,7 @@ The end-of-turn hook executes, never reads prose, and blocks once, naming the wa
 - **Memory** — the session card; obey its *Environment*. Hooks installed but no card and no hook line → they are not running: tell the user, run `waymark.mjs check`. More: `waymark.mjs memory <section>`, `tasks`, `engram search "<words>"`. Memory points, code decides (fix the entry). Project memory: `<project>/.waymark/memory.md`; any agent reads `.waymark/tasks.md` first. Missing → create it (`waymark/references/project-detection.md` → *Minimal bootstrap*). Never edit *Work in progress* (the hook writes it). Lessons go in the Aprendido; the hook saves them to engram (never call `mem_save`).
 - **Departments** — one `procedures.md` section per task; `waymark/skill-registry.md` only for a capability with no installed provider.
 - **Evidencia** — observe the real state before changing; code read is not observed. Cannot observe → *inferida* + the user's check.
-- **Gates** — while working, lint and test only the touched files; at the end, per repo, the full typecheck and (L2+) the build once, after the last change. 2nd failed attempt → *When stuck* (`waymark/references/protocol.md`).
+- **Gates** — while working, lint and test only the touched files; at the end, per repo, the full typecheck and (L2+) the build once, after the last change. 2nd failed attempt → `waymark/references/protocol/stuck.md`.
 - **Docs** — unverified library API, or retrying a failed attempt → `library-docs` or the installed package source, cited.
 - **Comments** say how the code works, never task history.
 - **Coexistence** — obey the injected `~/.waymark/coexistence.md`; never edit the other framework's files.
@@ -35,7 +35,7 @@ Independent tool calls in one response. Confirmations (plans, updates, destructi
 
 UI code: component, screen, modal, form, styles, visual bug → `dept-frontend` · look & feel, accessibility, motion, tokens → `dept-ux-ui` · API, service, job, webhook, realtime → `dept-backend` · schema, migration, query, cache, state → `dept-data` · auth, permissions, secrets, vulnerabilities → `dept-security` · tests, review, bug with no clear layer → `dept-qa` · build, CI, git, deploy → `dept-devops` · structure, refactor, patterns, new module → `dept-architecture` · idea → scope, criteria, plan → `dept-product` · skills, agent config, docs, Waymark → `dept-devex` · unsure / new project → `waymark`
 
-**L1** 1–2 known files · **L2** feature or >2 files → + `waymark/references/protocol.md` · **L3** refactor/migration/new project → + `dept-architecture`, plan first, ADR. Use only the skills and MCP servers this user has; never invent names. `waymark/…` = `<skills-dir>/waymark/`. A project `CLAUDE.md` / `AGENTS.md` wins for that project.
+**L1** 1–2 known files · **L2** feature or >2 files → + `waymark/references/protocol/l2.md` · **L3** refactor/migration/new project → + `waymark/references/protocol/l3.md`, `dept-architecture`. Use only the skills and MCP servers this user has; never invent names. `waymark/…` = `<skills-dir>/waymark/`. A project `CLAUDE.md` / `AGENTS.md` wins there.
 
 ## General rules
 

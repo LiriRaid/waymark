@@ -919,13 +919,13 @@ test('session hook: new location points to tasks.md; the bridge says old locatio
   const run = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd }), env, encoding: 'utf8' }).stdout).hookSpecificOutput.additionalContext;
   const repo = tmpRepo('session');
   const old = oldMemory('sess', repo);
-  assert.match(run(repo), /old location; read; full file there; `waymark\.mjs check` offers the move/);
+  assert.match(run(repo), /old location; read; full file there; W check offers the move\)\. W = node "[^"]+waymark\.mjs"\./);
   assert.ok((await check(repo)).some((t) => /^migrate: .*migrate-memory\.mjs" --project /.test(t)));
   fs.rmSync(old);
   assert.ok(!(await check(repo)).some((t) => t.startsWith('migrate:')), 'nothing left in the old location');
   fs.mkdirSync(path.join(repo, '.waymark'));
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n- ▶ C\n');
-  assert.match(run(repo), /Project memory: .*\.waymark\/memory\.md \(read; full file there\)\. Where the work stands: .*\.waymark\/tasks\.md[\s\S]*- ▶ C/);
+  assert.match(run(repo), /Project memory: .*\.waymark\/memory\.md \(read; full file there\) and tasks\.md next to it \(where the work stands\)\. W = node "[^"]+waymark\.mjs"\.[\s\S]*- ▶ C/);
   assert.match(run(tmpRepo('fresh')), /Project memory: none .* Create .*\.waymark\/memory\.md/);
 });
 
@@ -1781,7 +1781,7 @@ test('done: the user confirms tasks that work: they leave Work in progress, a ch
   const wip = ['- ▶ [2026-10-04 · T4c] que el usuario recargue y confirme', '- ▶ [2026-10-04 · T3] skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'].join('\n');
   const repo = memRepo('done', wip + '\n'), h = projectHome(repo), NOW = new Date(2026, 9, 5, 12, 0);
   const digest = spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
-  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9\. In your first reply ask the user once, in the choice window \(multi-select\), which of them already work; close those with node "[^"]+waymark\.mjs" done/);
+  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9 \(W check asks the user which already work\)\./);
   assert.deepEqual(P.confirmTasks(h, ['2026-10-04 · T4c', '2026-10-04 · T3', '2026-10-04 · T7'], { note: 'ya las vi, funcionan', now: NOW }), ['2026-10-04 · T4c', '2026-10-04 · T3']);
   const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
   assert.deepEqual(lines, ['- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'], 'confirmed tasks leave Work in progress; the confirm record keeps them');
@@ -1885,13 +1885,14 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   fs.appendFileSync(path.join(repo, '.waymark', 'memory.md'), '\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| build | npm run build | x |\n\n## Solved problems\n- a\n- b\n');
   appendRecord(repo, { id: '2026-10-05 · T1', agent: 'codex', at: '2026-10-05T10:00:00Z', commits: [], cierre: '## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: tooltips ← user; next: spec', evaluation: { steps: { Decision: true, Enrutar: false }, score: '1/2' }, unresolved: ['the routing line names no owner department'] });
   const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
-  assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: waymark\.mjs tasks "2026-10-05 · T1"\)/);
-  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2\./, 'an older pending line is open too');
+  assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: W tasks "2026-10-05 · T1"\)/);
+  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2 \(W check/, 'an older pending line is open too');
   assert.match(card, /Notes:\n- Gotcha: a note/);
   assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
-  assert.match(card, /Commands \(W = node "[^"]+waymark\.mjs"\): the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /W = node "[^"]+waymark\.mjs"\./);
+  assert.match(card, /Commands: the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2316,7 +2317,7 @@ test('engram layer: the close saves the Aprendido under the project slug (config
     assert.equal(e.saveLearned(h, { ...rec, cierre: 'Resultado: hecho' }), false, 'no Aprendido, nothing to learn');
     assert.equal(e.stageForCommit, undefined, 'the learned memory stays local (docs/adr/0017)');
     assert.ok(!fake.calls().some((c) => c[0] === 'sync'), 'no export to .engram/');
-    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · precios: Aprendido: el ahorro vive en la entity', '2026-10-06 · T3 · faq: Aprendido: grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
+    assert.deepEqual(e.learnedLines(h), ['2026-10-06 · T4 · el ahorro vive en la entity', '2026-10-06 · T3 · grupo con nombre accesible', '[2026-10-05] ADR docs/adr/0001 (screaming + SSR) y tema'], 'a body that repeats its title shows alone');
   });
   assert.deepEqual([e.saveLearned(h, { id: 'x', cierre: 'Aprendido: y' }), e.learnedLines(h)], [false, []], 'no engram: a no-op, Waymark keeps git and memory.md');
 });

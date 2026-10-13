@@ -137,7 +137,7 @@ test('session card: a new agent that is not prepared is said once; the next sess
   const run = () => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8' }).stdout).hookSpecificOutput.additionalContext;
   const first = run();
   assert.match(first, /New agents on this machine[^\n]*\.foo/, first);
-  assert.match(first, /waymark\.mjs" check/);
+  assert.match(first, /run (W|node "[^"]+waymark\.mjs") check/);
   assert.doesNotMatch(run(), /New agents on this machine/, 'said once');
   write(at('.qwen', 'settings.json'), '{}');
   assert.match(run(), /New agents on this machine[^\n]*Qwen Code/, 'a later one is said too');

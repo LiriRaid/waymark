@@ -89,8 +89,8 @@ export function saveQuestion(home, q) {
 }
 
 // The project's latest memories, newest first: "<title>: <content>" (from `engram context <project>`). A task's memory
-// titled "<id> · <Aprendido>" shows "<id> · <the whole Aprendido>"; the task in `skip` (the card's last closed, already
-// shown there) is left out. → lines.
+// titled "<id> · …" (the Aprendido or the request) whose content opens with its Aprendido shows "<id> · <the whole
+// Aprendido>"; the task in `skip` (the card's last closed, already shown there) is left out. → lines.
 export function learnedLines(home, n = 3, width = 150, skip = null) {
   if (!engramBin()) return [];
   const r = run(home, ['context', projectOf(home)]);
@@ -102,8 +102,7 @@ export function learnedLines(home, n = 3, width = 150, skip = null) {
     const id = title.match(ID)?.[0];
     const rest = id && title.startsWith(id) ? title.slice(id.length).replace(/^\s*·\s*/, '') : '';
     const mark = rest.startsWith('sin verificar · ') ? 'sin verificar · ' : '';
-    const lesson = rest.slice(mark.length).replace(/…$/, '');
-    if (lesson && body.startsWith(`Aprendido: ${lesson}`)) return `${id} · ${mark}${body.slice('Aprendido: '.length)}`;
+    if (rest && body.startsWith('Aprendido: ')) return `${id} · ${mark}${body.slice('Aprendido: '.length)}`;
     return same(title, body) ? body : `${title}: ${body}`;
   };
   return obs.filter(([, title]) => !skip || title.match(ID)?.[0] !== skip).slice(0, n).map(([, title, body]) => clip(line(title, body), width));

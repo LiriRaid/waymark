@@ -98,17 +98,19 @@ export function found() {
 // Agents found that are not prepared and were never said before: no block or pointer where one can go, documented hooks
 // with no adapter, an adapter whose hooks are not registered, or unknown. The session card says them once (session-hook);
 // every agent found is then remembered in ~/.waymark/agents-seen.json, so this costs a few stat calls, no network.
+export const unprepared = (a) => a.unknown || !a.connected || (a.hooks && !a.adapter) || (a.adapter && !a.full);
+export const agentLabel = (a) => (a.unknown ? `${a.name} (unknown)` : a.name);
 export function newAgents() {
   const file = path.join(HOME(), 'agents-seen.json');
   let seen = [];
   try { seen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   const all = found(), id = (a) => path.resolve(a.dir).toLowerCase() + (a.unknown ? '' : `#${a.key}`);
-  const fresh = all.filter((a) => !seen.includes(id(a)) && (a.unknown || !a.connected || (a.hooks && !a.adapter) || (a.adapter && !a.full)));
+  const fresh = all.filter((a) => !seen.includes(id(a)) && unprepared(a));
   if (all.some((a) => !seen.includes(id(a)))) {
     fs.mkdirSync(HOME(), { recursive: true });
     fs.writeFileSync(file, JSON.stringify([...new Set([...seen, ...all.map(id)])], null, 1) + '\n');
   }
-  return fresh.map((a) => (a.unknown ? `${a.name} (unknown)` : a.name));
+  return fresh.map(agentLabel);
 }
 
 // With an orchestrator the pointer still goes in, as Waymark's own block (guest: not Rule 0, never inside its blocks).

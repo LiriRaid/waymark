@@ -2270,6 +2270,22 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   assert.deepEqual(skills("Get-Content -Path 'C:\\Users\\u\\.claude\\skills\\dept-frontend\\SKILL.md'"), ['dept-frontend']);
 });
 
+// 2.0.7: YaloAtiendo's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
+// && … review <front files>`) and the testigo read only the first call.
+test('review: every waymark.mjs review in one command counts; the message names the code files left unreviewed', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), web = '/work/web/src/app/login.ts';
+  const base = [prompt('pkce en api y front'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
+    ...askWithId('q1', '¿Cómo?', ['PKCE', 'Otro'], 'PKCE'), call('Edit', { file_path: FILE }), call('Edit', { file_path: web }), call('Bash', { command: 'npm run build' })];
+  const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
+  const api = 'cd "/work/proj" && node "C:/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs 2>&1 | tail -40';
+  const left = judge([...base, call('Bash', { command: api })]);
+  assert.equal(left.observed.review, false);
+  assert.match(left.missing.find((m) => /no review ran/.test(m)) || '', /\(login\.ts\)/, 'the file left, not the first code files');
+  const both = judge([...base, call('Bash', { command: `${api}; cd ../web && node "C:/s/waymark/scripts/waymark.mjs" review src/app/login.ts 2>&1 | tail -40` })]);
+  assert.equal(both.observed.review, true, 'the second call of the same command covers the front');
+});
+
 test('waymark.mjs review: the diff of the task\'s files (new ones included) and the checklist', () => {
   const repo = memRepo('review');
   const W = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;

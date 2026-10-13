@@ -16,7 +16,8 @@
 //   Aprendido (≤200 characters), regenerates tasks.md, and the user sees a one-line summary (systemMessage, 0 model
 //   tokens). The record names the agent that did the work.
 // - A turn routed Q (analysis only, no change) in a project with memory gets a short record {kind: "Q"} with no task ID:
-//   it leaves a trace without taking a T<n>.
+//   it leaves a trace without taking a T<n>, with what it answered and the skills it ran (tasks.md lists the last five).
+//   A turn that launched an agent or skill in the background is recorded when its notification ends it.
 // It never blocks twice in a row (stop_hook_active). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -585,12 +586,23 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
 }
 
 // The record of a turn routed Q that changed nothing, or null: no task ID, so it never shifts T<n> or the follow-up offered.
-// A reply that ends with an "Aprendido:" line keeps it as `learned` (the hook saves it to engram, marked Q).
+// A reply that ends with an "Aprendido:" line keeps it as `learned` (the hook saves it to engram, marked Q). `answer` is
+// what tasks.md shows of it: the Aprendido, or else the start of the final reply as one line (no routing line, no
+// markdown), so a question that ran a review is not taken for still pending; `skills` are the ones it ran besides its
+// department.
 export function questionRecord(turn, meta = {}) {
   if (!turn.found || routedLevel(turn.texts, turn.tools) !== 'Q') return null;
   const tail = String(turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
   const learned = /^\s*Aprendido:/im.test(tail) ? maskSecrets(aprendidoOf(tail)).slice(0, 600) : '';
-  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), ...(learned ? { learned } : {}) };
+  const oneLine = (t) => String(t).split('\n').filter((l) => !/^\s*Waymark\s*→/.test(l))
+    .map((l) => l.replace(/\*\*|__|`/g, '').replace(/^\s*(?:#{1,6}|[-*+]|\d+\.)\s+/, '').trim()).filter(Boolean).join(' · ');
+  // the last block with substance: a closing line of its own ("¿Con cuál seguimos?") is not the answer
+  const blocks = [...turn.texts].reverse().map(oneLine).filter(Boolean);
+  const final = blocks.find((b) => b.length >= 60) || blocks[0] || '';
+  const answer = maskSecrets(learned || final).slice(0, 300);
+  const skills = [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')).filter((s) => s && !/^dept-/.test(s)))];
+  return { kind: 'Q', agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, department: routedDept(turn.texts, turn.tools), prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)),
+    ...(skills.length ? { skills } : {}), ...(answer ? { answer } : {}), ...(learned ? { learned } : {}) };
 }
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).

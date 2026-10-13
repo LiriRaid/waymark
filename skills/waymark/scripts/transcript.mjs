@@ -66,14 +66,15 @@ const turnStart = (lines, since = 0) => {
 };
 
 // A skill or agent the turn launched in the background that has not notified yet (Claude Code: its tool result has
-// toolUseResult.background, its end is a <task-notification> naming the tool-use id). The turn is not over: the agent
+// toolUseResult.background for a forked skill, toolUseResult.isAsync for an Agent call; its end is a <task-notification>
+// naming the tool-use id). The turn is not over: the agent
 // waits for it and closes in the notification's turn, so a task is never judged while its code-review runs.
 // Background shell commands are not waited for: a dev server never notifies.
 export function pendingBackground(lines, since = 0) {
   const { from } = turnStart(lines, since);
   const launched = [];
   for (const d of lines.slice(from)) {
-    if (d.type !== 'user' || d.isSidechain || !d.toolUseResult?.background) continue;
+    if (d.type !== 'user' || d.isSidechain || !(d.toolUseResult?.background || d.toolUseResult?.isAsync)) continue;
     for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push(c.tool_use_id);
   }
   if (!launched.length) return [];

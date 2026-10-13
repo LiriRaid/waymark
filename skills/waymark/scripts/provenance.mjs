@@ -186,6 +186,7 @@ export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED
 
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
 const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
+const QUESTIONS_SHOWN = 5; // questions (Q) since the last close listed in tasks.md, newest last
 const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
@@ -388,7 +389,12 @@ export function tasksMarkdown(home, now = new Date()) {
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
-  const questions = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q').length; // since the last close
+  // the questions since the last close, the newest QUESTIONS_SHOWN as one line each: when, department, skills, the
+  // question and what it answered (older records have no skills or answer)
+  const asked = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q'), questions = asked.length;
+  const today = now.toLocaleDateString('sv');
+  const when = (at) => { const t = new Date(at).toLocaleString('sv'); return t.slice(0, 10) === today ? t.slice(11, 16) : t.slice(5, 16); };
+  const qRows = asked.slice(-QUESTIONS_SHOWN).map((r) => clip(`- ${[when(r.at), r.department, r.skills?.join(', ')].filter(Boolean).map(cell).join(' · ')} · "${clip(cell(r.prompt), 80)}"${r.answer ? ` → ${cell(r.answer)}` : ''}`, TASK_CHARS));
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
   const source = (r) => (gitNote(r) ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
   // The last closed task with what another agent needs to continue: ~220 ch per field.
@@ -406,7 +412,7 @@ export function tasksMarkdown(home, now = new Date()) {
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (\`waymark.mjs tasks [<task ID>]\`: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
     ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash)', ...started, ''] : []),
-    ...(questions ? [`Preguntas (Q) desde el último cierre: ${questions} (provenance.jsonl, kind "Q")`, ''] : []),
+    ...(questions ? [`## Preguntas (Q) desde el último cierre: ${questions} (${qRows.length < questions ? `las últimas ${qRows.length}; ` : ''}provenance.jsonl, kind "Q")`, ...qRows, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,
     '| Task | Result | Routine | Request |', '|---|---|---|---|', ...rows, ''].join('\n');
@@ -414,6 +420,7 @@ export function tasksMarkdown(home, now = new Date()) {
   // (counted as "+n more"), then the remaining done rows.
   let out = render();
   while (out.length > TASKS_CHARS && rows.length > DONE_MIN) { rows.pop(); out = render(); }
+  while (out.length > TASKS_CHARS && qRows.length > 1) { qRows.shift(); out = render(); } // the oldest questions
   const order = withId.length ? withId.map((l) => idOrder(headId(l))) : tasks.map((_, i) => String(i).padStart(6, '0'));
   while (out.length > TASKS_CHARS && tasks.length > 1) {
     const i = order.indexOf([...order].sort()[0]);

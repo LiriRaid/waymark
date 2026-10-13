@@ -1375,6 +1375,14 @@ test('T2o background: a skill still running in the background holds the close; i
   assert.deepEqual(pendingBackground(bash), [], 'a background shell command (a dev server) is never waited for');
 });
 
+test('2.0.7 background: an agent launched in the background (isAsync) holds the close too; its notification releases it', () => {
+  const launch = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_ag1', content: 'Async agent launched successfully.' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a79f' } };
+  const turn = [prompt('corre el security-review'), say('Waymark → Q · dept-security · skills: security-review'), call('Agent', { description: 'review', run_in_background: true }), launch, say('La revisión sigue corriendo en segundo plano.')];
+  assert.deepEqual(pendingBackground(turn), ['toolu_ag1']);
+  const notified = [...turn, { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>a79f</task-id>\n<tool-use-id>toolu_ag1</tool-use-id>\n<status>completed</status>\n</task-notification>' } }, say('# Security review')];
+  assert.deepEqual(pendingBackground(notified), []);
+});
+
 test('T2o stop hook: no block and no record while the background review runs', () => {
   const { cwd, log } = fresh();
   const transcript = path.join(home, `t-bg-${n}.jsonl`);

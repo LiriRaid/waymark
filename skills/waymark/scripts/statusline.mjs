@@ -82,13 +82,14 @@ export function usageCost(model, u = {}) {
   return ((u.input_tokens || 0) * inp + minutes * inp * 1.25 + hour * inp * 2 + (u.cache_read_input_tokens || 0) * read + (u.output_tokens || 0) * out) / 1e6;
 }
 
-// The responses a transcript gained after `offset` (bytes): their cost, and the part answered at or before `paidUntil`
-// (ms). Whole lines only (a line still being written is read next time); each message once (a streamed response is
-// written as several lines that share message.id and usage, so the last ids read are kept across calls).
+// The responses a transcript gained after `offset` (bytes): their cost, the part answered at or before `paidUntil`
+// (ms), and their tokens (input, cache writes and reads, output). Whole lines only (a line still being written is read
+// next time); each message once (a streamed response is written as several lines that share message.id and usage, so
+// the last ids read are kept across calls).
 export function transcriptCost(file, offset = 0, seen = [], paidUntil = 0) {
   const size = fs.statSync(file).size;
   if (size < offset) { offset = 0; seen = []; } // rewritten
-  const r = { cost: 0, paid: 0, offset, seen };
+  const r = { cost: 0, paid: 0, tokens: 0, offset, seen };
   if (size === offset) return r;
   const buf = Buffer.alloc(size - offset), fd = fs.openSync(file, 'r');
   try { fs.readSync(fd, buf, 0, buf.length, offset); } finally { fs.closeSync(fd); }
@@ -102,9 +103,36 @@ export function transcriptCost(file, offset = 0, seen = [], paidUntil = 0) {
     ids.add(d.message.id);
     const c = usageCost(d.message.model, u);
     r.cost += c;
+    r.tokens += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
     if ((Date.parse(d.timestamp || '') || 0) <= paidUntil) r.paid += c;
   }
   return { ...r, offset: offset + end, seen: [...ids].slice(-50) };
+}
+
+// A session's files: its transcript and its subagents'.
+function sessionFiles(transcript) {
+  let subs = [];
+  try { const dir = subagentDir(transcript); subs = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).map((n) => [n, path.join(dir, n)]); } catch {}
+  return [['main', transcript], ...subs];
+}
+
+// The session's tokens for the line: what `s` counted so far plus what its files gained since (cache included, the
+// number each task's evaluation gives, so the session's is the sum of its tasks'). Null when nothing new was read. A
+// file shorter than where the count stopped was rewritten: the session is counted again from the start.
+function sessionTokens(s, transcript) {
+  const list = sessionFiles(transcript);
+  const rewritten = list.some(([key, file]) => { try { return fs.statSync(file).size < (s?.tokenFiles?.[key]?.offset || 0); } catch { return false; } });
+  if (rewritten) s = null;
+  let tokens = s?.tokens || 0, read = false;
+  const files = { ...(s?.tokenFiles || {}) };
+  for (const [key, file] of list) {
+    const p = files[key] || {};
+    let r;
+    try { r = transcriptCost(file, p.offset, p.seen); } catch { continue; }
+    if (r.offset === (p.offset || 0)) continue;
+    tokens += r.tokens; files[key] = { offset: r.offset, seen: r.seen }; read = true;
+  }
+  return read ? { tokens, tokenFiles: files } : null;
 }
 
 // What a session with no status line (Claude's desktop app) spent, recorded by the hooks so each rise of the window is
@@ -119,11 +147,8 @@ export function recordSpend(session, transcript, now = Date.now()) {
     if (prev && prev.by !== 'hook') return null;
     const s = prev ? { ...prev, files: { ...prev.files } } : { at: now, by: 'hook', activeAt: null, own: 0, cost: 0, paid: 0, files: {} };
     const paidUntil = prev ? 0 : st.latest?.at ?? Infinity;
-    const dir = subagentDir(transcript);
-    let subs = [];
-    try { subs = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).map((n) => [n, path.join(dir, n)]); } catch {}
     let spent = 0, read = !prev;
-    for (const [key, file] of [['main', transcript], ...subs]) {
+    for (const [key, file] of sessionFiles(transcript)) {
       const p = s.files[key] || {};
       const r = transcriptCost(file, p.offset, p.seen, paidUntil);
       s.cost += r.cost; s.paid += r.paid; spent += r.cost - r.paid;
@@ -154,10 +179,19 @@ function withLock(fn) {
 
 // One status update: the window's reading (when the input has one and it is new for this session), whether this
 // session's tokens moved, its cost, and the share of each rise of the window.
+// The session's tokens are read before the lock (the first read of a long transcript takes a while) and kept only when
+// the entry's count did not move meanwhile (another update of the same session counted them first).
 export function recordStatus(input, now = Date.now()) {
-  return withLock(() => record(input, now));
+  const id = input?.session_id, transcript = input?.transcript_path;
+  let tk = null, from;
+  if (id && transcript) {
+    const prev = readQuota().sessions[id];
+    from = prev && prev.by !== 'hook' ? prev.tokenFiles : undefined;
+    try { tk = sessionTokens(from ? prev : null, transcript); } catch {}
+  }
+  return withLock(() => record(input, now, tk && { tk, from: JSON.stringify(from ?? null) }));
 }
-function record(input, now) {
+function record(input, now, tokens = null) {
   const st = readQuota(), five = windowOf(input?.rate_limits?.five_hour), seven = windowOf(input?.rate_limits?.seven_day);
   let changed = false;
   const id = input?.session_id, cw = input?.context_window || {}, cost = input?.cost?.total_cost_usd;
@@ -166,12 +200,15 @@ function record(input, now) {
     // first sight: not activity yet, and the cost spent before is the baseline (nothing attributed to it). A session the
     // hooks recorded (recordSpend) is first seen here too: Claude Code's own cost replaces their estimate, its share stays
     const first = !prev || prev.by === 'hook';
-    const s = first ? { at: now, sig, activeAt: null, own: prev?.own || 0 } : prev.sig !== sig ? { ...prev, at: now, sig, activeAt: now } : prev;
+    let s = first ? { at: now, sig, activeAt: null, own: prev?.own || 0 } : prev.sig !== sig ? { ...prev, at: now, sig, activeAt: now } : prev;
     if (Number.isFinite(cost)) {
       // a lower cost is a cleared session (`/clear` restarts it at $0): what it spent since then is still unpaid
       s.paid = first || !Number.isFinite(prev.cost) ? cost : cost < prev.cost ? 0 : prev.paid ?? cost;
       s.cost = cost;
     }
+    // its tokens for the line, read before the lock from where the last update stopped (the hooks' estimate of a desktop
+    // session counts none)
+    if (tokens && tokens.from === JSON.stringify((first ? null : prev.tokenFiles) ?? null)) { if (s === prev) s = { ...prev }; Object.assign(s, tokens.tk); }
     if (s !== prev) { st.sessions[id] = s; changed = true; }
   }
   const fresh = five && (!id || readingKey(five) !== st.sessions[id]?.seen); // a re-run brings the session's same reading
@@ -199,15 +236,19 @@ function record(input, now) {
   return st;
 }
 
+// 1500999 → "1.5M", 250000 → "250k" (a point, as the task's evaluation line writes "5.89M tokens").
+const tokenText = (n) => (n >= 999500 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
 // The line: the newest reading of the account (this session's, or a newer one another session wrote in `st`), this
-// session's share of the window when it has a cost, the 7-day window and the context.
+// session's share of the window when it has a cost, its tokens, the 7-day window and the context.
 export function statusText(input, st = null) {
   let five = windowOf(input?.rate_limits?.five_hour);
   const newest = st?.latest?.five, seven = windowOf(input?.rate_limits?.seven_day), ctx = input?.context_window?.used_percentage;
   if (newest && (!five || (sameWindow(newest, five) ? newest.pct > five.pct : (newest.resetsAt || 0) > (five.resetsAt || 0)))) five = newest;
   const s = st?.sessions?.[input?.session_id], own = five && s?.own > 0 && Number.isFinite(s.cost) ? s.own : 0;
   const share = own ? `esta sesión ${own < 0.5 ? '<1' : `≈${Math.round(own)}`}%` : '';
-  return [five && `5h ${Math.round(five.pct)}%`, share, seven && `7d ${Math.round(seven.pct)}%`, Number.isFinite(ctx) && `contexto ${Math.round(ctx)}%`].filter(Boolean).join(' · ');
+  const tokens = s?.tokens > 0 ? `tokens ${tokenText(s.tokens)}` : '';
+  return [five && `5h ${Math.round(five.pct)}%`, share, tokens, seven && `7d ${Math.round(seven.pct)}%`, Number.isFinite(ctx) && `contexto ${Math.round(ctx)}%`].filter(Boolean).join(' · ');
 }
 
 // The task's start: the reading at its first prompt (a later prompt of the same task keeps it). The end-of-turn hook clears

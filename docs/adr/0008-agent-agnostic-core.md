@@ -22,7 +22,7 @@ The session hook adds one line (about 30 tokens, no network) when the last check
 
 The hooks take `--agent <name>`, with `claude` as the default, so current installs keep working. A new agent adds one file and registers the same four scripts. `install-hooks.mjs` writes the registration (dry run by default; `--apply` makes a backup and replaces only Waymark's own entries).
 
-**The record says who did the work.** Each record carries `agent`, and tasks.md shows it next to the ID, so a session in Claude sees "T4 · codex". A turn routed Q (analysis only) in a project with memory gets a chained record `{kind: "Q"}` with no task ID. It does not consume `T<n>` or change the follow-up offered. tasks.md shows only "Preguntas (Q) desde el último cierre: N".
+**The record says who did the work.** Each record carries `agent`, and tasks.md shows it next to the ID, so a session in Claude sees "T4 · codex". A turn routed Q (analysis only) in a project with memory gets a chained record `{kind: "Q"}` with no task ID. It does not consume `T<n>` or change the follow-up offered. tasks.md lists the questions since the last close, the newest five as one line each: when, department, skills, the question and what it answered (2.0.7; before, only their count).
 
 ## Alternatives considered
 - **Keep the extras in the hooks and add Codex next to them:** rejected. Every agent would inherit the network check, the offers and Claude-only paths, and each hook would grow per agent.

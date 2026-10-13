@@ -9,6 +9,7 @@ The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version
   - Kiro reads plain text and exit codes, so the hooks answer through `answer()` (`agents/index.mjs`), which uses an adapter's `emit()` when it has one. Every other agent's answer is unchanged.
   - Both were built from the documentation; their first live session checks the points in their `adapters/*.md`. The uninstall removes their hooks, and `check` offers them like any agent's.
 - **Fix: "esta sesión" showed the whole 5-hour window.** The first reading with no reading before it (a new install, a wiped `~/.waymark`) counted the window's entire % as a rise, and a session that had already spent took all of it, so its share equaled the 5h figure. That reading is now a baseline: what the window held goes to outside, and only the rises after it are split among the sessions. The same goes for a new window first read more than 10 minutes after the last reset (its start went unseen: claude.ai, the desktop app); a reset seen happen still starts the shares at 0.
+- **Docs:** README describes the hooks of Copilot CLI, Kiro and Antigravity, the quota baseline, and what a terminal's share can include (use from a session without the status line, during a rise it also spent in). INSTALL §10 lists the hooks the uninstall removes from Copilot CLI, Kiro and Antigravity.
 
 ## 2.0.4 — Copilot CLI joins the chain, and the task records travel on their own
 - **Copilot CLI with its hooks** (`docs/adr/0022`, `adapters/copilot.md`):

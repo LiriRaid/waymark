@@ -531,10 +531,10 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   const noSearch = currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
   const ev = evaluate(cierreGaps(noSearch, cierre(id), undefined, undefined, ctx), { total: 2700000 });
-  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
-  assert.equal(ev.score, '8/9');
+  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Evidencia: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
+  assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
-  assert.match(summaryLine(id, ev), /Recordar ✘ .* 8\/9 · 2\.70M tokens · ¿qué % marcó tu cuota/);
+  assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
   assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run waymark\.mjs pack/, 'one memory: Waymark\'s, with or without engram');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
@@ -614,11 +614,11 @@ const l2Lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymar
 test('stop hook: a backed Cierre is recorded and not blocked', () => {
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const { out, records } = runStop(l2Lines, cierre(id));
-  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 9\/9 · /);
+  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 10\/10 · /);
   assert.equal(records.length, 1);
   assert.equal(records[0].id, id);
   assert.deepEqual(records[0].unresolved, []);
-  assert.equal(records[0].evaluation.score, '9/9');
+  assert.equal(records[0].evaluation.score, '10/10');
   assert.match(records[0].cierre, /^## Cierre · /);
 });
 
@@ -824,7 +824,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-step2', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
-  assert.match(JSON.parse(r.stdout).systemMessage, /· 9\/9 · /);
+  assert.match(JSON.parse(r.stdout).systemMessage, /· 10\/10 · /);
   const recs = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
   assert.equal(recs.length, 1);
   assert.deepEqual(recs[0].files, [FILE], 'the memory edit is not a project change');
@@ -1492,7 +1492,7 @@ test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (
 test('3e-1 testigo gate: with no gate after the last code change, the repo typecheck the hook re-runs decides', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), MEM()]);
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Read', { file_path: FILE }), MEM()]);
   let asked = null;
   const withRun = (r) => ({ ...ctxFor(cwd), rerun: (files) => { asked = files; return r; } });
   const ok = cierreGaps(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', from: 'package.json', ok: true, s: 3, timedOut: false }));

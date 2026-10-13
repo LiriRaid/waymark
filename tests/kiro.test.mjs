@@ -81,7 +81,7 @@ test('kiro adapter: payload, tool calls and answers', async () => {
   assert.deepEqual(kiro.out.deny('r'), { stderr: 'r', exit: 2 });
   assert.deepEqual(json(kiro.out.block('r').text), { decision: 'block', reason: 'r' });
   assert.equal(kiro.out.blockPrompt, undefined, 'UserPromptSubmit blocking is documented both ways: no prompt brake');
-  assert.deepEqual(kiro.lacks, ['cierre', 'decision'], 'no hook carries the reply: the Cierre and a question in the chat are invisible');
+  assert.deepEqual(kiro.lacks, ['cierre', 'evidence', 'decision'], 'no hook carries the reply: the Cierre, its Evidencia and a question in the chat are invisible');
   // answer(): plain text on stdout, a denial as stderr with exit code 2, every other agent's answer as JSON
   const answer = (agent, out) => spawnSync(process.execPath, ['--input-type=module', '-e',
     `const { answer, AGENTS } = await import(${JSON.stringify(url('agents/index.mjs'))}); answer(AGENTS[${JSON.stringify(agent)}], ${JSON.stringify(out)});`], { encoding: 'utf8' });

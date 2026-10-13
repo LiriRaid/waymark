@@ -4,6 +4,7 @@
     { "id": "decision", "label": "Decision", "levels": [1, 2, 3], "enforce": "block", "claim": "the choice window answered before the first change" },
     { "id": "gate", "label": "Verificar", "levels": [1, 2, 3], "when": "code", "enforce": "block", "claim": "a gate passing after the last code change (yours, or the typecheck the hook re-runs)" },
     { "id": "cierre", "label": "Cierre", "levels": [1, 2, 3], "enforce": "block", "claim": "the Cierre complete (Resultado · Evidencia · Aprendido)" },
+    { "id": "evidence", "label": "Evidencia", "levels": [1, 2, 3], "enforce": "block", "claim": "an Evidencia \"observada\" checked after the last change (a commit checks nothing)" },
     { "id": "secrets", "label": "Secretos", "levels": [1, 2, 3], "enforce": "block", "claim": "no secret in the memory or the task's diff and commits" },
     { "id": "memory", "label": "Recordar", "levels": [1, 2, 3], "enforce": "block", "claim": "each file's memory pack, handed by the hook at its first edit (never run pack)" },
     { "id": "review", "label": "Review", "levels": [2, 3], "when": "code", "enforce": "block", "claim": "L2+ with code: code-review (or waymark.mjs review <files>) on the task's files" },

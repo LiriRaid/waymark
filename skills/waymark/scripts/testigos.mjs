@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, commitsFor, findSecrets } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate } from './stack.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
@@ -125,8 +125,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const cwd = process.cwd(), home = projectHome(cwd), records = readRecords(home.log);
   const id = process.argv[2] || records.filter((r) => r.id).pop()?.id;
   const mark = (ok) => (ok === null ? '—' : ok ? '✔' : '✘');
-  const chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null); // with the notes, as the hook checks it
-  console.log(`${mark(chain.ok)} chain: ${records.length} records${chain.ok ? ' intact' : `, broken at record ${chain.at + 1}${chain.note ? ' (its git note is missing or was edited)' : ''}`} (${home.log})`);
+  const chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null, anchorsFor(cwd)); // with the notes, as the hook checks it
+  console.log(`${mark(chain.ok)} chain: ${records.length} records${chain.ok ? ' intact' : `, broken at record ${chain.at + 1}${chain.note ? ' (its git note is missing or was edited)' : chain.anchor ? ' (a line anchored in git is gone: the log was rewritten or cut)' : ''}`} (${home.log})`);
   if (!id) { console.log('— no task recorded yet'); process.exit(chain.ok ? 0 : 1); }
   const commits = commitsFor(cwd, id);
   console.log(`${commits.length ? '✔' : '—'} commit + trailer: ${commits.length ? commits.map((h) => h.slice(0, 8)).join(', ') : `no commit with Waymark-Task: ${id} in the last 30`}`);

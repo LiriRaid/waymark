@@ -2,6 +2,15 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.8 — the log anchored in git, forget, and an Evidencia backed by a check
+- **The log is anchored in git** (`docs/adr/0025`). Each record also appends `{m, n, hash, at}` to a note on HEAD under `refs/notes/waymark-anchor`: the log's length and last hash. A log rewritten by hand and chained again, or cut, no longer passes the chain (`chain broken … the log no longer holds a line anchored in git`). The anchors travel with the same fetch, push and merge as the task notes. Another clone's or machine's anchors are kept but not checked.
+- **`waymark.mjs forget "<task ID>" | --session <id> --reason "<why>" [--apply]`** removes records without a commit that you ask to remove. It chains the rest again and leaves a rewrite anchor with your reason, what was removed and the head before and after, so the removal shows instead of hiding. Without `--apply` it only shows the plan. A committed task is refused, because its record is the commit's git note.
+- **New testigo, Evidencia** (blocks once): an Evidencia «observada» needs a check after the last change. A read, a search or a run counts, even a failing one. An edit, a commit or push, a question, or a call a hook stopped does not. «inferida» needs none.
+- **Cited facts are looked up:** text in backticks, `84/84`, `exit N` and hashes are searched in the tool calls since the last close, never in the agent's own edits. One no call shows is recorded as **sin respaldo** and scores Evidencia ✘ without blocking. The evaluation has one more step: a full score is 10/10.
+- **Kiro and Antigravity:** Evidencia is not applicable there, like the Cierre (no hook carries the reply).
+- **The desktop app's share of the quota, verified live:** a desktop session (`by: hook`) and a terminal session each kept their own part in `.quota.json` (2.0.6).
+- **Docs:** README, INSTALL, the Kiro and Antigravity adapters, and ADR 0025.
+
 ## 2.0.7 — the session's tokens on the status line, and what each question answered in tasks.md
 - **The status line shows the session's tokens:** `5h 5% · esta sesión ≈1% · tokens 13.2M · 7d 68% · contexto 5%`. It counts every response of the session's transcript and its subagents', cache included: the number each task's evaluation gives, so the session's is the sum of its tasks'. It reads only what the files gained since the last update. Claude Code's `context_window.total_input_tokens` is what the context holds now, not this total (`docs/adr/0019`, amended).
 - **Fix: a turn that launched an agent in the background closed before it ended.** Claude Code marks an Agent call run in the background with `isAsync`, not `background`, so the end-of-turn hook did not wait for it. A question that ran a `security-review` that way was recorded with "la revisión sigue corriendo", and a task's background review could be judged before it finished. Both now wait for the notification.

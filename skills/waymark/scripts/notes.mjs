@@ -8,10 +8,15 @@
 // yet. The refspec is a glob (waymark*): a remote with no notes yet matches nothing, where an exact refspec would fail
 // every `git fetch` with "couldn't find remote ref";
 // the session hook merges that ref into the local one (mergeNotes, a conflict keeps the local note).
+// Anchors (docs/adr/0025): each close appends one line {m, n, hash, at} to a note on HEAD under refs/notes/waymark-anchor
+// (the log's length and its last hash; m names the log, so another clone's anchors are not checked against this one).
+// A rewrite of the log, even chained again, no longer matches them; `waymark.mjs forget` leaves a rewrite anchor instead.
+// The same refspec glob, push and merge carry them; their notes merge line by line (cat_sort_uniq).
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 export const NOTES_REF = 'refs/notes/waymark';
+export const ANCHOR_REF = 'refs/notes/waymark-anchor';
 export const noteSha = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, timeout: 3000, maxBuffer: 32 * 1024 * 1024, ...opts });
 
@@ -27,9 +32,9 @@ export function addNote(cwd, commit, text) {
 
 // The notes of the ref → Map(commit sha → note text), in two git calls (list + one cat-file batch); with `commits`,
 // only theirs.
-export function readNotes(cwd, commits = null) {
+export function readNotes(cwd, commits = null, ref = NOTES_REF) {
   const out = new Map();
-  const list = git(cwd, ['notes', `--ref=${NOTES_REF}`, 'list'], { encoding: 'utf8' });
+  const list = git(cwd, ['notes', `--ref=${ref}`, 'list'], { encoding: 'utf8' });
   if (list.status !== 0 || !list.stdout.trim()) return out;
   const want = commits && new Set(commits);
   const pairs = list.stdout.trim().split('\n').map((l) => l.trim().split(/\s+/)).filter(([, c]) => !want || want.has(c)); // "<note blob> <commit>"
@@ -46,6 +51,22 @@ export function readNotes(cwd, commits = null) {
     out.set(commit, buf.subarray(nl + 1, nl + 1 + size).toString('utf8').replace(/\n$/, ''));
     at = nl + 1 + size + 1;
   }
+  return out;
+}
+
+// Appends one anchor line to HEAD's note under ANCHOR_REF. A repo with no commit yet has nothing to hold it. → true when written.
+export function addAnchor(cwd, entry) {
+  if (git(cwd, ['rev-parse', '-q', '--verify', 'HEAD']).status !== 0) return false;
+  const add = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${ANCHOR_REF}`, 'append', '-F', '-', 'HEAD'], { input: JSON.stringify(entry), encoding: 'utf8' });
+  const r = add();
+  if (r.status === 0) return true;
+  return /identity|who you are|empty ident/i.test(r.stderr || '') && add(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']).status === 0;
+}
+
+// Every anchor line of the repo, from every commit's note (the blank lines `notes append` puts between them skipped).
+export function readAnchors(cwd) {
+  const out = [];
+  for (const [commit, text] of readNotes(cwd, null, ANCHOR_REF)) for (const line of text.split('\n')) { try { const a = JSON.parse(line); if (a && typeof a === 'object') out.push({ ...a, commit }); } catch {} }
   return out;
 }
 
@@ -102,12 +123,14 @@ export function noteLateCommits(cwd, records) {
 
 // Pushes the notes ref to a remote (default origin). With the fetch refspec, git moves the tracking ref too. → { ok, output }
 export function pushNotes(cwd, remote = 'origin') {
-  const r = git(cwd, ['push', remote, `${NOTES_REF}:${NOTES_REF}`], { encoding: 'utf8', timeout: 60000 });
+  const refs = [NOTES_REF, ANCHOR_REF].filter((ref) => refSha(cwd, ref));
+  if (!refs.length) return { ok: true, output: 'no notes' };
+  const r = git(cwd, ['push', remote, ...refs.map((ref) => `${ref}:${ref}`)], { encoding: 'utf8', timeout: 60000 });
   return { ok: r.status === 0, output: `${r.stdout || ''}${r.stderr || ''}`.trim() };
 }
 
 // The remote's notes as last fetched or pushed: a ref of their own, never the local one.
-export const trackRef = (remote = 'origin') => `refs/notes/remotes/${remote}/waymark`;
+export const trackRef = (remote = 'origin', ref = NOTES_REF) => `refs/notes/remotes/${remote}/${ref.replace(/^refs\/notes\//, '')}`;
 const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
 const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
 const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
@@ -117,25 +140,34 @@ export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--g
 // Joins the remote's notes (the tracking ref) into the local ref when the remote has note commits the local lacks.
 // A note both sides wrote on the same commit keeps the local one (strategy ours: its stub in the log hashes it).
 // → true when merged.
+// The anchors merge the same way, line by line (cat_sort_uniq): both sides' lines on one commit are kept.
 export function mergeNotes(cwd, remote = 'origin') {
-  const theirs = refSha(cwd, trackRef(remote));
-  if (!theirs) return false;
-  const ours = refSha(cwd, NOTES_REF);
-  if (ours && (ours === theirs || git(cwd, ['merge-base', '--is-ancestor', theirs, ours]).status === 0)) return false;
-  const merge = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${NOTES_REF}`, 'merge', '-q', '-s', 'ours', trackRef(remote)], { encoding: 'utf8' });
-  let r = merge();
-  if (r.status !== 0 && /identity|who you are|empty ident/i.test(r.stderr || '')) r = merge(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']);
-  return r.status === 0;
+  let merged = false;
+  for (const [ref, strategy] of [[NOTES_REF, 'ours'], [ANCHOR_REF, 'cat_sort_uniq']]) {
+    const theirs = refSha(cwd, trackRef(remote, ref));
+    if (!theirs) continue;
+    const ours = refSha(cwd, ref);
+    if (ours && (ours === theirs || git(cwd, ['merge-base', '--is-ancestor', theirs, ours]).status === 0)) continue;
+    const merge = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${ref}`, 'merge', '-q', '-s', strategy, trackRef(remote, ref)], { encoding: 'utf8' });
+    let r = merge();
+    if (r.status !== 0 && /identity|who you are|empty ident/i.test(r.stderr || '')) r = merge(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']);
+    if (r.status === 0) merged = true;
+  }
+  return merged;
 }
 
-// Note commits of the local ref the remote lacks (against the tracking ref, no network). → a count, 0 with no local
-// notes, or null when it cannot be known (no tracking ref yet).
+// Note commits of the local refs (task notes and anchors) the remote lacks (against the tracking refs, no network). → a
+// count, 0 with no local notes, or null when it cannot be known (no tracking ref yet).
 export function unpushedNotes(cwd, remote = 'origin') {
-  const ours = refSha(cwd, NOTES_REF);
-  if (!ours) return 0;
-  if (!refSha(cwd, trackRef(remote))) return null;
-  const r = git(cwd, ['rev-list', '--count', `${trackRef(remote)}..${NOTES_REF}`], { encoding: 'utf8' });
-  return r.status === 0 ? Number(r.stdout.trim()) : null;
+  let total = 0;
+  for (const ref of [NOTES_REF, ANCHOR_REF]) {
+    if (!refSha(cwd, ref)) continue;
+    if (!refSha(cwd, trackRef(remote, ref))) return null;
+    const r = git(cwd, ['rev-list', '--count', `${trackRef(remote, ref)}..${ref}`], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    total += Number(r.stdout.trim());
+  }
+  return total;
 }
 // The hook pushes the notes after a push it saw when the remote may lack some (unknown counts as lacking).
 export const shouldPushNotes = (cwd, remote = 'origin') => { const n = unpushedNotes(cwd, remote); return n === null || n > 0; };

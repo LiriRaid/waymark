@@ -97,7 +97,8 @@ export function currentTurn(lines, since = 0) {
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) {
-      for (const c of d.message.content) if (c.type === 'tool_result') results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '')) };
+      // raw: the first 20,000 characters, where the Evidencia testigo looks up what the Cierre cites (text is clipped)
+      for (const c of d.message.content) if (c.type === 'tool_result') { const s = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || ''); results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(s), raw: s.slice(0, 20000) }; }
     }
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {

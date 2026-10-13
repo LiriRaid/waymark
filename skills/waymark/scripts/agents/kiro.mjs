@@ -24,7 +24,7 @@ export const name = 'kiro';
 const HOME = () => agentDir(known('kiro'));
 export const instructions = path.join(HOME(), 'steering', 'AGENTS.md');
 export const preContext = false; // PreToolUse documents no context: the pack goes with the result (PostToolUse)
-export const lacks = ['cierre', 'decision']; // no hook carries the reply (its review is waymark.mjs review)
+export const lacks = ['cierre', 'evidence', 'decision']; // no hook carries the reply (its review is waymark.mjs review)
 
 export const out = {
   context: (event, text) => ({ text }),

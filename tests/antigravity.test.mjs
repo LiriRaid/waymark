@@ -83,7 +83,7 @@ test('antigravity adapter: tool calls and answers', async () => {
   assert.deepEqual(ag.out.block('r'), { decision: 'continue', reason: 'r' });
   assert.deepEqual([ag.out.pass('PreToolUse'), ag.out.pass('PostToolUse')], [{ decision: 'allow' }, {}]);
   assert.equal(ag.preContext, true);
-  assert.deepEqual(ag.lacks, ['cierre'], 'no hook carries the reply: the Cierre is invisible');
+  assert.deepEqual(ag.lacks, ['cierre', 'evidence'], 'no hook carries the reply: the Cierre and its Evidencia are invisible');
 });
 
 test('antigravity hooks end to end: the card as an injected step, the record says antigravity', () => {

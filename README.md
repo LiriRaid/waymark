@@ -47,7 +47,7 @@ There is no installer script. [`INSTALL.md`](INSTALL.md) is written **for the ag
 3. Offers to remove the third-party skills this one replaces.
 4. Copies the skills and creates your private layer `~/.waymark/`.
 5. Writes a managed block of general working rules into each agent's instructions file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…). The rest of that file stays as it is.
-6. Registers Waymark's hooks in each agent: settings for Claude Code, Codex and Gemini CLI, `hooks.json` for Cursor, a plugin for OpenCode. In Claude Code it also sets Waymark's status line (`5h 41% · esta sesión ≈12% · 7d … · contexto …`).
+6. Registers Waymark's hooks in each agent: settings for Claude Code, Codex and Gemini CLI, `hooks.json` for Cursor, a plugin for OpenCode, `hooks/waymark.json` for Copilot CLI and Kiro, and a `waymark` hook in Antigravity's `config/hooks.json`. In Claude Code it also sets Waymark's status line (`5h 41% · esta sesión ≈12% · 7d … · contexto …`).
 7. Sets up engram, the learned memory every agent shares (installs it after your yes if it is missing), proposes MCP servers (`context7`; stack-specific ones only for stacks you use) and runs `sync.mjs`.
 8. Lists every file it created or modified, asks you to restart, and gives you a smoke test.
 
@@ -99,7 +99,7 @@ It reads the agent's own session transcript (offline, no model call) and shows, 
 
 ### Your quota, per terminal
 
-In Claude Code with a Pro or Max plan, Waymark's status line reads the real % of the 5-hour window and measures each task's % from its first prompt to its close, with no question to you (`docs/adr/0019`). The window is your account's, so several sessions spend from the same %. Each rise is split among the open sessions by what each one spent, so every terminal shows its own part (`5h 41% · esta sesión ≈12%`). The line refreshes every 30 s, so a quiet terminal also sees what the others spent. A task that shared the window closes with `medido, con otra sesión activa; esta sesión ≈ X%, prorrateado por costo`. Use that no Claude Code session paid for (claude.ai, Codex) is never charged to one. Elsewhere the % is estimated from your measured tasks of the same model.
+In Claude Code with a Pro or Max plan, Waymark's status line reads the real % of the 5-hour window and measures each task's % from its first prompt to its close, with no question to you (`docs/adr/0019`). The window is your account's, so several sessions spend from the same %. Each rise is split among the open sessions by what each one spent, so every terminal shows its own part (`5h 41% · esta sesión ≈12%`). The line refreshes every 30 s, so a quiet terminal also sees what the others spent. A task that shared the window closes with `medido, con otra sesión activa; esta sesión ≈ X%, prorrateado por costo`. The first reading Waymark sees with none before it (a new install), or of a new window read long after the last reset, is a baseline: what the window already held is no session's. A rise while no Claude Code session spent (claude.ai, Codex, the desktop app) goes to none of them; while a terminal also spent, the terminal takes it, because the split sees only the sessions that run the status line. Elsewhere the % is estimated from your measured tasks of the same model.
 
 ## How it triggers
 

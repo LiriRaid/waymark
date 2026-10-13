@@ -3,8 +3,10 @@
 // verifyChain. Notes travel when the agent pushes (the end-of-turn hook pushes the notes ref to the same remote while it
 // has note commits the remote lacks) or with `waymark.mjs notes push`, and follow a rebased or amended commit
 // (repairNotes); a task committed later by another task gets its record as a note too (noteLateCommits). A clone
-// brings branches only: `waymark.mjs notes setup` (after the user's yes, the one change to git's config) adds a fetch
-// refspec into a tracking ref, refs/notes/remotes/<remote>/waymark, so a fetch never overwrites notes not pushed yet;
+// brings branches only: the session hook (ensureFetchSpec, in a repo with .waymark/) or `waymark.mjs notes setup` adds a
+// fetch refspec into a tracking ref, refs/notes/remotes/<remote>/waymark, so a fetch never overwrites notes not pushed
+// yet. The refspec is a glob (waymark*): a remote with no notes yet matches nothing, where an exact refspec would fail
+// every `git fetch` with "couldn't find remote ref";
 // the session hook merges that ref into the local one (mergeNotes, a conflict keeps the local note).
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -106,7 +108,8 @@ export function pushNotes(cwd, remote = 'origin') {
 
 // The remote's notes as last fetched or pushed: a ref of their own, never the local one.
 export const trackRef = (remote = 'origin') => `refs/notes/remotes/${remote}/waymark`;
-const fetchSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`;
+const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
+const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
 const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
 export const hasRemote = (cwd, remote = 'origin') => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
 export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;
@@ -137,12 +140,18 @@ export function unpushedNotes(cwd, remote = 'origin') {
 // The hook pushes the notes after a push it saw when the remote may lack some (unknown counts as lacking).
 export const shouldPushNotes = (cwd, remote = 'origin') => { const n = unpushedNotes(cwd, remote); return n === null || n > 0; };
 
-// Run on the user's yes (`waymark.mjs notes setup`): the fetch refspec into the tracking ref (added once), a fetch of the
-// notes and the merge. → { ok, added, merged, output }
+// The fetch refspec, added once to .git/config (no network); an exact one from 2.0.3 is replaced. → true when added.
+export function ensureFetchSpec(cwd, remote = 'origin') {
+  if (!hasRemote(cwd, remote) || hasFetchSpec(cwd, remote)) return false;
+  git(cwd, ['config', '--fixed-value', '--unset-all', `remote.${remote}.fetch`, exactSpec(remote)]);
+  return git(cwd, ['config', '--add', `remote.${remote}.fetch`, fetchSpec(remote)]).status === 0;
+}
+
+// `waymark.mjs notes setup`: the fetch refspec (ensureFetchSpec), a fetch of the notes and the merge. → { ok, added, merged, output }
 export function notesSetup(cwd, remote = 'origin') {
   if (!hasRemote(cwd, remote)) return { ok: false, added: false, merged: false, output: `no remote ${remote}` };
-  const added = !hasFetchSpec(cwd, remote);
-  if (added && git(cwd, ['config', '--add', `remote.${remote}.fetch`, fetchSpec(remote)]).status !== 0) return { ok: false, added: false, merged: false, output: 'git config failed' };
+  const added = ensureFetchSpec(cwd, remote);
+  if (!hasFetchSpec(cwd, remote)) return { ok: false, added: false, merged: false, output: 'git config failed' };
   const f = git(cwd, ['fetch', remote, fetchSpec(remote)], { encoding: 'utf8', timeout: 60000 });
   const output = `${f.stdout || ''}${f.stderr || ''}`.trim();
   // a remote with no notes yet answers "couldn't find remote ref": the refspec stays for when it has them

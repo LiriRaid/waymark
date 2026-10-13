@@ -13,7 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, logHookError, PROBE_OK } from './provenance.mjs';
-import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes } from './notes.mjs';
+import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
@@ -153,10 +153,16 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     cwd = h.cwd || cwd; sessionId = h.session_id || null;
     let text = '', held = '';
     // the remote's records a fetch brought (the refspec of `waymark.mjs notes setup`) join the local notes before the card
-    let joined = false;
-    try { const root = projectHome(cwd).root; joined = hasFetchSpec(root) && mergeNotes(root); } catch (e) { logHookError('session-hook notes', e); }
+    // a repo with Waymark memory gets the refspec on its own, once (no network; the next fetch brings the records)
+    let joined = false, added = false;
+    try {
+      const home = projectHome(cwd), root = home.root;
+      added = !!home.dir && !home.legacy && fs.existsSync(home.dir) && ensureFetchSpec(root);
+      joined = hasFetchSpec(root) && mergeNotes(root);
+    } catch (e) { logHookError('session-hook notes', e); }
     try {
       text = CARD_HEAD + digest(cwd, agent.name);
+      if (added) text += '\nNotes: fetches from origin now bring the task records (one fetch refspec added to .git/config).';
       if (joined) text += '\nNotes: the records the remote brought joined the local ones (git notes merge).';
       // a note a rebase or amend left on the old commit follows the task to its new commit
       try {

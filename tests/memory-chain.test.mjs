@@ -73,7 +73,7 @@ test('notes at clone: a clone has none; setup adds a tracking refspec (never ove
   const r = notes.notesSetup(b);
   assert.equal(r.ok, true, r.output);
   assert.equal(notes.hasFetchSpec(b), true);
-  assert.ok(gitT(b, 'config', '--get-all', 'remote.origin.fetch').stdout.includes(`+${notes.NOTES_REF}:refs/notes/remotes/origin/waymark`));
+  assert.ok(gitT(b, 'config', '--get-all', 'remote.origin.fetch').stdout.includes(`+${notes.NOTES_REF}*:refs/notes/remotes/origin/waymark*`), 'a glob: a remote without notes never fails a fetch');
   assert.ok(notes.readNotes(b).has(sha), 'the record came with the setup');
   assert.equal(notesState(b), '', 'nothing pending after the setup');
   // the other machine closes a second task and pushes: a plain fetch brings it, the merge joins it
@@ -84,6 +84,36 @@ test('notes at clone: a clone has none; setup adds a tracking refspec (never ove
   assert.equal(notes.mergeNotes(b), true);
   assert.ok(notes.readNotes(b).has(sha2));
   assert.equal(notes.mergeNotes(b), false, 'nothing new: no merge');
+});
+
+test('notes refspec: a remote with no notes yet never breaks git fetch; the old exact refspec is replaced', () => {
+  const base = tmp('empty'), remote = path.join(base, 'remote.git'), c = path.join(base, 'c');
+  gitT(base, 'init', '-q', '--bare', remote);
+  gitT(base, 'clone', '-q', remote, c);
+  commit(c, 'x'); gitT(c, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(c, 'config', '--add', 'remote.origin.fetch', `+${notes.NOTES_REF}:refs/notes/remotes/origin/waymark`); // 2.0.3's exact refspec
+  assert.equal(gitT(c, 'fetch', '-q', 'origin').status, 128, 'the exact refspec breaks fetch while the remote has no notes');
+  assert.equal(notes.hasFetchSpec(c), false, 'the old refspec does not count');
+  assert.equal(notes.ensureFetchSpec(c), true, 'added');
+  assert.deepEqual(gitT(c, 'config', '--get-all', 'remote.origin.fetch').stdout.trim().split(String.fromCharCode(10)).map((l) => l.trim()), ['+refs/heads/*:refs/remotes/origin/*', `+${notes.NOTES_REF}*:refs/notes/remotes/origin/waymark*`], 'the old one replaced');
+  assert.equal(gitT(c, 'fetch', '-q', 'origin').status, 0, 'fetch works with no notes on the remote');
+  assert.equal(notes.ensureFetchSpec(c), false, 'once');
+  const lone = tmp('lone'); gitT(lone, 'init', '-q');
+  assert.equal(notes.ensureFetchSpec(lone), false, 'no origin: nothing to add');
+});
+
+test('notes setup on its own: the session hook adds the refspec in a repo with Waymark memory and says it once; never in one without it', () => {
+  const { b, sha } = pair();
+  const card = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ session_id: 's', cwd }), env: process.env, encoding: 'utf8' }).stdout || '{}').hookSpecificOutput?.additionalContext || '';
+  assert.doesNotMatch(card(b), /fetches from origin now bring/, 'no .waymark/ here: the repo is left alone');
+  assert.equal(notes.hasFetchSpec(b), false);
+  withMemory(b);
+  assert.match(card(b), /fetches from origin now bring the task records/);
+  assert.equal(notes.hasFetchSpec(b), true);
+  assert.equal(notesState(b), '', 'check has nothing to offer');
+  gitT(b, 'fetch', '-q', 'origin');
+  assert.doesNotMatch(card(b), /fetches from origin now bring/, 'said once');
+  assert.ok(notes.readNotes(b).has(sha), 'the next fetch brought the records and the card merged them');
 });
 
 test('notes merge: a conflict on one commit keeps the local note (its stub hashes it); the rest joins', () => {

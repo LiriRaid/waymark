@@ -51,13 +51,13 @@ test('agents as data: agents.json lists every known agent with its docs; the ada
   assert.ok(AGENTS().some((a) => a.key === 'kiro' && a.dir === at('.kiro')));
   const ih = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   assert.equal(ih.settingsFile('codex'), process.env.WAYMARK_CODEX_HOOKS);
-  assert.equal(ih.settingsFile('kiro'), null, 'no adapter: no hooks written');
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'kiro'], { encoding: 'utf8' });
+  assert.equal(ih.settingsFile('qwen'), null, 'no adapter: no hooks written');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'qwen'], { encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stdout, /no adapter yet[\s\S]*Add an agent/, r.stdout);
 });
 
-test('a known agent without an adapter (Kiro): found, the pointer goes into its own instructions file, the plan says where it reads skills', async () => {
+test('a known agent whose hooks are not installed (Kiro): found, the pointer goes into its own instructions file, the plan says where it reads skills', async () => {
   const { found, planFor, apply: connect, POINTER } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
   fs.mkdirSync(at('.kiro'), { recursive: true }); // no steering/ yet: connect creates it
   write(at('.codeium', 'windsurf', 'memories', 'global_rules.md'), '# mine\n');
@@ -116,18 +116,18 @@ test('unknown agents: a home folder with an agent\'s signals is found, a tool\'s
 test('check: agents with no adapter (known with hooks, or unknown) are named once with the procedure; install-hooks is offered only where an adapter exists', async () => {
   const { check } = await import(`file://${SCRIPTS}/waymark.mjs`);
   const repo = withMemory(repoAt('check'));
-  fs.mkdirSync(at('.kiro'), { recursive: true });
+  fs.mkdirSync(at('.qwen'), { recursive: true });
   write(at('.foo', 'AGENTS.md'), '');
   fs.mkdirSync(at('.codex'), { recursive: true });
   const items = await check(repo);
   const line = items.find((t) => t.startsWith('agents: ')) || '';
-  assert.match(line, /Kiro/, line);
+  assert.match(line, /Qwen Code/, line);
   assert.match(line, /\.foo \(unknown/, line);
   assert.match(line, /Add an agent/);
   assert.match(line, /agent-adapter\.template\.mjs/);
   const hooks = items.find((t) => t.startsWith('hooks: ')) || '';
   assert.match(hooks, /Codex \(--agent codex\)/, hooks);
-  assert.doesNotMatch(hooks, /Kiro|\.foo/, 'no adapter: nothing to install yet');
+  assert.doesNotMatch(hooks, /Qwen|\.foo/, 'no adapter: nothing to install yet');
   clean();
 });
 

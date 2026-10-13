@@ -18,7 +18,7 @@ import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
-import { agentFrom, parseHook } from './agents/index.mjs';
+import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
 import { newProposals } from './learn.mjs';
 
@@ -198,7 +198,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     } catch (e) { logHookError('session-hook proposals', e); }
     // an agent with no instructions file of its own (Cursor): the Rule 0 block comes first, never cut by the cap
     try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}
-    if (text) process.stdout.write(JSON.stringify(agent.out.context('SessionStart', text)));
+    if (text) answer(agent, agent.out.context('SessionStart', text));
   };
   process.stdin.on('data', (d) => { input += d; });
   process.stdin.on('end', emit);

@@ -3,7 +3,8 @@
 //   node uninstall.mjs            the plan (nothing is written)
 //   node uninstall.mjs --apply    after the user's yes: each file is backed up first (~/.waymark-backups/<stamp>-uninstall/)
 // - Hooks: the entries that run waymark/scripts/<hook>.mjs, from Claude Code's settings.json, Codex's hooks.json, Gemini
-//   CLI's settings.json, Cursor's hooks.json and Copilot CLI's hooks/waymark.json (an event left without hooks goes too).
+//   CLI's settings.json, Cursor's hooks.json and Copilot CLI's hooks/waymark.json (an event left without hooks goes too);
+//   Kiro's hooks/waymark.json and the "waymark" hook in Antigravity's config/hooks.json (install-hooks.mjs withoutOwn).
 // - Claude Code's status line: Waymark's goes; the one the user had (~/.waymark/statusline.json) comes back.
 // - OpenCode: the plugin file (plugins/waymark.js).
 // - The marked blocks (Rule 0 and the pointer) in CLAUDE.md, next to Claude Code's settings, and in the instructions
@@ -16,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { settingsFile, PLUGIN } from './install-hooks.mjs';
+import { settingsFile, PLUGIN, withoutOwn } from './install-hooks.mjs';
 import { AGENTS, unknownAgents, stripWaymark } from './connect-agents.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -59,6 +60,12 @@ export function planUninstall() {
     }
     const own = agent === 'copilot' && !Object.keys(next.hooks || {}).length && Object.keys(next).every((k) => ['version', 'hooks'].includes(k)); // Copilot's hooks/waymark.json is Waymark's whole file
     if (what.length) steps.push({ agent, file, what: what.join('; ') + (own ? ' (the file was Waymark\'s: removed)' : ''), write: () => (own ? fs.rmSync(file) : fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n')) });
+  }
+  for (const agent of ['kiro', 'antigravity']) { // hooks files of their own shape
+    const file = settingsFile(agent), s = readJson(file);
+    if (!s) continue;
+    const { next, removed, empty } = withoutOwn(agent, s);
+    if (removed) steps.push({ agent, file, what: `remove ${removed} Waymark hook${removed > 1 ? 's' : ''}${empty ? ' (the file was Waymark\'s: removed)' : ''}`, write: () => (empty ? fs.rmSync(file) : fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n')) });
   }
   const plugin = PLUGIN();
   if (OURS.test(read(plugin) || '') || /const SCRIPTS = "[^"]*waymark[\\/]+scripts"/.test(read(plugin) || '')) steps.push({ agent: 'opencode', file: plugin, what: 'remove the Waymark plugin', write: () => fs.rmSync(plugin) });

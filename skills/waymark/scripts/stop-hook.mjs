@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart } from './statusline.mjs';
-import { agentFrom, parseHook } from './agents/index.mjs';
+import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
@@ -680,7 +680,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // next prompt keeps this turn's snapshot and the task's start, and the turn that ends it is judged
       if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
       if (gaps.missing.length && !h.stop_hook_active) {
-        process.stdout.write(JSON.stringify(agent.out.block(blockReason(gaps))));
+        answer(agent, agent.out.block(blockReason(gaps)));
         return;
       }
       gaps.observed.branches = branchesOf(gaps.changed);
@@ -718,7 +718,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
-      process.stdout.write(JSON.stringify(agent.out.notice(summaryLine(rec.id, evaluation, context) + moved + pushed)));
+      answer(agent, agent.out.notice(summaryLine(rec.id, evaluation, context) + moved + pushed));
     } catch (e) { logHookError('stop-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

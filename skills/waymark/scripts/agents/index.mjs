@@ -2,14 +2,16 @@
 // default so installs registered before 2.0 keep working. One module per agent in this folder (same exports as
 // claude.mjs); a new agent costs one module here and its entry in agents.json (docs/adr/0022; dept-devex procedures →
 // Add an agent, from templates/agent-adapter.template.mjs).
+import * as antigravity from './antigravity.mjs';
 import * as claude from './claude.mjs';
 import * as codex from './codex.mjs';
 import * as copilot from './copilot.mjs';
 import * as cursor from './cursor.mjs';
 import * as gemini from './gemini.mjs';
+import * as kiro from './kiro.mjs';
 import * as opencode from './opencode.mjs';
 
-export const AGENTS = { claude, codex, copilot, cursor, gemini, opencode };
+export const AGENTS = { antigravity, claude, codex, copilot, cursor, gemini, kiro, opencode };
 
 export function agentFrom(argv = process.argv) {
   const i = argv.indexOf('--agent');
@@ -27,4 +29,12 @@ export function parseHook(text, agent, { lenient = false, argv = process.argv } 
   if (h.waymark_probe) return h;
   if (!argv.includes('--agent') && h.cursor_version) return null;
   return agent.input ? agent.input(h) : h;
+}
+
+// A hook's answer as the agent reads it: JSON on stdout, or the agent's own emit() (Kiro: plain text, stderr and an exit
+// code). Nothing to say → nothing written.
+export function answer(agent, out) {
+  if (out == null) return;
+  if (agent.emit) agent.emit(out);
+  else process.stdout.write(JSON.stringify(out));
 }

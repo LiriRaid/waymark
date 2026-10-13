@@ -12,10 +12,10 @@
 - **Start and end.** The per-prompt hook keeps the reading at the task's first prompt; a later prompt of the same task keeps it. A reading whose window ended before the prompt starts a new window at 0. The end-of-turn hook subtracts the start from the latest reading, and the start is cleared when a record is written (task or question), as the token count is.
 - **No clean measure, no measured %.** There is no measure when no reading came after the start, when the window reset during the task, or when the difference is negative. The estimate is shown as before.
 - **Shared.** When another session's tokens moved during the task, the line says `medido, con otra sesión activa` and no pair is saved. The user's use of claude.ai cannot be seen.
-- **Calibration.** A clean measured % (> 0) is saved as a pair (`by: "measured"`). The estimate for Codex, OpenCode and a session without the status line improves with no question to the user. A measured % is never asked.
+- **Calibration.** A clean measured % (> 0) is saved as a pair (`by: "measured"`), with its model. It improves, with no question to the user, the estimate for the same model in a session without the status line (OpenCode, or Claude Code without it); another model of the same family gets an uncalibrated estimate from it (`calibrate.mjs` `estimate`: pairs of the model first, then of its family). A measured % is never asked. *Amended 2026-10-13 (2.0.3): the first version said these pairs also calibrate Codex; a Claude pair never calibrates a `gpt-*` model.*
 - **Install.** `install-hooks.mjs` adds the status line to `~/.claude/settings.json` with the hooks. A status line the user already has is not replaced: its command goes to `~/.waymark/statusline.json` and runs after Waymark's, with the same input.
 
 ## Consequences
 - The reading lags the turn's last response by one status update, and the % has the precision Claude Code gives. A task below it shows `<1%`.
 - With a status line set, Claude Code hides some footer hints (`esc to interrupt`, `? for shortcuts`).
-- Only Claude Code is measured. Codex keeps its own weekly window in its sessions, which this machine's sessions did not show; it stays estimated from pairs.
+- Only Claude Code is measured. Codex keeps its own weekly window in its sessions, which this machine's sessions did not show; it stays estimated from its own model's pairs, never from Claude's.

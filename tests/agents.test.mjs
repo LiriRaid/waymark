@@ -39,9 +39,10 @@ const node = (script, args, input, env = {}) => spawnSync(process.execPath, [pat
 const json = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 
-test('plugin: plugin.json carries VERSION; a skill invoked as waymark:dept-qa counts as dept-qa', () => {
+test('plugin: plugin.json and the CHANGELOG\'s newest section carry VERSION; a skill invoked as waymark:dept-qa counts as dept-qa', () => {
   const version = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
   assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version, version);
+  assert.equal(fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1], version, 'CHANGELOG.md opens with the VERSION');
   const lines = [{ type: 'user', uuid: 'p1', message: { role: 'user', content: 'escribe tests' } },
     { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L2 · dept-qa' }, { type: 'tool_use', id: 's1', name: 'Skill', input: { skill: 'waymark:dept-qa', args: 'L2' } }] } }];
   const turn = T.currentTurn(lines);

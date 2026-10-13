@@ -2,6 +2,45 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.3 — a supply chain you can trust: real testigos, records that travel, every agent, a project that learns
+- **Testigos without false ✔** (`docs/adr/0020`):
+  - Gate, test and build are judged by each command's executable and its exit, never by a word in an argument or a commit message (`git commit -m "fix build"` is no build).
+  - A test that failed after the last change keeps the gate ✘.
+  - Exception lines (`no comprobado`, `Tests: no`) show ⚠, never ✔. A skip quote needs 3 of your own words.
+  - Build and review must pass after the last change, in the code's repo; reading `code-review/SKILL.md` is no review.
+  - Secrets are read in every commit of the turn, in any repo.
+  - A lesson closed with testigos unresolved goes to engram marked `sin verificar`.
+  - Hook errors go to `~/.waymark/hook-errors.log`, and `check` reports them.
+- **No false ✘ on real work** (`docs/adr/0020`):
+  - A file changed through the shell gets its memory pack.
+  - A session's first task keeps its decision (the hooks read back to the task's start).
+  - A shell change in another repo is seen.
+  - A repo with no typecheck uses a green test as its gate.
+  - A reply that ends asking, with options, is a pause, not a missing Cierre (Codex too).
+  - The `/compact` summary is no prompt.
+- **The memory chain travels** (`docs/adr/0020`):
+  - `waymark.mjs notes setup` (on your yes) makes fetches bring the task records (git notes), merged without overwriting local ones. The notes are pushed with any push the hook sees.
+  - tasks.md, the card and the task IDs read the records that exist only as notes, so a clone sees what another machine did.
+  - Engram memories are titled with the lesson; a follow-up corrects its task's lesson; a question that ends with an `Aprendido:` line is saved too.
+- **Every agent with one install** (`docs/adr/0021`):
+  - Cursor adapter (hooks from its documentation; not tested live yet).
+  - `check` offers `install-hooks` to every agent without Waymark's hooks, Claude Code included.
+  - `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME` and `CURSOR_CONFIG_DIR` are honored.
+  - `uninstall.mjs` removes everything with a plan first and backups.
+  - Node 18+ is required.
+- **Any agent, also the ones Waymark does not know** (`docs/adr/0022`):
+  - Agents are data (`scripts/agents/agents.json`): Kiro, Copilot CLI, Windsurf, Qwen Code, Antigravity, Droid, Amp and Crush join the five known.
+  - An unknown agent (a home folder with instructions, skills or hooks) is detected, gets the pointer to `.waymark/tasks.md`, and is said once in the session card.
+  - Writing its adapter is a procedure (`dept-devex` → *Add an agent*) with a template.
+- **The project learns from its records** (`docs/adr/0023`):
+  - The end-of-turn hook dates the Quality gates that passed, keeps the Areas each task touched, and counts repeated procedures.
+  - A repeated procedure, an incident rule or a correction you repeated is *proposed* (project skill, Learned rule, preference) once in the card and in `check`, and written only after your yes.
+- **Less context** (`docs/adr/0024`):
+  - An L2 reads `references/protocol/l2.md` (3,761 characters) instead of the whole protocol (11,286).
+  - The session card asks nothing in the first reply: open tasks are listed, and `check` asks which already work. It also says each path once.
+  - `size.mjs` measures everything Waymark adds: the skill descriptions, the reminder as sent and the lines after the card's cap. A session carries 12,967 characters in this repo, not the 8,114 measured before.
+- **After updating**, run `waymark.mjs check`: the instructions block changed, so it offers to reconnect each agent, and it offers `notes setup` in each project with records.
+
 ## 2.0.2 — the quota % measured, false ✘ from work in another repo fixed
 - **Measured quota** (`docs/adr/0019`): Waymark's status line for Claude Code (`statusline.mjs`) reads the real % of the 5-hour window that Claude Code passes to it (Pro and Max). It shows `5h 23% · 7d 41% · contexto 18%`. The per-prompt hook keeps the reading at the task's start, and the end-of-turn line shows the difference as `≈ X% de la cuota (medido)`, with no question to the user. Another session active during the task gives `medido, con otra sesión activa` and no pair. A window reset, or no reading since the start, falls back to the estimate.
 - **Pairs on their own:** each clean measure is saved as a calibration pair, so the estimate for Codex, OpenCode and sessions without the status line improves without asking.

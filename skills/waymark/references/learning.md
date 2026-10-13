@@ -4,6 +4,18 @@ Part of the `waymark` core skill. Paths are relative to the core skill folder (`
 
 Run at the end of every L1+ task (Exit → Learn). **Work in progress** is written by the end-of-turn hook, never by hand: one line per task, `- ✔|▶ [<task ID>] <Aprendido>` (≤200 characters), taken from the Cierre's Aprendido, while the task is open (▶: parcial, bloqueado, or hecho with a testigo unresolved); a task done leaves the section, its whole record stays in git and `tasks.md`. A follow-up replaces its task's line; longer or older lines move whole to `history.md`. `tasks.md` is generated from those lines and the records (git notes + `provenance.jsonl`); a line without an ID at its head is a note.
 
+**What the hook learns by itself (docs/adr/0023).** At each close it writes into `memory.md` only what it observed:
+- *Quality gates*: a gate that passed after the last change dates its row. A gate with no row of its own fills an empty row of its kind with the part of the command that was the gate. A command already written is never replaced.
+- *Project map* → *Areas*: each folder the task touched, with the task and its Aprendido, at most 12 lines.
+- *Repeated procedures*: how many tasks repeated the same 3 to 5 action commands.
+
+The rest is only proposed, and the session card says each proposal once (`waymark.mjs check` lists them):
+- a repeated procedure → a project skill (§5);
+- an incident repeated 3 times → a Learned rule of the owner department;
+- a correction the user made in 2 tasks → `preferences.md`.
+
+Offer each in the choice window and write it only after a yes.
+
 After each L1+ task, collect what was **non-obvious and new**: something you had to discover, a correction from the user, a command or flag that was needed, a library quirk, a mistake you made. Discard anything already stated anywhere in Waymark.
 
 **1. Novelty check (mandatory before writing anything).** Grep the candidate concept in: the department `SKILL.md`, the stack profile, the tool skill, the project memory and the learnings file. Already covered → write nothing. Covered but wrong or outdated → fix it in place and say so.

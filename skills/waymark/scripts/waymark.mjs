@@ -29,7 +29,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
 import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
-import { incidentsAt } from './incidents.mjs';
+import { incidentsAt, incidents } from './incidents.mjs';
+import { proposals, ownerOf } from './learn.mjs';
 import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes } from './notes.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
@@ -246,6 +247,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => learnedLayer(cwd));
   await add(() => packageManager(cwd));
   await add(() => suggestedRules(cwd));
+  await add(() => learnProposals(cwd));
   let machine = null; // the agents on this machine, scanned once for the three lines below
   const onMachine = () => (machine ??= found());
   await add(() => agents(onMachine()));
@@ -302,8 +304,19 @@ export function packageManager(cwd) {
 
 // A testigo that failed 3 times or more in this project: offer to turn its lesson into a department or stack rule.
 export function suggestedRules(cwd) {
-  const { rules } = incidentsAt(cwd);
-  return rules.length ? `rule: ${rules.map((r) => `${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]})`).join('; ')} in this project. Offer to add the lesson as a rule of the owner department or the stack profile (${script('waymark.mjs')} incidents shows the causes); write it only after the user's yes.` : '';
+  const records = readTaskRecords(projectHome(cwd)), { rules } = incidents(records);
+  const owner = (r) => { const d = ownerOf(records, r.ids); return d ? ` → ${d} (${d}/SKILL.md → Learned rules)` : ''; };
+  return rules.length ? `rule: ${rules.map((r) => `${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]})${owner(r)}`).join('; ')} in this project. Offer to add the lesson as a Learned rule of the owner department, or to the stack profile (${script('waymark.mjs')} incidents shows the causes); write it only after the user's yes.` : '';
+}
+
+// A repeated procedure with no project skill, and a correction the user repeated (docs/adr/0023): proposed, never written.
+export function learnProposals(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return '';
+  const all = proposals(home, readTaskRecords(home)), lines = [];
+  for (const p of all.filter((x) => x.kind === 'skill')) lines.push(`procedure: ${p.text.replace(/^project skill for /, '')}. Offer a project skill for it with the user's yes; the count is in memory.md → Repeated procedures.`);
+  for (const p of all.filter((x) => x.kind === 'preference')) lines.push(`preference: ${p.text.replace(/^preference /, '')}. The user corrected this more than once: offer to add it to ~/.waymark/preferences.md with their yes.`);
+  return lines.join('\n');
 }
 
 // Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a

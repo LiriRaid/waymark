@@ -20,6 +20,7 @@ import { stackOf, stackLine, translate, directBins } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
+import { newProposals } from './learn.mjs';
 
 const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -172,6 +173,11 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const fresh = guest ? [] : newAgents();
       if (fresh.length) text += `\nNew agents on this machine (said once): ${fresh.join(', ')}. Before the task, run node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}" check and offer in your choice window what it reports for them.`;
     } catch (e) { logHookError('session-hook agents', e); }
+    // what the project could learn (docs/adr/0023): each proposal said once; written only after the user's yes
+    try {
+      const home = projectHome(cwd), fresh = guest || !home.dir || home.legacy ? [] : newProposals(home, readTaskRecords(home));
+      if (fresh.length) text += `\nProposals (said once; offer each in your choice window, write it only after the user's yes; W check lists them): ${fresh.map((p) => p.text).join('; ')}`;
+    } catch (e) { logHookError('session-hook proposals', e); }
     // an agent with no instructions file of its own (Cursor): the Rule 0 block comes first, never cut by the cap
     try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}
     if (text) process.stdout.write(JSON.stringify(agent.out.context('SessionStart', text)));

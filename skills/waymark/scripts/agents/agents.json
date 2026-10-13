@@ -43,8 +43,8 @@
     {
       "key": "copilot", "name": "Copilot CLI", "dir": "~/.copilot", "env": "COPILOT_HOME", "instructions": "copilot-instructions.md", "skills": true,
       "marks": ["config.json", "session-state", "logs"],
-      "hooks": { "file": "hooks/waymark.json", "format": "flat" },
-      "adapter": null, "docs": "https://docs.github.com/en/copilot/reference/hooks-reference", "checked": "2026-10-12"
+      "hooks": { "file": "hooks/waymark.json", "override": "WAYMARK_COPILOT_HOOKS", "format": "flat", "matcher": "Bash|PowerShell|Edit|Write|bash|powershell|edit|create|apply_patch|str_replace_editor", "extra": ["PostToolUse"] },
+      "adapter": "copilot", "docs": "https://docs.github.com/en/copilot/reference/hooks-reference", "checked": "2026-10-13"
     },
     {
       "key": "windsurf", "name": "Windsurf", "dir": "~/.codeium/windsurf", "instructions": "memories/global_rules.md", "skills": true,

@@ -37,6 +37,7 @@
 
 ## Consequences
 - **New known agents** with no adapter on 2.0.3: Kiro, Copilot CLI, Windsurf, Qwen Code, Antigravity, Droid, Amp and Crush. Each one gets the pointer now, and its hooks once its adapter is written and tested against its documentation.
+- **Copilot CLI has its adapter** (2026-10-13, `agents/copilot.mjs`, `adapters/copilot.md`): its hooks under Claude Code's event names give Claude's payload, and its session log (`session-state/<session>/events.jsonl`) is the turn. Built from the documentation; its first live session checks the points listed in `adapters/copilot.md`.
 - **Kiro's and Antigravity's own hook formats, and Amp's plugin,** also need a branch in `install-hooks.mjs` when their adapters are written, as OpenCode's plugin has.
 - **The first session after updating** names the agents already installed and not prepared, once. On this machine those are Antigravity, Kiro, Copilot CLI and `~/.quickwork`.
 - **A false signal** (a tool that keeps a `skills/` folder in the home) is named once in the card and in each `check`. Nothing is written without the user's yes.

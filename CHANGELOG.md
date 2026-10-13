@@ -39,6 +39,10 @@ The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version
   - An L2 reads `references/protocol/l2.md` (3,761 characters) instead of the whole protocol (11,286).
   - The session card asks nothing in the first reply: open tasks are listed, and `check` asks which already work. It also says each path once.
   - `size.mjs` measures everything Waymark adds: the skill descriptions, the reminder as sent and the lines after the card's cap. A session carries 12,967 characters in this repo, not the 8,114 measured before.
+- **Your share of the quota in each terminal** (`docs/adr/0019`, amended):
+  - The 5-hour window is your account's, so with several sessions open each rise of its % is split among them by what each spent (`cost.total_cost_usd`).
+  - Every terminal shows `5h 41% · esta sesión ≈12%`, refreshed every 30 s even when it is quiet.
+  - A task shared with another session closes with its own part, prorated by cost. Use no session paid for (claude.ai, Codex) is never charged to one.
 - **After updating**, run `waymark.mjs check`: the instructions block changed, so it offers to reconnect each agent, and it offers `notes setup` in each project with records.
 
 ## 2.0.2 — the quota % measured, false ✘ from work in another repo fixed

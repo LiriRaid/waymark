@@ -19,3 +19,12 @@
 - The reading lags the turn's last response by one status update, and the % has the precision Claude Code gives. A task below it shows `<1%`.
 - With a status line set, Claude Code hides some footer hints (`esc to interrupt`, `? for shortcuts`).
 - Only Claude Code is measured. Codex keeps its own weekly window in its sessions, which this machine's sessions did not show; it stays estimated from its own model's pairs, never from Claude's.
+
+## Amended 2026-10-13 (2.0.3): shares per session
+Every pick below is the user's (2026-10-12 · T13d and T13e, point 8 of the 2.0.3 plan).
+- **Context.** With two terminals working, both spend from the same 5-hour window. A task's difference then held the other session's use too; it was only marked `medido, con otra sesión activa`, and a terminal showed nothing of its own part. Claude Code passes each session's cumulative `cost.total_cost_usd` (estimated at list price; reset by `/clear`) to the status line. The status line runs on events and, with `refreshInterval`, every N seconds (code.claude.com/docs/en/statusline).
+- **Split at each reading, by cost.** Each rise of the window's % (a new reading, in the same window) is split among the sessions by what each one spent since it was last paid for. Each session accumulates its share (`own`) in `~/.waymark/.quota.json`. A rise that no session paid for (claude.ai, Codex, another machine) goes to `outside`, never to a session. A new window starts every share at 0. A session's first sight takes its cost so far as the baseline.
+- **No double count.** A re-run that brings the session's same reading (the timer) is not a new reading, so it neither replaces the newest one nor is split again.
+- **Each terminal shows its part.** The line reads `5h 41% · esta sesión ≈12% · 7d … · contexto …`. The 5-hour % is the newest reading any session wrote, so a quiet terminal shows what the others spent. `install-hooks.mjs` sets `refreshInterval: 30`.
+- **The close.** A task shared with another session closes with `≈ 20% de la cuota (medido, con otra sesión activa; esta sesión ≈ 12%, prorrateado por costo)`. The record keeps `quotaOwn`. A share is an estimate, so it never becomes a calibration pair; only a clean measure does.
+- **Consequences.** Cost is a weight at list price, not the quota's own accounting, so a share is approximate. A session without a cost in its input (another agent) gets no share; its use shows as `outside`. Until the reinstall, a 2.0.2 status line still running in an open session rewrites its own session entry without the shares.

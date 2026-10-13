@@ -2674,7 +2674,7 @@ test('quota: install-hooks plans the status line and chains the user\'s own inst
   const { planStatusLine } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   const cmd = 'node "/s/waymark/scripts/statusline.mjs"';
   const add = planStatusLine({ model: 'x' }, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd });
+  assert.deepEqual(add.settings.statusLine, { type: 'command', command: cmd, refreshInterval: 30 });
   assert.equal(add.settings.model, 'x');
   assert.deepEqual([add.steps.length, add.next], [1, null]);
   assert.deepEqual(planStatusLine(add.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');

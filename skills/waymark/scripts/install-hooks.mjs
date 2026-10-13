@@ -82,14 +82,17 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
 // Claude Code's status line (statusline.mjs): it shows the quota and context and measures each task's %. A status line
 // the user already has is not lost: `next` is its command, kept in ~/.waymark/statusline.json and run after Waymark's.
 // → { settings, steps, next } without touching the input.
+const REFRESH = 30; // seconds: Claude Code's statusLine.refreshInterval (code.claude.com/docs/en/statusline)
 const oursLine = (c) => /waymark[\\/]+scripts[\\/]+statusline\.mjs/.test(String(c || ''));
 export function planStatusLine(input, { scripts = SCRIPTS } = {}) {
   const s = structuredClone(input || {}), command = `node "${scripts}/statusline.mjs"`, have = s.statusLine?.command;
-  if (have === command) return { settings: s, steps: [], next: null };
+  // every 30 s too, so a quiet terminal shows what the other sessions spent (docs/adr/0019, shares per session)
+  if (have === command && s.statusLine.refreshInterval === REFRESH) return { settings: s, steps: [], next: null };
   const next = have && !oursLine(have) ? have : null;
-  s.statusLine = { type: 'command', command };
-  const steps = [!have ? 'add statusLine → statusline.mjs (5h · 7d · contexto; measures each task\'s %)'
-    : next ? `statusLine → statusline.mjs; yours (${next}) runs after it` : `update statusLine command: ${have} → ${command}`];
+  s.statusLine = { type: 'command', command, refreshInterval: REFRESH };
+  const steps = [!have ? 'add statusLine → statusline.mjs (5h · esta sesión · 7d · contexto; measures each task\'s %)'
+    : next ? `statusLine → statusline.mjs; yours (${next}) runs after it`
+      : have === command ? `statusLine: refreshInterval ${REFRESH} s (a quiet terminal shows the other sessions' use)` : `update statusLine command: ${have} → ${command}`];
   return { settings: s, steps, next };
 }
 

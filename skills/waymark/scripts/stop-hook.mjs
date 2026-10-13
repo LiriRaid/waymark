@@ -546,7 +546,8 @@ export function evaluate(gaps, usage, model = null, measured = null) {
   const ok = Object.values(steps).filter((v) => v === true).length, exceptions = Object.values(steps).filter((v) => v === 'exception').length;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
-  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct } : { quotaPct: est.pct, quotaBy: est.by };
+  // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
+  const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
   return { steps, score: `${ok}/${Object.keys(steps).length}${exceptions ? ` · ${exceptions} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, model, ...quota };
 }
 
@@ -604,7 +605,8 @@ export function summaryLine(id, ev, context = 0) {
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
   const by = String(ev.quotaBy);
-  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? 'medido, con otra sesión activa' : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
+  const own = ev.quotaOwn !== undefined ? `; esta sesión ${ev.quotaOwn > 0 && ev.quotaOwn < 1 ? '<1' : `≈ ${ev.quotaOwn}`}%, prorrateado por costo` : '';
+  const how = by === 'measured' ? 'medido' : by === 'measured:shared' ? `medido, con otra sesión activa${own}` : by.startsWith('family:') ? `sin calibrar, factor de ${by.slice(7)}` : 'estimado';
   const pct = by.startsWith('measured') && ev.quotaPct === 0 ? '<1%' : `≈ ${ev.quotaPct}%`; // below the reading's resolution
   return `Waymark ${id} · ${s} · ${ev.score} · ${(ev.tokens / 1e6).toFixed(2)}M tokens${ev.quotaPct !== null && ev.quotaPct !== undefined ? ` ${pct} de la cuota (${how})` : ''}${fresh}${ask}`;
 }

@@ -20,7 +20,7 @@ const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 const notes = await import(`file://${SCRIPTS}/notes.mjs`);
-const { cierreGaps } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+const { cierreGaps, evaluate, summaryLine } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const T = await import(`file://${SCRIPTS}/transcript.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -178,16 +178,32 @@ test('Evidencia: a commit or a push is no check; a read or a run after the chang
   assert.equal(step(judge(read, 'observada la guía queda corta'), 'evidence').pass, true);
 });
 
-test('Evidencia: cited facts are looked up in the turn\'s tool calls; an unbacked one scores ✘ without blocking', () => {
+test('Evidencia: cited facts are looked up in the turn\'s tool calls; an unbacked one is a ⚠ that neither blocks nor lowers the score', () => {
   const lines = [...opening(), ...run('Bash', { command: 'node --test tests/guide.test.mjs' }, { out: '# tests 84\n# pass 84/84\n# fail 0' })];
   const backed = judge(lines, 'observada `node --test` da 84/84 y exit 0');
   assert.equal(step(backed, 'evidence').pass, true);
   assert.deepEqual(backed.observed.evidence.unbacked, []);
   const unbacked = judge(lines, 'observada `node --test` da 99/99');
-  assert.equal(step(unbacked, 'evidence').pass, false, 'scored ✘');
+  assert.equal(step(unbacked, 'evidence').pass, true, 'not a ✘');
+  assert.match(step(unbacked, 'evidence').warn, /sin respaldo\): 99\/99/);
   assert.ok(!unbacked.missing.some((m) => /99\/99/.test(m)), 'not a block');
   assert.deepEqual(unbacked.observed.evidence.unbacked, ['99/99']);
-  assert.ok(unbacked.findings.some((f) => /99\/99/.test(f)));
+  assert.ok(unbacked.findings.some((f) => /99\/99/.test(f)), 'kept in the record');
+  const ev = evaluate(unbacked, null);
+  assert.equal(ev.steps[step(unbacked, 'evidence').label], 'warn');
+  assert.equal(ev.score, `${evaluate(backed, null).score} · 1 ⚠`, 'counted as passed, as when the fact is backed; shown as ⚠');
+  assert.match(summaryLine('2026-10-14 · T1', ev), new RegExp(`${step(unbacked, 'evidence').label} ⚠`));
+});
+
+test('Evidencia: file:line is backed by a call that named the file and showed that line (grep -n of one file, Read)', () => {
+  const FILE = '/work/proj/src/app/features/login/auth-callback/auth-callback.ts';
+  const grep = [...opening(), ...run('Bash', { command: `grep -n "link" ${FILE} | head` }, { out: '21: *  También recibe el regreso\n45:    const isLink = sso === \'link\';\n47:    const codeVerifier = x;' })];
+  assert.deepEqual(judge(grep, 'observada revisé `auth-callback.ts:45`').observed.evidence.unbacked, [], 'grep -n of one file prints "45:", not the file name');
+  const read = [...opening(), ...run('Read', { file_path: FILE, offset: 40, limit: 10 }, { out: '    44→  ngOnInit() {\n    45→    const isLink = sso === \'link\';' })];
+  assert.deepEqual(judge(read, 'observada `auth-callback.ts:45`').observed.evidence.unbacked, [], 'Read numbers its lines');
+  assert.deepEqual(judge(grep, 'observada `auth-callback.ts:46`').observed.evidence.unbacked, ['auth-callback.ts:46'], 'a line the output never showed');
+  assert.deepEqual(judge(grep, 'observada `login.ts:45`').observed.evidence.unbacked, ['login.ts:45'], 'line 45 of another file');
+  assert.deepEqual(judge(grep, 'observada `callback.ts:45`').observed.evidence.unbacked, ['callback.ts:45'], 'a name that only ends another file\'s name');
 });
 
 test('forget: removing every record leaves a chain that holds, and later records anchor again', () => {

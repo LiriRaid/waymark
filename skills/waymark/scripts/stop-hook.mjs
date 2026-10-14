@@ -507,9 +507,19 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const cited = evidenceFacts(evidText);
   // where a fact can be backed: the calls' inputs and outputs, never the text the agent wrote itself (its edits)
   const flat = (x) => String(x || '').toLowerCase().replace(/\\/g, '/').replace(/\s+/g, ' ');
-  const hay = cited.length ? flat([...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => `${Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')} ${result(t)?.raw || result(t)?.text || t.out || ''}`).join('\n')) : '';
+  const calls = cited.length ? [...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => ({ input: flat(Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')), out: String(result(t)?.raw || result(t)?.text || t.out || '') })) : [];
+  const hay = calls.map((c) => `${c.input} ${flat(c.out)}`).join('\n');
   const shellRan = (bad) => turn.tools.slice(lastChange + 1).some((t) => shell(t) && !stopped(t) && !!(result(t)?.error || t.error) === bad); // exit codes: after the last change
-  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)); };
+  // file:line is also backed by a call that named the file and printed that line without the file's name: grep -n of one
+  // file ("45:"), its context lines ("45-") and Read ("45→", "45\t")
+  const lineShown = (f) => {
+    const m = f.match(/^(?:.*[\\/])?([^\\/\s:]+\.\w+):(\d+)$/);
+    if (!m) return false;
+    const at = new RegExp(`(?:^|\\n)\\s*${m[2]}(?:[:\\t→-])`);
+    const named = new RegExp(`(?:^|[\\s/"'=])${m[1].toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`); // login.ts, never auth-login.ts
+    return calls.some((c) => named.test(c.input) && at.test(c.out));
+  };
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || lineShown(f); };
   observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
@@ -549,9 +559,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     dec.pass = false; dec.why = [...dec.why, why]; findings.push(why);
   }
   const ev = steps.find((s) => s.id === 'evidence');
-  if (ev?.applies && ev.pass && observed.evidence?.unbacked.length) { // a fact no tool call shows: scored, not blocked
+  if (ev?.applies && ev.pass && observed.evidence?.unbacked.length) { // a fact no tool call shows: a ⚠, never blocked
     const why = `Evidencia cites what no tool call of the task shows (sin respaldo): ${observed.evidence.unbacked.join(' · ').slice(0, 160)}`;
-    ev.pass = false; ev.why = [why]; findings.push(why);
+    ev.warn = why; findings.push(why);
   }
   const docsStep = steps.find((s) => s.id === 'docs'), blind = retried.filter((r) => !r.docs && r.late);
   if (docsStep?.applies && blind.length) { // already retried without docs: too late to undo, so recorded, not blocked
@@ -577,17 +587,20 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
 // all pass), the score over the applicable steps, tokens and the quota: measured by the status line when there is a
 // clean reading (statusline.mjs, { pct, shared }), else estimated.
-// A step that passed on a declared exception is 'exception' (⚠): not a ✘, never counted as a ✔ in the score.
+// A step that passed on a declared exception is 'exception' (⚠): not a ✘, never counted as a ✔ in the score. A step that
+// passed with a warning (an Evidencia fact sin respaldo) is 'warn' (⚠): counted as passed, shown so it is looked at.
 export function evaluate(gaps, usage, model = null, measured = null) {
   const steps = {};
-  const worst = (a, b) => (a === false || b === false ? false : a === 'exception' || b === 'exception' ? 'exception' : true);
-  for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = worst(steps[s.label] ?? true, s.pass === false ? false : s.exception ? 'exception' : true);
-  const ok = Object.values(steps).filter((v) => v === true).length, exceptions = Object.values(steps).filter((v) => v === 'exception').length;
+  const rank = (v) => (v === false ? 0 : v === 'exception' ? 1 : v === 'warn' ? 2 : 3);
+  const worst = (a, b) => (rank(a) <= rank(b) ? a : b);
+  for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = worst(steps[s.label] ?? true, s.pass === false ? false : s.exception ? 'exception' : s.warn ? 'warn' : true);
+  const ok = Object.values(steps).filter((v) => v === true || v === 'warn').length, exceptions = Object.values(steps).filter((v) => v === 'exception').length;
+  const marks = exceptions + Object.values(steps).filter((v) => v === 'warn').length;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
   // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
   const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
-  return { steps, score: `${ok}/${Object.keys(steps).length}${exceptions ? ` · ${exceptions} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, model, ...quota };
+  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -650,7 +663,7 @@ export function questionRecord(turn, meta = {}) {
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
 export function summaryLine(id, ev, context = 0) {
-  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
+  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
   const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';

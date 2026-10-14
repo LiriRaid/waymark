@@ -405,7 +405,7 @@ export function tasksMarkdown(home, now = new Date()) {
       .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
-    ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
+    ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception' || v === 'warn').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
   const rows = records.slice(-8).reverse()
     .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',

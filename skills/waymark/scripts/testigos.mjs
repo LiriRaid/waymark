@@ -136,6 +136,6 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const run = gate ? runGate(gate, top(cwd) || cwd) : null;
   console.log(run ? `${mark(run.ok)} typecheck now (${run.from}): ${run.cmd} · ${run.timedOut ? `over ${GATE_MS / 1000} s` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
   const rec = readTaskRecords(home).find((r) => r.id === id);
-  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'exception' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
+  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
   process.exit(chain.ok && !hits.length && (!run || run.ok) ? 0 : 1);
 }

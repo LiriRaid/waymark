@@ -17,6 +17,7 @@
 
 ## Consequences
 - The reading lags the turn's last response by one status update, and the % has the precision Claude Code gives. A task below it shows `<1%`.
+- Amended in 2.0.10 (2026-10-14, the user's pick): a reading only moves when the % moves, so a task that stayed below it had no reading after its start and was not measured, and its close asked for the %. Now the status line updating the session after the start, with the same reading, measures it as 0 (`<1% de la cuota (medido)`). A Claude session the status line watches is never asked its %. The question stays for agents without a status line, and for a desktop session the hooks estimate.
 - With a status line set, Claude Code hides some footer hints (`esc to interrupt`, `? for shortcuts`).
 - Only Claude Code is measured. Codex keeps its own weekly window in its sessions, which this machine's sessions did not show; it stays estimated from its own model's pairs, never from Claude's.
 

@@ -284,6 +284,30 @@ test('red by action: at L2+ a spec and code changed need the spec run before the
   assert.equal(step(turn(), why).pass, false, 'written before the block, it does not count');
 });
 
+test('red per spec: a spec that adds cases runs before the code after it; one that only adjusts mocks only passes; a spec written by the shell counts', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs'), OLD = '/work/proj/src/auth.service.spec.mjs';
+  const turn = (work) => currentTurn([prompt('refactor'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...work,
+    call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test' }), call('Skill', { skill: 'code-review' }), MEM()]);
+  const red = (work) => cierreGaps(turn(work), cierre(ids.next), undefined, undefined, ctxFor(cwd));
+  const mocks = call('Edit', { file_path: OLD, old_string: 'deleteMany: vi.fn()', new_string: 'deleteSessions: vi.fn()' });
+  // YaloAtiendo 2026-10-14 · T2: new specs written and run red by the shell, then code, then mocks adjusted
+  const shellRed = ran('s1', `cat > src/orders.service.spec.mjs <<'EOF'\nit('retries', () => {})\nEOF\nnpm test -- orders`, true);
+  const g = red([...shellRed, call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), mocks]);
+  assert.equal(g.steps.find((x) => x.id === 'red').pass, true, 'the new spec ran red first; the mocks need no red');
+  assert.deepEqual(g.observed.tests.notRed, undefined);
+  const late = red([call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), call('Edit', { file_path: OLD, old_string: '});', new_string: "});\nit('logs out everywhere', () => {})" })]);
+  assert.equal(late.steps.find((x) => x.id === 'red').pass, false, 'a case added after the code never ran first');
+  assert.deepEqual(late.observed.tests.notRed, ['auth.service.spec.mjs']);
+  assert.match(late.missing.join('\n'), /auth\.service\.spec\.mjs/, 'the message names the spec');
+  assert.equal(red([call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), mocks]).steps.find((x) => x.id === 'red').pass, true, 'only mocks changed: nothing to show red');
+  // code before the spec: a run counts only when it failed
+  const after = (failed) => red([call('Edit', { file_path: 'src/other.mjs', old_string: 'a', new_string: 'b' }), call('Write', { file_path: SPECF, content: "it('retries', () => {})" }), ...ran('r1', 'npm test -- orders', failed), call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' })]);
+  assert.equal(after(false).steps.find((x) => x.id === 'red').pass, false, 'green after other code proves nothing');
+  assert.equal(after(true).steps.find((x) => x.id === 'red').pass, true, 'seen failing');
+});
+
 test('pre-existing and docs by action: a failing gate asks for a clean copy; the same command failing twice asks for docs before the next run', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);

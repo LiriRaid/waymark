@@ -27,7 +27,8 @@
   - «inferida» needs no check.
 - **What the Evidencia cites is looked up.** That means text in backticks, and outside them `84/84`, `exit N` and commit or blob hashes. The lookup covers the inputs and outputs of the tool calls since the last close, never the agent's own edits.
   - `exit 0` counts when a shell call after the last change succeeded; `exit N` counts when one failed, or when its output shows that code.
-  - A fact no call shows is **sin respaldo**. It stays in the record (`observed.evidence.unbacked`) and scores the step ✘, but it does not block, because an honest paraphrase may not match.
+  - A fact no call shows is **sin respaldo**. It stays in the record (`observed.evidence.unbacked`) and in the findings, but it does not block, because an honest paraphrase may not match. Amended in 2.0.9 at the user's request (2026-10-14): the step shows ⚠ (`warn`) and counts as passed, instead of ✘.
+  - A `file:line` is also backed by a call that named the file (`login.ts`, never `auth-login.ts`) and printed that line without the name: `grep -n` over one file (`45:`, `45-`) or Read (`45→`). Added in 2.0.9: YaloAtiendo 2026-10-13 · T3f had read `auth-callback.ts:45` that way and scored ✘.
   - The output searched is the first 20,000 characters of each result (`raw`), not the 800 kept for the other testigos.
 - **Kiro and Antigravity:** `evidence` joins `cierre` in their `lacks`, so it is recorded as not applicable there.
 - **The block** quotes the new claim. Its Evidencia bullet keeps only what the testigo does not cover (observe before changing), and the block stays under 6,500 characters.

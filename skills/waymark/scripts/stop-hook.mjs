@@ -44,6 +44,8 @@ const exempt = (file) => {
 const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
 const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
+// a test case: it()/test() (it.each, test.only…), RSpec's `it "…"`, Python's def test_, Go's func TestX(
+const CASES = /\b(?:it|test)(?:\.\w+)*\s*\(|^\s*it\s+['"]|\bdef test_\w+|\bfunc Test\w+\(/gm;
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$|_spec\.rb$|_test\.(go|py)$|^test_.*\.py$/i;
 const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i; // <project>/.waymark/memory.md or the pre-0007 ~/.waymark/projects/<slug>.md (tasks.md is generated)
 // A command's output that shows a failure, read only when its exit is not the gate's or the test's own (a pipe, a `;`).
@@ -317,12 +319,29 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     return result(t)?.error || t.error ? (i === all.length - 1 ? false : null) : all.slice(i, -1).every((p) => p.sep === '&&') ? true : null;
   };
   const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && FAIL_OUT.test(output(t))); };
-  // Test-first, measured from the spec: the spec written first, run (red) before the next edit of code. Config, scaffolding
-  // made by commands (`ng new`, installs) and the spec itself are not the code it tests.
+  // Test-first, per spec: a spec that adds cases (a new spec, or a new it()/test() in one) runs before the next code edit
+  // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
+  // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
+  // Config, scaffolding made by commands (`ng new`, installs) and the spec itself are not the code it tests.
   const codeEdit = (t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !SPEC.test(path.basename(fileOf(t)));
-  const firstSpecEdit = allTools.findIndex((t, i) => i >= base && EDITS.test(t.name) && !denied(t) && SPEC.test(path.basename(fileOf(t))));
-  const codeBeforeSpec = firstSpecEdit >= 0 && allTools.some((t, i) => i >= base && i < firstSpecEdit && codeEdit(t));
-  const codeAfterSpec = firstSpecEdit < 0 ? -1 : allTools.findIndex((t, i) => i > firstSpecEdit && codeEdit(t));
+  const cases = (s) => (String(s || '').match(CASES) || []).length;
+  const shellSpecs = (t) => (shell(t) ? [...cmdOf(t).matchAll(/(?:>>?|\btee(?:\s+-a)?)\s*["']?([^\s"'<>|;&]+)/g)].map((m) => m[1]).filter((f) => SPEC.test(path.basename(f))) : []);
+  const specWrites = new Map(); // spec basename → { at: first write, adds: cases added }
+  allTools.forEach((t, i) => {
+    if (i < base || denied(t)) return;
+    const add = (f, n) => { const k = path.basename(f).toLowerCase(), w = specWrites.get(k) || { at: i, adds: 0 }; w.adds += n; specWrites.set(k, w); };
+    if (EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))) {
+      const inp = t.input || {}; // a new file, or an edit whose text is unknown, counts as adding cases
+      add(fileOf(t), t.name === 'Write' ? cases(inp.content) || 1 : (inp.edits || [inp]).reduce((n, e) => n + (e.new_string === undefined ? 1 : Math.max(0, cases(e.new_string) - cases(e.old_string))), 0));
+    } else for (const f of shellSpecs(t)) add(f, cases(cmdOf(t)) || 1);
+  });
+  const ranRed = (w) => {
+    const next = allTools.findIndex((t, i) => i > w.at && codeEdit(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && codeEdit(t));
+    return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && (!codeFirst || failedRun(t, 'test')));
+  };
+  const inWorktree = allTools.some((t, i) => i >= base && testCmd(t) && /git\s+worktree\s+add/.test(cmdOf(t)));
+  const notRed = inWorktree ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
+    .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !w || (w.adds > 0 && !ranRed(w)); });
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
   const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT/i.test(String(result(t)?.text || t.out || ''));
   // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
@@ -377,8 +396,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
-      // red: a test run before the first code change, or in a clean copy (git worktree add … && … test)
-      red: allTools.some((t, i) => i >= base && testCmd(t) && (/git\s+worktree\s+add/.test(cmdOf(t)) || (firstSpecEdit >= 0 && !codeBeforeSpec && i > firstSpecEdit && (codeAfterSpec < 0 || i < codeAfterSpec)))),
+      // red: every spec that adds cases ran before the code after it, or a run in a clean copy (git worktree add … && … test)
+      red: !notRed.length, ...(notRed.length ? { notRed } : {}),
     },
     build: noBuild ? { none: ctx.noBuild } : null, // the project declares no build (memory.md Quality gates)
     gate: null, // the gate testigo's run: { by: agent | testigo, cmd, ok, s, from?, timedOut? }
@@ -543,7 +562,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
     procedure,
     spec: observed.tests.specsChanged.length ? [] : testsNo ? (excepted.spec = testsNo, []) : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
-    red: observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : ['a spec and code changed, and the spec never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"'],
+    red: observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"`],
     preexisting: observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: !observed.secrets.length ? [] : secretsNo ? (excepted.secrets = secretsNo, []) : [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`],

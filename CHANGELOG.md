@@ -2,6 +2,16 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.11 — red before the code, judged per spec
+- **Fix: a task that did test-first scored Tests ⚠.** The red testigo took the task's first spec edit and asked that no code came before it. YaloAtiendo 2026-10-14 · T2 wrote its two new specs from the shell (`cat > … <<EOF`) and ran them red before any code (`Cannot find module`). Then it fixed the mocks of two existing specs after the code, a refactor with no new case. The hook did not see the shell's specs, took those mock edits as the first spec, and the agent had to write `Tests: no (…)`.
+- Now red is judged per spec:
+  - A spec that adds cases (a new spec, or a new `it()`/`test()`, RSpec `it "…"`, `def test_`, `func TestX(`) must run before the next code edit after it was written.
+  - If code changed before that spec, the run must fail: a green there proves nothing.
+  - A spec that only adjusts setup or mocks only has to pass.
+  - A spec the shell wrote counts as written in that call.
+  - The message names the specs left. A run in a clean copy still covers all of them.
+  - With this, T2 passes ✔ (`docs/adr/0012`, amended).
+
 ## 2.0.10 — a path backed by the folder it listed, and a task below 1% measured instead of asked
 - **Fix: a path the agent listed scored «sin respaldo».** `ls prisma/backups | tail -1` prints only `2026-10-14T15-38-44-344Z`, so the cited `prisma/backups/2026-10-14T15-38-44-344Z` was in no single place (YaloAtiendo 2026-10-14 · T1, Evidencia ⚠). Now a path is also backed by a call whose command named its folder and whose output printed its whole name. With the fix, that task's 7 cited facts are all backed (`docs/adr/0025`).
 - **Fix: a task that stayed below 1% asked «¿qué % marcó tu cuota?».** The 5-hour reading only moves when its % moves. A task from 37% to 37% had no reading after its start, so it was not measured, and with no calibration pairs its close asked. Now the status line updating the session after the start, with the same reading, measures it as 0: `<1% de la cuota (medido)`. A Claude session the status line watches is never asked its %. The question stays for agents without a status line (`docs/adr/0019`, amended).

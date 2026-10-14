@@ -28,7 +28,7 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes } from './notes.mjs';
@@ -239,6 +239,13 @@ export function effectiveReply(texts = [], last = '') {
 // A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
 export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').replace(/\*\*|__/g, '')) && closingQuestions(reply).length > 0;
 
+// The facts an Evidencia cites: `backticks`, and outside them 84/84, exit 0, a commit or blob hash.
+export function evidenceFacts(text) {
+  const s = String(text || ''), out = [...s.matchAll(/`([^`\n]{2,160})`/g)].map((m) => m[1].trim());
+  for (const m of s.replace(/`[^`\n]*`/g, ' ').matchAll(/\b\d+\/\d+\b|\bexit(?: code)? \d+\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi)) out.push(m[0]);
+  return [...new Set(out)];
+}
+
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
   const byKey = new Map();
@@ -386,6 +393,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))),
     branches: ctx.branches || {},
+    evidence: null, // the Evidencia testigo: { claim, checkedAfter, cited, unbacked }
     time: { minutes: turn.startedAt ? Math.round(Math.max(0, Date.now() - turn.startedAt - userWait * 1000) / 6000) / 10 : null, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
   };
 
@@ -486,6 +494,23 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
     specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
   };
+  // Testigo evidence (docs/adr/0025): an Evidencia "observada" needs a check after the last change (a read, a search, a
+  // run; a commit, a push, a question or a skill load checks nothing), and each fact it cites (`backticks`, 84/84, exit 0,
+  // a hash) is looked up in the task's tool calls since the last close. A fact no call shows is "sin respaldo": scored,
+  // never blocking (an honest paraphrase may not match).
+  const evidText = hasCierre ? field(reply, 'Evidencia') || '' : '';
+  const claim = /^\s*observad/i.test(evidText) ? 'observada' : /^\s*inferid/i.test(evidText) ? 'inferida' : null;
+  const onlyGit = (t) => runsOf(t).length > 0 && runsOf(t).every((p) => /^git\s+(add|commit|push|tag)\b/.test(p.text.trim()));
+  // a failing run is a check too (it saw the state); a call a hook or the user's permission stopped saw nothing
+  const stopped = (t) => denied(t) && /hook error|PreToolUse:|doesn't want to proceed|user (?:denied|rejected)|Permission to use \S+ (?:has been|was) denied/i.test(output(t));
+  const checks = (t) => !/^(AskUserQuestion|Skill|TodoWrite|ToolSearch|EnterPlanMode|ExitPlanMode)$/.test(t.name) && !EDITS.test(t.name) && !stopped(t) && !(shell(t) && onlyGit(t));
+  const cited = evidenceFacts(evidText);
+  // where a fact can be backed: the calls' inputs and outputs, never the text the agent wrote itself (its edits)
+  const flat = (x) => String(x || '').toLowerCase().replace(/\\/g, '/').replace(/\s+/g, ' ');
+  const hay = cited.length ? flat([...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => `${Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')} ${result(t)?.raw || result(t)?.text || t.out || ''}`).join('\n')) : '';
+  const shellRan = (bad) => turn.tools.slice(lastChange + 1).some((t) => shell(t) && !stopped(t) && !!(result(t)?.error || t.error) === bad); // exit codes: after the last change
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)); };
+  observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
   if (!dept.declared) procedure.push('no owner department was invoked: invoke the owner dept-* skill (its SKILL.md) first');
@@ -493,6 +518,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   const fails = {
     decision, gate, cierre,
+    evidence: observed.evidence?.claim === 'observada' && !observed.evidence.checkedAfter ? ['Evidencia says "observada" but no tool call checked the state after the last change (a commit, a push or a question checks nothing): check it now (run, read or test what changed), or write it as "inferida de <source> (check: <one line for the user>)"'] : [],
     memory: observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
     review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`],
     build: buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'],
@@ -503,7 +529,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     preexisting: observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : ['the gate after the last change failed: if it is not this task\'s, show the same failure in a clean copy now (git worktree add <tmp> HEAD → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"'],
     trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
     secrets: !observed.secrets.length ? [] : secretsNo ? (excepted.secrets = secretsNo, []) : [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`],
-    chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
+    chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? 'the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through waymark.mjs forget' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
   };
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
@@ -521,6 +547,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (lateDecision && dec?.applies) { // cannot be undone, so it does not block; the evaluation keeps it
     const why = 'the first choice-window question came after the task\'s first change';
     dec.pass = false; dec.why = [...dec.why, why]; findings.push(why);
+  }
+  const ev = steps.find((s) => s.id === 'evidence');
+  if (ev?.applies && ev.pass && observed.evidence?.unbacked.length) { // a fact no tool call shows: scored, not blocked
+    const why = `Evidencia cites what no tool call of the task shows (sin respaldo): ${observed.evidence.unbacked.join(' · ').slice(0, 160)}`;
+    ev.pass = false; ev.why = [why]; findings.push(why);
   }
   const docsStep = steps.find((s) => s.id === 'docs'), blind = retried.filter((r) => !r.docs && r.late);
   if (docsStep?.applies && blind.length) { // already retried without docs: too late to undo, so recorded, not blocked
@@ -680,7 +711,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let turnAll = [];
       try { if (turn.startedAt) turnAll = turnCommitsAll(turn.tools, cwd, turn.startedAt); } catch (e) { logHookError('stop-hook commits', e); }
       ctx.scanSecrets = (files) => secretSources(files, [...ctx.commits.filter((c) => !turnAll.some((x) => x.h === c)), ...turnAll], cwd, home.memory, turn.startedAt);
-      ctx.chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null);
+      ctx.chain = verifyChain(records, records.some(gitNote) ? readNotes(cwd) : null, anchorsFor(cwd));
       let gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       if (gaps?.renamed) { // a new task after all: judged over its own stretch, not the claimed task's
         ctx.taskTools = ctx.stretchTools;

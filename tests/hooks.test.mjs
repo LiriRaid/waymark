@@ -531,10 +531,10 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   const noSearch = currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
   const ev = evaluate(cierreGaps(noSearch, cierre(id), undefined, undefined, ctx), { total: 2700000 });
-  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
-  assert.equal(ev.score, '8/9');
+  assert.deepEqual(ev.steps, { Decision: true, Verificar: true, Cierre: true, Evidencia: true, Secretos: true, Recordar: false, Review: true, Build: true, Enrutar: true, Cadena: true });
+  assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
-  assert.match(summaryLine(id, ev), /Recordar ✘ .* 8\/9 · 2\.70M tokens · ¿qué % marcó tu cuota/);
+  assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
   assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run waymark\.mjs pack/, 'one memory: Waymark\'s, with or without engram');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
@@ -614,11 +614,11 @@ const l2Lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymar
 test('stop hook: a backed Cierre is recorded and not blocked', () => {
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const { out, records } = runStop(l2Lines, cierre(id));
-  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 9\/9 · /);
+  assert.match(JSON.parse(out).systemMessage, /^Waymark .* · 10\/10 · /);
   assert.equal(records.length, 1);
   assert.equal(records[0].id, id);
   assert.deepEqual(records[0].unresolved, []);
-  assert.equal(records[0].evaluation.score, '9/9');
+  assert.equal(records[0].evaluation.score, '10/10');
   assert.match(records[0].cierre, /^## Cierre · /);
 });
 
@@ -824,7 +824,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const id = `${new Date().toLocaleDateString('sv')} · T1`;
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-step2', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
-  assert.match(JSON.parse(r.stdout).systemMessage, /· 9\/9 · /);
+  assert.match(JSON.parse(r.stdout).systemMessage, /· 10\/10 · /);
   const recs = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
   assert.equal(recs.length, 1);
   assert.deepEqual(recs[0].files, [FILE], 'the memory edit is not a project change');
@@ -1492,7 +1492,7 @@ test('3e-1 testigo gate: the agent\'s failing gate blocks once; "no comprobado (
 test('3e-1 testigo gate: with no gate after the last code change, the repo typecheck the hook re-runs decides', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), MEM()]);
+  const turn = currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), call('AskUserQuestion'), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Read', { file_path: FILE }), MEM()]);
   let asked = null;
   const withRun = (r) => ({ ...ctxFor(cwd), rerun: (files) => { asked = files; return r; } });
   const ok = cierreGaps(turn, cierre(id), undefined, undefined, withRun({ cmd: 'npm run typecheck', from: 'package.json', ok: true, s: 3, timedOut: false }));
@@ -2496,7 +2496,7 @@ test('a task that changed no project file (a push the user asked for): the user\
 });
 
 test('context brake: a message to a session at 300k is stopped before the model once, kept for the next session, and brought by its card', async () => {
-  const { brake, BRAKE_TOKENS } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const { brake, BRAKE_TOKENS, BRAKE_STEP } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);
   const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`), codex = await import(`file://${SCRIPTS}/agents/codex.mjs`);
   const repo = memRepo('brake'), state = path.join(home, `brake-${n}.json`);
@@ -2511,8 +2511,18 @@ test('context brake: a message to a session at 300k is stopped before the model 
   assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 300000 }, state).block.decision, 'block');
   assert.equal(brake(hook('s1', 'sigo aquí'), claude, { context: 310000 }, state), null);
   assert.match(fs.readFileSync(path.join(projectHome(repo).dir, 'next-prompt.md'), 'utf8'), /otra cosa/, 'another braked session continuing never removes s5\'s held message');
-  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per session: resent, it continues');
+  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per step: resent, it continues');
   assert.equal(heldPrompt(projectHome(repo)), '', 'resent here: the held copy is gone, no new session gets it');
+  // the session keeps growing: every BRAKE_STEP (100k) past the threshold brakes once more
+  assert.equal(BRAKE_STEP, 100000);
+  assert.equal(brake(hook('s5', 'sigo'), claude, { context: 399999 }, state), null, 'still in the 300k step');
+  const again = brake(hook('s5', 'sigo'), claude, { context: 400000 }, state);
+  assert.match(again.block.reason, /~400k tokens[\s\S]*Open a new session/, '400k: a new step brakes again');
+  assert.equal(brake(hook('s5', 'sigo'), claude, { context: 410000 }, state), null, 'resent in the 400k step: it continues');
+  assert.equal(brake(hook('s5', 'más'), claude, { context: 520000 }, state).block.decision, 'block', 'and again at 500k');
+  fs.writeFileSync(state, JSON.stringify({ old: Date.now() }));
+  assert.equal(brake(hook('old', 'sigo'), claude, { context: 350000 }, state), null, 'a session braked before steps existed is in its 300k step');
+  assert.equal(brake(hook('old', 'sigo'), claude, { context: 400000 }, state).block.decision, 'block');
   // idle brake: the cache expired, so resuming re-writes the whole context; braked once per idle stretch
   const t0 = Date.parse('2026-10-12T10:00:00Z'), H = 3600000;
   assert.equal(brake(hook('s7'), claude, { context: 90000, lastAt: t0 }, state, t0 + 5 * H), null, 'under 100k: never braked for idleness');
@@ -2526,6 +2536,19 @@ test('context brake: a message to a session at 300k is stopped before the model 
   const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
   assert.equal(brake(hook('s3'), gemini, { context: 300000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
   assert.match(brake(hook('s4'), { out: {} }, { context: 300000 }, state).line, /~300k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
+});
+
+test('session state skips the synthetic response a usage limit leaves: the context and time stay the last real response\'s', async () => {
+  const { sessionState } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const usage = (n) => ({ input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: n - 1002 });
+  const st = sessionState([
+    { type: 'user', message: { role: 'user', content: 'sigue' } },
+    { type: 'assistant', timestamp: '2026-10-13T22:17:17Z', message: { model: 'claude-opus-5-5', usage: usage(368084), content: [{ type: 'text', text: 'Waymark → L2 · dept-security' }] } },
+    { type: 'assistant', timestamp: '2026-10-13T22:19:48Z', apiError: 'usage_limit_reached', message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: 'You\'ve hit your limit' }] } },
+  ]);
+  assert.equal(st.context, 368084, 'the usage limit\'s zeros are not the context');
+  assert.equal(st.lastAt, Date.parse('2026-10-13T22:17:17Z'), 'idle is counted from the last real response');
+  assert.equal(st.openedWithWaymark, true);
 });
 
 test('context brake in OpenCode: the plugin shows the reason and throws from chat.message, so the message never reaches the model', async () => {

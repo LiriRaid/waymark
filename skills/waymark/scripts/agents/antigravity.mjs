@@ -23,7 +23,7 @@ import { readTail } from '../transcript.mjs';
 export const name = 'antigravity';
 export const instructions = path.join(agentDir(known('antigravity')), 'GEMINI.md'); // shared with Gemini CLI
 export const preContext = true; // the pack goes before the tool runs, as the reason of an allow
-export const lacks = ['cierre']; // no hook carries the reply (its review is waymark.mjs review)
+export const lacks = ['cierre', 'evidence']; // no hook carries the reply (its review is waymark.mjs review)
 
 export const out = {
   context: (event, text) => (event === 'PreToolUse' ? { decision: 'allow', reason: text } : event === 'PostToolUse' ? {} : { injectSteps: [{ ephemeralMessage: text }] }),

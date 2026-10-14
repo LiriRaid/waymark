@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isPrompt, promptText } from './transcript.mjs';
-import { addNote, readNotes, noteSha, NOTES_REF } from './notes.mjs';
+import { addNote, readNotes, noteSha, NOTES_REF, addAnchor, readAnchors } from './notes.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -863,8 +863,8 @@ export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(S
 export function appendRecord(cwd, record) {
   const file = logFile(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  let prev = null;
-  try { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); if (lines.length) prev = JSON.parse(lines[lines.length - 1]).hash || sha(lines[lines.length - 1]); } catch {}
+  let prev = null, count = 0;
+  try { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); count = lines.length; if (lines.length) prev = JSON.parse(lines[lines.length - 1]).hash || sha(lines[lines.length - 1]); } catch {}
   let line = record;
   const commit = record.id && record.commits?.[0];
   if (commit) {
@@ -876,13 +876,50 @@ export function appendRecord(cwd, record) {
     }
   }
   const body = { ...line, prev };
-  fs.appendFileSync(file, JSON.stringify({ ...body, hash: sha(JSON.stringify(body)) }) + '\n');
+  const hash = sha(JSON.stringify(body));
+  fs.appendFileSync(file, JSON.stringify({ ...body, hash }) + '\n');
+  anchor(cwd, file, { n: count + 1, hash }); // n from the read that gave prev: another session appending meanwhile cannot shift it
   return file;
 }
 
+// The log's anchor in git (notes.mjs, docs/adr/0025): its length and last hash on HEAD, named by `m`, the log's own id
+// (this machine and this log's path), so the anchors of another clone or machine are not checked against this log.
+export const logId = (file) => sha(`${os.hostname()}|${norm(fs.existsSync(file) ? fs.realpathSync(file) : file)}`).slice(0, 16);
+function anchor(cwd, file, entry) {
+  try { addAnchor(cwd, { m: logId(file), at: Date.now(), ...entry }); } catch (e) { logHookError('anchor', e); }
+}
+// This log's anchors, oldest first.
+export const anchorsFor = (cwd) => { const id = logId(logFile(cwd)); return readAnchors(cwd).filter((a) => a.m === id).sort((a, b) => (a.at || 0) - (b.at || 0)); };
+
+// `waymark.mjs forget`: removes the records of one task ID (exactly that ID: a follow-up is named on its own) or of a session,
+// chains the rest again from prev = null and leaves a rewrite anchor with the reason, what was removed and the head before
+// and after, so the removal shows in git instead of hiding. A committed task's record is its git note: refused (the
+// commit holds it). dryRun: the plan, nothing written. → { removed, from, to } or { error }.
+export function forget(cwd, id, { session = null, reason = '', dryRun = false } = {}) {
+  if (!String(reason).trim()) return { error: 'a reason is required (--reason "<why>"): it stays in the rewrite anchor' };
+  if (!id && !session) return { error: 'name a task ID or --session <id>' };
+  const file = logFile(cwd);
+  const lines = (() => { try { return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
+  const hit = (r) => (id ? r.id === id : String(r.session || '').startsWith(session));
+  const drop = lines.filter(hit);
+  if (!drop.length) return { error: `no record of ${id || `session ${session}`} in ${file}` };
+  const noted = drop.filter((r) => r.note?.commit);
+  if (noted.length) return { error: `${noted.map((r) => r.id).join(', ')}: the record is a git note on commit ${noted[0].note.commit.slice(0, 8)}; forget removes only records without a commit` };
+  const from = { n: lines.length, hash: lines[lines.length - 1]?.hash || null };
+  const removed = [...new Set(drop.map((r) => r.id || `Q ${String(r.session || '').slice(0, 8)} ${r.at || ''}`.trim()))];
+  if (dryRun) return { removed, from, to: { n: lines.length - drop.length, hash: null }, dryRun: true };
+  let prev = null;
+  const keep = lines.filter((r) => !hit(r)).map((r) => { const { hash, prev: _, ...rest } = r; const body = { ...rest, prev }; prev = sha(JSON.stringify(body)); return { ...body, hash: prev }; });
+  fs.writeFileSync(file, keep.map((r) => JSON.stringify(r)).join('\n') + (keep.length ? '\n' : ''));
+  anchor(cwd, file, { kind: 'rewrite', n: keep.length, hash: prev, reason: String(reason).trim(), removed, from });
+  return { removed, from, to: { n: keep.length, hash: prev } };
+}
+
 // → { ok: true } or { ok: false, at: <index of the first line whose hash or link does not match> }. With the notes
-// (readNotes): a stub whose note is missing or does not match its sha256 breaks the chain too ({ note: true }).
-export function verifyChain(records, notes = null) {
+// (readNotes): a stub whose note is missing or does not match its sha256 breaks the chain too ({ note: true }). With
+// the log's anchors (anchorsFor, oldest first): each one since the last rewrite anchor must still name the line it
+// anchored, or the log was rewritten or cut ({ anchor: true }); the anchors before a rewrite describe the log it replaced.
+export function verifyChain(records, notes = null, anchors = null) {
   let prev = null;
   for (let i = 0; i < records.length; i++) {
     const { hash, ...body } = records[i];
@@ -890,6 +927,12 @@ export function verifyChain(records, notes = null) {
     const gn = gitNote(body);
     if (notes && gn && (!notes.has(gn.commit) || noteSha(notes.get(gn.commit)) !== gn.sha)) return { ok: false, at: i, note: true };
     prev = hash;
+  }
+  const list = anchors || [];
+  const since = list.map((a) => a.kind).lastIndexOf('rewrite');
+  for (const a of list.slice(Math.max(0, since))) {
+    if (a.n === 0 && !a.hash) continue; // a rewrite that removed every record: nothing left to anchor
+    if (!(a.n > 0) || records[a.n - 1]?.hash !== a.hash) return { ok: false, at: Math.max(0, Math.min(a.n, records.length) - 1), anchor: true };
   }
   return { ok: true };
 }

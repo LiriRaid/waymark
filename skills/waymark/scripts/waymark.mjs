@@ -11,6 +11,8 @@
 //                                           (into refs/notes/remotes/<remote>/waymark, merged at session start), then a fetch
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
+//   node waymark.mjs forget <ID> | --session <id> --reason "…" [--apply]  remove records without a commit the user asked to remove: the rest
+//                                           chained again and a rewrite anchor in git with the reason (docs/adr/0025); the plan without --apply
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
 //   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
@@ -28,7 +30,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
@@ -446,6 +448,16 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (done.length) refreshTasks(home, true);
     console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
     process.exitCode = done.length ? 0 : 1;
+  } else if (sub === 'forget') {
+    const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : null; };
+    const apply = rest.includes('--apply'), session = opt('--session'), reason = opt('--reason') || '';
+    const id = rest.join(' ').match(ID)?.[0] || null;
+    const home = projectHome(process.cwd());
+    const r = forget(process.cwd(), id, { session, reason, dryRun: !apply });
+    if (r.error) console.log(`forget: ${r.error}\nUsage: node waymark.mjs forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
+    else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
+    else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
+    process.exitCode = r.error ? 1 : 0;
   } else if (sub === 'notes' && rest[0] === 'setup') {
     const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
     console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
@@ -463,7 +475,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

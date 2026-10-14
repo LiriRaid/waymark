@@ -51,15 +51,16 @@ const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rul
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 
 // Context brake (docs/adr/0016): every response re-reads the whole session, so a new message to a session past
-// BRAKE_TOKENS is stopped before the model (0 tokens), once per session. The message is kept in
-// .waymark/next-prompt.md and the next session's card brings it; sending it again here continues. Agents whose
-// prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder instead.
-// WAYMARK_BRAKE_TOKENS tunes it (0 = off).
+// BRAKE_TOKENS is stopped before the model (0 tokens), once per BRAKE_STEP the context grows (300k, 400k, 500k…). The
+// message is kept in .waymark/next-prompt.md and the next session's card brings it; sending it again here continues
+// until the next step. Agents whose prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder
+// instead. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
 // Idle brake (docs/adr/0018): the prompt cache lasts about an hour, so the first message to a session idle longer than
 // that re-writes its whole context, which costs far more than reading it (431k re-written ≈ 9% of the quota). A session
 // past IDLE_TOKENS idle over IDLE_MINUTES is braked the same way, once per idle stretch. WAYMARK_IDLE_TOKENS and
 // WAYMARK_IDLE_MINUTES tune it (0 = off).
 export const BRAKE_TOKENS = Number(process.env.WAYMARK_BRAKE_TOKENS ?? 300000);
+export const BRAKE_STEP = Number(process.env.WAYMARK_BRAKE_STEP ?? 100000);
 export const IDLE_TOKENS = Number(process.env.WAYMARK_IDLE_TOKENS ?? 100000);
 export const IDLE_MINUTES = Number(process.env.WAYMARK_IDLE_MINUTES ?? 60);
 export const NEXT_PROMPT = 'next-prompt.md';
@@ -71,9 +72,12 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const session = hook.session_id || 'unknown', k = `${Math.round(context / 1000)}k`;
-  // the idle stretch is named by the last response before it: a resend (no response since) finds it seen and continues
-  const key = idle ? `${session}:idle:${st.lastAt}` : session;
-  if (seen[key] || (!idle && seen[session])) { // braked already: the user chose to continue here, so this session's held message is not for a new one
+  // the idle stretch is named by the last response before it: a resend (no response since) finds it seen and continues.
+  // The size brake is named by its step: the first keeps the bare session id, as before steps existed.
+  const step = big && BRAKE_STEP ? Math.floor((context - BRAKE_TOKENS) / BRAKE_STEP) : 0;
+  const sizeKey = step ? `${session}:${step}` : session;
+  const key = idle ? `${session}:idle:${st.lastAt}` : sizeKey;
+  if (seen[key] || (!idle && seen[sizeKey])) { // braked already: the user chose to continue here, so this session's held message is not for a new one
     try {
       const home = projectHome(hook.cwd || process.cwd()), file = path.join(home.dir, NEXT_PROMPT);
       if (home.dir && !home.legacy && fs.readFileSync(file, 'utf8').split('\n')[0].includes(`· session ${session} -->`)) fs.rmSync(file, { force: true });

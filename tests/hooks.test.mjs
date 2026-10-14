@@ -2496,7 +2496,7 @@ test('a task that changed no project file (a push the user asked for): the user\
 });
 
 test('context brake: a message to a session at 300k is stopped before the model once, kept for the next session, and brought by its card', async () => {
-  const { brake, BRAKE_TOKENS } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const { brake, BRAKE_TOKENS, BRAKE_STEP } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);
   const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`), codex = await import(`file://${SCRIPTS}/agents/codex.mjs`);
   const repo = memRepo('brake'), state = path.join(home, `brake-${n}.json`);
@@ -2511,8 +2511,18 @@ test('context brake: a message to a session at 300k is stopped before the model 
   assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 300000 }, state).block.decision, 'block');
   assert.equal(brake(hook('s1', 'sigo aquí'), claude, { context: 310000 }, state), null);
   assert.match(fs.readFileSync(path.join(projectHome(repo).dir, 'next-prompt.md'), 'utf8'), /otra cosa/, 'another braked session continuing never removes s5\'s held message');
-  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per session: resent, it continues');
+  assert.equal(brake(hook('s5', 'otra cosa'), claude, { context: 310000 }, state), null, 'once per step: resent, it continues');
   assert.equal(heldPrompt(projectHome(repo)), '', 'resent here: the held copy is gone, no new session gets it');
+  // the session keeps growing: every BRAKE_STEP (100k) past the threshold brakes once more
+  assert.equal(BRAKE_STEP, 100000);
+  assert.equal(brake(hook('s5', 'sigo'), claude, { context: 399999 }, state), null, 'still in the 300k step');
+  const again = brake(hook('s5', 'sigo'), claude, { context: 400000 }, state);
+  assert.match(again.block.reason, /~400k tokens[\s\S]*Open a new session/, '400k: a new step brakes again');
+  assert.equal(brake(hook('s5', 'sigo'), claude, { context: 410000 }, state), null, 'resent in the 400k step: it continues');
+  assert.equal(brake(hook('s5', 'más'), claude, { context: 520000 }, state).block.decision, 'block', 'and again at 500k');
+  fs.writeFileSync(state, JSON.stringify({ old: Date.now() }));
+  assert.equal(brake(hook('old', 'sigo'), claude, { context: 350000 }, state), null, 'a session braked before steps existed is in its 300k step');
+  assert.equal(brake(hook('old', 'sigo'), claude, { context: 400000 }, state).block.decision, 'block');
   // idle brake: the cache expired, so resuming re-writes the whole context; braked once per idle stretch
   const t0 = Date.parse('2026-10-12T10:00:00Z'), H = 3600000;
   assert.equal(brake(hook('s7'), claude, { context: 90000, lastAt: t0 }, state, t0 + 5 * H), null, 'under 100k: never braked for idleness');
@@ -2526,6 +2536,19 @@ test('context brake: a message to a session at 300k is stopped before the model 
   const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
   assert.equal(brake(hook('s3'), gemini, { context: 300000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
   assert.match(brake(hook('s4'), { out: {} }, { context: 300000 }, state).line, /~300k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
+});
+
+test('session state skips the synthetic response a usage limit leaves: the context and time stay the last real response\'s', async () => {
+  const { sessionState } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const usage = (n) => ({ input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: n - 1002 });
+  const st = sessionState([
+    { type: 'user', message: { role: 'user', content: 'sigue' } },
+    { type: 'assistant', timestamp: '2026-10-13T22:17:17Z', message: { model: 'claude-opus-5-5', usage: usage(368084), content: [{ type: 'text', text: 'Waymark → L2 · dept-security' }] } },
+    { type: 'assistant', timestamp: '2026-10-13T22:19:48Z', apiError: 'usage_limit_reached', message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, content: [{ type: 'text', text: 'You\'ve hit your limit' }] } },
+  ]);
+  assert.equal(st.context, 368084, 'the usage limit\'s zeros are not the context');
+  assert.equal(st.lastAt, Date.parse('2026-10-13T22:17:17Z'), 'idle is counted from the last real response');
+  assert.equal(st.openedWithWaymark, true);
 });
 
 test('context brake in OpenCode: the plugin shows the reason and throws from chat.message, so the message never reaches the model', async () => {

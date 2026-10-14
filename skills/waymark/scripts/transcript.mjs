@@ -171,11 +171,13 @@ export function withSubagents(usage, sub) {
 }
 
 // Context size and time of the last main-agent response, and whether the last answered turn opened with "Waymark →".
+// A usage limit leaves a synthetic response (model "<synthetic>", usage all 0) that no model read: it is skipped, or the
+// session would look empty and the brakes would let its costly resume through.
 export function sessionState(lines) {
   let context = 0, lastAt = 0, opener = null, turn = null;
   for (const d of lines) {
     if (isPrompt(d)) { turn = { first: null }; continue; }
-    if (d.type !== 'assistant' || d.isSidechain) continue;
+    if (d.type !== 'assistant' || d.isSidechain || d.message?.model === '<synthetic>') continue;
     const u = d.message?.usage;
     if (u) {
       context = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);

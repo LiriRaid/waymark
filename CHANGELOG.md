@@ -8,6 +8,8 @@ The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version
 - **New testigo, Evidencia** (blocks once): an Evidencia «observada» needs a check after the last change. A read, a search or a run counts, even a failing one. An edit, a commit or push, a question, or a call a hook stopped does not. «inferida» needs none.
 - **Cited facts are looked up:** text in backticks, `84/84`, `exit N` and hashes are searched in the tool calls since the last close, never in the agent's own edits. One no call shows is recorded as **sin respaldo** and scores Evidencia ✘ without blocking. The evaluation has one more step: a full score is 10/10.
 - **Kiro and Antigravity:** Evidencia is not applicable there, like the Cierre (no hook carries the reply).
+- **The context brake stops again every 100k:** after the first stop at 300k, a resend continued for the rest of the session. A session kept going to 426k (`contexto 43%` with a 1M window) with no further stop. Now it stops again at 400k, 500k… and a resend continues until the next step (`WAYMARK_BRAKE_STEP`, 0 = once per session, `docs/adr/0016`).
+- **Fix: a usage limit hid the session's size from both brakes.** The limit leaves a synthetic response (`<synthetic>`, usage all 0) in the transcript. The hooks read it as the last response, so the session looked empty. The next day's "continúa" to a 368k session idle 15 h went through and re-wrote 352,513 tokens of cache (~5% of the 5-hour quota). The synthetic response is skipped now (`docs/adr/0018`).
 - **The desktop app's share of the quota, verified live:** a desktop session (`by: hook`) and a terminal session each kept their own part in `.quota.json` (2.0.6).
 - **Docs:** README, INSTALL, the Kiro and Antigravity adapters, and ADR 0025.
 

@@ -10,6 +10,8 @@
 ## Decision
 **Context brake.** Updated in T11 at the user's request: the default threshold is 300k tokens, up from 150k, to prioritize longer sessions while stopping before context grows too large. It costs 0 tokens and happens once per session. The message is kept in `.waymark/next-prompt.md`, and the next session's card brings it, after the card's cap so it is never cut. Sending it again in the same session continues there. `WAYMARK_BRAKE_TOKENS` tunes the threshold, and 0 turns it off.
 
+Amended in 2.0.8 at the user's request (2026-10-14 · T1): the brake fires once per 100k step, not once per session (300k, 400k, 500k…). A resend continues until the next step. With a 1M-token window, the status line showed `contexto 43%` (426k), and nothing stopped the session after its first brake at 371k. `WAYMARK_BRAKE_STEP` tunes the step, and 0 brings back once per session. The first step keeps the bare session id in `~/.waymark/.brake.json`, so a session braked before 2.0.8 continues in its 300k step.
+
 How each agent stops the message, verified at the installed versions:
 
 | Agent | How the message is stopped |

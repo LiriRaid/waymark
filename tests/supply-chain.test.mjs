@@ -206,6 +206,13 @@ test('Evidencia: file:line is backed by a call that named the file and showed th
   assert.deepEqual(judge(grep, 'observada `callback.ts:45`').observed.evidence.unbacked, ['callback.ts:45'], 'a name that only ends another file\'s name');
 });
 
+test('Evidencia: a path is backed when its folder is in a call\'s command and its name in that call\'s output', () => {
+  const ls = [...opening(), ...run('Bash', { command: 'cd api && ls prisma/backups | tail -1 && ls prisma/backups/$(ls prisma/backups | tail -1) | grep -c json' }, { out: '2026-10-14T15-38-44-344Z\n34' })];
+  assert.deepEqual(judge(ls, 'observada el backup `prisma/backups/2026-10-14T15-38-44-344Z` tiene 34 tablas').observed.evidence.unbacked, []);
+  assert.deepEqual(judge(ls, 'observada `prisma/seeds/2026-10-14T15-38-44-344Z`').observed.evidence.unbacked, ['prisma/seeds/2026-10-14T15-38-44-344Z'], 'another folder');
+  assert.deepEqual(judge(ls, 'observada `prisma/backups/2026-10-14T15-38-44`').observed.evidence.unbacked, ['prisma/backups/2026-10-14T15-38-44'], 'only part of the name');
+});
+
 test('forget: removing every record leaves a chain that holds, and later records anchor again', () => {
   const d = repo('forget-all');
   P.appendRecord(d, rec(1, { session: 'only' }));

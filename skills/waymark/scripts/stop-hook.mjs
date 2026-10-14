@@ -26,7 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
-import { measure, clearStart, recordSpend } from './statusline.mjs';
+import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
@@ -516,10 +516,18 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const m = f.match(/^(?:.*[\\/])?([^\\/\s:]+\.\w+):(\d+)$/);
     if (!m) return false;
     const at = new RegExp(`(?:^|\\n)\\s*${m[2]}(?:[:\\t→-])`);
-    const named = new RegExp(`(?:^|[\\s/"'=])${m[1].toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`); // login.ts, never auth-login.ts
+    const named = new RegExp(`(?:^|[\\s/"'=])${esc(m[1].toLowerCase())}(?![\\w.-])`); // login.ts, never auth-login.ts
     return calls.some((c) => named.test(c.input) && at.test(c.out));
   };
-  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || lineShown(f); };
+  // a path is also backed by a call whose command named its folder and whose output printed its name (ls dir | tail -1)
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pathShown = (f) => {
+    const m = flat(f).match(/^(.+)\/([^/\s]{3,})$/);
+    if (!m) return false;
+    const name = new RegExp(`(?:^|[\\s/"'=])${esc(m[2])}(?![\\w.-])`);
+    return calls.some((c) => c.input.includes(m[1]) && name.test(flat(c.out)));
+  };
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || lineShown(f) || pathShown(f); };
   observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
@@ -662,9 +670,9 @@ export function questionRecord(turn, meta = {}) {
 // tokens of context, it says the next task is cheaper in a new session: every response re-reads the whole context, and
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
-export function summaryLine(id, ev, context = 0) {
+export function summaryLine(id, ev, context = 0, { ask: asking = true } = {}) {
   const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
-  const ask = /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
+  const ask = asking && /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';
   const by = String(ev.quotaBy);
@@ -783,7 +791,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
-      answer(agent, agent.out.notice(summaryLine(rec.id, evaluation, context) + moved + pushed));
+      let ask = true; // a Claude session the status line watches is measured: the close never asks its %
+      try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
+      answer(agent, agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed));
     } catch (e) { logHookError('stop-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

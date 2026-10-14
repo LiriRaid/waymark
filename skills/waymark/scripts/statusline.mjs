@@ -272,18 +272,23 @@ export function clearStart(session) {
 
 // → { pct, shared[, own] } from the task's start to the latest reading, or null: no start, no reading since the start, or
 // the window reset during the task. shared: another session's tokens moved in between (its use is in the difference);
-// then own is this session's share of the rise, prorated by cost, when the session has a cost.
+// then own is this session's share of the rise, prorated by cost, when the session has a cost. The status line updating
+// this session after the start with the same reading is a reading too: the task stayed below its resolution (pct 0).
 export function measure(session, now = Date.now()) {
-  const st = readQuota(), id = session || 'unknown', s = st.starts[id], e = st.latest;
-  if (!s || !e?.five || e.at <= s.at) return null;
+  const st = readQuota(), id = session || 'unknown', s = st.starts[id], e = st.latest, mine = st.sessions[id];
+  const seenSince = e?.five && mine && mine.by !== 'hook' && mine.at > s?.at && mine.seen === readingKey(e.five);
+  if (!s || !e?.five || (e.at <= s.at && !seenSince)) return null;
   if (s.resetsAt !== null && Math.abs((e.five.resetsAt || 0) - s.resetsAt) > RESET_SLACK) return null;
   const pct = round(e.five.pct - s.pct);
   if (pct < 0) return null;
   const shared = Object.entries(st.sessions).some(([k, v]) => k !== id && v.activeAt && v.activeAt > s.at && v.activeAt <= now);
-  const mine = st.sessions[id];
   if (!shared || !Number.isFinite(mine?.cost)) return { pct, shared };
   return { pct, shared, own: Math.min(pct, Math.max(0, round((mine.own || 0) - (s.own || 0)))) };
 }
+
+// Whether Claude Code's status line watches this session (the hooks' estimate of a desktop session does not count): its
+// task's % is measured, so the close never asks for it.
+export const watched = (session) => { const s = readQuota().sessions[session || 'unknown']; return !!s && s.by !== 'hook'; };
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   let input = '', done = false;

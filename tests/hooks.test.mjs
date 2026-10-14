@@ -1198,6 +1198,8 @@ test('3c: the end-of-turn line asks the real quota % while the model has fewer t
   const none = summaryLine('x', { ...base, quotaPct: null, quotaBy: 'none' });
   assert.match(none, /1.00M tokens · ¿qué % marcó tu cuota/, 'a model without pairs: tokens only, and the % is asked');
   assert.ok(!/≈|5 h/.test(none));
+  assert.doesNotMatch(summaryLine('x', { ...base, quotaPct: null, quotaBy: 'none' }, 0, { ask: false }), /marcó tu cuota/, 'a Claude session the status line watches is measured, never asked');
+  assert.match(summaryLine('x', { ...base, quotaPct: 0, quotaBy: 'measured' }), /1.00M tokens <1% de la cuota \(medido\)$/);
 });
 
 test('3c: open.json records the agent, and tasks.md shows where the turn started', () => {
@@ -2675,7 +2677,7 @@ test('quota: the status line keeps the real % and shows quota and context', asyn
 });
 
 test('quota: a task\'s % is measured from the prompt to the close; shared, reset or stale gives no clean measure', async () => {
-  const { recordStatus, markStart, clearStart, measure, quotaFile } = await import(`file://${SCRIPTS}/statusline.mjs`);
+  const { recordStatus, markStart, clearStart, measure, quotaFile, watched } = await import(`file://${SCRIPTS}/statusline.mjs`);
   const t0 = 1799991000000;
   recordStatus(status('m1', 20, 40), t0);
   markStart('m1', t0 + 1000);
@@ -2692,6 +2694,10 @@ test('quota: a task\'s % is measured from the prompt to the close; shared, reset
   assert.equal(measure('m1', t0 + 68000), null, 'no start: nothing to measure');
   markStart('m1', t0 + 70000);
   assert.equal(measure('m1', t0 + 71000), null, 'no reading after the start: stale');
+  recordStatus(status('m1', 27, 41, 13, 7500), t0 + 71500); // the status line saw the session work after the start; the 5h did not move
+  assert.deepEqual(measure('m1', t0 + 71600), { pct: 0, shared: false }, 'below the reading\'s resolution: measured, <1%');
+  assert.equal(watched('m1'), true, 'the status line watches this session');
+  assert.equal(watched('nobody'), false);
   recordStatus({ ...status('m1', 2, 41, 12, 8000), rate_limits: { five_hour: { used_percentage: 2, resets_at: 1800018000 } } }, t0 + 72000);
   assert.equal(measure('m1', t0 + 73000), null, 'the window reset during the task');
   clearStart('m1');

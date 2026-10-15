@@ -1,6 +1,6 @@
 {
   "name": "waymark",
-  "version": "2.0.14",
+  "version": "2.0.15",
   "description": "A supply chain for your coding agent's work: every task goes through the department that owns it (frontend, backend, data, security, QA, devops, architecture, UX/UI, product, devex), you decide among the optimal options, evidence and gates are checked, and a hash-chained record ties inputs, decision and commits. Stack- and agent-agnostic, layered loading to save tokens, learns with use.",
   "author": {
     "name": "LiriRaid",

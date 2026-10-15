@@ -16,7 +16,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, markOpen, markTaskStart, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, markOpen, markTaskStart, taskInProgress, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -55,6 +55,8 @@ const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 // message is kept in .waymark/next-prompt.md and the next session's card brings it; sending it again here continues
 // until the next step. Agents whose prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder
 // instead. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
+// Both brakes wait for the task: while this session's task is in progress (no Cierre yet, cut by the quota, or closed
+// parcial/bloqueado) no message is braked at any size; a new session mid-task would rebuild what this one holds.
 // Idle brake (docs/adr/0018): the prompt cache lasts about an hour, so the first message to a session idle longer than
 // that re-writes its whole context, which costs far more than reading it (431k re-written ≈ 9% of the quota). A session
 // past IDLE_TOKENS idle over IDLE_MINUTES is braked the same way, once per idle stretch. WAYMARK_IDLE_TOKENS and
@@ -69,6 +71,7 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   const big = BRAKE_TOKENS && context >= BRAKE_TOKENS;
   const idle = IDLE_TOKENS && IDLE_MINUTES && context >= IDLE_TOKENS && idleMin > IDLE_MINUTES;
   if ((!big && !idle) || !String(hook.prompt || '').trim()) return null;
+  if (taskInProgress(hook.cwd || process.cwd(), hook.session_id)) return null; // mid-task, at any size: braked once it closes hecho
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const session = hook.session_id || 'unknown', k = `${Math.round(context / 1000)}k`;

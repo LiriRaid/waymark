@@ -16,10 +16,10 @@ import { found, unprepared, agentLabel, instructionsBlock } from './connect-agen
 import { proposals } from './learn.mjs';
 import { projectHome, readTaskRecords } from './provenance.mjs';
 import { stackLine } from './stack.mjs';
+import { read } from './lib/fs.mjs';
 
 const SKILLS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CORE = path.join(SKILLS, 'waymark');
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const len = (f) => { try { return f().length; } catch { return 0; } };
 export const tokens = (chars) => Math.round(chars / 4);
 

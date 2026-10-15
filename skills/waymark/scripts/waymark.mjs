@@ -43,13 +43,11 @@ import { claudeDir } from './agents/paths.mjs';
 import { engramBin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
+import { waymarkHome as HOME, norm } from './lib/paths.mjs';
+import { read, readJson } from './lib/fs.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const script = (name) => path.join(SCRIPTS, name).replace(/\\/g, '/');
-const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const section = (text, title) => {
   const m = text.match(new RegExp(`\\n## ${title}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];

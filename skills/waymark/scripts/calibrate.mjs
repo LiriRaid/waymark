@@ -12,8 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords } from './provenance.mjs';
+import { waymarkHome as HOME } from './lib/paths.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 export const pairsFile = () => path.join(HOME(), 'calibration.jsonl');
 export const readPairs = (model) => readRecords(pairsFile()).filter((p) => p.pct > 0 && p.total > 0 && (!model || p.model === model));
 

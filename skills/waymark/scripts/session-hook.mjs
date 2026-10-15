@@ -22,8 +22,10 @@ import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
 import { newProposals } from './learn.mjs';
+import { waymarkHome } from './lib/paths.mjs';
+import { read } from './lib/fs.mjs';
 
-const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
+const HOME = waymarkHome();
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const MAX = 2700; // characters of injected project memory, hard cap
 const STALE_DAYS = 14; // Work in progress entries older than this are flagged for confirmation
@@ -41,7 +43,6 @@ function fetchDue(root, now = Date.now()) {
   return true;
 }
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const section = (text, title) => {
   const m = text.match(new RegExp(`\\n## ${title}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];

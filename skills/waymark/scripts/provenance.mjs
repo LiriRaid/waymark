@@ -22,9 +22,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isPrompt, promptText } from './transcript.mjs';
 import { addNote, readNotes, noteSha, NOTES_REF, addAnchor, readAnchors, addLogLine, readLogLines, dropLogLines } from './notes.mjs';
+import { waymarkHome as HOME, norm } from './lib/paths.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
-const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 export const ID = /\b(20\d\d-\d\d-\d\d) · T(\d+)([a-z]?)\b/;
 
 // A hook's own failure never reaches the agent (a hook must not break the turn): it is appended to

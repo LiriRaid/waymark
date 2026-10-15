@@ -20,8 +20,9 @@ import { taskIds, saveSnapshot, markOpen, markTaskStart, taskInProgress, project
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
+import { waymarkHome } from './lib/paths.mjs';
 
-const HOME = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
+const HOME = waymarkHome();
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // where this install's skills live
 
 // Coexistence mode (~/.waymark/coexistence.md, waymark/references/coexistence.md) decides the reminder.

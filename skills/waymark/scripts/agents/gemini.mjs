@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readTail } from '../transcript.mjs';
+import { asQuestion as question, answerLine } from './lines.mjs';
 
 export const name = 'gemini';
 const HOME = () => process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
@@ -70,12 +71,12 @@ export function toLines(rows) {
       const a = c.args || {}, at = c.timestamp || ts, isError = /error|cancel/i.test(String(c.status || ''));
       const res = () => lines.push({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: c.id, is_error: isError, content: resultText(c.result).slice(0, 400) }] } });
       if (c.name === 'ask_user') {
-        const qs = (a.questions || []).map((q) => ({ question: String(q.question || q.header || '').trim(), options: (q.options || []).map((o) => ({ label: String(o?.label ?? o) })) }));
+        const qs = (a.questions || []).map((q) => question(q, { text: ['question', 'header'] }));
         assistant(at, [{ type: 'tool_use', name: 'AskUserQuestion', id: c.id, input: { questions: qs } }]);
         let picked = {};
         try { picked = JSON.parse(resultText(c.result).match(/\{\\?"answers\\?"\s*:\s*\{[^}]*\}\s*\}/)?.[0].replace(/\\"/g, '"') || '{}').answers || {}; } catch {}
         const answers = Object.fromEntries(qs.map((q, i) => [q.question, String(picked[i] ?? '')]).filter(([, v]) => v));
-        if (!isError && Object.keys(answers).length) lines.push({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: c.id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
+        if (!isError && Object.keys(answers).length) lines.push(answerLine(at, c.id, 'answered', { questions: qs, answers }));
         else res();
         continue;
       }

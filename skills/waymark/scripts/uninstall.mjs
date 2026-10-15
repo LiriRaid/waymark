@@ -13,19 +13,17 @@
 // Left for the user: the skills (~/.agents/skills and the links in ~/.claude/skills, INSTALL §10 step 2: this script lives
 // there), ~/.waymark (their memory) and the MCP servers (ask before removing any).
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { settingsFile, PLUGIN, withoutOwn } from './install-hooks.mjs';
 import { AGENTS, unknownAgents, stripWaymark } from './connect-agents.mjs';
+import { waymarkHome as HOME, slash } from './lib/paths.mjs';
+import { read as readText, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const BACKUPS = () => process.env.WAYMARK_BACKUPS || path.join(path.dirname(HOME()), '.waymark-backups');
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
-const slash = (p) => String(p).replace(/\\/g, '/');
+const read = (p) => readText(p, null);
 const OURS = /waymark[\\/]+scripts[\\/]+[\w-]+\.mjs/;
 const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 

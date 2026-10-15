@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readTail, clipOutput } from '../transcript.mjs';
+import { answerLine } from './lines.mjs';
 
 export const journalDir = (agent) => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), agent);
 const safe = (s) => String(s || 'unknown').replace(/[^\w.-]+/g, '_');
@@ -61,7 +62,7 @@ export function toLines(rows, tag = 'j') {
       asked.delete(id);
       if (question && !r.error) { // answered: the hook carries no answer, so the record says so
         const qs = question;
-        lines.push({ type: 'user', timestamp: r.at, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers: Object.fromEntries(qs.map((q) => [q.question, r.output || '(answered; the hook does not carry the answer)'])) } });
+        lines.push(answerLine(r.at, id, 'answered', { questions: qs, answers: Object.fromEntries(qs.map((q) => [q.question, r.output || '(answered; the hook does not carry the answer)'])) }));
         continue;
       }
       lines.push({ type: 'user', timestamp: r.at, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: !!r.error, content: clipOutput(String(r.error || r.output || '')) }] } });

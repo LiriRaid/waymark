@@ -15,8 +15,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KNOWN, USER, xdgConfig, agentDir } from './agents/paths.mjs';
+import { waymarkHome as HOME, slash } from './lib/paths.mjs';
+import { read } from './lib/fs.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const BACKUPS = () => process.env.WAYMARK_BACKUPS || path.join(path.dirname(HOME()), '.waymark-backups');
 const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 
@@ -57,8 +58,6 @@ export function unknownAgents() {
 export const POINTER = '<!-- waymark:pointer -->\nSi el proyecto tiene .waymark/, lee .waymark/tasks.md primero.\n<!-- /waymark:pointer -->';
 const REGISTRY = '## Connected agents (pointer only)';
 const registry = () => path.join(HOME(), 'agent.md');
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
-const slash = (p) => p.replace(/\\/g, '/');
 const BLOCK = /<!-- waymark:begin -->[\s\S]*?<!-- waymark:end -->/;
 const POINTER_RE = /\n*<!-- waymark:pointer -->[\s\S]*?<!-- \/waymark:pointer -->\n?/;
 // The text without Waymark's marked blocks (Rule 0 and the pointer), the rest as it was (uninstall.mjs).

@@ -2,6 +2,19 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.15 — one command classifier, an open failure, and no copies
+Every release since 2.0.7 patched a different testigo for a false ✘ or ⚠ (`docs/adr/0026`). This one removes the cause and the redundancy behind it.
+- **A regression corpus first.** `tests/corpus/` holds real turns (YaloAtiendo T1 and five waymark turns with a false ⚠) and `tests/corpus.test.mjs` replays them through `cierreGaps`. A fix lands with its case.
+- **One classifier for what a command runs: `scripts/runs.mjs`.** `commandKind` answers `copy`, `unknown`, `build`, `gate`, `test` or `aux`; the shell parsing (`shellSkeleton`, `shellRuns`, `mutatesFiles`, `changesProject`) moved there. The testigos no longer read a command's text with their own regex.
+- **Open failure.** A gate or test run the hook cannot place (a clean copy, a temp or scratch folder, a variable nothing assigns) is recorded as `apart`: never the judged gate, never a red test, never «a command after the last change failed». The hook blocks only on evidence it can read.
+- **Evidencia reads what a person writes.** A command with its quoted path, a short phrase one call holds together, `84/84` from «tests 84 … pass 84», a file name whose stem a call printed, a result stored as escaped JSON. Still a ⚠, never a block.
+- **`cierreGaps` split** into the observation of the turn (`observeTurn`, `observeBuild`, `observeEvidence`) and one function per testigo; `routine.json` says which apply.
+- **`scripts/lib/`.** One `norm`, `slash`, `waymarkHome`, `read`, `readJson`, `writeJson`, `git`, `sha` and the packed state, instead of ~40 copies in 19 scripts; no hook imports from another hook.
+- **`provenance.mjs` split** (900 lines, 63 exports) into `scripts/provenance/`: ids, secrets, project, chain, records, tasks, taskmd, decisions, snapshot. The file stays as the facade the 13 importers use; no cycles; a module exports only what another uses.
+- **`agents/lines.mjs`.** The choice-window question and its answer line, built once for the seven adapters.
+- Measured, nothing removed: `calibrate`, `statusline`, `skill-fit`, `mcp-fit` and `measure` add no context tokens (on-demand scripts); the user kept them.
+- 329 tests (306 → 329) and the corpus. No change of behavior in the splits.
+
 ## 2.0.14 — git holds what was done, why and what for
 In YaloAtiendo 2026-10-15, deleting `.waymark` (and the local notes the remote never had) lost the why of tasks T1–T4b. Only the commit messages were left. After this version, a clean reinstall resumes from git alone (`docs/adr/0012`, `0013` and `0025`, amended).
 - **Fix: notes the hook could not push.** In T4b, the hook's push of the notes failed («make sure you have the correct access rights»): its process had no credentials, while the same push worked from the agent's shell. It was only a note in the summary line. Now, after the record is written, the close **blocks once** and asks the agent to run `node waymark.mjs notes push` from its shell in each repo (new testigo `notes`). The next stop checks the tracking refs and says whether the notes reached the remote.

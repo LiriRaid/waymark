@@ -4,8 +4,8 @@
 // Offline, a few small file reads, 0 model tokens.
 import fs from 'node:fs';
 import path from 'node:path';
+import { read } from './lib/fs.mjs';
 
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const json = (p) => { try { return JSON.parse(read(p)); } catch { return null; } };
 
 const LOCKS = [['pnpm', 'pnpm-lock.yaml'], ['yarn', 'yarn.lock'], ['bun', 'bun.lockb'], ['bun', 'bun.lock'], ['npm', 'package-lock.json']];

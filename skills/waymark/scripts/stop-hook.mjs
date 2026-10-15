@@ -37,6 +37,7 @@ import { saveLearned, saveQuestion } from './engram.mjs';
 import { packedFiles } from './lib/packed.mjs';
 import { learn } from './learn.mjs';
 import { norm } from './lib/paths.mjs';
+import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 
 const exempt = (file) => {
   const f = norm(file), home = norm(os.homedir());
@@ -648,15 +649,18 @@ function cierreWitness(S) {
 
 // The conditions routine.json names in `when`, from what ran, never from words.
 function whenOf(S) {
-  const { code, committed, ctx, near, noBuild, observed, redTests, retried, skip, ui } = S;
+  const { changed, code, committed, ctx, level, near, noBuild, observed, redTests, retried, shellChange, skip, turn, ui } = S;
+  // review proportional to risk (routine.json risk, docs/adr/0027): L3, a sensitive path, or a big change blocks; a small one is recorded as omitted
+  const risk = reviewRisk({ code, changed, level, lines: editedLines(turn.tools, shellChange), cfg: loadRisk(ctx.root) });
   const when = {
+    riskyCode: risk.review,
     engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
     repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
     specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
     push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
   };
-  return { when };
+  return { when, risk };
 }
 
 // Testigo procedure: the owner department loaded and its procedures.md read.
@@ -729,7 +733,7 @@ function failsOf(S) {
 
 // The steps of the routine contract (waymark/routine.json): does each apply, did it pass, why not.
 function composeSteps(S) {
-  const { changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, renamed, reply, retried, when } = S;
+  const { changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, renamed, reply, retried, risk, when } = S;
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
@@ -770,7 +774,14 @@ function composeSteps(S) {
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
-  return { level, changed, reply, missing, findings, steps, dept, observed, renamed };
+  const omitted = omittedOf(S, steps);
+  return { level, changed, reply, missing, findings, steps, dept, observed, renamed, ...(omitted ? { omitted } : {}) };
+}
+
+// The review a small, plain change skips is recorded with its reason, so the record says why nothing blocked.
+function omittedOf(S, steps) {
+  const r = steps.find((s) => s.id === 'review');
+  return r && !r.applies && S.code.length && S.level >= 2 && !r.na ? { Review: `riesgo bajo (${S.risk.reason})` } : null;
 }
 
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
@@ -832,7 +843,7 @@ export function evaluate(gaps, usage, model = null, measured = null, links = nul
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
   // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
   const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
-  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, ...(links ? { links } : {}), model, ...quota };
+  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), ...(gaps.omitted ? { omitted: gaps.omitted } : {}), tokens: usage?.total || 0, ...split, ...(links ? { links } : {}), model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.

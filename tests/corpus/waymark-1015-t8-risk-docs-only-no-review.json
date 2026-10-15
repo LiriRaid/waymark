@@ -1,0 +1,81 @@
+{
+ "source": "synthetic · 2026-10-15 · T8",
+ "note": "a docs-only L2 has no code and needs no review (2.0.16 point 2)",
+ "synthetic": true,
+ "lines": [
+  {
+   "type": "user",
+   "uuid": "u0",
+   "timestamp": "2026-10-15T10:00:00Z",
+   "message": {
+    "role": "user",
+    "content": "arregla esto en el proyecto"
+   }
+  },
+  {
+   "type": "assistant",
+   "timestamp": "2026-10-15T10:01:00Z",
+   "message": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Waymark → L2 · dept-qa · skills: ninguna"
+     }
+    ]
+   }
+  },
+  {
+   "type": "assistant",
+   "timestamp": "2026-10-15T10:02:00Z",
+   "message": {
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "t1",
+      "name": "Skill",
+      "input": {
+       "skill": "dept-qa",
+       "args": "L2"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "assistant",
+   "timestamp": "2026-10-15T10:03:00Z",
+   "message": {
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "t2",
+      "name": "Edit",
+      "input": {
+       "file_path": "/work/proj/docs/guide.md",
+       "old_string": "a",
+       "new_string": "x"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "assistant",
+   "timestamp": "2026-10-15T10:04:00Z",
+   "message": {
+    "content": [
+     {
+      "type": "text",
+      "text": "## Cierre · 2026-10-15 · T1\nResultado: hecho\nEvidencia: inferida de la edición (check: léela)\nAprendido: cambio pequeño ← pedido; siguiente: nada."
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "absent": [
+   "no review ran"
+  ],
+  "present": []
+ }
+}

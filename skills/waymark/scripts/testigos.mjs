@@ -10,7 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
-import { stackOf, translate } from './stack.mjs';
+import { stackOf, translate, gateCell } from './stack.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
@@ -40,7 +40,8 @@ export function buildNone(memoryFile) {
 export function gateCommand(root, memoryFile) {
   const stack = stackOf(root);
   for (const [gate, cmd] of gateRows(memoryFile)) {
-    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd: translate(cmd, stack), from: 'memory.md' };
+    // the cell as it runs: a closing note such as "(not verified)" dropped (gateCell)
+    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd: translate(gateCell(cmd), stack), from: 'memory.md' };
   }
   let pkg = null;
   try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}

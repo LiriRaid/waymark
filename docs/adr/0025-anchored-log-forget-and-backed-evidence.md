@@ -16,11 +16,13 @@
 
   `verifyChain(records, notes, anchors)` checks each anchor since the last rewrite anchor. The line at `n` must still hold `hash`, or the chain breaks with `{ anchor: true }`. A log rewritten and chained again, or cut below an anchor, no longer passes.
 - **Anchors travel like the notes.** The same fetch glob (`refs/notes/waymark*`) brings them. `pushNotes` pushes both refs, and `unpushedNotes` counts both. `mergeNotes` joins the anchor notes line by line (`cat_sort_uniq`), so both sides' lines on one commit are kept.
+  - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): a third ref, `refs/notes/waymark-log`, holds the log lines with no commit (questions, tasks without one, confirmations), appended to a note on HEAD as they were chained. The same glob, push, count and line-by-line merge carry it. The chain and the anchors are unchanged: `verifyChain` still checks the local log; the `waymark-log` lines are a copy that a clone reads.
 - **`waymark.mjs forget`** is the way to remove what the user asks to remove: `forget "<task ID>" | --session <id> --reason "<why>"`. It shows the plan, and `--apply` writes it.
   - It removes exactly that task ID (a follow-up is named on its own) or every record of a session.
   - It chains the rest again and appends a rewrite anchor `{kind: "rewrite", n, hash, reason, removed, from: {n, hash}}`, so the removal shows in git instead of hiding. The anchors before it describe the log it replaced.
   - A reason is required. A task with a commit is refused, because its record is the commit's git note.
   - Removing every record leaves a rewrite anchor with `n: 0`, which checks nothing.
+  - Amended in 2.0.14 (the user's pick): forget also removes those lines from `refs/notes/waymark-log`, and the reader skips any line a rewrite anchor names in `removed`. A copy merged back from another clone or the remote therefore does not revive it. The remote keeps its copy until the next notes push.
 - **Testigo `evidence` (blocks once):** an Evidencia «observada» needs a check after the last change.
   - A check is a read, a search or a run, including a failing one, because it saw the state.
   - None of these is a check: an edit, a question, a skill load, a commit, an add, a push or a tag, or a call a hook or the user's permission stopped.

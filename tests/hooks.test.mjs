@@ -2197,6 +2197,62 @@ test('stop hook: when the agent pushes the task, its note goes to the same remot
   assert.match(gitT(repo, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/);
 });
 
+// ---- 2.0.14: git holds what was done, why and what for ----
+const stopRun = (name, lines, input) => {
+  const transcript = path.join(home, `t-${name}.jsonl`);
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, ...input }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  return JSON.parse(r.stdout || '{}');
+};
+const bareRemote = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-')); temps.push(d); gitT(d, 'init', '-q', '--bare'); return d; };
+
+test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => {
+  const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
+  const t = routine.testigos.find((x) => x.id === 'notes');
+  assert.ok(t && t.enforce === 'block' && t.when === 'push', 'a testigo of the catalog that blocks');
+  const remote = bareRemote(), repo = memRepo('notes-fail'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(repo, 'remote', 'add', 'origin', remote);
+  commitTask(repo, id);
+  gitT(repo, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', path.join(remote, 'no-access.git')); // the hook's process cannot push
+  const out = stopRun('notes-fail', [...l2Lines, ...ran('push1', 'git push origin HEAD:main')], { cwd: repo, session_id: 's-nf', last_assistant_message: cierre(id) });
+  assert.equal(out.decision, 'block', JSON.stringify(out));
+  assert.match(out.reason, /waymark\.mjs" notes push/);
+  assert.ok(out.reason.includes(path.basename(repo)), 'it names the repo');
+  assert.ok(readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0].note, 'the record is written before the block');
+  // the agent pushes them from its own shell; the next stop (after the block) checks the remote
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', remote);
+  const p = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'notes', 'push'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  const again = stopRun('notes-fail-2', [say('Subí los notes.'), ...ran('np', 'node waymark.mjs notes push')], { cwd: repo, session_id: 's-nf', stop_hook_active: true, last_assistant_message: 'Subí los notes.' });
+  assert.equal(again.decision, undefined, 'blocked once');
+  assert.match(again.systemMessage || '', /notas .*en origin/);
+});
+
+test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => {
+  const remote = bareRemote(), repo = memRepo('two-fe'), api = tmpRepo('two-api'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(api, 'remote', 'add', 'origin', remote);
+  const fe = commitTask(repo, id), apiSha = commitTask(api, id);
+  gitT(api, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  const lines = [...l2Lines, ...ran('c-api', `cd "${api}" && git commit -q -m "x"`), ...ran('p-api', `cd "${api}" && git push origin HEAD:main`)];
+  stopRun('two-repos', lines, { cwd: repo, session_id: 's-two', last_assistant_message: cierre(id) });
+  assert.equal(JSON.parse(readNotes(repo).get(fe) || '{}').id, id, 'the session repo');
+  assert.equal(JSON.parse(readNotes(api).get(apiSha) || '{}').id, id, 'the other repo of the task');
+  const stub = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0];
+  assert.deepEqual((stub.repos || []).map((r) => [path.basename(r.root), r.commits[0]]), [[path.basename(api), apiSha]], 'the stub names the other repo');
+  assert.match(gitT(api, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/, 'pushed where the agent pushed');
+});
+
+test('2.0.14 the remote of a push skips flags and refspecs, and a git error never carries a URL\'s credentials', async () => {
+  const { pushedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const { gitError } = await import(`file://${SCRIPTS}/provenance.mjs`);
+  const repo = tmpRepo('remote-word');
+  const remote = (command) => pushedRepos([{ name: 'Bash', id: 'x', input: { command } }], {}, repo).map((r) => r.remote);
+  assert.deepEqual([remote('git push --tags'), remote('git push --force-with-lease=x up main'), remote('git push HEAD:main'), remote('git push -u origin feat')], [['origin'], ['up'], ['origin'], ['origin']]);
+  assert.equal(gitError("fatal: unable to access 'https://bob:s3cret@github.com/a/b/': 403"), "fatal: unable to access 'https://***@github.com/a/b/': 403");
+});
+
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {
   const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
   const rows = Object.fromEntries(sizes(process.cwd()).map((r) => [r.name, r]));
@@ -2902,4 +2958,56 @@ test('commit trailer: a commit made in another repo with an earlier task\'s ID c
   fs.writeFileSync(path.join(api, 'b.ts'), '1\n'); gitT(api, 'add', '.');
   gitT(api, 'commit', '-q', '-m', 'x', '-m', `Waymark-Task: ${day} · T9`);
   assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
+});
+
+// 2.0.14: YaloAtiendo 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
+// was made in one call and run in another (PowerShell), failed on pnpm's own TTY check, and was judged the task's gate.
+const ranOut = (id, name, command, out, failed = false) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: { command } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: failed, content: out }] } }];
+test('2.0.14 a lint with warnings only passes; a run inside the clean copy is never the task\'s gate; the clean copy installs offline', async () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const head = [prompt('agrega reintentos'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE })];
+  const judge = (lines, extra = {}) => cierreGaps(currentTurn(lines), cierre(id), undefined, undefined, { ...ctx, ...extra });
+  const warned = 'src/a.spec.ts\n  68:17  warning  Unexpected any  @typescript-eslint/no-explicit-any\n\n✖ 1 problem (0 errors, 1 warning)\n\neslint exit 0';
+  const lint = [...head, ...ranOut('l1', 'Bash', 'pnpm exec eslint src/a.ts; echo "eslint exit $?"', warned)];
+  const g = judge(lint);
+  assert.equal(g.observed.gate?.ok, true, 'warnings only: the lint passed');
+  assert.deepEqual(g.missing.filter((m) => /failed/.test(m)), []);
+  const errors = judge([...head, ...ranOut('l2', 'Bash', 'pnpm exec eslint src/a.ts; echo "eslint exit $?"', '✖ 2 problems (1 error, 1 warning)\n\neslint exit 1')]);
+  assert.equal(errors.observed.gate?.ok, false, 'an error still fails');
+  const copy = [...lint, ...ranOut('w1', 'Bash', 'T="C:/tmp/sp/wt-clean" && git worktree add -q --detach "$T" HEAD && cd /c/work/proj && git worktree list', ''),
+    ...ranOut('w2', 'PowerShell', '$T = "C:\\tmp\\sp\\wt-clean"; Push-Location $T; pnpm exec eslint src/a.ts; "eslint exit $LASTEXITCODE"', '[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY\neslint exit 1')];
+  const c = judge(copy);
+  assert.match(c.observed.gate?.cmd || '', /^pnpm exec eslint src\/a\.ts; echo/, 'the gate stays the run in the repo');
+  assert.equal(c.observed.gate?.ok, true);
+  assert.equal(c.observed.worktree, true, 'the run inside the copy is the clean copy');
+  assert.deepEqual(c.missing.filter((m) => /failed/.test(m)), []);
+  // the repo's own path in that command is not the copy: a later gate in the repo is still the task's
+  const back = judge([...copy, ...ranOut('g9', 'Bash', 'cd /c/work/proj && npx tsc --noEmit', 'error TS2322: x', true)]);
+  assert.equal(back.observed.gate?.ok, false, 'a gate run in the repo after the copy is judged');
+  // a failing gate in a pnpm repo: the clean copy installs from the store, never through a junction
+  const failing = judge([...head, ...ran('g1', 'npx tsc --noEmit', true)], { copyInstall: 'pnpm install --offline --frozen-lockfile' });
+  assert.ok(failing.missing.some((m) => /pnpm install --offline --frozen-lockfile/.test(m) && /CI=true/.test(m) && /never a junction/.test(m)), failing.missing.join('\n'));
+  const { copyInstall, stackOf } = await import(`file://${SCRIPTS}/stack.mjs`);
+  const repo = tmpRepo('pnpm-copy');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));
+  assert.equal(copyInstall(stackOf(repo)), 'pnpm install --offline --frozen-lockfile');
+  assert.equal(copyInstall(null), null, 'not a Node repo: no install step');
+});
+
+test('2.0.14 a note in a gate\'s Command cell is not run: "(not verified)" is dropped; a subshell stays', async () => {
+  const repo = tmpRepo('gate-cell'), mem = path.join(repo, 'memory.md');
+  const table = (cmd) => fs.writeFileSync(mem, `# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | ${cmd} | |\n`);
+  table('pnpm exec tsc -p tsconfig.app.json --noEmit (not verified)');
+  assert.equal(gateCommand(repo, mem).cmd, 'pnpm exec tsc -p tsconfig.app.json --noEmit');
+  table('npx tsc --noEmit (sin verificar)');
+  assert.equal(gateCommand(repo, mem).cmd, 'npx tsc --noEmit');
+  table('cd api && (npm test)');
+  assert.equal(gateCommand(repo, mem).cmd, 'cd api && (npm test)', 'after an operator it is a subshell, not a note');
+  const { gateCell } = await import(`file://${SCRIPTS}/stack.mjs`);
+  assert.equal(gateCell('none (scripts Node sin paso de build)'), 'none (scripts Node sin paso de build)', 'a none row keeps its reason (the card shows it)');
+  const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'project-detection.md'), 'utf8');
+  assert.match(guide, /leave the \*Verified\* cell empty/, 'the bootstrap says where "not verified" goes');
 });

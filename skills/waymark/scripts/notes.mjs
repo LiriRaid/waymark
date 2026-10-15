@@ -3,7 +3,8 @@
 // verifyChain. Notes travel when the agent pushes (the end-of-turn hook pushes the notes ref to the same remote while it
 // has note commits the remote lacks) or with `waymark.mjs notes push`, and follow a rebased or amended commit
 // (repairNotes); a task committed later by another task gets its record as a note too (noteLateCommits). A clone
-// brings branches only: the session hook (ensureFetchSpec, in a repo with .waymark/) or `waymark.mjs notes setup` adds a
+// brings branches only: the session hook (ensureFetchSpec; in a repo without .waymark/ it also fetches, fetchNotes, and
+// rebuilds the memory from git) or `waymark.mjs notes setup` adds a
 // fetch refspec into a tracking ref, refs/notes/remotes/<remote>/waymark, so a fetch never overwrites notes not pushed
 // yet. The refspec is a glob (waymark*): a remote with no notes yet matches nothing, where an exact refspec would fail
 // every `git fetch` with "couldn't find remote ref";
@@ -12,11 +13,16 @@
 // (the log's length and its last hash; m names the log, so another clone's anchors are not checked against this one).
 // A rewrite of the log, even chained again, no longer matches them; `waymark.mjs forget` leaves a rewrite anchor instead.
 // The same refspec glob, push and merge carry them; their notes merge line by line (cat_sort_uniq).
+// What has no commit (a question, a task closed without one, a confirmation): its chained log line, whole, is appended
+// the same way to a note on HEAD under refs/notes/waymark-log, so a clone or a cleaned project still has it. The same
+// refspec, push and line-by-line merge carry it; `waymark.mjs forget` removes its lines (dropLogLines).
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 export const NOTES_REF = 'refs/notes/waymark';
 export const ANCHOR_REF = 'refs/notes/waymark-anchor';
+export const LOG_REF = 'refs/notes/waymark-log';
+const REFS = [NOTES_REF, ANCHOR_REF, LOG_REF];
 export const noteSha = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, timeout: 3000, maxBuffer: 32 * 1024 * 1024, ...opts });
 
@@ -54,20 +60,44 @@ export function readNotes(cwd, commits = null, ref = NOTES_REF) {
   return out;
 }
 
-// Appends one anchor line to HEAD's note under ANCHOR_REF. A repo with no commit yet has nothing to hold it. → true when written.
-export function addAnchor(cwd, entry) {
+// Appends one JSON line to HEAD's note under `ref`. A repo with no commit yet has nothing to hold it. → true when written.
+function appendLine(cwd, ref, entry) {
   if (git(cwd, ['rev-parse', '-q', '--verify', 'HEAD']).status !== 0) return false;
-  const add = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${ANCHOR_REF}`, 'append', '-F', '-', 'HEAD'], { input: JSON.stringify(entry), encoding: 'utf8' });
+  const add = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${ref}`, 'append', '-F', '-', 'HEAD'], { input: JSON.stringify(entry), encoding: 'utf8' });
   const r = add();
   if (r.status === 0) return true;
   return /identity|who you are|empty ident/i.test(r.stderr || '') && add(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']).status === 0;
 }
-
-// Every anchor line of the repo, from every commit's note (the blank lines `notes append` puts between them skipped).
-export function readAnchors(cwd) {
+// Every JSON line of the ref's notes, each with the commit that holds it (the blank lines `notes append` puts between
+// them skipped).
+function readLines(cwd, ref) {
   const out = [];
-  for (const [commit, text] of readNotes(cwd, null, ANCHOR_REF)) for (const line of text.split('\n')) { try { const a = JSON.parse(line); if (a && typeof a === 'object') out.push({ ...a, commit }); } catch {} }
+  for (const [commit, text] of readNotes(cwd, null, ref)) for (const line of text.split('\n')) { try { const a = JSON.parse(line); if (a && typeof a === 'object') out.push({ ...a, commit }); } catch {} }
   return out;
+}
+export const addAnchor = (cwd, entry) => appendLine(cwd, ANCHOR_REF, entry);
+export const readAnchors = (cwd) => readLines(cwd, ANCHOR_REF);
+// A log line with no commit of its own, on HEAD under LOG_REF. → true when written.
+export const addLogLine = (cwd, line) => appendLine(cwd, LOG_REF, line);
+// Every log line kept in git, without the commit that holds it (the log line as it was chained).
+export const readLogLines = (cwd) => readLines(cwd, LOG_REF).map(({ commit, ...line }) => line);
+
+// Removes the LOG_REF lines `drop` matches from every note that holds one (a note left empty is removed). → how many
+// lines were removed.
+export function dropLogLines(cwd, drop) {
+  let removed = 0;
+  for (const [commit, text] of readNotes(cwd, null, LOG_REF)) {
+    const lines = text.split('\n').filter((l) => l.trim());
+    const keep = lines.filter((l) => { try { return !drop(JSON.parse(l)); } catch { return true; } });
+    if (keep.length === lines.length) continue;
+    const write = (ident = []) => (keep.length
+      ? git(cwd, [...ident, 'notes', `--ref=${LOG_REF}`, 'add', '-f', '-F', '-', commit], { input: keep.join('\n\n'), encoding: 'utf8' })
+      : git(cwd, [...ident, 'notes', `--ref=${LOG_REF}`, 'remove', commit], { encoding: 'utf8' }));
+    let r = write();
+    if (r.status !== 0 && /identity|who you are|empty ident/i.test(r.stderr || '')) r = write(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']);
+    if (r.status === 0) removed += lines.length - keep.length;
+  }
+  return removed;
 }
 
 // A note left on a commit the branch no longer has (a rebase or amend rewrote it) is copied to the commit of the branch
@@ -121,12 +151,23 @@ export function noteLateCommits(cwd, records) {
   return added;
 }
 
-// Pushes the notes ref to a remote (default origin). With the fetch refspec, git moves the tracking ref too. → { ok, output }
+// Pushes the notes refs to a remote (default origin) and moves the tracking refs to what was pushed (git does it only
+// with the fetch refspec), so unpushedNotes knows without network that the remote has them. → { ok, output }
 export function pushNotes(cwd, remote = 'origin') {
-  const refs = [NOTES_REF, ANCHOR_REF].filter((ref) => refSha(cwd, ref));
+  const refs = REFS.map((ref) => [ref, refSha(cwd, ref)]).filter(([, sha]) => sha);
   if (!refs.length) return { ok: true, output: 'no notes' };
-  const r = git(cwd, ['push', remote, ...refs.map((ref) => `${ref}:${ref}`)], { encoding: 'utf8', timeout: 60000 });
+  const r = git(cwd, ['push', remote, ...refs.map(([ref]) => `${ref}:${ref}`)], { encoding: 'utf8', timeout: 60000 });
+  if (r.status === 0) for (const [ref, sha] of refs) git(cwd, ['update-ref', trackRef(remote, ref), sha]);
   return { ok: r.status === 0, output: `${r.stdout || ''}${r.stderr || ''}`.trim() };
+}
+
+// Fetches the notes refs into the tracking refs with a time limit and no prompt (a credential prompt would wait for
+// nobody). A remote with no notes yet answers "couldn't find remote ref": that is no failure. → { ok, output }
+export function fetchNotes(cwd, remote = 'origin', timeout = 60000) {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+  const f = git(cwd, ['fetch', remote, fetchSpec(remote)], { encoding: 'utf8', timeout, env });
+  const output = `${f.stdout || ''}${f.stderr || ''}`.trim() || (f.error ? `${f.error.code || f.error.message}` : '');
+  return { ok: f.status === 0 || /couldn't find remote ref/i.test(output), output };
 }
 
 // The remote's notes as last fetched or pushed: a ref of their own, never the local one.
@@ -140,10 +181,10 @@ export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--g
 // Joins the remote's notes (the tracking ref) into the local ref when the remote has note commits the local lacks.
 // A note both sides wrote on the same commit keeps the local one (strategy ours: its stub in the log hashes it).
 // → true when merged.
-// The anchors merge the same way, line by line (cat_sort_uniq): both sides' lines on one commit are kept.
+// The anchors and the log lines merge line by line (cat_sort_uniq): both sides' lines on one commit are kept.
 export function mergeNotes(cwd, remote = 'origin') {
   let merged = false;
-  for (const [ref, strategy] of [[NOTES_REF, 'ours'], [ANCHOR_REF, 'cat_sort_uniq']]) {
+  for (const [ref, strategy] of [[NOTES_REF, 'ours'], [ANCHOR_REF, 'cat_sort_uniq'], [LOG_REF, 'cat_sort_uniq']]) {
     const theirs = refSha(cwd, trackRef(remote, ref));
     if (!theirs) continue;
     const ours = refSha(cwd, ref);
@@ -156,11 +197,11 @@ export function mergeNotes(cwd, remote = 'origin') {
   return merged;
 }
 
-// Note commits of the local refs (task notes and anchors) the remote lacks (against the tracking refs, no network). → a
+// Note commits of the local refs (task notes, anchors and log lines) the remote lacks (against the tracking refs, no network). → a
 // count, 0 with no local notes, or null when it cannot be known (no tracking ref yet).
 export function unpushedNotes(cwd, remote = 'origin') {
   let total = 0;
-  for (const ref of [NOTES_REF, ANCHOR_REF]) {
+  for (const ref of REFS) {
     if (!refSha(cwd, ref)) continue;
     if (!refSha(cwd, trackRef(remote, ref))) return null;
     const r = git(cwd, ['rev-list', '--count', `${trackRef(remote, ref)}..${ref}`], { encoding: 'utf8' });
@@ -184,9 +225,8 @@ export function notesSetup(cwd, remote = 'origin') {
   if (!hasRemote(cwd, remote)) return { ok: false, added: false, merged: false, output: `no remote ${remote}` };
   const added = ensureFetchSpec(cwd, remote);
   if (!hasFetchSpec(cwd, remote)) return { ok: false, added: false, merged: false, output: 'git config failed' };
-  const f = git(cwd, ['fetch', remote, fetchSpec(remote)], { encoding: 'utf8', timeout: 60000 });
-  const output = `${f.stdout || ''}${f.stderr || ''}`.trim();
-  // a remote with no notes yet answers "couldn't find remote ref": the refspec stays for when it has them
-  if (f.status !== 0 && !/couldn't find remote ref/i.test(output)) return { ok: false, added, merged: false, output };
+  // a remote with no notes yet: the refspec stays for when it has them
+  const { ok, output } = fetchNotes(cwd, remote);
+  if (!ok) return { ok: false, added, merged: false, output };
   return { ok: true, added, merged: mergeNotes(cwd, remote), output };
 }

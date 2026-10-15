@@ -35,6 +35,17 @@ export function stackOf(root) {
   return { pm, pmVersion: declared?.[2] || null, from: declared ? 'package.json packageManager' : lock ? lock[1] : 'default', ...RUNNERS[pm], deps };
 }
 
+// The install for a clean copy (a git worktree) of a Node repo: from the package manager's store or cache, the lockfile
+// as is, no network. A link to the repo's node_modules is no clean copy, and pnpm purges a modules folder it did not
+// make (through a junction, the repo's own). → the command, or null outside Node.
+const COPY_INSTALL = { pnpm: 'pnpm install --offline --frozen-lockfile', npm: 'npm ci --prefer-offline --no-audit --no-fund', yarn: 'yarn install --frozen-lockfile --prefer-offline', bun: 'bun install --frozen-lockfile' };
+export const copyInstall = (stack) => COPY_INSTALL[stack?.pm] || null;
+
+// A Quality gates Command cell as it runs: a closing note in parentheses with no shell characters ("(not verified)",
+// "(sin verificar)") is dropped; one after an operator (`cd api && (npm test)`) is a subshell and stays, and so does the
+// reason of a `none (<why>)` row, which runs nothing.
+export const gateCell = (cmd) => (/^\s*none\b/i.test(String(cmd || '')) ? String(cmd).trim() : String(cmd || '').replace(/(?<![&|;(]\s*)\s+\([\p{L} ]+\)\s*$/u, '').trim());
+
 // Codex's Windows sandbox does not resolve the .CMD launchers in node_modules/.bin, so `pnpm exec` / `npx` fail there
 // ("not recognized") while `pnpm run` works: for that agent a package binary runs with node.
 export const directBins = (agent, platform = process.platform) => agent === 'codex' && platform === 'win32';

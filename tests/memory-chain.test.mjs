@@ -18,7 +18,7 @@ process.env.WAYMARK_AGENTS_HOME = home;
 process.env.WAYMARK_NO_GH = '1';
 const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
-const { appendRecord, projectHome, readTaskRecords, taskIds, tasksMarkdown } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { appendRecord, projectHome, readTaskRecords, taskIds, tasksMarkdown, readRecords, verifyChain, anchorsFor, forget } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const notes = await import(`file://${SCRIPTS}/notes.mjs`);
 const engram = await import(`file://${SCRIPTS}/engram.mjs`);
 const { questionRecord } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
@@ -40,6 +40,7 @@ const commit = (repo, id) => {
   return gitT(repo, 'rev-parse', 'HEAD').stdout.trim();
 };
 const day = new Date().toLocaleDateString('sv');
+const card = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ session_id: 's', cwd }), env: process.env, encoding: 'utf8' }).stdout || '{}').hookSpecificOutput?.additionalContext || '';
 const record = (id, sha, more = {}) => ({ id, agent: 'claude', at: new Date().toISOString(), session: 's', files: ['a.txt'], commits: [sha], prompt: `pedido ${id}`, cierre: `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada x\nAprendido: lección de ${id}`, evaluation: { score: '4/4', steps: {} }, ...more });
 // A bare remote, a repo that closed one task (its record a note) and pushed branch and notes, and a fresh clone.
 const pair = () => {
@@ -102,11 +103,8 @@ test('notes refspec: a remote with no notes yet never breaks git fetch; the old 
   assert.equal(notes.ensureFetchSpec(lone), false, 'no origin: nothing to add');
 });
 
-test('notes setup on its own: the session hook adds the refspec in a repo with Waymark memory and says it once; never in one without it', () => {
+test('notes setup on its own: the session hook adds the refspec in a repo with Waymark memory and says it once', () => {
   const { b, sha } = pair();
-  const card = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ session_id: 's', cwd }), env: process.env, encoding: 'utf8' }).stdout || '{}').hookSpecificOutput?.additionalContext || '';
-  assert.doesNotMatch(card(b), /fetches from origin now bring/, 'no .waymark/ here: the repo is left alone');
-  assert.equal(notes.hasFetchSpec(b), false);
   withMemory(b);
   assert.match(card(b), /fetches from origin now bring the task records/);
   assert.equal(notes.hasFetchSpec(b), true);
@@ -270,4 +268,80 @@ test('docs say what the code does: closed lines leave Work in progress (DONE_KEP
   for (const [name, text] of [['learning.md', learning], ['template', template], ['provenance.mjs', prov]]) assert.doesNotMatch(text, /newest 5/i, name);
   assert.match(prov, /DONE_KEPT = 0/);
   assert.match(learning, /follow-up/i);
+});
+
+// ---- 2.0.14: what has no commit rides in git too, and a clone starts from git ----
+const question = (answer, more = {}) => ({ kind: 'Q', agent: 'claude', at: new Date().toISOString(), session: 'sq', department: 'dept-devops', prompt: '¿cuál opción?', answer, ...more });
+
+test('2.0.14 Q and tasks without a commit append their log line to refs/notes/waymark-log; a clone reads them; forget reaches git', () => {
+  const { a, b, id } = pair();
+  appendRecord(a, question('las opciones A y C'));
+  const loose = `${day} · T2`;
+  appendRecord(a, record(loose, null, { commits: [], at: new Date(Date.now() + 1000).toISOString() }));
+  const log = readRecords(projectHome(a).log), lines = notes.readLogLines(a);
+  assert.deepEqual(lines.map((l) => l.kind || l.id), ['Q', loose], 'one line each, in order');
+  assert.deepEqual(lines.map((l) => l.hash), log.slice(1).map((r) => r.hash), 'the log lines as chained');
+  assert.ok(!lines.some((l) => l.id === id), 'a committed task is its note, not a log line');
+  assert.equal(verifyChain(log, notes.readNotes(a), anchorsFor(a)).ok, true, 'the chain and its anchors hold');
+  assert.equal(notes.pushNotes(a).ok, true);
+  assert.match(gitT(a, 'ls-remote', 'origin').stdout, /refs\/notes\/waymark-log/);
+  withMemory(b);
+  appendRecord(b, question('la opción B', { session: 'sb', at: new Date(Date.now() + 2000).toISOString() })); // the clone's own question, on the same HEAD
+  notes.notesSetup(b);
+  assert.deepEqual(notes.readLogLines(b).map((l) => l.answer || l.id).sort(), ['la opción B', 'las opciones A y C', loose].sort(), 'both sides kept, line by line');
+  const recs = readTaskRecords(projectHome(b));
+  assert.ok(recs.some((r) => r.kind === 'Q' && r.answer === 'las opciones A y C'), 'the other machine\'s question');
+  assert.equal(recs.filter((r) => r.answer === 'la opción B').length, 1, 'a line in the log and in git is one record');
+  assert.ok(recs.some((r) => r.id === loose));
+  assert.equal(taskIds(b).next, `${day} · T3`, 'an ID only in waymark-log is taken');
+  // forget: out of the log and of waymark-log; the clone that merged it skips it by the rewrite anchor
+  assert.ok(!forget(a, loose, { reason: 'el usuario lo pidió' }).error);
+  assert.ok(!notes.readLogLines(a).some((l) => l.id === loose), 'gone from git here');
+  assert.equal(notes.pushNotes(a).ok, true);
+  gitT(b, 'fetch', '-q', 'origin');
+  notes.mergeNotes(b);
+  assert.ok(!readTaskRecords(projectHome(b)).some((r) => r.id === loose), 'a merged copy does not bring it back');
+});
+
+test('2.0.14 a clone with no .waymark starts from git: the session hook adds the refspec, fetches, merges and rebuilds memory.md and tasks.md', () => {
+  const { a, b, id } = pair();
+  const open = `${day} · T2`, sha2 = commit(a, open);
+  appendRecord(a, record(open, sha2, { at: new Date(Date.now() + 1000).toISOString(), cierre: `## Cierre · ${open}\nResultado: parcial (falta el deploy)\nEvidencia: observada x\nAprendido: falta el deploy ← sin acceso al servidor` }));
+  appendRecord(a, question('las opciones A y C', { at: new Date(Date.now() + 2000).toISOString() }));
+  gitT(a, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  assert.equal(notes.pushNotes(a).ok, true);
+  gitT(b, 'pull', '-q', 'origin', 'main');
+  const text = card(b);
+  assert.match(text, /Rebuilt from git: .*memory\.md and tasks\.md/);
+  assert.equal(notes.hasFetchSpec(b), true, 'the refspec, with no .waymark');
+  const mem = fs.readFileSync(path.join(b, '.waymark', 'memory.md'), 'utf8');
+  assert.ok(mem.includes(`\n- ▶ [${open}] falta el deploy`), 'the open task\'s line');
+  assert.ok(!mem.includes(`[${id}]`), 'a task done leaves Work in progress');
+  assert.match(mem, /## Identity/, 'from the template, for the bootstrap to complete');
+  const tasks = fs.readFileSync(path.join(b, '.waymark', 'tasks.md'), 'utf8');
+  assert.match(tasks, new RegExp(`- ${open} · en curso · falta el deploy`));
+  assert.match(tasks, /las opciones A y C/, 'the question since the last close');
+  assert.match(text, new RegExp(`Last closed: ${open}`));
+  assert.doesNotMatch(card(b), /Rebuilt from git/, 'once: the next session has .waymark');
+});
+
+test('2.0.14 no notes in git: the trailer commits are the records, per task ID; a fetch that fails is said in one line', () => {
+  const base = tmp('trailers'), remote = path.join(base, 'remote.git'), c = path.join(base, 'c'), d = path.join(base, 'd');
+  gitT(base, 'init', '-q', '--bare', remote);
+  gitT(base, 'clone', '-q', remote, c);
+  fs.writeFileSync(path.join(c, 'a.txt'), '1');
+  gitT(c, 'add', 'a.txt'); gitT(c, 'commit', '-q', '-m', `feat: login con Google\n\nWaymark-Task: ${day} · T1`);
+  gitT(c, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(base, 'clone', '-q', '-b', 'main', remote, d);
+  gitT(d, 'remote', 'set-url', 'origin', path.join(base, 'gone.git')); // no fetch possible
+  const text = card(d);
+  assert.match(text, /Notes: the fetch from origin failed/);
+  const tasks = fs.readFileSync(path.join(d, '.waymark', 'tasks.md'), 'utf8');
+  assert.ok(tasks.includes(`| ${day} · T1 | solo commit | — | feat: login con Google |`), tasks);
+  // a repo with a note for one task and only a commit for another: both listed
+  const sha2 = commit(d, `${day} · T2`);
+  notes.addNote(d, sha2, JSON.stringify(record(`${day} · T2`, sha2)));
+  const recs = readTaskRecords(projectHome(d)).filter((r) => r.id);
+  assert.deepEqual(recs.map((r) => [r.id, !!r.fromCommit]), [[`${day} · T1`, true], [`${day} · T2`, false]]);
+  assert.equal(taskIds(d).next, `${day} · T3`);
 });

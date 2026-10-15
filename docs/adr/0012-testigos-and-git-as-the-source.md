@@ -37,6 +37,10 @@ The routine contract becomes the list of testigos that apply at each level. Step
 2. **3e-2: git as the source of truth.**
    - The commit says what was done.
    - The task's record (decisions, verdicts, tokens, time) is attached as a git note (`refs/notes/waymark`). `provenance.jsonl` keeps only what has no commit.
+     - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): git holds all of it. In YaloAtiendo, deleting `.waymark` lost the questions and the tasks with no commit, among them the user's approval of «las opciones A y C». It also lost the notes the hook had failed to push, and the API commits of 2026-10-15 · T4b had never had a note.
+       - What has no commit (a question, a task closed without a commit, a confirmation) keeps its whole line in the log, and that line, as chained, is appended to a note on HEAD under `refs/notes/waymark-log`.
+       - A task committed in several repos gets the same note on its newest commit with the trailer in each one. The record lists them in `repos`.
+       - With no log, `readTaskRecords` reads git: notes, `waymark-log` lines, and, for a task ID that no record holds, the commits with its `Waymark-Task` trailer (`fromCommit`, shown as «solo commit»). Such an ID counts as taken for a new task, and is still valid to close, since a task commits before its Cierre.
    - `tasks.md` is generated from git and the live task.
    - `memory.md` holds the live state (≤200 characters per task) and stable facts, written by the hook.
    - One index.
@@ -131,6 +135,10 @@ The hook's judgment was replayed, read-only, on the 6 tasks of the day: the Clau
 - **Red is measured from the spec:** the spec is written, then run before the next edit of code. Config and scaffolding made earlier by commands (`ng new`, installs, `pnpm-workspace.yaml`) are not the code it tests. The landing did test-first and was marked ✘.
   - Amended in 2.0.11 (2026-10-14, the user's picks): red is judged per spec. A spec that adds cases (a new spec, or a new `it()`/`test()` in one) must run before the next code edit after it was written; when code changed before it, that run must fail. A spec that only adjusts setup or mocks (a refactor) only has to pass. A spec the shell wrote (`cat > x.spec.ts <<EOF … && npm test`) counts as written in that call. YaloAtiendo 2026-10-14 · T2 wrote its two new specs that way and ran them red before any code, then fixed the mocks of two others after the code, and needed `Tests: no (…)` (⚠); it now passes ✔. The message names the specs left (`observed.tests.notRed`).
 - **Docs counts failed attempts, not failures:** a failure after a code change since the previous run of that command counts. A first red run of a new spec, a rerun with nothing changed, and a failure of the environment ("not recognized", "command not found") do not. Codex's sandbox failures and a red → fix → green loop were taken for blind retries.
+- **The clean copy, the lint and the gate cell** (amended in 2.0.14, 2026-10-15 · T3b, the user's picks). YaloAtiendo 2026-10-15 · T1 scored Verificar ✘ on three false failures:
+  - **A note in a Command cell.** The bootstrap wrote `… --noEmit (not verified)`, and the hook ran it. A closing note in parentheses with no shell characters is dropped (`gateCell`, stack.mjs); after an operator it is a subshell and stays. The bootstrap now says «not verified» is an empty *Verified* cell.
+  - **Lint warnings.** eslint's `✖ N problems` counts as a failure only with errors in it.
+  - **A run inside the clean copy.** A call naming the path a `git worktree add` of the task created runs in the clean copy, even from another shell with its own variable. It is never the task's gate or a failed test. In a Node repo the message gives the copy's install from the store (`copyInstall`: `pnpm install --offline --frozen-lockfile` with `CI=true`) and rules out a junction to the repo's `node_modules`, which pnpm purges through the link.
 - **The environment is no failed command:** Codex's `pnpm exec` "not recognized" was reported as "a command after the last change failed".
 After the fixes the replay keeps only the real ✘: Claude T3 Enrutar (the procedure read only after the block) and Codex T4 Tests (the HTML edited before its spec). The landing scores 10/10.
 
@@ -143,5 +151,6 @@ After the fixes the replay keeps only the real ✘: Claude T3 Enrutar (the proce
 - False ✘ from prose parsing disappear, and the agent writes less.
 - Context cost per session becomes bounded and measurable.
 - Records become portable with the repo (notes), so another clone or agent can read them. Notes need `git push origin refs/notes/waymark` to travel, an explicit step.
+  - Amended in 2.0.14: a push the hook's process cannot make (its shell may lack your git credentials) blocks once with `waymark.mjs notes push` for each repo (testigo `notes`, ADR 0013).
 - Old records migrate to notes, or are archived with the chain verified.
 - The order after 3e: the live Codex test, then step 4 (A/B against gentle-ai), then 3d (adapters).

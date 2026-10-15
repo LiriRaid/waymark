@@ -6,7 +6,7 @@ Part of the `waymark` core skill. Paths are relative to the core skill folder (`
 
 No project memory yet → create `<project>/.waymark/memory.md` **now** (`<project>` = the git root, or the folder itself when it has no git yet; the session hook names the exact path), before the task, from `templates/project-memory.template.md`. The folder is local: the end-of-turn hook adds `.waymark/` to the project's `.gitignore` and writes its `README.md` and `tasks.md` (docs/adr/0007). Fill only what one quick look gives:
 - *Identity*: stack and version from the manifest; architecture from the folder signals below (or "unknown").
-- *Quality gates*: commands from the project's own `AGENTS.md` / `CLAUDE.md` / README, else the manifest scripts (`package.json` scripts, `Makefile`, `composer.json`…); mark them *not verified*.
+- *Quality gates*: commands from the project's own `AGENTS.md` / `CLAUDE.md` / README, else the manifest scripts (`package.json` scripts, `Makefile`, `composer.json`…). The *Command* cell holds the command only, since the hook runs it as written. Not verified yet → leave the *Verified* cell empty (the hook dates it once the gate passes).
 - *Work in progress*: empty; the end-of-turn hook writes one line per task from its Cierre (`- ✔|▶ [<task ID>] …`, ≤200 characters).
 - Add the row to `~/.waymark/projects.md`.
 

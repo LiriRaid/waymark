@@ -4,7 +4,8 @@
 // agent: same script with `--agent <name>`). Runs locally; it injects once per session a compact digest of what the
 // agent must recall: this machine's Environment and the current project's memory (Work in progress, the latest learned
 // memories from engram (docs/adr/0015)
-// symptoms, Quality gates) with the pointer to .waymark/tasks.md. Missing project memory → a one-line instruction.
+// symptoms, Quality gates) with the pointer to .waymark/tasks.md. Missing project memory → a one-line instruction, unless
+// git holds the project's records: then memory.md and tasks.md are rebuilt from them first (docs/adr/0013).
 // With ~/.waymark/coexistence.md it also injects that file's rules (the agent must obey them). Offers, syncs and the
 // update check are `waymark.mjs check` (docs/adr/0008): this hook only adds one line pointing to it when the last
 // check is older than a week (at most once a week). It never blocks. Remove it from the agent's settings to disable it.
@@ -12,11 +13,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, logHookError, PROBE_OK } from './provenance.mjs';
-import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec } from './notes.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -29,6 +30,16 @@ const STALE_DAYS = 14; // Work in progress entries older than this are flagged f
 const MAX_COEXIST = 1800; // characters of injected coexistence rules, hard cap
 const WEEK = 7 * 86400000;
 export const CHECK_STATE = path.join(HOME, '.check.json'); // { checkedAt } written by waymark.mjs check, { pointedAt } here
+const FETCH_MS = 5000; // the notes fetch of a repo with no .waymark/: short, so the session never waits on the network
+const FETCH_STATE = path.join(HOME, '.notes-fetch.json'); // { <repo root>: last attempt } of that fetch, at most once a day
+// A repo with no .waymark/ fetches the remote's notes when its refspec was just added, else at most once a day.
+function fetchDue(root, now = Date.now()) {
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(FETCH_STATE, 'utf8')) || {}; } catch {}
+  if (now - (st[root] || 0) < 86400000) return false;
+  try { fs.mkdirSync(HOME, { recursive: true }); fs.writeFileSync(FETCH_STATE, JSON.stringify({ ...st, [root]: now })); } catch {}
+  return true;
+}
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const section = (text, title) => {
@@ -82,7 +93,7 @@ export function digest(cwd, agentName = 'claude') {
   const line = stackLine(home.root, { direct });
   if (line) out.push(`Repo (read now): ${line}`);
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
-    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack, { root: home.root, direct })}`);
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
@@ -153,15 +164,25 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     cwd = h.cwd || cwd; sessionId = h.session_id || null;
     let text = '', held = '';
     // the remote's records a fetch brought (the refspec of `waymark.mjs notes setup`) join the local notes before the card
-    // a repo with Waymark memory gets the refspec on its own, once (no network; the next fetch brings the records)
-    let joined = false, added = false;
+    // a repo with Waymark memory gets the refspec on its own, once (no network; the next fetch brings the records); one
+    // without .waymark/ (a clone, a cleaned project) also fetches them now, short and without prompts, and rebuilds
+    // memory.md and tasks.md from what git holds
+    let joined = false, added = false, rebuilt = 0, failed = '';
     try {
       const home = projectHome(cwd), root = home.root;
-      added = !!home.dir && !home.legacy && fs.existsSync(home.dir) && ensureFetchSpec(root);
+      const bare = !!home.dir && !home.legacy && !fs.existsSync(home.dir);
+      if (bare && hasRemote(root)) {
+        added = ensureFetchSpec(root);
+        if ((added || fetchDue(root)) && hasFetchSpec(root)) { const f = fetchNotes(root, 'origin', FETCH_MS); if (!f.ok) failed = gitError(f.output); }
+      } else added = !!home.dir && !home.legacy && fs.existsSync(home.dir) && ensureFetchSpec(root);
       joined = hasFetchSpec(root) && mergeNotes(root);
+      if (bare) rebuilt = rebuildFromGit(home);
     } catch (e) { logHookError('session-hook notes', e); }
     try {
-      text = CARD_HEAD + digest(cwd, agent.name);
+      text = CARD_HEAD;
+      if (rebuilt) text += `Rebuilt from git: .waymark/memory.md and tasks.md from ${rebuilt} records (notes, waymark-log, trailer commits); complete Identity and Quality gates in memory.md (Minimal bootstrap).\n`;
+      if (failed) text += `Notes: the fetch from origin failed (${failed}); the records here are the local ones. Run waymark.mjs notes setup from your shell.\n`;
+      text += digest(cwd, agent.name);
       if (added) text += '\nNotes: fetches from origin now bring the task records (one fetch refspec added to .git/config).';
       if (joined) text += '\nNotes: the records the remote brought joined the local ones (git notes merge).';
       // a note a rebase or amend left on the old commit follows the task to its new commit

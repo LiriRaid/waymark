@@ -28,7 +28,8 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd } from './runs.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
@@ -374,22 +375,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     return result(t)?.error || t.error ? (i === all.length - 1 ? false : null) : all.slice(i, -1).every((p) => p.sep === '&&') ? true : null;
   };
   const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && FAIL_OUT.test(output(t))); };
-  // The clean copies (git worktree) the task made: the path each `git worktree add` names (its first word after the
-  // flags, or the value of the variable it names, assigned in the same command), and the calls that run in one: the one
-  // that adds it, or a later one naming that path (another shell, its own variable). A run there shows a failure is not
-  // this task's, or a spec red first; it is never the task's gate.
-  const slash = (s) => String(s).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').replace(/\/+$/, '').toLowerCase();
-  const copyPath = (cmd) => {
-    const words = (cmd.match(/git\s+worktree\s+add\s+(.*)/)?.[1] || '').split(/\s+/);
-    let target = null;
-    for (let i = 0; i < words.length && !target; i++) { if (/^-[bB]$/.test(words[i])) i++; else if (!words[i].startsWith('-')) target = words[i]; }
-    target = String(target || '').replace(/^["']|["']$/g, '');
-    const name = target.match(/^\$\{?(\w+)\}?$/)?.[1];
-    if (name) target = cmd.match(new RegExp(`\\$?${name}\\s*=\\s*["']?([^"';&|\\s]+)`))?.[1] || '';
-    return /^(?:[A-Za-z]:[\\/]|\/)/.test(target) ? slash(target) : null;
-  };
-  const copies = [...new Set(allTools.filter((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))).map((t) => copyPath(cmdOf(t))).filter((p) => p && p.length >= 8))];
-  const inCopy = (t) => shell(t) && (/git\s+worktree\s+add/.test(cmdOf(t)) || copies.some((p) => slash(cmdOf(t)).includes(p)));
+  // The clean copies (git worktree) the task made, and the calls that run in one (runs.mjs): a run there shows a failure is
+  // not this task's, or a spec red first; it is never the task's gate.
+  const copies = copyPaths(allTools.filter(shell).map(cmdOf));
+  const inCopy = (t) => shell(t) && inCopyCmd(cmdOf(t), copies);
   // Test-first, per spec: a spec that adds cases (a new spec, or a new it()/test() in one) runs before the next code edit
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.

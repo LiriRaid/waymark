@@ -48,3 +48,12 @@ test('open failure: a gate or test run from a temp folder or an unknown place is
   assert.ok(R.apart('Push-Location $x; npm test') && R.apart('T=/tmp/c && git worktree add "$T" HEAD && cd "$T" && npm test'));
   assert.ok(!R.apart('npm test') && !R.apart('node scripts/helper.mjs'));
 });
+
+test('review fixes: Pop-Location ends the temp place; temp/ and $TEMPLATE_DIR are the project', () => {
+  assert.equal(R.commandKind('Push-Location $T; npm test; Pop-Location; pnpm exec tsc --noEmit'), 'gate', 'the typecheck after Pop-Location is the project\'s');
+  assert.equal(R.commandKind('cd /tmp/c && npm test && cd - && npx tsc'), 'gate');
+  assert.equal(R.commandKind('cd temp/app && npm test'), 'test', 'a relative temp/ folder is the project');
+  assert.equal(R.commandKind('cd "$TEMPLATE_DIR" && npx tsc'), 'unknown', 'not assigned here: unknown, never temp');
+  assert.equal(R.commandKind('cd /tmp/c && npm test'), 'copy');
+  assert.equal(R.commandKind('cd "$TMPDIR/x" && npm test'), 'copy');
+});

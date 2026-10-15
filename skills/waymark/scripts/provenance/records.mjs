@@ -7,12 +7,12 @@ import { projectHome } from './project.mjs';
 import { closeKey, gitNote, lineKey, readLog, readRecords, recordName } from './chain.mjs';
 
 // In date order; records without a date, and ties, keep their order.
-export const byDate = (list) => list.map((r, i) => [r, i]).sort(([a, i], [b, j]) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0) || i - j).map(([r]) => r);
+const byDate = (list) => list.map((r, i) => [r, i]).sort(([a, i], [b, j]) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0) || i - j).map(([r]) => r);
 
 // The task records that live only as notes (a clone, another machine, a log started over): every note whose close
 // (ID + session) has no line in `records`, one per close (a rebase copies a note), each with `fromNote: <commit>`.
 // Not chained: git hashes them.
-export function noteOnly(notes, records) {
+function noteOnly(notes, records) {
   const inLog = new Set(records.filter((r) => r.id).map(closeKey)), out = new Map();
   for (const [commit, text] of notes) {
     let r = null;
@@ -25,7 +25,7 @@ export function noteOnly(notes, records) {
 
 // The lines rewrite anchors removed: by their key (with the session, so another machine's task with the same ID stays),
 // or by name for an anchor that has no keys.
-export const forgotten = (root) => {
+const forgotten = (root) => {
   const keys = new Set(), names = new Set();
   for (const a of readAnchors(root).filter((x) => x.kind === 'rewrite')) for (const k of a.keys || a.removed || []) (a.keys ? keys : names).add(k);
   return (r) => keys.has(lineKey(r)) || names.has(recordName(r));
@@ -34,8 +34,8 @@ export const forgotten = (root) => {
 // The task IDs of the commits' `Waymark-Task` trailers (the last 500 of HEAD) that no record holds: one record each from
 // its commits (newest first) and the newest commit's message, `fromCommit` set. The log is read once per HEAD (the hooks
 // read the records several times a turn). → records
-export const trailerCache = new Map();
-export function trailerRecords(root, known) {
+const trailerCache = new Map();
+function trailerRecords(root, known) {
   const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 1500 });
   if (head.status !== 0) return [];
   const key = `${root}|${head.stdout.trim()}`;
@@ -59,7 +59,7 @@ export function trailerRecords(root, known) {
 
 // What git holds that the log lacks: records that are only notes, log lines kept in git (not those forget removed), and
 // the trailer IDs no record holds. Not chained: git hashes them.
-export function gitOnly(root, records, notes) {
+function gitOnly(root, records, notes) {
   const only = noteOnly(notes, records);
   const seen = new Set([...records, ...only].map(lineKey)), gone = forgotten(root);
   const logged = readLogLines(root).filter((r) => !gone(r) && !seen.has(lineKey(r)) && seen.add(lineKey(r)));

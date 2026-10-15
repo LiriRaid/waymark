@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { waymarkHome as HOME } from '../lib/paths.mjs';
 import { sha } from '../lib/hash.mjs';
 
-export const fileSha = (p) => { try { return sha(fs.readFileSync(p)).slice(0, 16); } catch { return null; } };
+const fileSha = (p) => { try { return sha(fs.readFileSync(p)).slice(0, 16); } catch { return null; } };
 
 // What the task was built with, from the turn's transcript lines (from its prompt on) and the instruction files.
 export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir(), '.claude', 'CLAUDE.md')) { // the agent adapter names its file
@@ -73,9 +73,9 @@ export function snapshotDiff(before, after) {
 // `others`: the snapshots of other repos, each taken by the pre-tool hook before the first shell command that changes
 // files there. `paused`: the turn ended asking the user (a task in progress), so the next prompt keeps this snapshot and
 // the turn that resumes the task still sees what the paused one changed.
-export const snapFile = () => path.join(HOME(), '.turn-snapshot.json');
-export const readSnaps = () => { try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8')) || {}; } catch { return {}; } };
-export const writeSnaps = (all) => {
+const snapFile = () => path.join(HOME(), '.turn-snapshot.json');
+const readSnaps = () => { try { return JSON.parse(fs.readFileSync(snapFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeSnaps = (all) => {
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(snapFile(), JSON.stringify(all));

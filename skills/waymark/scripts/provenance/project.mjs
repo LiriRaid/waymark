@@ -18,7 +18,7 @@ export function logHookError(where, err) {
   } catch {}
 }
 
-export const slugOf = (dir) => (path.basename(norm(dir)) || 'project').replace(/[^a-z0-9._-]+/g, '-');
+const slugOf = (dir) => (path.basename(norm(dir)) || 'project').replace(/[^a-z0-9._-]+/g, '-');
 
 // The pre-0007 memory file whose `Path:` holds cwd (longest match), skipping files already migrated (`Moved:`).
 export function legacyMemory(cwd) {
@@ -35,7 +35,7 @@ export function legacyMemory(cwd) {
   return best ? { slug: best.f.slice(0, -3), file: path.join(dir, best.f), root: best.root } : null;
 }
 
-export const gitTop = (cwd) => { try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } };
+const gitTop = (cwd) => { try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } };
 
 // The one resolver of a project's Waymark state (docs/adr/0007). → { root, slug, dir, memory, tasks, log, legacy, legacyFile? }
 // 1. The nearest <dir>/.waymark/memory.md walking up from cwd (the home folder itself is skipped: ~/.waymark is Waymark's).
@@ -108,7 +108,7 @@ export function ensureLocal(home) {
   return true;
 }
 
-export const README = `# .waymark: this project's Waymark memory (local, not committed)
+const README = `# .waymark: this project's Waymark memory (local, not committed)
 
 Any agent (Claude Code, Codex, Cursor, a new session) resumes the work from this folder:
 

@@ -48,7 +48,7 @@ export function decisionsIn(lines) {
 // Decisions as the chained log keeps them: the picked labels, and a free-text answer as written, at most 200
 // characters, with passwords, tokens, keys, URL credentials and e-mail addresses masked (a chained record cannot be
 // edited later).
-export const answerText = (s) => clip(maskSecrets(s).replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[correo]'), 200);
+const answerText = (s) => clip(maskSecrets(s).replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[correo]'), 200);
 export function recordedDecisions(decisions = []) {
   return (decisions || []).map((d) => {
     if (!d.labels) return d; // built by hand (tests, older callers): no options known; decisionsIn always sets them

@@ -66,9 +66,9 @@ export function taskStart(records, session, id) {
 // The task's start, per session (~/.waymark/.task-starts.json): marked by the per-prompt hook at the task's first prompt
 // (a later prompt of the same task keeps it), cleared by the end-of-turn hook when a task closes and when a turn ends
 // with no task (a question, L0). Without it a session's first task was read from its last 3 prompts only.
-export const startsFile = () => path.join(HOME(), '.task-starts.json');
-export const readStarts = () => { try { return JSON.parse(fs.readFileSync(startsFile(), 'utf8')) || {}; } catch { return {}; } };
-export const writeStarts = (all) => {
+const startsFile = () => path.join(HOME(), '.task-starts.json');
+const readStarts = () => { try { return JSON.parse(fs.readFileSync(startsFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeStarts = (all) => {
   for (const [k, at] of Object.entries(all)) if (Date.now() - at > 7 * 86400000) delete all[k];
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(startsFile(), JSON.stringify(all));

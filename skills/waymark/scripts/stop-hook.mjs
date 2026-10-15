@@ -241,10 +241,11 @@ export function effectiveReply(texts = [], last = '') {
 // A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
 export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').replace(/\*\*|__/g, '')) && closingQuestions(reply).length > 0;
 
-// The facts an Evidencia cites: `backticks`, and outside them 84/84, exit 0, a commit or blob hash.
+// The facts an Evidencia cites: `backticks`, and outside them 84/84, exit 0, a commit or blob hash. A chain of three or
+// more numbers (29/86/326/15/1: counts, a date) is not a pass/total.
 export function evidenceFacts(text) {
   const s = String(text || ''), out = [...s.matchAll(/`([^`\n]{2,160})`/g)].map((m) => m[1].trim());
-  for (const m of s.replace(/`[^`\n]*`/g, ' ').matchAll(/\b\d+\/\d+\b|\bexit(?: code)? \d+\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi)) out.push(m[0]);
+  for (const m of s.replace(/`[^`\n]*`/g, ' ').matchAll(/\b(?<!\/)\d+\/\d+\b(?!\/)|\bexit(?: code)? \d+\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi)) out.push(m[0]);
   return [...new Set(out)];
 }
 
@@ -500,13 +501,16 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   }
   const near = code.length ? specsNear(code) : null;
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
-  // Testigo build: a build that passed (exit 0, or no failure in its output when its exit is another part's), after the
-  // last code change, in the repo of each changed code file (known only for files and folders on disk).
-  const builds = lastCode < 0 ? [] : turn.tools.slice(lastCode + 1).filter((t) => runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))));
+  // Testigo build: a build that passed (exit 0, or no failure in its output when its exit is another part's) in the repo of
+  // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
+  // an unknown one matches any build; a code change by shell names no repo and counts for every repo.
   const repoAt = ctx.repoOf || repoOf;
-  const buildRepos = builds.map((t) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd); });
-  const codeRepos = code.map((f) => repoAt(path.dirname(f)));
-  const buildAfter = builds.length > 0 && (!ctx.cwd || [...buildRepos, ...codeRepos].some((r) => !r) || codeRepos.every((r) => buildRepos.includes(r)));
+  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
+    .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
+  const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
+  const lastIn = (r) => lastIdx((t) => shellChange(t) || (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && repoAt(path.dirname(fileOf(t))) === r));
+  const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastCode : last) && (!b.repo || !r || b.repo === r)); };
+  const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastCode));
   const when = {
     engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed

@@ -2,6 +2,16 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.14 — git holds what was done, why and what for
+In YaloAtiendo 2026-10-15, deleting `.waymark` (and the local notes the remote never had) lost the why of tasks T1–T4b. Only the commit messages were left. After this version, a clean reinstall resumes from git alone (`docs/adr/0012`, `0013` and `0025`, amended).
+- **Fix: notes the hook could not push.** In T4b, the hook's push of the notes failed («make sure you have the correct access rights»): its process had no credentials, while the same push worked from the agent's shell. It was only a note in the summary line. Now, after the record is written, the close **blocks once** and asks the agent to run `node waymark.mjs notes push` from its shell in each repo (new testigo `notes`). The next stop checks the tracking refs and says whether the notes reached the remote.
+- **Fix: a task in two repos had a note in one.** The API commits of T4b carried `Waymark-Task` and got no note. Now the record is a note on the task's newest commit in each repo where it committed (`repos` on the record). The notes are pushed in each repo the turn pushed, to the remote each push named.
+- **What has no commit is in git.** A question (`kind: "Q"`), a task closed without a commit and a confirmation lived only in `provenance.jsonl`; the user's «las opciones A y C» was lost that way. Now each line, as chained, is appended to a note on HEAD under `refs/notes/waymark-log`. The same refspec glob, push and line-by-line merge carry it. `forget` removes its lines there too, and a copy merged back is skipped by the rewrite anchor.
+- **A clone or a cleaned project starts from git.** In a repo with no `.waymark/`, the session hook adds the fetch refspec and fetches the notes. The fetch has 5 s, no credential prompt, and runs at most once a day while the repo has no `.waymark/`. The hook then merges the notes and rebuilds `.waymark/memory.md` (*Work in progress* from the records) and `tasks.md`.
+  - With no record for a task ID, its `Waymark-Task` commits stand in: «solo commit», with the commit's message. Such an ID is taken for new tasks and still valid to close.
+  - A fetch that fails is one line on the card.
+- The instructions block quotes the new claim and stays under 6,500 characters.
+
 ## 2.0.13 — a build per repo, and counts are not results
 - **Fix: Build ✗ on a task that built every repo.** The Build testigo counted only the builds after the turn's last code change and wanted one per repo with changed code. YaloAtiendo 2026-10-15 · T3 changed the API and the front, built both (exit 0), then wrote only the front's `main.spec.ts` and rebuilt only the front. The API had not changed since its build, yet the task scored Build ✗.
 - Now each repo needs a build that passed after the last code change **in that repo**. A code change made from the shell names no repo, so it still counts for every repo; a build or file whose repo is unknown matches any, as before (`docs/adr/0020`, amended).

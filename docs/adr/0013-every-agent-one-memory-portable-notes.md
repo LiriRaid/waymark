@@ -34,6 +34,11 @@ After the 3e tests, three gaps kept Waymark from being one supply chain:
 
 **Notes that travel and survive.**
 - **With the push:** when the agent pushes the task, the end-of-turn hook pushes `refs/notes/waymark` to the same remote. Pushing at all is the user's request. A failure is reported, never forced.
+  - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): a failure is no longer only reported. In YaloAtiendo 2026-10-15 · T4b, the hook's push failed with «make sure you have the correct access rights», because its process had no credentials. The same push worked from the agent's shell. The summary line said so, and nobody ran the command.
+    - The hook pushes the notes in **each repo the turn pushed** (`cd <repo> && git push`, `git -C <repo> push`), to the remote each push named.
+    - **Testigo `notes`** (`routine.json`, enforce `block`): when a push fails, the close blocks once, after the record is written, and asks for `cd "<repo>" && node waymark.mjs notes push` from the agent's shell in each repo. It is judged after the record, because the hook pushes once the record is a note, so it is not in that record's score.
+    - The next stop checks the tracking refs, without network (`pushNotes` moves them to what it pushed), and says in the summary whether the notes are on the remote.
+- **Starting from git** (amended in 2.0.14, the user's picks): in a repo with no `.waymark/` (a clone, a cleaned project), the session hook adds the fetch refspec and fetches the notes. The fetch has 5 s, no credential prompt (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`), and runs at most once a day while the repo has no `.waymark/`. The hook merges the notes and, when git holds records, rebuilds `.waymark/memory.md` from the template, with *Work in progress* replayed from the records, and `tasks.md`. A fetch that fails is one line on the card; the rebuild then uses what git has locally.
 - **After a rebase or amend:** at session start, one `git log` of HEAD finds each task whose note sits on a commit the branch no longer has. It copies that note to the branch's commit carrying the same `Waymark-Task`. The note is copied, not moved, so the chained stub still matches. Git's config is never changed.
 
 ### After the API/FE work (2026-10-05 · T14, the user's picks)

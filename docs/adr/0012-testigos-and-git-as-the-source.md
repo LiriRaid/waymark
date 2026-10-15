@@ -37,6 +37,10 @@ The routine contract becomes the list of testigos that apply at each level. Step
 2. **3e-2: git as the source of truth.**
    - The commit says what was done.
    - The task's record (decisions, verdicts, tokens, time) is attached as a git note (`refs/notes/waymark`). `provenance.jsonl` keeps only what has no commit.
+     - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): git holds all of it. In YaloAtiendo, deleting `.waymark` lost the questions and the tasks with no commit, among them the user's approval of «las opciones A y C». It also lost the notes the hook had failed to push, and the API commits of 2026-10-15 · T4b had never had a note.
+       - What has no commit (a question, a task closed without a commit, a confirmation) keeps its whole line in the log, and that line, as chained, is appended to a note on HEAD under `refs/notes/waymark-log`.
+       - A task committed in several repos gets the same note on its newest commit with the trailer in each one. The record lists them in `repos`.
+       - With no log, `readTaskRecords` reads git: notes, `waymark-log` lines, and, for a task ID that no record holds, the commits with its `Waymark-Task` trailer (`fromCommit`, shown as «solo commit»). Such an ID counts as taken for a new task, and is still valid to close, since a task commits before its Cierre.
    - `tasks.md` is generated from git and the live task.
    - `memory.md` holds the live state (≤200 characters per task) and stable facts, written by the hook.
    - One index.
@@ -143,5 +147,6 @@ After the fixes the replay keeps only the real ✘: Claude T3 Enrutar (the proce
 - False ✘ from prose parsing disappear, and the agent writes less.
 - Context cost per session becomes bounded and measurable.
 - Records become portable with the repo (notes), so another clone or agent can read them. Notes need `git push origin refs/notes/waymark` to travel, an explicit step.
+  - Amended in 2.0.14: a push the hook's process cannot make (its shell may lack your git credentials) blocks once with `waymark.mjs notes push` for each repo (testigo `notes`, ADR 0013).
 - Old records migrate to notes, or are archived with the chain verified.
 - The order after 3e: the live Codex test, then step 4 (A/B against gentle-ai), then 3d (adapters).

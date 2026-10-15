@@ -28,10 +28,10 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, PROBE_OK } from './provenance.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity } from './stack.mjs';
-import { pushNotes, noteLateCommits, shouldPushNotes } from './notes.mjs';
+import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { saveLearned, saveQuestion } from './engram.mjs';
 import { packedFiles } from './tool-hook.mjs';
 import { learn } from './learn.mjs';
@@ -85,20 +85,73 @@ export function turnCommits(tools, cwd, claimed, ids, since = 0) {
   return [...new Set(commitsSince(new Set([path.resolve(cwd), ...commitRepos(tools, cwd)]), since)
     .filter((c) => String(c.msg).split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))).map((c) => c.h))];
 }
-// The repos the turn's commit commands ran in: the session's, a `cd <repo> &&` before the commit, or `git -C <repo>`.
-function commitRepos(tools, cwd) {
-  const dirs = new Set();
-  for (const t of tools.filter((x) => shell(x) && /\bgit\b[\s\S]*\scommit\b/.test(cmdOf(x)))) {
+// The git commands `verb` (commit, push) of the tools and the folder each ran in: the session's, a `cd <repo> &&` before
+// it, or `git -C <repo>`. → [{ dir, part, t }] (part: the command's own piece of the line)
+function gitRuns(tools, cwd, verb) {
+  const out = [], has = new RegExp(`\\bgit\\b[\\s\\S]*\\s${verb}\\b`), here = new RegExp(`\\bgit\\b[^|;&]*\\s${verb}\\b`), atC = new RegExp(`\\bgit\\s+-C\\s+["']?([^"'\\s]+)["']?[^|;&]*\\s${verb}\\b`);
+  for (const t of tools.filter((x) => shell(x) && has.test(cmdOf(x)))) {
     let dir = null;
     for (const part of bare(t).split(/&&|\|\||[;|\n]/)) {
       const cd = part.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:\/d\s+|-Path\s+)?["']?([^"']+?)["']?\s*$/i);
       if (cd) { dir = cd[1]; continue; }
-      const c = part.match(/\bgit\s+-C\s+["']?([^"'\s]+)["']?[^|;&]*\scommit\b/);
-      if (c) dirs.add(path.resolve(cwd, c[1]));
-      else if (/\bgit\b[^|;&]*\scommit\b/.test(part)) dirs.add(path.resolve(cwd, (dir || '.').replace(/^\/([a-z])\//i, '$1:/')));
+      const c = part.match(atC);
+      if (c) out.push({ dir: path.resolve(cwd, c[1]), part, t });
+      else if (here.test(part)) out.push({ dir: path.resolve(cwd, (dir || '.').replace(/^\/([a-z])\//i, '$1:/')), part, t });
     }
   }
-  return dirs;
+  return out;
+}
+// The repos the turn's commit commands ran in.
+const commitRepos = (tools, cwd) => new Set(gitRuns(tools, cwd, 'commit').map((r) => r.dir));
+const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; };
+const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+
+// The other repos the task committed in with its ID (its tool calls' `cd <repo> && git commit`, `git -C <repo> commit`).
+// → [{ root, commits }] (commits newest first), the session's repo left out.
+export function taskRepos(tools, cwd, root, id) {
+  const out = [];
+  for (const dir of commitRepos(tools, cwd)) {
+    const top = fs.existsSync(dir) && gitRoot(dir);
+    if (!top || sameDir(top, root) || out.some((r) => sameDir(r.root, top))) continue;
+    const commits = commitsFor(top, id);
+    if (commits.length) out.push({ root: top, commits });
+  }
+  return out;
+}
+
+// The repos the turn pushed to (a push that did not fail, not of the notes refs themselves) and the remote each named.
+// → [{ root, remote }]
+export function pushedRepos(tools, results, cwd) {
+  const out = [];
+  for (const { dir, part, t } of gitRuns(tools, cwd, 'push')) {
+    if (results?.[t.id]?.error || /refs\/notes/.test(cmdOf(t))) continue;
+    const top = fs.existsSync(dir) && gitRoot(dir);
+    // the first word after `push` that is no flag (`--tags`, `-u`), when it names a remote and not a refspec
+    const word = part.slice(part.search(/\bpush\b/) + 4).trim().split(/\s+/).find((w) => w && !w.startsWith('-'));
+    const remote = word && /^[\w.-]+$/.test(word) ? word : 'origin';
+    if (top && !out.some((r) => sameDir(r.root, top) && r.remote === remote)) out.push({ root: top, remote });
+  }
+  return out;
+}
+
+// Notes the hook could not push (testigo "notes", judged after the record: the push follows it). The close blocks once
+// per record and keeps the repos here; the next stop checks them against the tracking refs, without network.
+const NOTES_PENDING = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.notes-pending.json');
+const readPending = () => { try { return JSON.parse(fs.readFileSync(NOTES_PENDING(), 'utf8')) || {}; } catch { return {}; } };
+const writePending = (all) => { try { fs.mkdirSync(path.dirname(NOTES_PENDING()), { recursive: true }); fs.writeFileSync(NOTES_PENDING(), JSON.stringify(all)); } catch {} };
+export function notesBlock(failed, waymark = path.join(path.dirname(fileURLToPath(import.meta.url)), 'waymark.mjs')) {
+  const cmd = (f) => `cd "${f.root}" && node "${waymark.replace(/\\/g, '/')}" notes push${f.remote === 'origin' ? '' : ` ${f.remote}`}`;
+  return `Waymark: the task's record is written, but the hook could not push its git notes (${failed[0].output}); the hook's process may not have your git credentials. Run from your shell, in each repo: ${failed.map(cmd).join(' ; ')}. Then say in one line whether they went up; do not repeat the Cierre.`;
+}
+// → the line for the user once the agent ran the push, or '' with nothing pending for the session.
+export function notesChecked(session) {
+  const all = readPending(), pending = all[session];
+  if (!pending) return '';
+  delete all[session];
+  writePending(all);
+  const left = pending.repos.filter((r) => unpushedNotes(r.root, r.remote) !== 0);
+  return left.length ? `Waymark ${pending.id} · las notas siguen sin subir en ${left.map((r) => `${path.basename(r.root)} (${r.remote})`).join(', ')}: node waymark.mjs notes push desde tu shell`
+    : `Waymark ${pending.id} · notas de waymark ya en ${[...new Set(pending.repos.map((r) => r.remote))].join(', ')} (${pending.repos.map((r) => path.basename(r.root)).join(', ')})`;
 }
 // → [{ h, dir, msg }] committed in those repos since the turn started (a minute of slack); mine: only by the repo's git
 // user (commits a pull or rebase brought in keep their own committer).
@@ -516,6 +569,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
     repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
     specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
+    push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
   };
   // Testigo evidence (docs/adr/0025): an Evidencia "observada" needs a check after the last change (a read, a search, a
   // run; a commit, a push, a question or a skill load checks nothing), and each fact it cites (`backticks`, 84/84, exit 0,
@@ -770,6 +824,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         try { if (q) appendRecord(cwd, q); if (q || !(typeof lvl === 'number' && lvl > 0)) { clearStart(h.session_id); clearTaskStart(h.session_id); } } catch (e) { logHookError('stop-hook question', e); }
         try { if (q?.learned && home.dir && !home.legacy) saveQuestion(home, q); } catch (e) { logHookError('stop-hook engram', e); }
         try { refreshTasks(home, closeOpen(home, h.session_id) || !!q); } catch {}
+        try { const n = notesChecked(h.session_id); if (n) answer(agent, agent.out.notice(n)); } catch (e) { logHookError('stop-hook notes check', e); } // after a notes block
         return;
       }
       // a reply with no Cierre that ends asking the user, with options: the task is in progress (a pause, not an end); the
@@ -786,6 +841,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
+      try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
@@ -795,16 +851,24 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch (e) { logHookError('stop-hook engram', e); } // the learned layer: engram, written here, never by the agent
-      // the agent pushed (the user asked): the notes the remote lacks go to the same remote, this task's included
+      // the agent pushed (the user asked): in each repo it pushed, the notes the remote lacks go to the same remote, this
+      // task's included; a push the hook's process cannot make blocks once, after the record (testigo "notes")
       let pushed = '';
+      const failed = [];
       try {
-        const push = turn.tools.filter((t) => shell(t) && /\bgit\b[^|;&\n]*\spush\b/.test(bare(t)) && !turn.results?.[t.id]?.error && !/refs\/notes/.test(cmdOf(t))).pop();
-        const remote = push && (cmdOf(push).match(/\bpush\s+(?:-{1,2}[\w-]+\s+)*([\w.-]+)/)?.[1] || 'origin');
-        if (push && shouldPushNotes(home.root, remote)) {
-          const r = pushNotes(home.root, remote);
-          pushed = r.ok ? ` · notas subidas a ${remote}` : ` · notas sin subir (${(r.output.split('\n').pop() || 'error').slice(0, 80)}): waymark.mjs notes push`;
+        for (const { root, remote } of pushedRepos(turn.tools, turn.results, cwd)) {
+          if (!shouldPushNotes(root, remote)) continue;
+          const r = pushNotes(root, remote), where = sameDir(root, home.root) ? '' : ` (${path.basename(root)})`;
+          if (r.ok) pushed += ` · notas subidas a ${remote}${where}`;
+          else failed.push({ root, remote, output: gitError(r.output) });
         }
-      } catch {}
+      } catch (e) { logHookError('stop-hook notes push', e); }
+      let notesStop = '';
+      if (failed.length) {
+        pushed += ` · notas sin subir: ${failed.map((f) => path.basename(f.root)).join(', ')}`;
+        const all = readPending();
+        if (all[h.session_id]?.id !== rec.id) { all[h.session_id] = { id: rec.id, repos: failed.map(({ root, remote }) => ({ root, remote })) }; writePending(all); notesStop = notesBlock(failed); }
+      }
       try { writeTaskLine(home, rec); } catch (e) { logHookError('stop-hook memory', e); } // the task's Work in progress line, from its Aprendido
       try { if (home.dir && !home.legacy) learn(home, rec, readTaskRecords(home)); } catch (e) { logHookError('stop-hook learn', e); } // what it observed: gates, areas, procedures (docs/adr/0023)
       try { if (home.dir && !home.legacy) syncIdentity(home.memory, stackOf(home.root)); } catch {} // Identity names the repo's package manager
@@ -816,7 +880,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed));
     } catch (e) { logHookError('stop-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

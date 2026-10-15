@@ -2197,6 +2197,62 @@ test('stop hook: when the agent pushes the task, its note goes to the same remot
   assert.match(gitT(repo, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/);
 });
 
+// ---- 2.0.14: git holds what was done, why and what for ----
+const stopRun = (name, lines, input) => {
+  const transcript = path.join(home, `t-${name}.jsonl`);
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, ...input }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  return JSON.parse(r.stdout || '{}');
+};
+const bareRemote = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-')); temps.push(d); gitT(d, 'init', '-q', '--bare'); return d; };
+
+test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => {
+  const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
+  const t = routine.testigos.find((x) => x.id === 'notes');
+  assert.ok(t && t.enforce === 'block' && t.when === 'push', 'a testigo of the catalog that blocks');
+  const remote = bareRemote(), repo = memRepo('notes-fail'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(repo, 'remote', 'add', 'origin', remote);
+  commitTask(repo, id);
+  gitT(repo, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', path.join(remote, 'no-access.git')); // the hook's process cannot push
+  const out = stopRun('notes-fail', [...l2Lines, ...ran('push1', 'git push origin HEAD:main')], { cwd: repo, session_id: 's-nf', last_assistant_message: cierre(id) });
+  assert.equal(out.decision, 'block', JSON.stringify(out));
+  assert.match(out.reason, /waymark\.mjs" notes push/);
+  assert.ok(out.reason.includes(path.basename(repo)), 'it names the repo');
+  assert.ok(readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0].note, 'the record is written before the block');
+  // the agent pushes them from its own shell; the next stop (after the block) checks the remote
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', remote);
+  const p = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'notes', 'push'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  const again = stopRun('notes-fail-2', [say('Subí los notes.'), ...ran('np', 'node waymark.mjs notes push')], { cwd: repo, session_id: 's-nf', stop_hook_active: true, last_assistant_message: 'Subí los notes.' });
+  assert.equal(again.decision, undefined, 'blocked once');
+  assert.match(again.systemMessage || '', /notas .*en origin/);
+});
+
+test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => {
+  const remote = bareRemote(), repo = memRepo('two-fe'), api = tmpRepo('two-api'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(api, 'remote', 'add', 'origin', remote);
+  const fe = commitTask(repo, id), apiSha = commitTask(api, id);
+  gitT(api, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  const lines = [...l2Lines, ...ran('c-api', `cd "${api}" && git commit -q -m "x"`), ...ran('p-api', `cd "${api}" && git push origin HEAD:main`)];
+  stopRun('two-repos', lines, { cwd: repo, session_id: 's-two', last_assistant_message: cierre(id) });
+  assert.equal(JSON.parse(readNotes(repo).get(fe) || '{}').id, id, 'the session repo');
+  assert.equal(JSON.parse(readNotes(api).get(apiSha) || '{}').id, id, 'the other repo of the task');
+  const stub = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0];
+  assert.deepEqual((stub.repos || []).map((r) => [path.basename(r.root), r.commits[0]]), [[path.basename(api), apiSha]], 'the stub names the other repo');
+  assert.match(gitT(api, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/, 'pushed where the agent pushed');
+});
+
+test('2.0.14 the remote of a push skips flags and refspecs, and a git error never carries a URL\'s credentials', async () => {
+  const { pushedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const { gitError } = await import(`file://${SCRIPTS}/provenance.mjs`);
+  const repo = tmpRepo('remote-word');
+  const remote = (command) => pushedRepos([{ name: 'Bash', id: 'x', input: { command } }], {}, repo).map((r) => r.remote);
+  assert.deepEqual([remote('git push --tags'), remote('git push --force-with-lease=x up main'), remote('git push HEAD:main'), remote('git push -u origin feat')], [['origin'], ['up'], ['origin'], ['origin']]);
+  assert.equal(gitError("fatal: unable to access 'https://bob:s3cret@github.com/a/b/': 403"), "fatal: unable to access 'https://***@github.com/a/b/': 403");
+});
+
 test('3e-4 sizes: the block, the reminder and the card stay short, and no department rule says MUST (a testigo checks the process)', async () => {
   const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
   const rows = Object.fromEntries(sizes(process.cwd()).map((r) => [r.name, r]));

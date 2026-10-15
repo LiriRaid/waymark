@@ -5,9 +5,11 @@
 //   servers, instruction file hashes), its commits (trailer `Waymark-Task: <id>`) and the Cierre text. Git is the
 //   source of truth (docs/adr/0012): a task with a commit keeps its whole record as a git note on that commit
 //   (notes.mjs) and <project>/.waymark/provenance.jsonl keeps a stub with the note's hash; a task without one keeps the
-//   whole record there. Each line holds the hash of the previous one: an edited or deleted record or note breaks the
-//   chain (verifyChain). Each record names its agent; a question (kind "Q") is a short record with no task ID
-//   (docs/adr/0008).
+//   whole record there, and that line, as chained, also rides in git (refs/notes/waymark-log). A task committed in other
+//   repos too gets the same note on its newest commit in each (`repos` on the record). Each line holds the hash of the
+//   previous one: an edited or deleted record or note breaks the chain (verifyChain). Each record names its agent; a
+//   question (kind "Q") is a short record with no task ID (docs/adr/0008). With no log (a clone, a cleaned project) the
+//   records come from git: notes, log lines, and else the commits' `Waymark-Task` trailers (rebuildFromGit).
 // - The live state: one line per task in memory.md → Work in progress, written by the end-of-turn hook from the Cierre
 //   (writeTaskLine), and tasks.md generated from it and the records.
 // - `note` on a log line is always the git-note pointer { commit, sha } (gitNote() reads it); other text uses other fields.
@@ -19,7 +21,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isPrompt, promptText } from './transcript.mjs';
-import { addNote, readNotes, noteSha, NOTES_REF, addAnchor, readAnchors } from './notes.mjs';
+import { addNote, readNotes, noteSha, NOTES_REF, addAnchor, readAnchors, addLogLine, readLogLines, dropLogLines } from './notes.mjs';
 
 const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -354,9 +356,60 @@ function noteOnly(notes, records) {
   return [...out.values()];
 }
 
-// Every task record, from the log and from the notes (one git list and one batch read), in date order: a stub becomes
-// the whole record (note fields, then the stub's); a whole log line that a later commit also carries as a note (same
-// close) takes the note's fields; a record that is only a note joins.
+// The last line of git's output, short, with a URL's credentials (https://user:token@) and secret-like values masked.
+export const gitError = (output) => maskSecrets((String(output || '').split('\n').filter(Boolean).pop() || 'no answer').replace(/\/\/[^/@\s]+@/g, '//***@')).slice(0, 120);
+
+// How `forget` names a record (a task ID, else the session and time).
+export const recordName = (r) => r.id || `Q ${String(r.session || '').slice(0, 8)} ${r.at || ''}`.trim();
+// One close or one question, wherever its line lives (a log chained again by forget has new hashes).
+const lineKey = (r) => (r.id ? closeKey(r) : `${r.kind || ''}|${r.session || ''}|${r.at || ''}`);
+// The lines rewrite anchors removed: by their key (with the session, so another machine's task with the same ID stays),
+// or by name for an anchor that has no keys.
+const forgotten = (root) => {
+  const keys = new Set(), names = new Set();
+  for (const a of readAnchors(root).filter((x) => x.kind === 'rewrite')) for (const k of a.keys || a.removed || []) (a.keys ? keys : names).add(k);
+  return (r) => keys.has(lineKey(r)) || names.has(recordName(r));
+};
+
+// The task IDs of the commits' `Waymark-Task` trailers (the last 500 of HEAD) that no record holds: one record each from
+// its commits (newest first) and the newest commit's message, `fromCommit` set. The log is read once per HEAD (the hooks
+// read the records several times a turn). → records
+const trailerCache = new Map();
+function trailerRecords(root, known) {
+  const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 1500 });
+  if (head.status !== 0) return [];
+  const key = `${root}|${head.stdout.trim()}`;
+  if (!trailerCache.has(key)) {
+    const log = spawnSync('git', ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, maxBuffer: 16 * 1024 * 1024 });
+    const byTask = new Map();
+    for (const entry of log.status === 0 ? log.stdout.split('\x1e') : []) {
+      const [commit, at, body = ''] = entry.trim().split('\x00');
+      if (!commit) continue;
+      for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) {
+        const id = m[1];
+        if (!ID.test(id)) continue;
+        if (!byTask.has(id)) byTask.set(id, { id, at, fromCommit: commit, prompt: maskSecrets(body.split('\n')[0].trim()).slice(0, 600), message: maskSecrets(body.replace(/^\s*Waymark-Task:.*$/gim, '').trim()).slice(0, 2000), commits: [] });
+        byTask.get(id).commits.push(commit);
+      }
+    }
+    trailerCache.set(key, [...byTask.values()]);
+  }
+  return trailerCache.get(key).filter((r) => !known.has(r.id)).map((r) => ({ ...r, commits: [...r.commits] }));
+}
+
+// What git holds that the log lacks: records that are only notes, log lines kept in git (not those forget removed), and
+// the trailer IDs no record holds. Not chained: git hashes them.
+function gitOnly(root, records, notes) {
+  const only = noteOnly(notes, records);
+  const seen = new Set([...records, ...only].map(lineKey)), gone = forgotten(root);
+  const logged = readLogLines(root).filter((r) => !gone(r) && !seen.has(lineKey(r)) && seen.add(lineKey(r)));
+  const known = new Set([...records, ...only, ...logged].flatMap((r) => [r.id, r.claimed]).filter(Boolean)); // claimed: an ID the hook replaced
+  return [...only, ...logged, ...trailerRecords(root, known)];
+}
+
+// Every task record, from the log and from git (notes, waymark-log lines, trailer commits), in date order: a stub
+// becomes the whole record (note fields, then the stub's); a whole log line that a later commit also carries as a note
+// (same close) takes the note's fields; what only git holds joins.
 export function readTaskRecords(home) {
   const records = readRecords(home.log), notes = readNotes(home.root);
   const byClose = new Map();
@@ -367,7 +420,7 @@ export function readTaskRecords(home) {
     const n = r.id && byClose.get(closeKey(r));
     return n ? { ...r, ...n, prev: r.prev, hash: r.hash } : r;
   });
-  const only = noteOnly(notes, records);
+  const only = gitOnly(home.root, records, notes);
   return only.length ? byDate([...merged, ...only]) : merged;
 }
 
@@ -385,7 +438,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
   const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
-  const result = (r, later = []) => cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : '');
+  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
@@ -396,7 +449,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const when = (at) => { const t = new Date(at).toLocaleString('sv'); return t.slice(0, 10) === today ? t.slice(11, 16) : t.slice(5, 16); };
   const qRows = asked.slice(-QUESTIONS_SHOWN).map((r) => clip(`- ${[when(r.at), r.department, r.skills?.join(', ')].filter(Boolean).map(cell).join(' · ')} · "${clip(cell(r.prompt), 80)}"${r.answer ? ` → ${cell(r.answer)}` : ''}`, TASK_CHARS));
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
-  const source = (r) => (gitNote(r) ? `git notes --ref=waymark show ${String(r.note.commit).slice(0, 8)}` : 'last line of provenance.jsonl');
+  const source = (r) => (gitNote(r) || r.fromNote ? `git notes --ref=waymark show ${String(r.note?.commit || r.fromNote).slice(0, 8)}` : r.fromCommit ? `git show ${r.fromCommit.slice(0, 8)} (no record: its commit only)` : 'last line of provenance.jsonl');
   // The last closed task with what another agent needs to continue: ~220 ch per field.
   const lastClosed = lastRec ? [`## Last closed: ${cell(lastRec.id)}${who(lastRec)} (${new Date(lastRec.at).toLocaleString('sv').slice(0, 16)}; full record: ${source(lastRec)})`,
     // a field runs to the end of its line, or to the next field on the same line ("Resultado: hecho · Decisión: …")
@@ -441,6 +494,23 @@ export function refreshTasks(home, force = false) {
   return true;
 }
 
+// A project with records in git and no .waymark/ (a clone, a cleaned project): memory.md from the template, its Work in
+// progress replayed from the records in date order (a task done leaves it, as at its close), and tasks.md. Identity,
+// gates and map stay for the Minimal bootstrap. → the number of records it was rebuilt from, or 0 (nothing written).
+export function rebuildFromGit(home, now = new Date()) {
+  if (!home?.dir || home.legacy || fs.existsSync(home.dir)) return 0;
+  const records = readTaskRecords(home);
+  if (!records.length) return 0;
+  let template = '';
+  try { template = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'project-memory.template.md'), 'utf8'); } catch {}
+  if (!/\n## Work in progress/.test(template)) template = '# Project: <name>\n\n## Work in progress\n\n## Identity\n';
+  ensureLocal(home);
+  fs.writeFileSync(home.memory, template.replace('<name>', home.slug).replace('<absolute path to project root>', home.root).replace('<YYYY-MM-DD>', localDay(now)));
+  for (const r of records.filter((x) => x.id && x.cierre)) writeTaskLine(home, r, now);
+  refreshTasks(home, true);
+  return records.length;
+}
+
 export const readLog = (cwd) => readRecords(logFile(cwd));
 export function readRecords(file) {
   try { return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; }
@@ -449,17 +519,19 @@ export function readRecords(file) {
 const localDay = (now) => now.toLocaleDateString('sv'); // YYYY-MM-DD in local time
 const base = (id) => { const m = String(id).match(ID); return m ? `${m[1]} · T${m[2]}` : null; };
 
-// The log's records plus those that are only notes (their IDs are taken too: a clone never reuses one).
+// The log's records plus those only git holds (their IDs are taken too: a clone never reuses one).
 const knownRecords = (cwd) => {
   const records = readLog(cwd);
-  try { const only = noteOnly(readNotes(projectHome(cwd).root), records); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
+  try { const root = projectHome(cwd).root, only = gitOnly(root, records, readNotes(root)); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
 };
 
-// The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded.
+// The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded, `committed` the IDs
+// only a commit's trailer holds (taken for a new task, yet still free to close: a task commits before its Cierre).
 export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   const day = localDay(now);
   const n = Math.max(0, ...records.map((r) => String(r.id || '').match(ID)).filter((m) => m && m[1] === day).map((m) => Number(m[2])));
-  const known = new Set(records.map((r) => r.id).filter(Boolean));
+  const known = new Set(records.filter((r) => !r.fromCommit).map((r) => r.id).filter(Boolean));
+  const committed = new Set(records.filter((r) => r.fromCommit).map((r) => r.id));
   const follow = (id) => {
     const b = base(id);
     for (let c = 98; c <= 122; c++) if (!known.has(`${b}${String.fromCharCode(c)}`)) return `${b}${String.fromCharCode(c)}`; // b … z
@@ -467,15 +539,16 @@ export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   };
   const tasks = records.filter((r) => ID.test(String(r.id || ''))); // question records (kind "Q") carry no ID
   const last = tasks.length ? base(tasks[tasks.length - 1].id) : null;
-  return { next: `${day} · T${n + 1}`, last, followUp: last ? follow(last) : null, known, follow };
+  return { next: `${day} · T${n + 1}`, last, followUp: last ? follow(last) : null, known, committed, follow };
 }
 
-// An ID is valid for this turn when it is the next new one, or an unused follow-up letter of a recorded task.
+// An ID is valid for this turn when it is the next new one, one only a commit's trailer holds (its task closing now), or
+// an unused follow-up letter of a recorded task.
 export function validId(id, ids) {
   const m = String(id || '').match(ID);
   if (!m || ids.known.has(m[0])) return false;
-  if (m[0] === ids.next) return true;
-  return !!m[3] && [...ids.known].some((k) => base(k) === base(m[0]));
+  if (m[0] === ids.next || ids.committed?.has(m[0])) return true;
+  return !!m[3] && [...ids.known, ...(ids.committed || [])].some((k) => base(k) === base(m[0]));
 }
 
 // Lines of the current task. With `since` (ms, taskStart): every line after it, so a new task never carries the
@@ -867,7 +940,9 @@ export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(S
 
 // Appends the record with `prev` (hash of the last line) and `hash` (of this line without it). A task with commits
 // (newest first, as commitsFor returns them) is written whole as a git note on its newest commit and the line is a stub
-// that holds the note's sha256; a commit that already has a note, or a failed write, keeps the whole record here.
+// that holds the note's sha256; a commit that already has a note, or a failed write, keeps the whole record here. The
+// same note goes on the newest commit of each other repo in `repos` ([{ root, commits }], newest first). A line with no
+// note, as chained, is appended to refs/notes/waymark-log on HEAD as well, so it is in git.
 export function appendRecord(cwd, record) {
   const file = logFile(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -875,17 +950,17 @@ export function appendRecord(cwd, record) {
   try { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); count = lines.length; if (lines.length) prev = JSON.parse(lines[lines.length - 1]).hash || sha(lines[lines.length - 1]); } catch {}
   let line = record;
   const commit = record.id && record.commits?.[0];
-  if (commit) {
-    const text = JSON.stringify(record);
-    if (addNote(cwd, commit, text)) {
-      const { id, kind, agent, at, session, cwd: where, files, commits, department } = record; // department: what the session loaded (docs/adr/0015)
-      line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, department }).filter(([, v]) => v !== undefined));
-      line.note = { commit, sha: noteSha(text) };
-    }
+  const text = JSON.stringify(record);
+  if (commit && addNote(cwd, commit, text)) {
+    const { id, kind, agent, at, session, cwd: where, files, commits, repos, department } = record; // department: what the session loaded (docs/adr/0015)
+    line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, repos, department }).filter(([, v]) => v !== undefined));
+    line.note = { commit, sha: noteSha(text) };
   }
+  if (record.id) for (const r of record.repos || []) { try { if (r.commits?.[0]) addNote(r.root, r.commits[0], text); } catch (e) { logHookError('note in another repo', e); } }
   const body = { ...line, prev };
   const hash = sha(JSON.stringify(body));
   fs.appendFileSync(file, JSON.stringify({ ...body, hash }) + '\n');
+  if (!line.note) { try { addLogLine(cwd, { ...body, hash }); } catch (e) { logHookError('log line in git', e); } }
   anchor(cwd, file, { n: count + 1, hash }); // n from the read that gave prev: another session appending meanwhile cannot shift it
   return file;
 }
@@ -914,12 +989,13 @@ export function forget(cwd, id, { session = null, reason = '', dryRun = false } 
   const noted = drop.filter((r) => r.note?.commit);
   if (noted.length) return { error: `${noted.map((r) => r.id).join(', ')}: the record is a git note on commit ${noted[0].note.commit.slice(0, 8)}; forget removes only records without a commit` };
   const from = { n: lines.length, hash: lines[lines.length - 1]?.hash || null };
-  const removed = [...new Set(drop.map((r) => r.id || `Q ${String(r.session || '').slice(0, 8)} ${r.at || ''}`.trim()))];
+  const removed = [...new Set(drop.map(recordName))];
   if (dryRun) return { removed, from, to: { n: lines.length - drop.length, hash: null }, dryRun: true };
   let prev = null;
   const keep = lines.filter((r) => !hit(r)).map((r) => { const { hash, prev: _, ...rest } = r; const body = { ...rest, prev }; prev = sha(JSON.stringify(body)); return { ...body, hash: prev }; });
   fs.writeFileSync(file, keep.map((r) => JSON.stringify(r)).join('\n') + (keep.length ? '\n' : ''));
-  anchor(cwd, file, { kind: 'rewrite', n: keep.length, hash: prev, reason: String(reason).trim(), removed, from });
+  try { dropLogLines(cwd, hit); } catch (e) { logHookError('forget log lines', e); } // their copy in git; a merged copy elsewhere is skipped by the anchor's `removed`
+  anchor(cwd, file, { kind: 'rewrite', n: keep.length, hash: prev, reason: String(reason).trim(), removed, keys: [...new Set(drop.map(lineKey))], from });
   return { removed, from, to: { n: keep.length, hash: prev } };
 }
 

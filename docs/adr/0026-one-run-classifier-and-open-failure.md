@@ -16,6 +16,7 @@
 
   An `apart` run is recorded on the gate (`apart: true`), is never the judged gate or a red test, and never produces «a command after the last change failed».
 - **Evidencia reads what a person writes** (the cited fact is looked up in more forms, still a ⚠ and never a block): a command with its quoted path, a short phrase whose words one call holds together (tool name, input, output), `84/84` from «tests 84 … pass 84», a file name whose stem a call printed, and a result stored as JSON with its quotes escaped.
+- **`cierreGaps` split (plan point 4, behavior-preserving).** The turn is observed once (`observeTurn`, `observeBuild`, `observeEvidence`), then each testigo is a function of what was observed: `decisionWitness`, `gateWitness`, `cierreWitness`, `procedureWitness` and the `WITNESS` table (one function per id: evidence, memory, review, build, docs, spec, red, preexisting, trailer, secrets, chain). `composeSteps` applies `routine.json` (which testigos apply at the level, `when`, `enforce`); `cierreGaps` only composes. The 306 tests and the corpus did not change.
 
 ## Alternatives considered
 - **Keep patching each testigo.** Rejected: it is what produced eight releases of false fails.

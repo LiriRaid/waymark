@@ -37,3 +37,14 @@ test('copyPath: the target of git worktree add, direct or through its variable, 
   assert.equal(R.copyPath('git worktree add ../relative HEAD'), null, 'a relative path names no copy to match later');
   assert.equal(R.slash('/c/Users/u/x/'), 'c:/users/u/x');
 });
+
+test('open failure: a gate or test run from a temp folder or an unknown place is apart, never the task\'s', () => {
+  assert.equal(R.runPlace('Push-Location $T; pnpm exec eslint a.ts', { cd: '$T' }), 'temp', '$T is the scratch folder by convention');
+  assert.equal(R.runPlace('$w = "/tmp/wt"; cd $w; npm test', { cd: '$w' }), 'temp', 'a variable resolved from its assignment');
+  assert.equal(R.runPlace('cd $x; npm test', { cd: '$x' }), 'unknown', 'a variable nothing assigns: the hook cannot tell');
+  assert.equal(R.runPlace('cd src; npm test', { cd: 'src' }), null, 'a plain path is the project');
+  assert.equal(R.commandKind('Push-Location $x; pnpm exec eslint a.ts'), 'unknown');
+  assert.equal(R.commandKind('cd src && npx tsc --noEmit'), 'gate', 'a known place is judged as ever');
+  assert.ok(R.apart('Push-Location $x; npm test') && R.apart('T=/tmp/c && git worktree add "$T" HEAD && cd "$T" && npm test'));
+  assert.ok(!R.apart('npm test') && !R.apart('node scripts/helper.mjs'));
+});

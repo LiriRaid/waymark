@@ -1653,6 +1653,5 @@
   "absent": [
    "waymark.mjs check"
   ]
- },
- "redUntil": "3"
+ }
 }

@@ -1115,7 +1115,7 @@
       "type": "tool_result",
       "tool_use_id": "toolu_01DdEPgadxMNm6n4riu6GGzd",
       "is_error": false,
-      "content": "Waymark check · 3 pending (offer each with the choice window; run its command only after the user's  …  skill-registry.md; third-party skills listed there with their path).\n- agents: .quickwork (unknown: skills/) on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stan"
+      "content": "Waymark check · 3 pending (offer each with the choice window; run its command only after the user's  …  skill-registry.md; third-party skills listed there with their path).\n- agents: .quickwork (unknown: skills/) on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stan … Waymark Rule 0 (the instructions block): routing line first (\\\"Waymark → L<n> o\n{\"waymark_probe\":\"ok\"}\n5"
      }
     ]
    }
@@ -1270,6 +1270,5 @@
    "grep BRAKE_STEP",
    "waymark_probe"
   ]
- },
- "redUntil": "3"
+ }
 }

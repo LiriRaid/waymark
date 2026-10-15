@@ -28,7 +28,7 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd } from './runs.mjs';
+import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
@@ -379,6 +379,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // not this task's, or a spec red first; it is never the task's gate.
   const copies = copyPaths(allTools.filter(shell).map(cmdOf));
   const inCopy = (t) => shell(t) && inCopyCmd(cmdOf(t), copies);
+  // Also apart: a gate or test run from a temp folder or from a place the hook cannot tell (runs.mjs): recorded, never held
+  // against the task (an open failure: only evidence the hook can read counts).
+  const apart = (t) => shell(t) && apartCmd(cmdOf(t), copies);
   // Test-first, per spec: a spec that adds cases (a new spec, or a new it()/test() in one) runs before the next code edit
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
@@ -453,7 +456,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
-    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}) })),
+    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}), ...(apart(t) ? { apart: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
       // red: every spec that adds cases ran before the code after it, or a run in a clean copy (git worktree add … && … test)
@@ -518,7 +521,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const gate = [];
   const redTests = [];
   if (lastCode >= 0) {
-    const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t) && !inCopy(t)).pop(); // a gate that never ran checked nothing; a run in the clean copy is not the task's
+    const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t) && !apart(t)).pop(); // a gate that never ran checked nothing; a run in the clean copy is not the task's
     const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
     // The exit is the gate's only when nothing but '&&' follows it, or it is the last part: "build | grep -i error" exits 1
     // on a clean build and "tsc; echo done" exits 0 on a red one. Otherwise a failure in its output decides, then the
@@ -526,11 +529,11 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const own = mine ? exitFor(mine, 'gate') : null;
     const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
     // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
-    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !inCopy(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
+    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !apart(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
     const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
     observed.gate = run || null;
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
-    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !inCopy(t));
+    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
     for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
@@ -590,7 +593,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const cited = evidenceFacts(evidText);
   // where a fact can be backed: the calls' inputs and outputs, never the text the agent wrote itself (its edits)
   const flat = (x) => String(x || '').toLowerCase().replace(/\\/g, '/').replace(/\s+/g, ' ');
-  const calls = cited.length ? [...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => ({ input: flat(Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')), out: String(result(t)?.raw || result(t)?.text || t.out || '') })) : [];
+  const calls = cited.length ? [...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => ({ name: String(t.name || ''), input: flat(Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')), out: String(result(t)?.raw || result(t)?.text || t.out || '') })) : [];
   const hay = calls.map((c) => `${c.input} ${flat(c.out)}`).join('\n');
   const shellRan = (bad) => turn.tools.slice(lastChange + 1).some((t) => shell(t) && !stopped(t) && !!(result(t)?.error || t.error) === bad); // exit codes: after the last change
   // file:line is also backed by a call that named the file and printed that line without the file's name: grep -n of one
@@ -610,7 +613,22 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const name = new RegExp(`(?:^|[\\s/"'=])${esc(m[2])}(?![\\w.-])`);
     return calls.some((c) => c.input.includes(m[1]) && name.test(flat(c.out)));
   };
-  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || lineShown(f) || pathShown(f); };
+  // Open failure (docs/adr/0026): a fact the hook cannot find in the literal form it was cited is looked up in the forms a
+  // person writes it: a command with its quoted path ("waymark.mjs" check), a phrase whose words one call holds together
+  // (the tool's name, its input and its output), pass/total (84/84) from "tests 84 … pass 84", a file name whose stem a
+  // call printed (bf28ce5b.jsonl, the stem listed).
+  const unquoted = (s) => flat(s).replace(/["'`\\]/g, ''); // a result stored as JSON has its quotes escaped
+  const unquotedHay = unquoted(hay);
+  const wordsTogether = (f) => {
+    const words = unquoted(f).toLowerCase().split(/[\s:,;]+/).filter((w) => w.length > 1);
+    return words.length >= 2 && words.length <= 6 && calls.some((c) => { const h = unquoted(`${c.name} ${c.input} ${c.out}`).toLowerCase(); return words.every((w) => new RegExp(`(?<![\\w.-])${esc(w)}(?![\\w-])`).test(h)); });
+  };
+  const ratioShown = (f) => {
+    const m = f.match(/^(\d+)\/(\d+)$/);
+    return !!m && calls.some((c) => new RegExp(`(?:pass(?:ed)?|✓|ok)\\D{0,8}${m[1]}\\b|\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out) && new RegExp(`(?:tests?|total)\\D{0,8}${m[2]}\\b|\\b${m[2]}\\s+(?:tests?|total)`, 'i').test(c.out));
+  };
+  const stemShown = (f) => { const m = flat(f).match(/^(?:.*\/)?([\w-]{7,})\.\w{1,6}$/); return !!m && hay.includes(m[1]); };
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || unquotedHay.includes(unquoted(f)) || lineShown(f) || pathShown(f) || wordsTogether(f) || ratioShown(f) || stemShown(f); };
   observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
@@ -672,7 +690,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
-  const otherFailed = observed.gates.filter((g) => g.error && !g.env && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
+  const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   return { level, changed, reply, missing, findings, steps, dept, observed, renamed };
 }

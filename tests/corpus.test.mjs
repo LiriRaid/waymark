@@ -77,12 +77,12 @@ const SYNTHETIC = {
   'heredoc-helper': sh("python - <<'EOF'\nimport sys\nsys.exit(2)\nEOF", { out: 'exit 2', error: true }),
   'clean-copy-bash': sh('T=/tmp/wt-clean && git worktree add -q --detach "$T" HEAD && cd "$T" && npm test; git worktree remove --force "$T"', { out: '1 failing', error: true }),
 };
-const RED = new Set(['powershell-T-junction', 'powershell-join-path', 'clean-copy-bash']); // fail today: plan 2.0.15 point 3 (open failure)
 for (const [name, tail] of Object.entries(SYNTHETIC)) {
-  test(`corpus synthetic ${name}: a failing run that is not the task's gate does not say a gate failed`, { todo: RED.has(name) ? 'red until plan 2.0.15 point 3' : false }, () => {
+  test(`corpus synthetic ${name}: a failing run that is not the task's gate does not say a gate failed`, () => {
     const c = { lines: [...head(), ...tail, ...done] };
     const g = judgeCase(c);
     const said = [...(g.missing || []), ...(g.findings || [])];
     assert.ok(!said.some((s) => /gate after the last code change failed|test after the last code change failed|command after the last change failed/.test(s)), said.join('\n'));
+    assert.equal(g.steps.find((s) => s.id === 'gate')?.pass, true, "Verificar is the task's own gate, whatever the helper exited with");
   });
 }

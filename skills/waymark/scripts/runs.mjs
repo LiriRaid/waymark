@@ -111,7 +111,7 @@ export function shellRuns(command, depth = 0) {
     const text = full.slice(from, to).trim().replace(/^[({]\s*/, '').replace(/\s*[)}]$/, ''); // a subshell or group: (cd x && npm test)
     from = to + sep.length;
     if (!text) return;
-    const words = tokens(text), dir = /^(cd|pushd|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
+    const words = tokens(text), dir = /^(cd|pushd|push-location|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
     if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
     const k = classify(words), at = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
     if (k.inner !== undefined && depth < 2) {
@@ -146,11 +146,32 @@ export function copyPath(cmd) {
 export const copyPaths = (commands) => [...new Set(commands.filter((c) => WORKTREE_ADD.test(c)).map(copyPath).filter((p) => p && p.length >= 8))];
 // The command adds a clean copy or runs in one of `copies` (a later call naming its path, another shell, its own variable).
 export const inCopy = (command, copies = []) => WORKTREE_ADD.test(command) || copies.some((p) => slash(command).includes(p));
+// Where one run executes, read from the `cd` / Push-Location before it in the same command; a variable there is resolved
+// from its assignment in the command. 'temp': a scratch or temp folder (a clean copy or a helper, never the project);
+// 'unknown': a variable nothing in the command assigns, so the hook cannot tell where it ran; null: the session's folder
+// or a plain path.
+const assigned = (command, name) => command.match(new RegExp(`(?:^|[\\s;&(])\\$?${name}\\s*=\\s*["']?([^"';&|\\n]+)`))?.[1];
+export function runPlace(command, run) {
+  const cd = String(run.cd || '').replace(/^["']|["']$/g, '');
+  if (!cd) return null;
+  if (TEMP.test(cd) || /\$env:(temp|tmp)\b/i.test(cd)) return 'temp';
+  const name = cd.match(/^\$\{?(\w+)\}?(?:[\\/].*)?$/)?.[1];
+  if (!name) return null;
+  const value = assigned(command, name);
+  if (!value) return 'unknown';
+  return TEMP.test(value) || /\$env:(temp|tmp)\b/i.test(value) ? 'temp' : null;
+}
 
-// The kind of a whole command, the one question every testigo asks about a run: 'copy' (in a clean copy: never the
-// task's gate), 'build', 'gate', 'test' (the strongest part of the chain), or 'aux' (anything else it runs).
+// The kind of a whole command, the one question every testigo asks about a run: 'copy' (in a clean copy or a temp folder:
+// never the task's gate), 'unknown' (a gate or test run whose folder the hook cannot tell: recorded, never held against
+// the task), 'build', 'gate', 'test' (the strongest part of the chain), or 'aux' (anything else it runs).
 export function commandKind(command, copies = []) {
-  if (inCopy(String(command || ''), copies)) return 'copy';
-  const runs = shellRuns(command);
+  const c = String(command || '');
+  if (inCopy(c, copies)) return 'copy';
+  const runs = shellRuns(c), checks = runs.filter((p) => p.gate || p.build || p.test);
+  const places = checks.map((p) => runPlace(c, p));
+  if (checks.length && places.every(Boolean)) return places.includes('unknown') ? 'unknown' : 'copy';
   return runs.some((p) => p.build) ? 'build' : runs.some((p) => p.gate) ? 'gate' : runs.some((p) => p.test) ? 'test' : 'aux';
 }
+// A run that is not the task's to answer for: in a clean copy or temp folder, or from a place the hook cannot tell.
+export const apart = (command, copies = []) => ['copy', 'unknown'].includes(commandKind(command, copies));

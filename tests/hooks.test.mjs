@@ -2959,3 +2959,55 @@ test('commit trailer: a commit made in another repo with an earlier task\'s ID c
   gitT(api, 'commit', '-q', '-m', 'x', '-m', `Waymark-Task: ${day} · T9`);
   assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
 });
+
+// 2.0.14: YaloAtiendo 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
+// was made in one call and run in another (PowerShell), failed on pnpm's own TTY check, and was judged the task's gate.
+const ranOut = (id, name, command, out, failed = false) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: { command } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: failed, content: out }] } }];
+test('2.0.14 a lint with warnings only passes; a run inside the clean copy is never the task\'s gate; the clean copy installs offline', async () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next, ctx = ctxFor(cwd);
+  const head = [prompt('agrega reintentos'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE })];
+  const judge = (lines, extra = {}) => cierreGaps(currentTurn(lines), cierre(id), undefined, undefined, { ...ctx, ...extra });
+  const warned = 'src/a.spec.ts\n  68:17  warning  Unexpected any  @typescript-eslint/no-explicit-any\n\n✖ 1 problem (0 errors, 1 warning)\n\neslint exit 0';
+  const lint = [...head, ...ranOut('l1', 'Bash', 'pnpm exec eslint src/a.ts; echo "eslint exit $?"', warned)];
+  const g = judge(lint);
+  assert.equal(g.observed.gate?.ok, true, 'warnings only: the lint passed');
+  assert.deepEqual(g.missing.filter((m) => /failed/.test(m)), []);
+  const errors = judge([...head, ...ranOut('l2', 'Bash', 'pnpm exec eslint src/a.ts; echo "eslint exit $?"', '✖ 2 problems (1 error, 1 warning)\n\neslint exit 1')]);
+  assert.equal(errors.observed.gate?.ok, false, 'an error still fails');
+  const copy = [...lint, ...ranOut('w1', 'Bash', 'T="C:/tmp/sp/wt-clean" && git worktree add -q --detach "$T" HEAD && cd /c/work/proj && git worktree list', ''),
+    ...ranOut('w2', 'PowerShell', '$T = "C:\\tmp\\sp\\wt-clean"; Push-Location $T; pnpm exec eslint src/a.ts; "eslint exit $LASTEXITCODE"', '[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY\neslint exit 1')];
+  const c = judge(copy);
+  assert.match(c.observed.gate?.cmd || '', /^pnpm exec eslint src\/a\.ts; echo/, 'the gate stays the run in the repo');
+  assert.equal(c.observed.gate?.ok, true);
+  assert.equal(c.observed.worktree, true, 'the run inside the copy is the clean copy');
+  assert.deepEqual(c.missing.filter((m) => /failed/.test(m)), []);
+  // the repo's own path in that command is not the copy: a later gate in the repo is still the task's
+  const back = judge([...copy, ...ranOut('g9', 'Bash', 'cd /c/work/proj && npx tsc --noEmit', 'error TS2322: x', true)]);
+  assert.equal(back.observed.gate?.ok, false, 'a gate run in the repo after the copy is judged');
+  // a failing gate in a pnpm repo: the clean copy installs from the store, never through a junction
+  const failing = judge([...head, ...ran('g1', 'npx tsc --noEmit', true)], { copyInstall: 'pnpm install --offline --frozen-lockfile' });
+  assert.ok(failing.missing.some((m) => /pnpm install --offline --frozen-lockfile/.test(m) && /CI=true/.test(m) && /never a junction/.test(m)), failing.missing.join('\n'));
+  const { copyInstall, stackOf } = await import(`file://${SCRIPTS}/stack.mjs`);
+  const repo = tmpRepo('pnpm-copy');
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));
+  assert.equal(copyInstall(stackOf(repo)), 'pnpm install --offline --frozen-lockfile');
+  assert.equal(copyInstall(null), null, 'not a Node repo: no install step');
+});
+
+test('2.0.14 a note in a gate\'s Command cell is not run: "(not verified)" is dropped; a subshell stays', async () => {
+  const repo = tmpRepo('gate-cell'), mem = path.join(repo, 'memory.md');
+  const table = (cmd) => fs.writeFileSync(mem, `# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | ${cmd} | |\n`);
+  table('pnpm exec tsc -p tsconfig.app.json --noEmit (not verified)');
+  assert.equal(gateCommand(repo, mem).cmd, 'pnpm exec tsc -p tsconfig.app.json --noEmit');
+  table('npx tsc --noEmit (sin verificar)');
+  assert.equal(gateCommand(repo, mem).cmd, 'npx tsc --noEmit');
+  table('cd api && (npm test)');
+  assert.equal(gateCommand(repo, mem).cmd, 'cd api && (npm test)', 'after an operator it is a subshell, not a note');
+  const { gateCell } = await import(`file://${SCRIPTS}/stack.mjs`);
+  assert.equal(gateCell('none (scripts Node sin paso de build)'), 'none (scripts Node sin paso de build)', 'a none row keeps its reason (the card shows it)');
+  const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'project-detection.md'), 'utf8');
+  assert.match(guide, /leave the \*Verified\* cell empty/, 'the bootstrap says where "not verified" goes');
+});

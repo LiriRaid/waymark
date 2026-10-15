@@ -11,6 +11,12 @@ In YaloAtiendo 2026-10-15, deleting `.waymark` (and the local notes the remote n
   - With no record for a task ID, its `Waymark-Task` commits stand in: «solo commit», with the commit's message. Such an ID is taken for new tasks and still valid to close.
   - A fetch that fails is one line on the card.
 - The instructions block quotes the new claim and stays under 6,500 characters.
+- **Fix: three false ✘ from YaloAtiendo 2026-10-15 · T1** (`docs/adr/0012`, amended):
+  - **A note in a gate's Command cell was run.** The bootstrap said «mark them *not verified*», so the cell held `pnpm exec tsc -p tsconfig.app.json --noEmit (not verified)` and the typecheck failed. Now a closing note in parentheses with no shell characters is dropped before the command runs (one after `&&` is a subshell and stays). The bootstrap now says to leave the *Verified* cell empty.
+  - **A lint with warnings only failed.** `✖ 1 problem (0 errors, 1 warning)` with exit 0 matched the failure line. Now eslint's line counts only with errors.
+  - **The clean copy.** The agent created the worktree in one call and ran the lint there from another (PowerShell, its own variable). That run counted as the task's gate, and it failed on pnpm's own check: a junction to `node_modules` made pnpm want to purge the folder (the repo's own, through the link) and abort without a TTY.
+    - A call naming the path a `git worktree add` created now runs in the clean copy, never as the gate.
+    - In a Node repo the hook's message gives the install for the copy (`pnpm install --offline --frozen-lockfile` with `CI=true`; npm, yarn and bun have their own) and says never to use a junction.
 
 ## 2.0.13 — a build per repo, and counts are not results
 - **Fix: Build ✗ on a task that built every repo.** The Build testigo counted only the builds after the turn's last code change and wanted one per repo with changed code. YaloAtiendo 2026-10-15 · T3 changed the API and the front, built both (exit 0), then wrote only the front's `main.spec.ts` and rebuilt only the front. The API had not changed since its build, yet the task scored Build ✗.

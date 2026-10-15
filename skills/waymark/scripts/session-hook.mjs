@@ -17,7 +17,7 @@ import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblin
 import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -93,7 +93,7 @@ export function digest(cwd, agentName = 'claude') {
   const line = stackLine(home.root, { direct });
   if (line) out.push(`Repo (read now): ${line}`);
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
-    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(c, stack, { root: home.root, direct })}`);
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it

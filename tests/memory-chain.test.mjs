@@ -264,8 +264,8 @@ test('card: the last closed task\'s Aprendido shows once (not again under Learne
 test('docs say what the code does: closed lines leave Work in progress (DONE_KEPT = 0); a follow-up corrects its task\'s lesson', () => {
   const learning = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'references', 'learning.md'), 'utf8');
   const template = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'templates', 'project-memory.template.md'), 'utf8');
-  const prov = fs.readFileSync(path.join(SCRIPTS, 'provenance.mjs'), 'utf8');
-  for (const [name, text] of [['learning.md', learning], ['template', template], ['provenance.mjs', prov]]) assert.doesNotMatch(text, /newest 5/i, name);
+  const prov = fs.readFileSync(path.join(SCRIPTS, 'provenance', 'taskmd.mjs'), 'utf8');
+  for (const [name, text] of [['learning.md', learning], ['template', template], ['taskmd.mjs', prov]]) assert.doesNotMatch(text, /newest 5/i, name);
   assert.match(prov, /DONE_KEPT = 0/);
   assert.match(learning, /follow-up/i);
 });

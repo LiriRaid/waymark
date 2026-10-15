@@ -17,14 +17,13 @@
 // the same way to a note on HEAD under refs/notes/waymark-log, so a clone or a cleaned project still has it. The same
 // refspec, push and line-by-line merge carry it; `waymark.mjs forget` removes its lines (dropLogLines).
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { git } from './lib/git.mjs';
 
 export const NOTES_REF = 'refs/notes/waymark';
 export const ANCHOR_REF = 'refs/notes/waymark-anchor';
 export const LOG_REF = 'refs/notes/waymark-log';
 const REFS = [NOTES_REF, ANCHOR_REF, LOG_REF];
 export const noteSha = (text) => crypto.createHash('sha256').update(text).digest('hex');
-const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, timeout: 3000, maxBuffer: 32 * 1024 * 1024, ...opts });
 
 // Adds the note as the user (git's own identity); only a repo with no identity at all gets waymark's. Never overwrites
 // a note already on the commit (`notes add` without -f refuses). → true when written.

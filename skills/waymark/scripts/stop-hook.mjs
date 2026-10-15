@@ -28,15 +28,16 @@ import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, r
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, changesProject, shellSkeleton, shellRuns, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
+import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { saveLearned, saveQuestion } from './engram.mjs';
-import { packedFiles } from './tool-hook.mjs';
+import { packedFiles } from './lib/packed.mjs';
 import { learn } from './learn.mjs';
+import { norm } from './lib/paths.mjs';
 
-const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
   const f = norm(file), home = norm(os.homedir());
   return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || f.includes('/scratchpad/');
@@ -303,31 +304,9 @@ export function evidenceFacts(text) {
   return [...new Set(out)];
 }
 
-// → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
-export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
-  const byKey = new Map();
-  for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
-  const changed = [...byKey.values()];
-  // A task with a Cierre whose changes are all outside the project (install, cleanup) is recorded too (ctx.outside):
-  // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn.
-  const lastText = String(last || '').replace(/\*\*|__/g, '');
-  const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
-  if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
-  const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
-  // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
-  // is not a field (found when the hook read a bullet of the reply as Decisión).
-  const reply = full.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || full;
-  const routed = routedLevel([...turn.texts, full], turn.tools) || ctx.inherited?.level || 0; // an unrouted reply inside an open task
-  // The level judged comes from what the agent changed, with the declared one as a floor: 1–2 files → L1, more → L2. L3
-  // only when declared; an explicit L0 keeps its skip for a single file; a Q turn that changed files is judged as L2.
-  const denied = (t) => !!(turn.results?.[t.id]?.error || t.error); // an edit the gate denied changed nothing
-  const agentFiles = new Set(turn.tools.filter((t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t))).map((t) => norm(fileOf(t))));
-  if (turn.tools.some((t) => shell(t) && changesProject(t.input.command))) for (const f of ctx.gitChanged || []) if (!exempt(f)) agentFiles.add(norm(f));
-  const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;
-  const explicitL0 = /^[ \t]*Waymark →\s*L0\b(?!\s*(?:\||or)\s*Q)/m.test([...turn.texts, full].join('\n'));
-  const declared = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
-  const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
-  if (!level) return null;
+// The turn, observed: what the agent ran and changed, the gates, the files. Computed, never declared.
+function observeTurn(S) {
+  const { allTools, changed, ctx, denied, reply, turn } = S;
 
   // ---- Observed (computed, never declared) ----
   const where = (t) => `${t.input.file_path || ''} ${t.input.path || ''} ${t.input.pattern || ''} ${t.input.command || ''}${shell(t) ? cdPaths(t.input.command) : ''}`;
@@ -374,22 +353,13 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     return result(t)?.error || t.error ? (i === all.length - 1 ? false : null) : all.slice(i, -1).every((p) => p.sep === '&&') ? true : null;
   };
   const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && FAIL_OUT.test(output(t))); };
-  // The clean copies (git worktree) the task made: the path each `git worktree add` names (its first word after the
-  // flags, or the value of the variable it names, assigned in the same command), and the calls that run in one: the one
-  // that adds it, or a later one naming that path (another shell, its own variable). A run there shows a failure is not
-  // this task's, or a spec red first; it is never the task's gate.
-  const slash = (s) => String(s).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').replace(/\/+$/, '').toLowerCase();
-  const copyPath = (cmd) => {
-    const words = (cmd.match(/git\s+worktree\s+add\s+(.*)/)?.[1] || '').split(/\s+/);
-    let target = null;
-    for (let i = 0; i < words.length && !target; i++) { if (/^-[bB]$/.test(words[i])) i++; else if (!words[i].startsWith('-')) target = words[i]; }
-    target = String(target || '').replace(/^["']|["']$/g, '');
-    const name = target.match(/^\$\{?(\w+)\}?$/)?.[1];
-    if (name) target = cmd.match(new RegExp(`\\$?${name}\\s*=\\s*["']?([^"';&|\\s]+)`))?.[1] || '';
-    return /^(?:[A-Za-z]:[\\/]|\/)/.test(target) ? slash(target) : null;
-  };
-  const copies = [...new Set(allTools.filter((t) => shell(t) && /git\s+worktree\s+add/.test(cmdOf(t))).map((t) => copyPath(cmdOf(t))).filter((p) => p && p.length >= 8))];
-  const inCopy = (t) => shell(t) && (/git\s+worktree\s+add/.test(cmdOf(t)) || copies.some((p) => slash(cmdOf(t)).includes(p)));
+  // The clean copies (git worktree) the task made, and the calls that run in one (runs.mjs): a run there shows a failure is
+  // not this task's, or a spec red first; it is never the task's gate.
+  const copies = copyPaths(allTools.filter(shell).map(cmdOf));
+  const inCopy = (t) => shell(t) && inCopyCmd(cmdOf(t), copies);
+  // Also apart: a gate or test run from a temp folder or from a place the hook cannot tell (runs.mjs): recorded, never held
+  // against the task (an open failure: only evidence the hook can read counts).
+  const apart = (t) => shell(t) && apartCmd(cmdOf(t), copies);
   // Test-first, per spec: a spec that adds cases (a new spec, or a new it()/test() in one) runs before the next code edit
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
@@ -464,7 +434,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
-    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}) })),
+    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}), ...(apart(t) ? { apart: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
       // red: every spec that adds cases ran before the code after it, or a run in a clean copy (git worktree add … && … test)
@@ -486,108 +456,31 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     evidence: null, // the Evidencia testigo: { claim, checkedAfter, cited, unbacked }
     time: { minutes: turn.startedAt ? Math.round(Math.max(0, Date.now() - turn.startedAt - userWait * 1000) / 6000) / 10 : null, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
   };
+  return { shellChange, dept, procRe, lastIdx, lastCode, lastSpec, lastChange, result, firstRealChange, secs, runsOf, gateCmd, testCmd, output, exitFor, failedRun, apart, envFail, cmdKey, retried, ui, code, reviewLeft, noBuild, ASK, observed };
+}
 
-  // ---- Each step of the routine contract (waymark/routine.json): does it apply, did it pass, why not ----
-  const chosenLabels = (ctx.decisions || []).flatMap((x) => String(x.chosen).split(',')).map(plain).filter(Boolean);
-  const skip = {}, extras = [];
-  for (const f of ['Tests', 'Review']) {
-    const s = userSkip(reply, f, prompts, chosenLabels);
-    if (s === 'ok') skip[f] = true;
-    else if (s?.short) extras.push(`${f}: skip quoted as the user's ("${s.quote}") is too short: quote at least 3 of their words`);
-    else if (s) extras.push(`${f}: skip quoted as the user's ("${s.quote}") but those words are not in the user's messages nor an option they picked`);
-  }
-  const hasCierre = CIERRE.test(reply);
-  // The exception lines (Tests: no, Build: no, no comprobado, Secretos: no) answer a block: written before the hook
-  // blocked, a preventive one would cancel a real block. Read only in the reply that follows the block (stop_hook_active).
-  const exc = ctx.blocked ? reply : '';
-  // Testigo decision: the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
-  // answered question of the task came before its first change; each answer is recorded with its position, and a later
-  // question does not count against it. An edit the gate denied changed nothing. Measured on the stretch since the last
-  // close (a follow-up's own question is not measured against its parent's first change); the review still counts
-  // across the whole task.
-  const taskTools = ctx.stretchTools?.length ? ctx.stretchTools : ctx.taskTools?.length ? ctx.taskTools : allTools;
-  const changedFile = (t) => !t.error && ((EDITS.test(t.name) && !exempt(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
-  const firstTaskChange = taskTools.findIndex(changedFile);
-  const firstAsk = taskTools.findIndex((t) => ASK(t) && !t.error);
-  for (const x of ctx.decisions || []) {
-    const i = x.callId ? taskTools.findIndex((t) => t.id === x.callId) : -1;
-    if (i >= 0) x.position = firstTaskChange >= 0 && i > firstTaskChange ? 'after' : 'before';
-  }
-  const decision = [];
-  let lateDecision = false;
-  if (ctx.decisions && !ctx.decisions.length) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick');
-  else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
-  // The exception lines (docs/adr/0012): written after a block, they let the step pass as ⚠ "excepción declarada", never
-  // as ✔ (nothing ran to prove it). → the line, or undefined.
-  const excLine = (re) => exc.match(re)?.[0]?.trim().slice(0, 160);
-  const noComp = excLine(/no comprobado \(.{3,}\)/i), testsNo = excLine(/Tests:\s*no \(.{3,}\)/i), buildNo = excLine(/Build:\s*no \(.{3,}\)/i), secretsNo = excLine(/Secretos:\s*no \(.{3,}\)/i);
-  const excepted = {};
-  // Testigo gate: the exit of the agent's last gate after its last code change; with none, the repo typecheck the hook
-  // re-runs (ctx.rerun, testigos.mjs: 40 s, never the full build). A test that failed after the last code change (and did
-  // not pass in a later run) leaves it ✘ too, whatever ran after it. A failing gate blocks once; "no comprobado (<why>)"
-  // says the failure is not this task's.
-  const gate = [];
-  const redTests = [];
-  if (lastCode >= 0) {
-    const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t) && !inCopy(t)).pop(); // a gate that never ran checked nothing; a run in the clean copy is not the task's
-    const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
-    // The exit is the gate's only when nothing but '&&' follows it, or it is the last part: "build | grep -i error" exits 1
-    // on a clean build and "tsc; echo done" exits 0 on a red one. Otherwise a failure in its output decides, then the
-    // hook's own typecheck (none: not held against it).
-    const own = mine ? exitFor(mine, 'gate') : null;
-    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
-    // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
-    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !inCopy(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
-    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
-    observed.gate = run || null;
-    // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
-    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !inCopy(t));
-    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
-    observed.tests.failed = redTests;
-    const none = 'no typecheck, lint or build ran after the last code change';
-    if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
-    else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
-    else if (!run.ok && noComp) excepted.gate = noComp;
-    else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
-    if (redTests.length && noComp) excepted.gate = noComp;
-    else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 160)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
-  }
-  if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
-  const cierre = [];
-  let renamed = null;
-  if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)');
-  else {
-    if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | parcial (<what is missing>) | bloqueado (<why>)');
-    if (!field(reply, 'Evidencia')) cierre.push('Evidencia: observada <what you saw> | inferida de <source> (check: <one line for the user>)');
-    if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
-    if (ctx.ids) {
-      const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-      const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
-      if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
-      else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
-      // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
-      else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
-    }
-  }
+// Testigo build: a build that passed in the repo of each changed code file, after the last code change in that repo.
+function observeBuild(S) {
+  const { apart, code, ctx, exitFor, last, lastCode, lastIdx, output, runsOf, shellChange, turn } = S;
   const near = code.length ? specsNear(code) : null;
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
   // Testigo build: a build that passed (exit 0, or no failure in its output when its exit is another part's) in the repo of
   // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
   // an unknown one matches any build; a code change by shell names no repo and counts for every repo.
   const repoAt = ctx.repoOf || repoOf;
-  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
+  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
   const lastIn = (r) => lastIdx((t) => shellChange(t) || (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && repoAt(path.dirname(fileOf(t))) === r));
   const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastCode : last) && (!b.repo || !r || b.repo === r)); };
   const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastCode));
-  const when = {
-    engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
-    // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
-    repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
-    specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
-    push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
-  };
+  return { near, committed, buildAfter };
+}
+
+// Testigo evidence (docs/adr/0025, 0026): an Evidencia "observada" needs a check after the last change, and each fact it cites is looked up in the tool calls.
+function observeEvidence(S) {
+  const { ctx, denied, lastChange, observed, output, reply, result, runsOf, turn } = S;
+  const hasCierre = CIERRE.test(reply);
   // Testigo evidence (docs/adr/0025): an Evidencia "observada" needs a check after the last change (a read, a search, a
   // run; a commit, a push, a question or a skill load checks nothing), and each fact it cites (`backticks`, 84/84, exit 0,
   // a hash) is looked up in the task's tool calls since the last close. A fact no call shows is "sin respaldo": scored,
@@ -601,7 +494,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const cited = evidenceFacts(evidText);
   // where a fact can be backed: the calls' inputs and outputs, never the text the agent wrote itself (its edits)
   const flat = (x) => String(x || '').toLowerCase().replace(/\\/g, '/').replace(/\s+/g, ' ');
-  const calls = cited.length ? [...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => ({ input: flat(Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')), out: String(result(t)?.raw || result(t)?.text || t.out || '') })) : [];
+  const calls = cited.length ? [...turn.tools, ...(ctx.stretchTools || [])].filter((t) => !EDITS.test(t.name)).map((t) => ({ name: String(t.name || ''), input: flat(Object.values(t.input || {}).filter((v) => typeof v === 'string').join(' ')), out: String(result(t)?.raw || result(t)?.text || t.out || '') })) : [];
   const hay = calls.map((c) => `${c.input} ${flat(c.out)}`).join('\n');
   const shellRan = (bad) => turn.tools.slice(lastChange + 1).some((t) => shell(t) && !stopped(t) && !!(result(t)?.error || t.error) === bad); // exit codes: after the last change
   // file:line is also backed by a call that named the file and printed that line without the file's name: grep -n of one
@@ -621,8 +514,154 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     const name = new RegExp(`(?:^|[\\s/"'=])${esc(m[2])}(?![\\w.-])`);
     return calls.some((c) => c.input.includes(m[1]) && name.test(flat(c.out)));
   };
-  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || lineShown(f) || pathShown(f); };
+  // Open failure (docs/adr/0026): a fact the hook cannot find in the literal form it was cited is looked up in the forms a
+  // person writes it: a command with its quoted path ("waymark.mjs" check), a phrase whose words one call holds together
+  // (the tool's name, its input and its output), pass/total (84/84) from "tests 84 … pass 84", a file name whose stem a
+  // call printed (bf28ce5b.jsonl, the stem listed).
+  const unquoted = (s) => flat(s).replace(/["'`\\]/g, ''); // a result stored as JSON has its quotes escaped
+  const unquotedHay = unquoted(hay);
+  const wordsTogether = (f) => {
+    const words = unquoted(f).toLowerCase().split(/[\s:,;]+/).filter((w) => w.length > 1);
+    return words.length >= 2 && words.length <= 6 && calls.some((c) => { const h = unquoted(`${c.name} ${c.input} ${c.out}`).toLowerCase(); return words.every((w) => new RegExp(`(?<![\\w.-])${esc(w)}(?![\\w-])`).test(h)); });
+  };
+  const ratioShown = (f) => {
+    const m = f.match(/^(\d+)\/(\d+)$/);
+    return !!m && calls.some((c) => new RegExp(`(?:pass(?:ed)?|✓|ok)\\D{0,8}${m[1]}\\b|\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out) && new RegExp(`(?:tests?|total)\\D{0,8}${m[2]}\\b|\\b${m[2]}\\s+(?:tests?|total)`, 'i').test(c.out));
+  };
+  const stemShown = (f) => { const m = flat(f).match(/^(?:.*\/)?([\w-]{7,})\.\w{1,6}$/); return !!m && hay.includes(m[1]); };
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || unquotedHay.includes(unquoted(f)) || lineShown(f) || pathShown(f) || wordsTogether(f) || ratioShown(f) || stemShown(f); };
   observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
+  return { hasCierre };
+}
+
+// The skips the user quoted (Tests, Review), validated against their own words.
+function readSkips(S) {
+  const { ctx, prompts, reply } = S;
+
+  // ---- Each step of the routine contract (waymark/routine.json): does it apply, did it pass, why not ----
+  const chosenLabels = (ctx.decisions || []).flatMap((x) => String(x.chosen).split(',')).map(plain).filter(Boolean);
+  const skip = {}, extras = [];
+  for (const f of ['Tests', 'Review']) {
+    const s = userSkip(reply, f, prompts, chosenLabels);
+    if (s === 'ok') skip[f] = true;
+    else if (s?.short) extras.push(`${f}: skip quoted as the user's ("${s.quote}") is too short: quote at least 3 of their words`);
+    else if (s) extras.push(`${f}: skip quoted as the user's ("${s.quote}") but those words are not in the user's messages nor an option they picked`);
+  }
+  return { skip, extras };
+}
+
+// The exception lines a reply writes after a block (docs/adr/0012).
+function readExceptions(S) {
+  const { ctx, reply } = S;
+  // The exception lines (Tests: no, Build: no, no comprobado, Secretos: no) answer a block: written before the hook
+  // blocked, a preventive one would cancel a real block. Read only in the reply that follows the block (stop_hook_active).
+  const exc = ctx.blocked ? reply : '';
+  // The exception lines (docs/adr/0012): written after a block, they let the step pass as ⚠ "excepción declarada", never
+  // as ✔ (nothing ran to prove it). → the line, or undefined.
+  const excLine = (re) => exc.match(re)?.[0]?.trim().slice(0, 160);
+  const noComp = excLine(/no comprobado \(.{3,}\)/i), testsNo = excLine(/Tests:\s*no \(.{3,}\)/i), buildNo = excLine(/Build:\s*no \(.{3,}\)/i), secretsNo = excLine(/Secretos:\s*no \(.{3,}\)/i);
+  const excepted = {};
+  return { noComp, testsNo, buildNo, secretsNo, excepted };
+}
+
+// Testigo decision: the user's answer in the choice window came before the first change.
+function decisionWitness(S) {
+  const { ASK, allTools, ctx } = S;
+  // Testigo decision: the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
+  // answered question of the task came before its first change; each answer is recorded with its position, and a later
+  // question does not count against it. An edit the gate denied changed nothing. Measured on the stretch since the last
+  // close (a follow-up's own question is not measured against its parent's first change); the review still counts
+  // across the whole task.
+  const taskTools = ctx.stretchTools?.length ? ctx.stretchTools : ctx.taskTools?.length ? ctx.taskTools : allTools;
+  const changedFile = (t) => !t.error && ((EDITS.test(t.name) && !exempt(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
+  const firstTaskChange = taskTools.findIndex(changedFile);
+  const firstAsk = taskTools.findIndex((t) => ASK(t) && !t.error);
+  for (const x of ctx.decisions || []) {
+    const i = x.callId ? taskTools.findIndex((t) => t.id === x.callId) : -1;
+    if (i >= 0) x.position = firstTaskChange >= 0 && i > firstTaskChange ? 'after' : 'before';
+  }
+  const decision = [];
+  let lateDecision = false;
+  if (ctx.decisions && !ctx.decisions.length) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick');
+  else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
+  return { decision, lateDecision };
+}
+
+// Testigo gate: the exit of the agent's last gate after its last code change, and the tests that failed after it.
+function gateWitness(S) {
+  const { apart, cmdKey, code, ctx, envFail, excepted, exitFor, failedRun, gateCmd, lastCode, lastSpec, noComp, observed, output, secs, testCmd, turn } = S;
+  // Testigo gate: the exit of the agent's last gate after its last code change; with none, the repo typecheck the hook
+  // re-runs (ctx.rerun, testigos.mjs: 40 s, never the full build). A test that failed after the last code change (and did
+  // not pass in a later run) leaves it ✘ too, whatever ran after it. A failing gate blocks once; "no comprobado (<why>)"
+  // says the failure is not this task's.
+  const gate = [];
+  const redTests = [];
+  if (lastCode >= 0) {
+    const mine = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && !envFail(t) && !apart(t)).pop(); // a gate that never ran checked nothing; a run in the clean copy is not the task's
+    const rerun = () => { const r = ctx.rerun ? ctx.rerun(code) : null; return r && { by: 'testigo', ...r }; };
+    // The exit is the gate's only when nothing but '&&' follows it, or it is the last part: "build | grep -i error" exits 1
+    // on a clean build and "tsc; echo done" exits 0 on a red one. Otherwise a failure in its output decides, then the
+    // hook's own typecheck (none: not held against it).
+    const own = mine ? exitFor(mine, 'gate') : null;
+    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
+    // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
+    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !apart(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
+    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
+    observed.gate = run || null;
+    // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
+    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
+    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
+    observed.tests.failed = redTests;
+    const none = 'no typecheck, lint or build ran after the last code change';
+    if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
+    else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
+    else if (!run.ok && noComp) excepted.gate = noComp;
+    else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    if (redTests.length && noComp) excepted.gate = noComp;
+    else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 160)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+  }
+  if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
+  return { gate, redTests };
+}
+
+// Testigo cierre: the Cierre block, its fields and its task ID.
+function cierreWitness(S) {
+  const { changed, ctx, hasCierre, reply } = S;
+  const cierre = [];
+  let renamed = null;
+  if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)');
+  else {
+    if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | parcial (<what is missing>) | bloqueado (<why>)');
+    if (!field(reply, 'Evidencia')) cierre.push('Evidencia: observada <what you saw> | inferida de <source> (check: <one line for the user>)');
+    if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
+    if (ctx.ids) {
+      const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
+      const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
+      if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
+      else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
+      // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
+      else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
+    }
+  }
+  return { cierre, renamed };
+}
+
+// The conditions routine.json names in `when`, from what ran, never from words.
+function whenOf(S) {
+  const { code, committed, ctx, near, noBuild, observed, redTests, retried, skip, ui } = S;
+  const when = {
+    engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
+    // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
+    repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
+    specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
+    push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
+  };
+  return { when };
+}
+
+// Testigo procedure: the owner department loaded and its procedures.md read.
+function procedureWitness(S) {
+  const { ctx, dept, observed, procRe, routed } = S;
   const procedure = [];
   if (routed === 'Q') procedure.push('routed as a question (Q) but changed project files');
   if (!dept.declared) procedure.push('no owner department was invoked: invoke the owner dept-* skill (its SKILL.md) first');
@@ -630,21 +669,67 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   // a Node repo's clean copy installs its own modules from the store (copyInstall, stack.mjs), never through a link
   const copyStep = ctx.copyInstall ? ` → in <tmp>: ${ctx.copyInstall}, with CI=true in its environment (from the store, no network, no prompt; never a junction to the repo's node_modules: the package manager can purge it through the link)` : '';
-  const fails = {
-    decision, gate, cierre,
-    evidence: observed.evidence?.claim === 'observada' && !observed.evidence.checkedAfter ? ['Evidencia says "observada" but no tool call checked the state after the last change (a commit, a push or a question checks nothing): check it now (run, read or test what changed), or write it as "inferida de <source> (check: <one line for the user>)"'] : [],
-    memory: observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'],
-    review: skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`],
-    build: buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'],
-    docs: retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`),
-    procedure,
-    spec: observed.tests.specsChanged.length ? [] : testsNo ? (excepted.spec = testsNo, []) : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`],
-    red: observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD${copyStep} → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"`],
-    preexisting: observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (git worktree add <tmp> HEAD${copyStep} → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"`],
-    trailer: ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'],
-    secrets: !observed.secrets.length ? [] : secretsNo ? (excepted.secrets = secretsNo, []) : [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`],
-    chain: ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? 'the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through waymark.mjs forget' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [],
-  };
+  return { procedure, copyStep };
+}
+
+// One function per testigo: what it says is missing. routine.json decides which apply at the level and which block.
+const WITNESS = {
+  decision: (S) => S.decision,
+  gate: (S) => S.gate,
+  cierre: (S) => S.cierre,
+  evidence: (S) => {
+    const { observed } = S;
+    return observed.evidence?.claim === 'observada' && !observed.evidence.checkedAfter ? ['Evidencia says "observada" but no tool call checked the state after the last change (a commit, a push or a question checks nothing): check it now (run, read or test what changed), or write it as "inferida de <source> (check: <one line for the user>)"'] : [];
+  },
+  memory: (S) => {
+    const { observed } = S;
+    return observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'];
+  },
+  review: (S) => {
+    const { observed, reviewLeft, skip } = S;
+    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
+  },
+  build: (S) => {
+    const { buildAfter, buildNo, excepted } = S;
+    return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'];
+  },
+  docs: (S) => {
+    const { retried } = S;
+    return retried.filter((r) => !r.docs && !r.late).map((r) => `the same command failed twice (${r.cmd.slice(0, 80)}): consult the docs (library-docs, or the installed package's types/source) before running it again`);
+  },
+  procedure: (S) => S.procedure,
+  spec: (S) => {
+    const { excepted, near, observed, testsNo } = S;
+    return observed.tests.specsChanged.length ? [] : testsNo ? (excepted.spec = testsNo, []) : [`${near} sits next to the changed code and no spec was added or changed: add or update it and run it, or write Tests: no (<why no spec can cover it>)`];
+  },
+  red: (S) => {
+    const { copyStep, excepted, observed, testsNo } = S;
+    return observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD${copyStep} → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"`];
+  },
+  preexisting: (S) => {
+    const { copyStep, excepted, noComp, observed } = S;
+    return observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (git worktree add <tmp> HEAD${copyStep} → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"`];
+  },
+  trailer: (S) => {
+    const { ctx } = S;
+    return ctx.commits?.length || ctx.trailered?.length ? [] : ['a commit made this turn without the trailer "Waymark-Task: <task ID>"'];
+  },
+  secrets: (S) => {
+    const { excepted, observed, secretsNo } = S;
+    return !observed.secrets.length ? [] : secretsNo ? (excepted.secrets = secretsNo, []) : [`a secret-like value in ${observed.secrets.slice(0, 3).map((h) => `${h.where}${h.line ? `:${h.line}` : ''} (${h.kind})`).join(', ')}: remove it (and rotate it if it is real), or write "Secretos: no (<why>)" when it is a fake value in a test or fixture`];
+  },
+  chain: (S) => {
+    const { ctx } = S;
+    return ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? 'the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through waymark.mjs forget' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [];
+  },
+};
+function failsOf(S) {
+  return { fails: Object.fromEntries(Object.entries(WITNESS).map(([id, witness]) => [id, witness(S)])) };
+}
+
+// The steps of the routine contract (waymark/routine.json): does each apply, did it pass, why not.
+function composeSteps(S) {
+  const { changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, renamed, reply, retried, when } = S;
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
@@ -683,10 +768,53 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
-  const otherFailed = observed.gates.filter((g) => g.error && !g.env && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
+  const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   return { level, changed, reply, missing, findings, steps, dept, observed, renamed };
 }
+
+// → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
+// The turn is observed once (observeTurn); each testigo is a function of what was observed (S) and routine.json says which
+// apply at the level and which block (docs/adr/0026).
+export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
+  const byKey = new Map();
+  for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
+  const changed = [...byKey.values()];
+  // A task with a Cierre whose changes are all outside the project (install, cleanup) is recorded too (ctx.outside):
+  // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn.
+  const lastText = String(last || '').replace(/\*\*|__/g, '');
+  const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
+  if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
+  const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
+  // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
+  // is not a field (found when the hook read a bullet of the reply as Decisión).
+  const reply = full.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || full;
+  const routed = routedLevel([...turn.texts, full], turn.tools) || ctx.inherited?.level || 0; // an unrouted reply inside an open task
+  // The level judged comes from what the agent changed, with the declared one as a floor: 1–2 files → L1, more → L2. L3
+  // only when declared; an explicit L0 keeps its skip for a single file; a Q turn that changed files is judged as L2.
+  const denied = (t) => !!(turn.results?.[t.id]?.error || t.error); // an edit the gate denied changed nothing
+  const agentFiles = new Set(turn.tools.filter((t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t))).map((t) => norm(fileOf(t))));
+  if (turn.tools.some((t) => shell(t) && changesProject(t.input.command))) for (const f of ctx.gitChanged || []) if (!exempt(f)) agentFiles.add(norm(f));
+  const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;
+  const explicitL0 = /^[ \t]*Waymark →\s*L0\b(?!\s*(?:\||or)\s*Q)/m.test([...turn.texts, full].join('\n'));
+  const declared = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
+  const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
+  if (!level) return null;
+  const S = { turn, last, allTools, prompts, ctx, byKey, changed, lastText, earlyLevel, full, reply, routed, denied, agentFiles, byFiles, explicitL0, declared, level };
+  Object.assign(S, observeTurn(S));
+  Object.assign(S, observeBuild(S));
+  Object.assign(S, observeEvidence(S));
+  Object.assign(S, readSkips(S));
+  Object.assign(S, readExceptions(S));
+  Object.assign(S, decisionWitness(S));
+  Object.assign(S, gateWitness(S));
+  Object.assign(S, cierreWitness(S));
+  Object.assign(S, whenOf(S));
+  Object.assign(S, procedureWitness(S));
+  Object.assign(S, failsOf(S));
+  return composeSteps(S);
+}
+
 
 // Automatic evaluation from the routine contract: ✔/✘ per step that applied (a label with several steps passes only if
 // all pass), the score over the applicable steps, tokens and the quota: measured by the status line when there is a

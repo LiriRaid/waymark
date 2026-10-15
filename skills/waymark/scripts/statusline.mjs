@@ -26,8 +26,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { subagentDir } from './transcript.mjs';
+import { waymarkHome as HOME } from './lib/paths.mjs';
+import { readJson as readJsonFile } from './lib/fs.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 export const quotaFile = () => path.join(HOME(), '.quota.json');
 const startsFile = () => path.join(HOME(), '.quota-starts.json');
 const KEEP = 7 * 86400000; // sessions and starts older than a week are dropped
@@ -35,7 +36,7 @@ const RESET_SLACK = 120; // seconds: the same window's resets_at may move a litt
 const SEEN_RESET = 600; // seconds: a new window's first reading within this of the last reset saw the reset happen
 const round = (x) => Math.round(x * 10) / 10;
 
-const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { return {}; } };
+const readJson = (file) => readJsonFile(file) || {};
 export function readQuota() {
   const st = readJson(quotaFile());
   return { latest: st.latest || null, sessions: st.sessions || {}, outside: st.outside || null, starts: readJson(startsFile()) };

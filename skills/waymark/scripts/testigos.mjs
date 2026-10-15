@@ -11,10 +11,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell } from './stack.mjs';
+import { read } from './lib/fs.mjs';
+import { git as gitIn } from './lib/git.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+const git = (cwd, ...a) => gitIn(cwd, a, { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
 const top = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? path.resolve(r.stdout.trim()) : null; };
 const same = (a, b) => String(a || '').replace(/\\/g, '/').toLowerCase() === String(b || '').replace(/\\/g, '/').toLowerCase();
 

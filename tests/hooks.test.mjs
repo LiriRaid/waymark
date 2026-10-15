@@ -2313,6 +2313,34 @@ test('review: every waymark.mjs review in one command counts; the message names 
   assert.equal(both.observed.review, true, 'the second call of the same command covers the front');
 });
 
+// 2.0.13: YaloAtiendo's T3 built the API and the front after changing both, then wrote only the front's main.spec.ts and
+// rebuilt only the front; the testigo wanted every repo built after the turn's last code change.
+test('build: each repo needs a build that passed after the last code change in that repo', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), api = '/work/api/src/whatsapp.service.ts', web = '/work/web/src/app/inbox.ts', spec = '/work/web/src/main.spec.ts';
+  const repoOf = (d) => String(d).replace(/\\/g, '/').replace(/^[a-z]:/i, '').match(/^\/work\/(api|web)\b/)?.[0] || null;
+  const build = (r) => call('Bash', { command: `cd /work/${r} && npm run build` });
+  const head = [prompt('conexiones en api y front'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
+    ...askWithId('q1', '¿Cómo?', ['A', 'B'], 'A')];
+  const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l), cwd: '/work', repoOf });
+  const built = (l) => judge(l).steps.find((s) => s.id === 'build').pass;
+  const both = [...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('api'), build('web')];
+  assert.equal(built([...both, call('Write', { file_path: spec }), build('web')]), true, 'the API did not change after its build');
+  assert.equal(built([...both, call('Write', { file_path: spec })]), false, 'the front changed after its build');
+  assert.equal(built([...both, call('Edit', { file_path: api }), build('web')]), false, 'the API changed after its build and only the front was rebuilt');
+  assert.equal(built([...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('web')]), false, 'the API was never built');
+});
+
+// 2.0.13: YaloAtiendo's T4 wrote "conteos antes y después (29/86/326/15/1)" and the testigo read "29/86" and "326/15"
+// as pass/total results no call showed.
+test('evidence facts: a chain of three or more numbers joined by / is not a pass/total', async () => {
+  const { evidenceFacts } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  assert.deepEqual(evidenceFacts('observada conteos antes y después (29/86/326/15/1)'), []);
+  assert.deepEqual(evidenceFacts('observada 1/2/3 y 10/20/30'), []);
+  assert.deepEqual(evidenceFacts('observada `node --test` da 84/84 y exit 0'), ['node --test', '84/84', 'exit 0'], 'a pass/total still counts');
+  assert.deepEqual(evidenceFacts('observada 12/12 (spec) y 3/4.'), ['12/12', '3/4']);
+});
+
 test('waymark.mjs review: the diff of the task\'s files (new ones included) and the checklist', () => {
   const repo = memRepo('review');
   const W = (...a) => spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), ...a], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;

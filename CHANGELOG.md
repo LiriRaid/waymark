@@ -2,6 +2,11 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.13 — a build per repo, and counts are not results
+- **Fix: Build ✗ on a task that built every repo.** The Build testigo counted only the builds after the turn's last code change and wanted one per repo with changed code. YaloAtiendo 2026-10-15 · T3 changed the API and the front, built both (exit 0), then wrote only the front's `main.spec.ts` and rebuilt only the front. The API had not changed since its build, yet the task scored Build ✗.
+- Now each repo needs a build that passed after the last code change **in that repo**. A code change made from the shell names no repo, so it still counts for every repo; a build or file whose repo is unknown matches any, as before (`docs/adr/0020`, amended).
+- **Fix: Evidencia ⚠ for counts.** `29/86/326/15/1` (counts before and after, in YaloAtiendo 2026-10-15 · T4) was read as two pass/total results, `29/86` and `326/15`, that no call showed. A chain of three or more numbers joined by `/` is no longer a fact to back; `84/84` still is (`docs/adr/0025`, amended).
+
 ## 2.0.12 — the context brakes wait for the task
 - **Fix: a large task was stopped mid-work.** The size brake (300k, then every 100k) and the idle brake (100k, idle over an hour) fired on any message, task finished or not. A big YaloAtiendo task was braked while working, and again when it resumed after the quota ran out. Opening a new session mid-task rebuilds what the old one held, so it costs more than continuing.
 - Now both brakes wait for the task:

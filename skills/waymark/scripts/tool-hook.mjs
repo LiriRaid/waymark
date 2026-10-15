@@ -15,7 +15,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { taskLines, taskStart, askedChoice, changesProject, shellSkeleton, shellRuns, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
+import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
+import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 

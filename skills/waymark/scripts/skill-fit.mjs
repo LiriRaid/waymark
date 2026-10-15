@@ -14,6 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { claudeDir } from './agents/paths.mjs';
+import { readJson } from './lib/fs.mjs';
 
 const HOME = os.homedir();
 const LOCAL = process.env.WAYMARK_HOME || path.join(HOME, '.waymark');
@@ -24,7 +25,6 @@ const SKILLS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const MAP = path.join(SKILLS_ROOT, 'waymark', 'skill-map.json');
 const STATE = path.join(LOCAL, 'skill-fit.json');
 const MIN_HISTORY_DAYS = Number(process.env.WAYMARK_SKILL_FIT_MIN_DAYS ?? 14); // less history than this → no recommendation (everything would look unused)
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const readText = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
 function transcripts() {

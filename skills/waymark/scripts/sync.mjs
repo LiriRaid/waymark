@@ -9,6 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { discoverMcp } from './agents/paths.mjs'; // every agent's MCP config, where its environment variables put it
+import { readJson } from './lib/fs.mjs';
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = os.homedir();
@@ -62,7 +63,6 @@ const CAP_KEYWORDS = [
 const guessCapability = (s) => CAP_KEYWORDS.find(([, re]) => re.test(`${s.name.replace(/[-_]/g, ' ')} ${s.description || ''}`))?.[0] || '-';
 
 const readText = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 
 function frontmatter(text) {
   const m = text?.match(/^---\r?\n([\s\S]*?)\r?\n---/);

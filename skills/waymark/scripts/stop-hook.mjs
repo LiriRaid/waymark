@@ -34,10 +34,10 @@ import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs'
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { saveLearned, saveQuestion } from './engram.mjs';
-import { packedFiles } from './tool-hook.mjs';
+import { packedFiles } from './lib/packed.mjs';
 import { learn } from './learn.mjs';
+import { norm } from './lib/paths.mjs';
 
-const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 const exempt = (file) => {
   const f = norm(file), home = norm(os.homedir());
   return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || f.includes('/scratchpad/');

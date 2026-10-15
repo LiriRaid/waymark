@@ -11,9 +11,9 @@ import path from 'node:path';
 import { aprendidoOf, maskSecrets } from './provenance.mjs';
 import { shellRuns } from './runs.mjs';
 import { incidents } from './incidents.mjs';
+import { read } from './lib/fs.mjs';
 
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
-const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const words = (s) => [...String(s).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
 const cells = (l) => l.split('|').slice(1, -1).map((c) => c.trim());
 const isRow = (l) => /^\|/.test(l) && !/^\|\s*-{3}/.test(l);

@@ -12,13 +12,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './lib/fs.mjs';
 
 const HOME = os.homedir();
 const LOCAL = process.env.WAYMARK_HOME || path.join(HOME, '.waymark');
 const CLAUDE_JSON = process.env.WAYMARK_CLAUDE_JSON || (process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(HOME, '.claude.json'));
 const MAP = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skill-map.json');
 const STATE = path.join(LOCAL, 'mcp-fit.json');
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const readText = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 const norm = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase();
 

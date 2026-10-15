@@ -12,8 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { legacyMemory, readRecords, verifyChain, projectHome, ensureLocal, refreshTasks } from './provenance.mjs';
+import { waymarkHome as HOME } from './lib/paths.mjs';
 
-const HOME = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 const BACKUPS = () => process.env.WAYMARK_BACKUPS || path.join(path.dirname(HOME()), '.waymark-backups');
 const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 

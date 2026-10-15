@@ -19,8 +19,10 @@ import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
 import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
+import { norm } from './lib/paths.mjs';
+import { PACKED, readPacked, packedFiles } from './lib/packed.mjs';
+export { PACKED, packedFiles }; // moved to lib/packed.mjs; kept for existing importers
 
-const norm = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
 
 // Files the routine itself writes (memory, learnings, scratch) never need the opener. The OS temp dir is the one Node
 // reports (TMPDIR on macOS, /var/folders/…; TEMP on Windows).
@@ -128,13 +130,6 @@ const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 // earlier tasks did there) as context, so the routine never depends on the agent remembering it. Claude Code and Codex
 // take it before the tool runs; OpenCode and Gemini CLI with the tool's result (their after-tool hook). The files
 // handed over are kept per session and task (packed state), and the end-of-turn hook reads them for the testigo.
-export const PACKED = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.packed.json');
-const readPacked = (file = PACKED()) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
-// The files whose pack this session's current task already got (task = since its last close). → Set of normalized paths.
-export function packedFiles(session, since = 0, file = PACKED()) {
-  const st = readPacked(file)[session || 'unknown'];
-  return new Set(st && st.since === since ? st.files : []);
-}
 // The files a shell command names, resolved against the `cd` before them in the same command: arguments that are
 // existing files and redirect targets (a new file too, when its folder exists). Heredoc bodies name nothing. → paths.
 export function commandFiles(command, cwd = process.cwd()) {

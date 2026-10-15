@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJson } from '../lib/fs.mjs';
 
 export const USER = () => process.env.WAYMARK_AGENTS_HOME || os.homedir();
 export const xdgConfig = () => process.env.XDG_CONFIG_HOME || path.join(USER(), '.config');
@@ -24,7 +25,6 @@ export const geminiHome = () => agentDir(known('gemini'));
 export const opencodeDir = () => agentDir(known('opencode'));
 export const cursorDir = () => agentDir(known('cursor'));
 
-const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const readText = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 // JSON with // and /* */ comments and trailing commas (opencode.jsonc), strings left intact.
 export const parseJsonc = (text) => {

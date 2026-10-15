@@ -112,6 +112,8 @@ export function shellRuns(command, depth = 0) {
     from = to + sep.length;
     if (!text) return;
     const words = tokens(text), dir = /^(cd|pushd|push-location|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
+    const back = /^(pop-location|popd)$/i.test(words[0] || '') || (/^cd$/i.test(words[0] || '') && words[1] === '-'); // the folder before the last push
+    if (back) { cd = null; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
     if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
     const k = classify(words), at = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
     if (k.inner !== undefined && depth < 2) {
@@ -150,16 +152,19 @@ export const inCopy = (command, copies = []) => WORKTREE_ADD.test(command) || co
 // from its assignment in the command. 'temp': a scratch or temp folder (a clean copy or a helper, never the project);
 // 'unknown': a variable nothing in the command assigns, so the hook cannot tell where it ran; null: the session's folder
 // or a plain path.
+// A scratch place for a folder: an absolute temp path, the system temp variables or the `$T` convention. A relative
+// `temp/` or a variable such as $TEMPLATE_DIR is the project's.
+const tempPlace = (p) => /^["']?\$T(?![\w])|^["']?\$\{?(?:env:)?(?:TEMP|TMP|TMPDIR)\}?(?![\w])|^%TEMP%|AppData[\\/]Local[\\/]Temp|^["']?(?:[A-Za-z]:)?[\\/](?:tmp|temp|var[\\/]folders)[\\/]|[\\/]scratchpad[\\/]/i.test(String(p).trim());
 const assigned = (command, name) => command.match(new RegExp(`(?:^|[\\s;&(])\\$?${name}\\s*=\\s*["']?([^"';&|\\n]+)`))?.[1];
 export function runPlace(command, run) {
   const cd = String(run.cd || '').replace(/^["']|["']$/g, '');
   if (!cd) return null;
-  if (TEMP.test(cd) || /\$env:(temp|tmp)\b/i.test(cd)) return 'temp';
+  if (tempPlace(cd)) return 'temp';
   const name = cd.match(/^\$\{?(\w+)\}?(?:[\\/].*)?$/)?.[1];
   if (!name) return null;
   const value = assigned(command, name);
   if (!value) return 'unknown';
-  return TEMP.test(value) || /\$env:(temp|tmp)\b/i.test(value) ? 'temp' : null;
+  return tempPlace(value) ? 'temp' : null;
 }
 
 // The kind of a whole command, the one question every testigo asks about a run: 'copy' (in a clean copy or a temp folder:

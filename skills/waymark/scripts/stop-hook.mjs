@@ -567,7 +567,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
   // an unknown one matches any build; a code change by shell names no repo and counts for every repo.
   const repoAt = ctx.repoOf || repoOf;
-  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
+  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
   const lastIn = (r) => lastIdx((t) => shellChange(t) || (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && repoAt(path.dirname(fileOf(t))) === r));

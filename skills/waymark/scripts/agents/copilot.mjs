@@ -19,6 +19,7 @@ import path from 'node:path';
 import { readTail, clipOutput, closingQuestions, isPrompt } from '../transcript.mjs';
 import { agentDir, known } from './paths.mjs';
 import { patchFiles } from './codex.mjs';
+import { asQuestion as question, answerLine, chatAnswer } from './lines.mjs';
 
 export const name = 'copilot';
 const HOME = () => agentDir(known('copilot'));
@@ -62,7 +63,7 @@ const patchOf = (i = {}) => i.input || i.patch || i.command || '';
 const textOf = (v) => (typeof v === 'string' ? v : v == null ? '' : v.content != null ? textOf(v.content) : v.message != null ? String(v.message) : JSON.stringify(v));
 // The labels a result names, without one that is only part of a longer label it also names ("No" inside "Not now").
 const chosen = (labels, said) => { const hit = labels.filter((l) => l && said.includes(l)); return hit.filter((l) => !hit.some((o) => o !== l && o.includes(l))).join(','); };
-const asQuestion = (q) => ({ question: String(q?.question || q?.prompt || q?.title || q || '').trim(), options: (q?.choices || q?.options || []).map((o) => ({ label: String(o?.label ?? o) })) });
+const asQuestion = (q) => question(q, { text: ['question', 'prompt', 'title'], options: ['choices', 'options'], plain: true });
 
 // The session log → the core's lines (Claude Code .jsonl shape, canonical tool names).
 export function toLines(rows, cwd = process.cwd()) {
@@ -78,7 +79,7 @@ export function toLines(rows, cwd = process.cwd()) {
       if (questions.length) { // the previous turn ended asking in the chat: this prompt answers it
         const id = `chat-${n++}`, reply = String(d.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
         assistant({ timestamp: r.timestamp }, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);
-        lines.push({ type: 'user', timestamp: r.timestamp, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in chat' }] }, toolUseResult: { source: 'chat', questions: questions.map((question) => ({ question, options: [] })), answers: Object.fromEntries(questions.map((q) => [q, reply])) } });
+        lines.push(answerLine(r.timestamp, id, 'answered in chat', chatAnswer(questions, reply)));
       }
       lines.push(prompt);
       tail = []; choiceInTurn = false;
@@ -104,7 +105,7 @@ export function toLines(rows, cwd = process.cwd()) {
       if (asked.has(id) && !failed) { // answered: the labels its result names, else the result itself
         const qs = asked.get(id), said = textOf(d.result);
         const answers = Object.fromEntries(qs.map((q) => [q.question, chosen(q.options.map((o) => o.label), said) || said.slice(0, 300)]));
-        lines.push({ type: 'user', timestamp: r.timestamp, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
+        lines.push(answerLine(r.timestamp, id, 'answered', { questions: qs, answers }));
         choiceInTurn = true;
         continue;
       }

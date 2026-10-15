@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readTail, isPrompt, clipOutput, closingQuestions } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
+import { asQuestion as question, answerLine, plainQuestions, chatAnswer } from './lines.mjs';
 
 export const name = 'codex';
 const HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -38,7 +39,7 @@ const shellOf = (cmd) => {
 // The rollout's rows → the core's lines (Claude Code .jsonl shape, canonical tool names).
 // A question of request_user_input(_async) → { id, question, options: [{ label }] } ("question" or "title"; options as
 // strings or { label }).
-const asQuestion = (q) => ({ id: q.id, question: String(q.question || q.title || '').trim(), options: (q.options || []).map((o) => ({ label: String(o?.label ?? o) })) });
+const asQuestion = (q) => ({ id: q.id, ...question(q, { text: ['question', 'title'] }) });
 const bare = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s*\(recomendad[oa]\)\s*$/, '').replace(/\s+/g, ' ').trim();
 
 export function toLines(rows) {
@@ -67,7 +68,7 @@ export function toLines(rows) {
       assistant(at, [{ type: 'tool_use', name: 'AskUserQuestion', id: p.call_id, input: { questions: qs } }]);
       const answers = {};
       for (const q of qs) { const v = o.answers?.[q.id]?.answers; if (v?.length) answers[q.question] = v.join(','); }
-      lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: p.call_id, content: 'answered' }] }, toolUseResult: { questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
+      lines.push(answerLine(ts, p.call_id, 'answered', { questions: plainQuestions(qs), answers }, { version }));
       continue;
     }
     if (d.type === 'event_msg' && p.type === 'token_count' && p.info?.last_token_usage) {
@@ -88,7 +89,7 @@ export function toLines(rows) {
       for (const { id, qs } of pendingAsync) { // each question: the options the reply names, else the reply itself
         assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'async', questions: qs } }]);
         const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => bare(l) && bare(reply).includes(bare(l))).join(',') || reply]));
-        lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in the next message' }] }, toolUseResult: { source: 'async', questions: qs.map((q) => ({ question: q.question, options: q.options })), answers } });
+        lines.push(answerLine(ts, id, 'answered in the next message', { source: 'async', questions: plainQuestions(qs), answers }, { version }));
       }
       // the questions each message after the turn's last action ends asking, with options (a later message without "?"
       // must not hide them)
@@ -96,7 +97,7 @@ export function toLines(rows) {
       if (questions.length) { // the previous turn ended asking in the chat: this message answers it
         const id = `chat-${n}`;
         assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);
-        lines.push({ type: 'user', timestamp: ts, version, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in chat' }] }, toolUseResult: { source: 'chat', questions: questions.map((question) => ({ question, options: [] })), answers: Object.fromEntries(questions.map((q) => [q, reply])) } });
+        lines.push(answerLine(ts, id, 'answered in chat', chatAnswer(questions, reply), { version }));
       }
       lines.push(prompt);
       tail = []; choiceInTurn = false; pendingAsync = [];

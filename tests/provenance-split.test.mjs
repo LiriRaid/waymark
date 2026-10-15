@@ -61,3 +61,18 @@ test('each module stays readable: under 350 lines', () => {
     assert.ok(lines <= 350, `${n}.mjs has ${lines} lines`);
   }
 });
+
+test('a module exports only what another module or the facade uses', () => {
+  const dir = path.join(SCRIPTS, 'provenance');
+  const facade = fs.readFileSync(path.join(SCRIPTS, 'provenance.mjs'), 'utf8');
+  const srcs = Object.fromEntries(MODULES.map((n) => [n, fs.readFileSync(path.join(dir, `${n}.mjs`), 'utf8')]));
+  const idle = [];
+  for (const [n, s] of Object.entries(srcs)) {
+    for (const m of s.matchAll(/^export (?:async )?(?:const|let|function|class) ([A-Za-z_$][\w$]*)/gm)) {
+      const re = new RegExp(`(?<![\w$.])${m[1].replace(/\$/g, '\$')}(?![\w$])`);
+      const used = re.test(facade) || Object.entries(srcs).some(([o, t]) => o !== n && re.test(t.split('\n').filter((l) => /^import /.test(l)).join('\n')));
+      if (!used) idle.push(`${n}.${m[1]}`);
+    }
+  }
+  assert.deepEqual(idle, []);
+});

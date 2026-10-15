@@ -3,7 +3,7 @@
 
 // Secret formats that are unambiguous wherever they appear: the testigo "sin secretos"
 // looks for these in the memory, mem_save and the task's diff; "password=…" is only masked in what Waymark writes.
-export const SECRET_FORMATS = [
+const SECRET_FORMATS = [
   ['llave privada', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g],
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
   ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g],
@@ -18,7 +18,7 @@ export function findSecrets(text) {
   for (const [kind, re] of SECRET_FORMATS) for (const m of s.matchAll(re)) out.push({ kind, line: s.slice(0, m.index).split('\n').length });
   return out;
 }
-export const maskStrong = (text) => SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, '[redactado]'), String(text ?? ''));
+const maskStrong = (text) => SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, '[redactado]'), String(text ?? ''));
 // Every string of a record with the strong formats masked (the chained log cannot be edited later).
 export const deepMask = (v) => (typeof v === 'string' ? maskStrong(v) : Array.isArray(v) ? v.map(deepMask) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepMask(x)])) : v);
 

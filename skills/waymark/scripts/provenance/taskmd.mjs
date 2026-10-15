@@ -12,8 +12,8 @@ import { taskIds } from './tasks.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
 // entry per session, written by the per-prompt hook and removed when the turn ends.
-export const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
-export const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
+const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
+const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
 
 export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
   const home = projectHome(cwd), file = openFile(home);
@@ -53,22 +53,22 @@ export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED
   return gone.map(([, o]) => o);
 }
 
-export const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
-export const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
-export const QUESTIONS_SHOWN = 5; // questions (Q) since the last close listed in tasks.md, newest last
-export const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
+const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
+const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
+const QUESTIONS_SHOWN = 5; // questions (Q) since the last close listed in tasks.md, newest last
+const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
 
 
 // The pending parts of a line, in order: every NEXT / Next: / Pendiente: / Pending: marker. A marker inside quotes is
 // text, not a marker; "Next.js" is not one. None → the text after the first ":".
-export function nextOf(text) {
+function nextOf(text) {
   const masked = text.replace(/"[^"]*"|“[^”]*”/g, (q) => ' '.repeat(q.length));
   const marks = [...masked.matchAll(/\b(?:NEXT(?=[\s:]):?|(?:Next|Pendiente|Pending):)\s*/g)];
   return marks.map((m, i) => text.slice(m.index + m[0].length, marks[i + 1]?.index ?? text.length).trim().replace(/[\s·;.,]+$/, '')).filter(Boolean).join(' · ')
     || text.slice(text.indexOf(':') + 1).trim();
 }
 // A line written by the hook: "- ▶|✔ [<task ID>] <Aprendido>", at most LINE_CHARS.
-export const HOOK_LINE = new RegExp(`^\\s*-\\s*([▶✔])\\s*\\[(${ID.source})\\]\\s*(.*)$`);
+const HOOK_LINE = new RegExp(`^\\s*-\\s*([▶✔])\\s*\\[(${ID.source})\\]\\s*(.*)$`);
 
 // One Work in progress line with a task ID → "ID · status · …". A hook line → "ID · en curso|hecho · <Aprendido>"; an
 // older free-form line → "ID · status · step · next" (status: ▶ in progress, else pending).
@@ -83,9 +83,9 @@ export function taskSummary(line) {
   return clip(['- ' + id, status, step && `paso ${step}`, next && `próximo: ${next}`].filter(Boolean).join(' · '), TASK_CHARS);
 }
 
-export const WIP = /(\n## Work in progress[^\n]*\n)([\s\S]*?)(?=\n## |$)/;
+const WIP = /(\n## Work in progress[^\n]*\n)([\s\S]*?)(?=\n## |$)/;
 // The task ID that heads a line: a hook line's, else one before the line's first ":"; one quoted later is a note.
-export const headId = (l) => l.match(HOOK_LINE)?.[2] || l.slice(0, l.indexOf(':') + 1 || undefined).match(ID)?.[0] || null;
+const headId = (l) => l.match(HOOK_LINE)?.[2] || l.slice(0, l.indexOf(':') + 1 || undefined).match(ID)?.[0] || null;
 // The Aprendido of a Cierre: its line, or, when the value ends with ":" or is empty, the lines below it up to a blank
 // line, the next field or a heading.
 export function aprendidoOf(cierre) {
@@ -102,7 +102,7 @@ export function aprendidoOf(cierre) {
 }
 
 
-export const STALE_DAYS = 14; // an open (▶) line whose task ID is older leaves Work in progress (the session hook flags it at 14 too)
+const STALE_DAYS = 14; // an open (▶) line whose task ID is older leaves Work in progress (the session hook flags it at 14 too)
 
 // Writes the task's Work in progress line from its Cierre: "- ✔ [<id>] <Aprendido>" when Resultado is hecho, else
 // "- ▶ …", at most 200 characters (the whole Aprendido stays in the record). It replaces the line of the same task (a
@@ -152,7 +152,7 @@ export function tidyWip(home, now = new Date()) {
 // history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
 // that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
 // every closed (✔) line (DONE_KEPT: a task done lives in its record). A note (no ID at its head) is never moved except when over 200 characters.
-export function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
+function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
   if (!m && !line) return false;

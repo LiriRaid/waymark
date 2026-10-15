@@ -533,6 +533,14 @@ export function clearTaskStart(session) {
   writeStarts(all);
 }
 
+// A task of this session is not done: it started and has no Cierre yet (a turn the quota cut, a reply waiting on the
+// user), or its last Cierre says Resultado parcial or bloqueado. The context brakes wait for it (docs/adr/0016).
+export function taskInProgress(cwd, session) {
+  if (taskStartMark(session)) return true;
+  const last = readLog(cwd).filter((r) => r.session === (session || 'unknown') && r.cierre).pop();
+  return !!last && /^[ \t]*Resultado:\s*\**\s*(parcial|bloqueado)/im.test(last.cierre);
+}
+
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
 // A window the user rejected ("User rejected tool use") is answered by their next message: that message is their
 // decision, recorded as written (source "reply") and placed where the window was asked.

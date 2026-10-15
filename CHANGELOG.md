@@ -2,6 +2,13 @@
 
 The installed version is in `<skills-dir>/waymark/VERSION`. When a newer version is published the agent offers the update; you can also say *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"* (INSTALL §9).
 
+## 2.0.12 — the context brakes wait for the task
+- **Fix: a large task was stopped mid-work.** The size brake (300k, then every 100k) and the idle brake (100k, idle over an hour) fired on any message, task finished or not. A big YaloAtiendo task was braked while working, and again when it resumed after the quota ran out. Opening a new session mid-task rebuilds what the old one held, so it costs more than continuing.
+- Now both brakes wait for the task:
+  - While the session's task is in progress, no message is braked, at any size (600k, 800k). In progress means: it started and has no Cierre yet (a turn the quota cut, a reply waiting on you), or its last Cierre says `Resultado: parcial` or `bloqueado`.
+  - The first message after a Cierre `hecho` brakes as before, once per step, and a resend continues.
+  - Another session's open task does not count (`docs/adr/0016` and `0018`, amended).
+
 ## 2.0.11 — red before the code, judged per spec
 - **Fix: a task that did test-first scored Tests ⚠.** The red testigo took the task's first spec edit and asked that no code came before it. YaloAtiendo 2026-10-14 · T2 wrote its two new specs from the shell (`cat > … <<EOF`) and ran them red before any code (`Cannot find module`). Then it fixed the mocks of two existing specs after the code, a refactor with no new case. The hook did not see the shell's specs, took those mock edits as the first spec, and the agent had to write `Tests: no (…)`.
 - Now red is judged per spec:

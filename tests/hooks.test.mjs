@@ -842,7 +842,8 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   const repo = tmpRepo('stop');
   fs.mkdirSync(path.join(repo, '.waymark'));
   const mem = path.join(repo, '.waymark', 'memory.md');
-  fs.writeFileSync(mem, '# P\n\n## Work in progress\n- ▶ retries (2026-10-01 · T5): NEXT deploy\n');
+  const open = new Date(Date.now() - 86400000).toLocaleDateString('sv'); // yesterday: an open line older than 14 days moves to history.md
+  fs.writeFileSync(mem, `# P\n\n## Work in progress\n- ▶ retries (${open} · T5): NEXT deploy\n`);
   const transcript = path.join(home, 't-step2.jsonl');
   const lines = [...l2Lines.slice(0, -1), call('Edit', { file_path: mem })];
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
@@ -852,7 +853,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   const recs = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'));
   assert.equal(recs.length, 1);
   assert.deepEqual(recs[0].files, [FILE], 'the memory edit is not a project change');
-  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8'), new RegExp(`- 2026-10-01 · T5 · en curso · próximo: deploy[\\s\\S]*## Last closed: ${id} · claude [\\s\\S]*\\| ${id} · claude \\| hecho`), 'the agent that closed it is shown');
+  assert.match(fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8'), new RegExp(`- ${open} · T5 · en curso · próximo: deploy[\\s\\S]*## Last closed: ${id} · claude [\\s\\S]*\\| ${id} · claude \\| hecho`), 'the agent that closed it is shown');
   assert.equal(recs[0].agent, 'claude');
   assert.match(excludeOf(repo), /^\.waymark\/$/m);
   const bare = tmpRepo('stop-bare'); // no memory at all: the record still lands excluded from git
@@ -2562,6 +2563,34 @@ test('context brake: a message to a session at 300k is stopped before the model 
   const gemini = await import(`file://${SCRIPTS}/agents/gemini.mjs`);
   assert.equal(brake(hook('s3'), gemini, { context: 300000 }, state).block.decision, 'deny', 'Gemini CLI BeforeAgent denies');
   assert.match(brake(hook('s4'), { out: {} }, { context: 300000 }, state).line, /~300k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
+});
+
+test('context brake waits for the task: never mid-task (open, cut by the quota, parcial or bloqueado), only once it closes hecho', async () => {
+  const { brake } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const { markTaskStart, clearTaskStart, appendRecord } = await import(`file://${SCRIPTS}/provenance.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const repo = memRepo('brake-open'), state = path.join(home, `brake-open-${n}.json`);
+  const hook = (session, prompt = 'sigue') => ({ cwd: repo, session_id: session, prompt });
+  const t0 = Date.parse('2026-10-15T10:00:00Z'), H = 3600000;
+  const close = (id, result) => appendRecord(repo, { id, session: 'big', at: new Date().toISOString(), cierre: `## Cierre · ${id}\nResultado: ${result}\nEvidencia: observada x\nAprendido: y` });
+  // a task in progress (its start marked by the first prompt, no Cierre yet): neither brake stops it, at any size
+  markTaskStart('big');
+  assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'a task in progress at 650k continues');
+  assert.equal(brake(hook('big'), claude, { context: 820000, lastAt: t0 }, state, t0 + 5 * H), null, 'resumed after the quota ran out (5 h idle, 820k): it continues');
+  assert.equal(brake(hook('big'), { out: {} }, { context: 650000 }, state), null, 'no line either for an agent that cannot stop a prompt');
+  // closed but not done: parcial or bloqueado keeps it going
+  clearTaskStart('big');
+  close('2026-10-15 · T1', 'parcial (falta el deploy)');
+  assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'Resultado parcial: the task is not done');
+  close('2026-10-15 · T1a', 'bloqueado (espera el merge)');
+  assert.equal(brake(hook('big'), claude, { context: 700000, lastAt: t0 }, state, t0 + 2 * H), null, 'Resultado bloqueado: the task is not done');
+  // closed hecho: the next message brakes once, as before
+  close('2026-10-15 · T1b', 'hecho');
+  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 700000 }, state).block.decision, 'block', 'the task closed hecho: the size brake fires');
+  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 700000 }, state), null, 'resent: it continues');
+  // another session's open task does not shield this one
+  markTaskStart('other');
+  assert.equal(brake(hook('fresh'), claude, { context: 300000 }, state).block.decision, 'block', 'only this session\'s task counts');
 });
 
 test('session state skips the synthetic response a usage limit leaves: the context and time stay the last real response\'s', async () => {

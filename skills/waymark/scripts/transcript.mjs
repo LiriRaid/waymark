@@ -173,7 +173,7 @@ const ROUTINE_CALL = (c) => {
   if (c.name === 'Skill') return /^(dept-|waymark$|code-review$|library-docs$)/.test(String(i.skill || '').replace(PLUGIN, ''));
   if (c.name === 'AskUserQuestion') return true;
   if (c.name === 'Read') return /procedures\.md|[\\/]\.waymark[\\/]|[\\/]waymark[\\/]references[\\/]/.test(String(i.file_path || ''));
-  return /\bwaymark\.mjs\b/.test(String(i.command || ''));
+  return /\bwaymark\.mjs["']?\s+(pack|review|memory|tasks|check|engram|incidents|sync|notes|verify|attest)\b/.test(String(i.command || ''));
 };
 export function turnLinks(lines, since = 0) {
   const { from } = turnStart(lines, since);

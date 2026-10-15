@@ -3029,3 +3029,10 @@ test('cost per link: each response goes to routine, work or reply by its tool ca
   assert.equal(l.routine.output, 12);
   assert.equal(l.reply.cacheRead, 100);
 });
+
+test('cost per link: a command that only names waymark.mjs (a syntax check, a git add) is work; a waymark.mjs subcommand is routine', async () => {
+  const { turnLinks } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const as = (id, command) => ({ type: 'assistant', message: { id, content: [{ type: 'tool_use', name: 'Bash', id, input: { command } }], usage: { output_tokens: 1 } } });
+  const l = turnLinks([{ type: 'user', message: { content: 'x' } }, as('a', 'node --check skills/waymark/scripts/waymark.mjs'), as('b', 'node "~/waymark.mjs" pack src/a.js')]);
+  assert.deepEqual([l.routine.responses, l.work.responses], [1, 1]);
+});

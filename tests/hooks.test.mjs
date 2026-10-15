@@ -3011,3 +3011,21 @@ test('2.0.14 a note in a gate\'s Command cell is not run: "(not verified)" is dr
   const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'project-detection.md'), 'utf8');
   assert.match(guide, /leave the \*Verified\* cell empty/, 'the bootstrap says where "not verified" goes');
 });
+
+test('cost per link: each response goes to routine, work or reply by its tool calls; a streamed message counts once', async () => {
+  const { turnLinks } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const as = (id, content, out) => ({ type: 'assistant', message: { id, content, usage: { input_tokens: 1, cache_creation_input_tokens: 10, cache_read_input_tokens: 100, output_tokens: out } } });
+  const lines = [
+    { type: 'user', message: { content: 'haz algo' } },
+    as('m1', [{ type: 'tool_use', name: 'Skill', id: 'a', input: { skill: 'dept-qa', args: 'L1' } }], 5),
+    as('m2', [{ type: 'tool_use', name: 'Edit', id: 'b', input: { file_path: 'x.js' } }], 7),
+    as('m2', [{ type: 'tool_use', name: 'Bash', id: 'c', input: { command: 'node waymark.mjs pack x' } }], 7), // same message streamed: counts once, routine wins
+    as('m3', [{ type: 'tool_use', name: 'Read', id: 'd', input: { file_path: 'src/a.js' } }], 3),
+    as('m4', [{ type: 'text', text: 'Cierre' }], 9),
+  ];
+  const l = turnLinks(lines);
+  assert.equal(l.v, 1);
+  assert.deepEqual([l.routine.responses, l.work.responses, l.reply.responses], [2, 1, 1]);
+  assert.equal(l.routine.output, 12);
+  assert.equal(l.reply.cacheRead, 100);
+});

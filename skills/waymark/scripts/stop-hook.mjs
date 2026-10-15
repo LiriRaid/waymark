@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, sessionState } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -821,7 +821,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
 // clean reading (statusline.mjs, { pct, shared }), else estimated.
 // A step that passed on a declared exception is 'exception' (⚠): not a ✘, never counted as a ✔ in the score. A step that
 // passed with a warning (an Evidencia fact sin respaldo) is 'warn' (⚠): counted as passed, shown so it is looked at.
-export function evaluate(gaps, usage, model = null, measured = null) {
+export function evaluate(gaps, usage, model = null, measured = null, links = null) {
   const steps = {};
   const rank = (v) => (v === false ? 0 : v === 'exception' ? 1 : v === 'warn' ? 2 : 3);
   const worst = (a, b) => (rank(a) <= rank(b) ? a : b);
@@ -832,7 +832,7 @@ export function evaluate(gaps, usage, model = null, measured = null) {
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
   // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
   const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
-  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, model, ...quota };
+  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), tokens: usage?.total || 0, ...split, ...(links ? { links } : {}), model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -987,7 +987,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the % measured by Claude Code's status line (the quota it reads is Claude's: never another agent's task)
       let measured = null;
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
-      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured);
+      const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured, turnLinks(lines, since));
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there

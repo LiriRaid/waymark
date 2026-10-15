@@ -1,6 +1,6 @@
 # Self-evaluation (deep audit)
 
-Every closed task is already evaluated automatically: the end-of-turn hook judges it with the testigos of the catalog `waymark/routine.json` (each one executes: tool calls, git, a re-run) and writes the result into the task's record in `<project>/.waymark/provenance.jsonl` (`evaluation`: ✔/✘ per testigo that applied, score, tokens, estimated quota). `node <skills-dir>/waymark/scripts/testigos.mjs [<task ID>]` re-runs the ones that execute. The user sees it as one line. **The contract is the only rubric:** this guide adds none. When the user asks for **"evalúa tu trabajo"**, do a deeper audit of that record against the transcript.
+Every closed task is already evaluated automatically: the end-of-turn hook judges it with the testigos of the catalog `waymark/routine.json` (each one executes: tool calls, git, a re-run) and writes the result into the task's record in `<project>/.waymark/provenance.jsonl` (`evaluation`: ✔/✘ per testigo that applied, score, tokens, `links`: responses and tokens of the task split into routine, work and reply, estimated quota). `node <skills-dir>/waymark/scripts/testigos.mjs [<task ID>]` re-runs the ones that execute. The user sees it as one line. **The contract is the only rubric:** this guide adds none. When the user asks for **"evalúa tu trabajo"**, do a deeper audit of that record against the transcript.
 
 ## 1. Start from the record
 - `evaluation.steps`: the ✔/✘ per contract step that applied. Report them as they are; do not re-score with other criteria.

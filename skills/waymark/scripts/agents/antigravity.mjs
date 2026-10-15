@@ -19,6 +19,7 @@ import path from 'node:path';
 import { agentDir, known } from './paths.mjs';
 import { append, eventArg, journalOf, journals, stoppedAgain, toLines, SKILL_FILE } from './journal.mjs';
 import { readTail } from '../transcript.mjs';
+import { asQuestion as question } from './lines.mjs';
 
 export const name = 'antigravity';
 export const instructions = path.join(agentDir(known('antigravity')), 'GEMINI.md'); // shared with Gemini CLI
@@ -39,7 +40,7 @@ const READ = /^view_file$/;
 const ASK = /^ask_question$/;
 const fileOf = (i = {}) => i.TargetFile || i.AbsolutePath || i.file_path || i.filePath || i.path || '';
 const commandOf = (i = {}) => String(i.CommandLine || i.command || i.cmd || '');
-const asQuestion = (q) => ({ question: String(q?.question || q?.Question || q?.prompt || q || '').trim(), options: (q?.options || q?.Options || q?.choices || []).map((o) => ({ label: String(o?.label ?? o) })) });
+const asQuestion = (q) => question(q, { text: ['question', 'Question', 'prompt'], options: ['options', 'Options', 'choices'], plain: true });
 
 // The hook's stdin → the core's fields (session_id, cwd, tool_name, tool_input, prompt, transcript_path = the journal,
 // stop_hook_active), journaling the event first.

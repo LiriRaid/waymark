@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTail, clipOutput, closingQuestions, isPrompt } from '../transcript.mjs';
+import { asQuestion as question, answerLine, chatAnswer } from './lines.mjs';
 
 export const name = 'cursor';
 // No global instructions file (User Rules live in Cursor's settings): the session card carries the Rule 0 block.
@@ -88,7 +89,7 @@ const SKILL = /[\\/]([A-Za-z0-9:_-]+)[\\/]SKILL\.md$/i;
 const ASK = /^(ask_?(user_?)?questions?|askquestion|cursor\/ask_question)$/i;
 const fileOf = (i = {}) => i.file_path || i.path || i.target_file || i.filePath || i.file || '';
 const exitOf = (output) => { try { const o = JSON.parse(output); const c = o?.exitCode ?? o?.exit_code ?? o?.returnCode; return typeof c === 'number' ? c : 0; } catch { return 0; } };
-const asQuestion = (q) => ({ question: String(q?.question || q?.prompt || q?.title || q || '').trim(), options: (q?.options || []).map((o) => ({ label: String(o?.label ?? o) })) });
+const asQuestion = (q) => question(q, { text: ['question', 'prompt', 'title'], plain: true });
 
 // The journal → the core's lines (Claude Code .jsonl shape, canonical tool names).
 export function toLines(rows) {
@@ -103,7 +104,7 @@ export function toLines(rows) {
       if (questions.length) { // the previous turn ended asking in the chat: this prompt answers it
         const id = `chat-${n}`, reply = String(r.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 300);
         assistant(r, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'chat', questions: questions.map((question) => ({ question })) } }]);
-        lines.push({ type: 'user', timestamp: r.at, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered in chat' }] }, toolUseResult: { source: 'chat', questions: questions.map((question) => ({ question, options: [] })), answers: Object.fromEntries(questions.map((q) => [q, reply])) } });
+        lines.push(answerLine(r.at, id, 'answered in chat', chatAnswer(questions, reply)));
       }
       lines.push(prompt);
       tail = []; choiceInTurn = false;
@@ -124,7 +125,7 @@ export function toLines(rows) {
       if (asked.has(id) && !failed) { // answered: the labels its output names, else the output itself
         const qs = asked.get(id), said = String(r.output || '');
         const answers = Object.fromEntries(qs.map((q) => [q.question, q.options.map((o) => o.label).filter((l) => l && said.includes(l)).join(',') || said.slice(0, 300)]));
-        lines.push({ type: 'user', timestamp: r.at, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
+        lines.push(answerLine(r.at, id, 'answered', { questions: qs, answers }));
         choiceInTurn = true;
         continue;
       }

@@ -16,6 +16,7 @@ import { readTail } from '../transcript.mjs';
 import { out as claudeOut } from './claude.mjs';
 import { patchFiles } from './codex.mjs';
 import { opencodeDir } from './paths.mjs';
+import { asQuestion as question, answerLine } from './lines.mjs';
 
 export const name = 'opencode';
 export const instructions = path.join(opencodeDir(), 'AGENTS.md');
@@ -48,11 +49,11 @@ export function toLines(rows, cwd = process.cwd(), version = null) { // version:
       const end = st.time?.end ? new Date(st.time.end).toISOString() : at; // a tool lasts from its start to its end
       const res = () => lines.push({ type: 'user', timestamp: end, message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: String(st.output ?? st.error ?? '').slice(0, 400) }] } });
       if (p.tool === 'question') {
-        const qs = (a.questions || []).map((q) => ({ question: String(q.question || q.header || '').trim(), options: (q.options || []).map((o) => ({ label: String(o?.label ?? o) })) }));
+        const qs = (a.questions || []).map((q) => question(q, { text: ['question', 'header'] }));
         assistant(at, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { questions: qs } }]);
         const picked = st.metadata?.answers || [];
         const answers = Object.fromEntries(qs.map((q, i) => [q.question, [].concat(picked[i] || []).join(',')]).filter(([, v]) => v));
-        if (!isError && Object.keys(answers).length) lines.push({ type: 'user', timestamp: end, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'answered' }] }, toolUseResult: { questions: qs, answers } });
+        if (!isError && Object.keys(answers).length) lines.push(answerLine(end, id, 'answered', { questions: qs, answers }));
         else res();
         continue;
       }

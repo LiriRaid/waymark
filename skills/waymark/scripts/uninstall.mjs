@@ -13,7 +13,6 @@
 // Left for the user: the skills (~/.agents/skills and the links in ~/.claude/skills, INSTALL §10 step 2: this script lives
 // there), ~/.waymark (their memory) and the MCP servers (ask before removing any).
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

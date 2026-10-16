@@ -1,0 +1,1848 @@
+{
+ "schema": "waymark.external-results/v1",
+ "corpusSchema": "waymark.external-corpus/v2",
+ "at": "2026-10-16",
+ "agent": "claude-code (headless, stream-json)",
+ "model": "claude-sonnet-5-5",
+ "waymark": {
+  "release": "2.0.17 (in progress)",
+  "note": "the hooks of the repository checkout (not an installed copy), a private WAYMARK_HOME and no engram, so no memory of the author is read or written"
+ },
+ "method": "one real small change per repository, in a clone pinned to its commit, made by Claude Code headless (tests/external/run-agent.mjs); the choice window is answered by the harness with the recommended option; a shell command outside a short allow list is denied and counted; clones live in the scratchpad and are deleted after",
+ "passes": [
+  {
+   "name": "before",
+   "waymarkBehaviour": "as of commit 7ce8029 (2.0.16 behaviour with the 2.0.17 points 1, 2, 3 and 5)",
+   "totals": {
+    "repos": 8,
+    "runsSucceeded": 8,
+    "costUsd": 1.595,
+    "turns": 97,
+    "tokens": {
+     "input": 140,
+     "cacheWrite": 256962,
+     "cacheRead": 3384288,
+     "output": 22829
+    },
+    "tokensByLink": {
+     "routine": {
+      "responses": 22,
+      "cacheWrite": 169098,
+      "cacheRead": 860879,
+      "output": 8497
+     },
+     "work": {
+      "responses": 34,
+      "cacheWrite": 71651,
+      "cacheRead": 1738446,
+      "output": 10432
+     },
+     "reply": {
+      "responses": 14,
+      "cacheWrite": 16213,
+      "cacheRead": 784963,
+      "output": 3900
+     }
+    },
+    "stepsFailed": {
+     "Verificar": 6,
+     "Tests": 1
+    },
+    "stepsWarned": {
+     "Evidencia": 4
+    },
+    "reposWithAFailedStep": 6,
+    "memoryBootstrapped": 6,
+    "choiceAnswers": 13,
+    "denials": 6,
+    "departments": {
+     "dept-devex": 5,
+     "dept-backend": 2,
+     "dept-devops": 1
+    }
+   },
+   "repos": [
+    {
+     "id": "rust-cli",
+     "commit": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+     "field": "systems CLI",
+     "language": "rust",
+     "task": {
+      "kind": "docs",
+      "file": "src/exit_codes.rs",
+      "prompt": "En src/exit_codes.rs agrega un comentario de documentación (///) a la función `merge_exitcodes` que explique qué devuelve."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "rust (cargo)",
+      "profile": "rust",
+      "gates": {
+       "test": "cargo test",
+       "lint": "cargo clippy --all-targets -- -D warnings",
+       "build": "cargo build"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 10,
+      "durationMs": 32259,
+      "costUsd": 0.2634946,
+      "usage": {
+       "input": 12,
+       "cacheWrite": 53589,
+       "cacheRead": 240446,
+       "output": 2507
+      },
+      "choiceAnswers": 2,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 286,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✔",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): src/exit_codes.rs:46-51 · cargo doc"
+      ],
+      "unresolved": [],
+      "score": "8/8 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 44342,
+       "cacheRead": 47128,
+       "output": 827
+      },
+      "work": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 8988,
+       "cacheRead": 139988,
+       "output": 1196
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 259,
+       "cacheRead": 53330,
+       "output": 484
+      }
+     },
+     "changed": [
+      {
+       "file": "src/exit_codes.rs"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "php-laravel",
+     "commit": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+     "field": "web application",
+     "language": "php",
+     "task": {
+      "kind": "docs",
+      "file": "app/Models/User.php",
+      "prompt": "En app/Models/User.php agrega un comentario en línea dentro del método `casts` que explique para qué sirve el cast de `password`."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "php (composer)",
+      "profile": "php",
+      "gates": {
+       "test": "php artisan test",
+       "lint": "./vendor/bin/pint --test",
+       "typecheck": "./vendor/bin/phpstan analyse"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 15,
+      "durationMs": 44932,
+      "costUsd": 0.2128627,
+      "usage": {
+       "input": 24,
+       "cacheWrite": 29326,
+       "cacheRead": 608107,
+       "output": 3470
+      },
+      "choiceAnswers": 2,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "PowerShell",
+        "command": "Get-Command php, composer -ErrorAction SilentlyContinue | Select-Object Name, Source"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 1023,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-backend",
+      "invoked": [
+       "dept-backend"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [],
+      "findings": [],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 17362,
+       "cacheRead": 174519,
+       "output": 1297
+      },
+      "work": {
+       "responses": 6,
+       "input": 12,
+       "cacheWrite": 11515,
+       "cacheRead": 316737,
+       "output": 1686
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 449,
+       "cacheRead": 116851,
+       "output": 487
+      }
+     },
+     "changed": [
+      {
+       "file": "app/Models/User.php"
+      }
+     ],
+     "notMeasured": [
+      "gate \"php artisan test\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    },
+    {
+     "id": "terraform",
+     "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+     "field": "infrastructure as code",
+     "language": "hcl",
+     "task": {
+      "kind": "docs",
+      "file": "variables.tf",
+      "prompt": "En variables.tf mejora la `description` de la variable `name` para que diga que es el prefijo del nombre de los recursos de la VPC."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "terraform",
+      "profile": "terraform",
+      "gates": {
+       "lint": "terraform fmt -check -recursive",
+       "typecheck": "terraform validate",
+       "test": "terraform test"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 13,
+      "durationMs": 37833,
+      "costUsd": 0.175921,
+      "usage": {
+       "input": 18,
+       "cacheWrite": 26329,
+       "cacheRead": 437890,
+       "output": 2678
+      },
+      "choiceAnswers": 2,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd \"<path>\" && (terraform fmt -check -recursive . 2>&1 || echo \""
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 605,
+      "names": {
+       "stack": true,
+       "gates": true
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devops",
+      "invoked": [
+       "dept-devops"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [],
+      "findings": [],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 19583,
+       "cacheRead": 168423,
+       "output": 1463
+      },
+      "work": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 6234,
+       "cacheRead": 158672,
+       "output": 765
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 512,
+       "cacheRead": 110795,
+       "output": 450
+      }
+     },
+     "changed": [
+      {
+       "file": "variables.tf"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "python-ml",
+     "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+     "field": "data science / ML library",
+     "language": "python",
+     "task": {
+      "kind": "docs",
+      "file": "imblearn/base.py",
+      "prompt": "En imblearn/base.py agrega un docstring corto al método `_check_X_y` de la clase `BaseSampler`."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "python (pyproject)",
+      "profile": "python",
+      "gates": {
+       "test": "pytest",
+       "lint": "ruff check .",
+       "typecheck": "mypy ."
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 11,
+      "durationMs": 40286,
+      "costUsd": 0.1587269,
+      "usage": {
+       "input": 16,
+       "cacheWrite": 24016,
+       "cacheRead": 373909,
+       "output": 2524
+      },
+      "choiceAnswers": 2,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd \"<path>\" && (python -m ruff check imblearn/base.py 2>&1 || py"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 327,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [],
+      "findings": [],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 14431,
+       "cacheRead": 76426,
+       "output": 831
+      },
+      "work": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 8899,
+       "cacheRead": 191556,
+       "output": 1247
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 686,
+       "cacheRead": 105927,
+       "output": 446
+      }
+     },
+     "changed": [
+      {
+       "file": "imblearn/base.py"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "docs-only",
+     "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+     "field": "documentation only",
+     "language": "markdown",
+     "task": {
+      "kind": "docs",
+      "file": "README.md",
+      "prompt": "Al final de README.md agrega una línea que diga \"Gracias por contribuir.\" y nada más."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "generic",
+      "gates": {}
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 11,
+      "durationMs": 32896,
+      "costUsd": 0.20763879999999998,
+      "usage": {
+       "input": 16,
+       "cacheWrite": 36198,
+       "cacheRead": 383648,
+       "output": 2445
+      },
+      "choiceAnswers": 1,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd \"<path>\" && printf '\\r\\nGracias por contribuir.\\r\\n' >> READM"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [],
+      "findings": [],
+      "unresolved": [],
+      "score": "7/7"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 14567,
+       "cacheRead": 76230,
+       "output": 620
+      },
+      "work": {
+       "responses": 5,
+       "input": 10,
+       "cacheWrite": 17055,
+       "cacheRead": 245999,
+       "output": 1477
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 4576,
+       "cacheRead": 61419,
+       "output": 348
+      }
+     },
+     "changed": [
+      {
+       "file": "README.md"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "android-app",
+     "commit": "2a357a31551bb53f3fe80382a9ce6d30bcc8b960",
+     "field": "mobile app",
+     "language": "kotlin",
+     "task": {
+      "kind": "docs",
+      "file": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
+      "prompt": "En GrowZoneUtil.kt agrega la anotación KDoc @param y @return a la documentación de la función pública de ese archivo."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "android",
+      "gates": {
+       "test": "./gradlew testDebugUnitTest",
+       "lint": "./gradlew lint",
+       "typecheck": "./gradlew compileDebugKotlin",
+       "build": "./gradlew assembleDebug"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 10,
+      "durationMs": 28418,
+      "costUsd": 0.1492477,
+      "usage": {
+       "input": 14,
+       "cacheWrite": 23959,
+       "cacheRead": 321837,
+       "output": 2120
+      },
+      "choiceAnswers": 1,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): GrowZoneUtil.kt:21-36 · git diff"
+      ],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 15450,
+       "cacheRead": 75920,
+       "output": 654
+      },
+      "work": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 3902,
+       "cacheRead": 144069,
+       "output": 991
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 4607,
+       "cacheRead": 101848,
+       "output": 475
+      }
+     },
+     "changed": [
+      {
+       "file": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt"
+      }
+     ],
+     "notMeasured": [
+      "gate \"./gradlew testDebugUnitTest\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    },
+    {
+     "id": "polyglot-monorepo",
+     "commit": "38e7348eb289eb5b87c0c6e8cb19ced0449dc389",
+     "field": "multi-language monorepo",
+     "language": "go, python, csharp, java, node",
+     "task": {
+      "kind": "docs",
+      "file": "src/shippingservice/quote.go",
+      "prompt": "En src/shippingservice/quote.go mejora el comentario de la función `String` de `Quote` para que describa el formato del texto que devuelve."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "generic",
+      "gates": {}
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 14,
+      "durationMs": 46946,
+      "costUsd": 0.2000889,
+      "usage": {
+       "input": 22,
+       "cacheWrite": 27481,
+       "cacheRead": 545909,
+       "output": 3553
+      },
+      "choiceAnswers": 1,
+      "denials": 2,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd src/shippingservice && gofmt -l . ; go vet ./... 2>&1 | tail -5; echo exit=$?"
+       },
+       {
+        "tool": "Bash",
+        "command": "T=\"$(mktemp -d)/wt\" && git worktree add \"$T\" HEAD >/dev/null 2>&1 && (cd \"$T/src/shippingservice\" && go vet ./... 2>&1 | tail -2); git worktree remove --force \"$T\"; git status --short"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 1020,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-backend",
+      "invoked": [
+       "dept-backend"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Tests": "✘",
+       "Previos": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar",
+       "Tests"
+      ],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): fmt.Sprintf(\"$%d.%d\", ...) · git diff src/shippingservice/quote.go",
+       "a command after the last change failed: cd src/shippingservice && gofmt -l . ; go vet ./... 2>&1 | t"
+      ],
+      "unresolved": [
+       "the gate after the last code change failed (go vet ./..., re-run by the hook): fix it and run it again, or write \"no comprobado (<why>)\" if the failure is not this task's",
+       "<path>"
+      ],
+      "score": "8/10 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 19373,
+       "cacheRead": 120559,
+       "output": 1259
+      },
+      "work": {
+       "responses": 6,
+       "input": 12,
+       "cacheWrite": 7688,
+       "cacheRead": 312984,
+       "output": 1545
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 420,
+       "cacheRead": 112366,
+       "output": 749
+      }
+     },
+     "changed": [
+      {
+       "file": "src/shippingservice/quote.go"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "embedded-c",
+     "commit": "640d0c43705e64cd53f46b31d882de6cd8433933",
+     "field": "embedded C library",
+     "language": "c",
+     "task": {
+      "kind": "docs",
+      "file": "list.c",
+      "prompt": "En list.c agrega un comentario de una línea sobre la función `vListInitialise` que diga qué deja inicializado."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "c (cmake)",
+      "profile": "c",
+      "gates": {
+       "build": "cmake --build build"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 13,
+      "durationMs": 42400,
+      "costUsd": 0.22686619999999996,
+      "usage": {
+       "input": 18,
+       "cacheWrite": 36064,
+       "cacheRead": 472542,
+       "output": 3532
+      },
+      "choiceAnswers": 2,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 1361,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): /* Initialises an empty list: end marker linked to itself, zero items, integrity values set. */"
+      ],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 23990,
+       "cacheRead": 121674,
+       "output": 1546
+      },
+      "work": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 7370,
+       "cacheRead": 228441,
+       "output": 1525
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 4704,
+       "cacheRead": 122427,
+       "output": 461
+      }
+     },
+     "changed": [
+      {
+       "file": "list.c"
+      }
+     ],
+     "notMeasured": [
+      "gate \"cmake --build build\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "after",
+   "waymarkBehaviour": "with the point 4 changes: comment-only edits owe no gate; a tool that is not installed, or a refused run, is \"could not run here\" and accepts \"no comprobado\" or \"Resultado: parcial (<why>)\"; stacks c and android",
+   "totals": {
+    "repos": 8,
+    "runsSucceeded": 8,
+    "costUsd": 1.25,
+    "turns": 93,
+    "tokens": {
+     "input": 124,
+     "cacheWrite": 181987,
+     "cacheRead": 3043311,
+     "output": 21747
+    },
+    "tokensByLink": {
+     "routine": {
+      "responses": 23,
+      "cacheWrite": 93702,
+      "cacheRead": 1021513,
+      "output": 8714
+     },
+     "work": {
+      "responses": 28,
+      "cacheWrite": 79053,
+      "cacheRead": 1401326,
+      "output": 9685
+     },
+     "reply": {
+      "responses": 11,
+      "cacheWrite": 9232,
+      "cacheRead": 620472,
+      "output": 3348
+     }
+    },
+    "stepsFailed": {
+     "Verificar": 2,
+     "Decision": 1,
+     "Enrutar": 1
+    },
+    "stepsWarned": {
+     "Evidencia": 2
+    },
+    "reposWithAFailedStep": 3,
+    "memoryBootstrapped": 3,
+    "choiceAnswers": 11,
+    "denials": 3,
+    "departments": {
+     "dept-devex": 5,
+     "dept-backend": 2,
+     "dept-devops": 1
+    }
+   },
+   "repos": [
+    {
+     "id": "rust-cli",
+     "commit": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+     "field": "systems CLI",
+     "language": "rust",
+     "task": {
+      "kind": "docs",
+      "file": "src/exit_codes.rs",
+      "prompt": "En src/exit_codes.rs agrega un comentario de documentación (///) a la función `merge_exitcodes` que explique qué devuelve."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "rust (cargo)",
+      "profile": "rust",
+      "gates": {
+       "test": "cargo test",
+       "lint": "cargo clippy --all-targets -- -D warnings",
+       "build": "cargo build"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 12,
+      "durationMs": 36889,
+      "costUsd": 0.14956280000000002,
+      "usage": {
+       "input": 14,
+       "cacheWrite": 21959,
+       "cacheRead": 329688,
+       "output": 2873
+      },
+      "choiceAnswers": 2,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 569,
+      "names": {
+       "stack": true,
+       "gates": true
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): src/exit_codes.rs:46-51 · cargo doc",
+       "a command after the last change failed: cargo check 2>&1 | Select-Object -Last 5"
+      ],
+      "unresolved": [],
+      "score": "7/7 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 10309,
+       "cacheRead": 129698,
+       "output": 1195
+      },
+      "work": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 11390,
+       "cacheRead": 143550,
+       "output": 1333
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 260,
+       "cacheRead": 56440,
+       "output": 345
+      }
+     },
+     "changed": [
+      {
+       "file": "src/exit_codes.rs"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "php-laravel",
+     "commit": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+     "field": "web application",
+     "language": "php",
+     "task": {
+      "kind": "docs",
+      "file": "app/Models/User.php",
+      "prompt": "En app/Models/User.php agrega un comentario en línea dentro del método `casts` que explique para qué sirve el cast de `password`."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "php (composer)",
+      "profile": "php",
+      "gates": {
+       "test": "php artisan test",
+       "lint": "./vendor/bin/pint --test",
+       "typecheck": "./vendor/bin/phpstan analyse"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 12,
+      "durationMs": 33503,
+      "costUsd": 0.14124760000000003,
+      "usage": {
+       "input": 14,
+       "cacheWrite": 20371,
+       "cacheRead": 330656,
+       "output": 2667
+      },
+      "choiceAnswers": 2,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 643,
+      "names": {
+       "stack": true,
+       "gates": true
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-backend",
+      "invoked": [
+       "dept-backend"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [],
+      "findings": [],
+      "unresolved": [],
+      "score": "7/7"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 11911,
+       "cacheRead": 180843,
+       "output": 1290
+      },
+      "work": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 7716,
+       "cacheRead": 94812,
+       "output": 964
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 744,
+       "cacheRead": 55001,
+       "output": 413
+      }
+     },
+     "changed": [
+      {
+       "file": "app/Models/User.php"
+      }
+     ],
+     "notMeasured": [
+      "gate \"php artisan test\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    },
+    {
+     "id": "terraform",
+     "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+     "field": "infrastructure as code",
+     "language": "hcl",
+     "task": {
+      "kind": "docs",
+      "file": "variables.tf",
+      "prompt": "En variables.tf mejora la `description` de la variable `name` para que diga que es el prefijo del nombre de los recursos de la VPC."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "terraform",
+      "profile": "terraform",
+      "gates": {
+       "lint": "terraform fmt -check -recursive",
+       "typecheck": "terraform validate",
+       "test": "terraform test"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 13,
+      "durationMs": 39335,
+      "costUsd": 0.15863839999999998,
+      "usage": {
+       "input": 18,
+       "cacheWrite": 20684,
+       "cacheRead": 438264,
+       "output": 3204
+      },
+      "choiceAnswers": 1,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd \"<path>\" && (terraform fmt -check variables.tf && echo FMT_OK"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devops",
+      "invoked": [
+       "dept-devops"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [],
+      "findings": [],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 14676,
+       "cacheRead": 124763,
+       "output": 1295
+      },
+      "work": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 5243,
+       "cacheRead": 204642,
+       "output": 1325
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 765,
+       "cacheRead": 108859,
+       "output": 584
+      }
+     },
+     "changed": [
+      {
+       "file": "variables.tf"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "python-ml",
+     "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+     "field": "data science / ML library",
+     "language": "python",
+     "task": {
+      "kind": "docs",
+      "file": "imblearn/base.py",
+      "prompt": "En imblearn/base.py agrega un docstring corto al método `_check_X_y` de la clase `BaseSampler`."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "python (pyproject)",
+      "profile": "python",
+      "gates": {
+       "test": "pytest",
+       "lint": "ruff check .",
+       "typecheck": "mypy ."
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 11,
+      "durationMs": 41098,
+      "costUsd": 0.1606225,
+      "usage": {
+       "input": 16,
+       "cacheWrite": 23046,
+       "cacheRead": 398865,
+       "output": 2852
+      },
+      "choiceAnswers": 1,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Verificar": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Verificar"
+      ],
+      "warned": [],
+      "findings": [],
+      "unresolved": [
+       "no typecheck, lint or build ran after the last code change and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig): run the project's gate once now (the full one at the end, per repo)"
+      ],
+      "score": "7/8"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 8525,
+       "cacheRead": 84591,
+       "output": 878
+      },
+      "work": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 13529,
+       "cacheRead": 201144,
+       "output": 1517
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 992,
+       "cacheRead": 113130,
+       "output": 457
+      }
+     },
+     "changed": [
+      {
+       "file": "imblearn/base.py"
+      }
+     ],
+     "notMeasured": [
+      "gate \"pytest\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    },
+    {
+     "id": "docs-only",
+     "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+     "field": "documentation only",
+     "language": "markdown",
+     "task": {
+      "kind": "docs",
+      "file": "README.md",
+      "prompt": "Al final de README.md agrega una línea que diga \"Gracias por contribuir.\" y nada más."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "generic",
+      "gates": {}
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 13,
+      "durationMs": 40485,
+      "costUsd": 0.1979199,
+      "usage": {
+       "input": 22,
+       "cacheWrite": 28358,
+       "cacheRead": 584639,
+       "output": 2598
+      },
+      "choiceAnswers": 1,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd \"<path>\" && printf 'Gracias por contribuir.\\r\\n' >> README.md"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✘",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✘",
+       "Cadena": "✔"
+      },
+      "failed": [
+       "Decision",
+       "Enrutar"
+      ],
+      "warned": [],
+      "findings": [
+       "the first choice-window question came after the task's first change",
+       "the owner's procedures.md section was read after the task's first change"
+      ],
+      "unresolved": [],
+      "score": "5/7"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 1096,
+       "cacheRead": 120684,
+       "output": 525
+      },
+      "work": {
+       "responses": 7,
+       "input": 14,
+       "cacheWrite": 25798,
+       "cacheRead": 343625,
+       "output": 1792
+      },
+      "reply": {
+       "responses": 2,
+       "input": 4,
+       "cacheWrite": 1464,
+       "cacheRead": 120330,
+       "output": 281
+      }
+     },
+     "changed": [
+      {
+       "file": "README.md"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "android-app",
+     "commit": "2a357a31551bb53f3fe80382a9ce6d30bcc8b960",
+     "field": "mobile app",
+     "language": "kotlin",
+     "task": {
+      "kind": "docs",
+      "file": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
+      "prompt": "En GrowZoneUtil.kt agrega la anotación KDoc @param y @return a la documentación de la función pública de ese archivo."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "android",
+      "gates": {
+       "test": "./gradlew testDebugUnitTest",
+       "lint": "./gradlew lint",
+       "typecheck": "./gradlew compileDebugKotlin",
+       "build": "./gradlew assembleDebug"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 9,
+      "durationMs": 24862,
+      "costUsd": 0.1344704,
+      "usage": {
+       "input": 10,
+       "cacheWrite": 22523,
+       "cacheRead": 228384,
+       "output": 2152
+      },
+      "choiceAnswers": 1,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [],
+      "findings": [],
+      "unresolved": [],
+      "score": "7/7"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 17278,
+       "cacheRead": 123696,
+       "output": 1166
+      },
+      "work": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 696,
+       "cacheRead": 51996,
+       "output": 475
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 4549,
+       "cacheRead": 52692,
+       "output": 511
+      }
+     },
+     "changed": [
+      {
+       "file": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt"
+      }
+     ],
+     "notMeasured": [
+      "gate \"./gradlew testDebugUnitTest\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    },
+    {
+     "id": "polyglot-monorepo",
+     "commit": "38e7348eb289eb5b87c0c6e8cb19ced0449dc389",
+     "field": "multi-language monorepo",
+     "language": "go, python, csharp, java, node",
+     "task": {
+      "kind": "docs",
+      "file": "src/shippingservice/quote.go",
+      "prompt": "En src/shippingservice/quote.go mejora el comentario de la función `String` de `Quote` para que describa el formato del texto que devuelve."
+     },
+     "detection": null,
+     "expect": {
+      "stack": null,
+      "profile": "generic",
+      "gates": {}
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 9,
+      "durationMs": 31445,
+      "costUsd": 0.12504050000000003,
+      "usage": {
+       "input": 14,
+       "cacheWrite": 18053,
+       "cacheRead": 330005,
+       "output": 1980
+      },
+      "choiceAnswers": 1,
+      "denials": 1,
+      "denied": [
+       {
+        "tool": "Bash",
+        "command": "cd src/shippingservice && gofmt -l quote.go; go vet ./... 2>&1 | tail -5; git diff --stat"
+       }
+      ]
+     },
+     "bootstrap": {
+      "memoryExists": false,
+      "bytes": 0,
+      "names": {
+       "stack": false,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-backend",
+      "invoked": [
+       "dept-backend"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "parcial",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "⚠",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [
+       "Evidencia"
+      ],
+      "findings": [
+       "Evidencia cites what no tool call of the task shows (sin respaldo): fmt.Sprintf(\"$%d.%d\") · gofmt -l src/shippingservice/quote.go"
+      ],
+      "unresolved": [],
+      "score": "7/7 · 1 ⚠"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 15156,
+       "cacheRead": 124664,
+       "output": 1068
+      },
+      "work": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 2770,
+       "cacheRead": 152695,
+       "output": 455
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 127,
+       "cacheRead": 52646,
+       "output": 457
+      }
+     },
+     "changed": [
+      {
+       "file": "src/shippingservice/quote.go"
+      }
+     ],
+     "notMeasured": []
+    },
+    {
+     "id": "embedded-c",
+     "commit": "640d0c43705e64cd53f46b31d882de6cd8433933",
+     "field": "embedded C library",
+     "language": "c",
+     "task": {
+      "kind": "docs",
+      "file": "list.c",
+      "prompt": "En list.c agrega un comentario de una línea sobre la función `vListInitialise` que diga qué deja inicializado."
+     },
+     "detection": null,
+     "expect": {
+      "stack": "c (cmake)",
+      "profile": "c",
+      "gates": {
+       "build": "cmake --build build"
+      }
+     },
+     "run": {
+      "model": "sonnet",
+      "subtype": "success",
+      "error": false,
+      "turns": 14,
+      "durationMs": 39895,
+      "costUsd": 0.18249500000000002,
+      "usage": {
+       "input": 16,
+       "cacheWrite": 26993,
+       "cacheRead": 402810,
+       "output": 3421
+      },
+      "choiceAnswers": 2,
+      "denials": 0,
+      "denied": []
+     },
+     "bootstrap": {
+      "memoryExists": true,
+      "bytes": 893,
+      "names": {
+       "stack": true,
+       "gates": false
+      }
+     },
+     "routing": {
+      "level": 1,
+      "declared": "dept-devex",
+      "invoked": [
+       "dept-devex"
+      ]
+     },
+     "record": {
+      "id": "2026-10-16 · T1",
+      "result": "hecho",
+      "steps": {
+       "Decision": "✔",
+       "Cierre": "✔",
+       "Evidencia": "✔",
+       "Secretos": "✔",
+       "Recordar": "✔",
+       "Enrutar": "✔",
+       "Cadena": "✔"
+      },
+      "failed": [],
+      "warned": [],
+      "findings": [],
+      "unresolved": [],
+      "score": "7/7"
+     },
+     "tokensByLink": {
+      "routine": {
+       "responses": 3,
+       "input": 6,
+       "cacheWrite": 14751,
+       "cacheRead": 132574,
+       "output": 1297
+      },
+      "work": {
+       "responses": 4,
+       "input": 8,
+       "cacheWrite": 11911,
+       "cacheRead": 208862,
+       "output": 1824
+      },
+      "reply": {
+       "responses": 1,
+       "input": 2,
+       "cacheWrite": 331,
+       "cacheRead": 61374,
+       "output": 300
+      }
+     },
+     "changed": [
+      {
+       "file": "list.c"
+      }
+     ],
+     "notMeasured": [
+      "gate \"cmake --build build\" was not run: the toolchain is not installed on this machine or the agent did not run it"
+     ]
+    }
+   ]
+  }
+ ],
+ "notMeasured": [
+  "No gate (cargo, php, terraform, pytest/ruff, gradle, go, cmake) could run: none of those toolchains is installed on the machine of the run, so whether a gate passes on these repositories is not measured, only how Waymark treats a gate that cannot run.",
+  "One run per repository and pass, one model: the variation between runs of the same task is not measured (docs-only skipped the routine in the second pass and not in the first).",
+  "The harness answers the choice window with the recommended option; a person might pick otherwise, and the decision step is measured against that answer only.",
+  "The last change (a \"Resultado: parcial (<why>)\" counts as the exception for a missing tool) was verified with a corpus case and unit specs, not with a third pass of real runs.",
+  "Tokens are the session totals reported by Claude Code and the split by link of the record; no comparison with any other tool or with a session without Waymark was run, so no saving is claimed.",
+  "Routing is recorded, not judged: whether a department was \"the right one\" for a comment or README edit is a matter of opinion this file does not settle."
+ ]
+}

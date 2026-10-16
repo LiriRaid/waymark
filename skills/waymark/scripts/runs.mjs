@@ -95,11 +95,11 @@ function classify(words) {
   } else if (prog === 'node' || prog === 'deno') {
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;
-  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php|terraform|tofu|composer)$/.test(prog)) {
+  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|cmake|ctest|rails|rake|artisan|php|terraform|tofu|composer)$/.test(prog)) {
     const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : sub;
-    if (/^(test|spec)$/.test(verb)) out.test = true;
-    else if (/^(build|package|verify)$/.test(verb)) out.gate = out.build = true;
-    else if (/^(lint|vet|check|clippy|compile)$/.test(verb)) out.gate = true;
+    if (/^(test|spec)$/.test(verb) || prog === 'ctest' || (/^(gradle|gradlew)$/.test(prog) && /^test/i.test(verb))) out.test = true;
+    else if (/^(build|package|verify)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^assemble/i.test(verb)) || (prog === 'cmake' && subs.includes('--build')) || (prog === 'make' && (!verb || /^(all|build)$/.test(verb)))) out.gate = out.build = true;
+    else if (/^(lint|vet|check|clippy|compile)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^(lint|compile)/i.test(verb))) out.gate = true;
     // Terraform and Composer: validate is a gate, fmt only in check mode (plain fmt rewrites files), static analysis too
     else if (/^(terraform|tofu|composer)$/.test(prog) && (verb === 'validate' || (verb === 'fmt' && subs.includes('-check')) || /^(analy[sz]e|stan|lint)$/.test(verb))) out.gate = true;
   }

@@ -40,7 +40,7 @@ function scripted(root, file, gateCmd, { P, T, cierreGaps }) {
     ...(gateCmd ? run('Bash', { command: gateCmd }, 'test result: ok. 12 passed; 0 failed') : []),
   ];
   const turn = T.currentTurn(lines);
-  const cierre = '## Cierre · 2026-10-15 · T1\nResultado: hecho\nEvidencia: observada 12 passed en la salida del test\nAprendido: cambio pequeño ← pedido; siguiente: nada.';
+  const cierre = `## Cierre · ${P.taskIds(root).next}\nResultado: hecho\nEvidencia: observada 12 passed en la salida del test\nAprendido: cambio pequeño ← pedido; siguiente: nada.`; // the ID the hook offers today, so the measure never ages
   const g = cierreGaps(turn, cierre, T.sessionTools(lines), [turn.prompt], { ids: P.taskIds(root), decisions: [{ question: q, chosen: 'A', discarded: ['B'] }], outside: true, cwd: root, root, packed: 1, rerun: () => ({ cmd: 'typecheck', ok: true, s: 0 }) });
   return g ? { blocked: g.missing || [], noted: g.findings || [] } : { blocked: [], noted: [] };
 }
@@ -77,7 +77,7 @@ export async function measure(root, entry) {
   }
   const doc = firstFile(root, /^readme\.(md|rst|txt)$/i), code = entry.sample ? path.join(root, entry.sample) : null;
   const docTask = doc ? scripted(root, doc, null, { P, T, cierreGaps }) : null;
-  const codeTask = code && fs.existsSync(code) ? scripted(root, code, entry.expect.gates?.test || null, { P, T, cierreGaps }) : null;
+  const codeTask = code && fs.existsSync(code) ? scripted(root, code, entry.expect.gates?.test || Object.values(entry.expect.gates || {})[0] || null, { P, T, cierreGaps }) : null;
   return {
     id: entry.id, commit: entry.commit,
     detected: { stack: label, expected: entry.expect.stack ?? null, ok: (label ?? null) === (entry.expect.stack ?? null) },

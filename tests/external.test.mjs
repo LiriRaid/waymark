@@ -24,14 +24,15 @@ const dir = (files) => {
 };
 
 test('external corpus: every repository is pinned to a commit and says what a correct Waymark reports', () => {
-  assert.equal(manifest.schema, 'waymark.external-corpus/v1');
-  assert.ok(manifest.repos.length >= 5);
+  assert.equal(manifest.schema, 'waymark.external-corpus/v2');
+  assert.equal(manifest.repos.length, 8);
+  for (const r of manifest.repos) if (r.sample) assert.ok(r.task?.prompt && r.task.file, `${r.id}: the real task`);
   for (const r of manifest.repos) {
     assert.match(r.url, /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/, r.id);
     assert.match(r.commit, /^[0-9a-f]{40}$/, r.id);
     assert.ok(r.field && r.language && 'stack' in r.expect && r.expect.profile, r.id);
   }
-  assert.equal(new Set(manifest.repos.map((r) => r.language)).size, manifest.repos.length, 'five different ecosystems');
+  assert.equal(new Set(manifest.repos.map((r) => r.language)).size, manifest.repos.length, 'eight different ecosystems');
 });
 
 test('external corpus: the recorded measurement after the fixes has no miss; the one before is kept as the evidence of the gaps', () => {
@@ -40,6 +41,26 @@ test('external corpus: the recorded measurement after the fixes has no miss; the
   assert.deepEqual(misses(after), []);
   assert.ok(misses(before).length >= 6, 'the first run found the gaps this release closed');
   for (const x of after.results) assert.deepEqual(x.hookErrors, [], `${x.id}: the hooks ran clean`);
+});
+
+test('external runs: the recorded real runs are two passes over the eight repositories, and the second fails fewer steps than the first', () => {
+  const r = JSON.parse(fs.readFileSync(path.join(HERE, 'external', 'results-2026-10-16.json'), 'utf8'));
+  assert.equal(r.schema, 'waymark.external-results/v1');
+  assert.deepEqual(r.passes.map((x) => [x.name, x.repos.length, x.totals.runsSucceeded]), [['before', 8, 8], ['after', 8, 8]]);
+  const failed = (x) => Object.values(x.totals.stepsFailed).reduce((a, b) => a + b, 0);
+  assert.ok(failed(r.passes[1]) < failed(r.passes[0]), 'fewer failed steps after the fixes');
+  assert.ok(r.notMeasured.length >= 5 && r.notMeasured.some((t) => /toolchain/i.test(t)), 'what was not measured is written');
+  assert.doesNotMatch(JSON.stringify(r), /Users[\\/]+[A-Za-z]/, 'no path of a person in the dataset');
+});
+
+test('stack detection: C with CMake or Make, and Android (a Gradle build with a manifest in a module); a plain Gradle build is Java', () => {
+  assert.equal(S.stackOf(dir({ 'CMakeLists.txt': '', 'list.c': '' })).other, 'c (cmake)');
+  assert.equal(S.stackOf(dir({ Makefile: '', 'main.c': '' })).other, 'c (make)');
+  assert.equal(S.stackOf(dir({ 'CMakeLists.txt': '' })), null, 'a CMake file with no C source is no C project');
+  assert.equal(S.profileOf(dir({ 'CMakeLists.txt': '', 'a.c': '' })).slug, 'c');
+  const android = dir({ 'settings.gradle.kts': '', 'app/src/main/AndroidManifest.xml': '<manifest/>' });
+  assert.deepEqual([S.profileOf(android).slug, S.profileOf(android).exists], ['android', true]);
+  assert.equal(S.profileOf(dir({ 'build.gradle.kts': '', 'src/main/java/A.java': '' })).slug, 'java');
 });
 
 test('stack detection: Rust, PHP (a package.json with no framework is its assets), Terraform; a JS framework next to composer.json stays Node', () => {

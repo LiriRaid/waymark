@@ -24,6 +24,18 @@ const len = (f) => { try { return f().length; } catch { return 0; } };
 export const tokens = (chars) => Math.round(chars / 4);
 
 // → [{ group, name, chars }] for the folder whose project card and reminder are measured.
+// The rows that do not depend on the project (README.md carries them between markers; tests/docs.test.mjs checks them).
+export const README_ROWS = [
+  ['instructions block', 'every session', 'instructions block in CLAUDE.md / AGENTS.md: levels, routing, the testigos, memory'],
+  ['skill descriptions', 'every session', "Waymark's 17 skill descriptions, which the agent lists"],
+  ['reminder (full)', 'every prompt', 'the rule line of the per-prompt reminder (the task ID, stack and git line come on top)'],
+  ['reminder (short)', 'every prompt after a reply that followed the routine', 'the short reminder'],
+  ['protocol L2', 'an L2 task', 'the protocol an L2 reads'],
+  ['protocol L3', 'an L3 task', 'the protocol an L3 reads (L2 and L3 parts)'],
+  ['held message (max)', 'only after the context brake', 'the largest line the session hook adds for a held message'],
+];
+export const readmeTable = (rows) => ['| Part | Loaded | What it is | Characters |', '|---|---|---|---|', ...README_ROWS.map(([name, when, what]) => `| ${name} | ${when} | ${what} | ${(rows.find((r) => r.name === name)?.chars || 0).toLocaleString('en-US')} |`)].join('\n');
+
 export function sizes(cwd) {
   const home = projectHome(cwd);
   const dirs = fs.readdirSync(SKILLS).sort();
@@ -61,6 +73,7 @@ export function sizes(cwd) {
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const rows = sizes(process.cwd());
   if (process.argv.includes('--json')) { console.log(JSON.stringify(rows)); process.exit(0); }
+  if (process.argv.includes('--readme')) { console.log(readmeTable(rows)); process.exit(0); }
   const of = (name) => rows.find((r) => r.name === name)?.chars || 0;
   const sum = (g) => rows.filter((r) => r.group === g).reduce((n, r) => n + r.chars, 0);
   const avg = (g) => Math.round(sum(g) / Math.max(1, rows.filter((r) => r.group === g).length));

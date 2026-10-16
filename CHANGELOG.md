@@ -235,7 +235,7 @@ Waymark is now a supply chain of the agent's work: every task goes through defin
   - **One adapter per agent:** `scripts/agents/<name>.mjs` holds the transcript reader, the pre-tool input mapping, the output shapes, and the instructions file and session folder. The hooks take `--agent <name>`, `claude` by default, so existing registrations keep working. Codex is step 3b.
   - **`install-hooks.mjs` replaces the manual merge:** it shows a dry-run plan, and `--apply` makes a backup first. It adds, updates or de-duplicates only Waymark's own entries and registers nothing in guest or skills-only mode.
   - **The record says who did the work:** each record carries `agent`, and `tasks.md` shows it next to the ID (`T4 · codex`).
-  - **Questions leave a trace:** a turn routed Q in a project with memory gets a short chained record with no task ID (`kind: "Q"`), so it never takes a `T<n>`. `tasks.md` shows *Preguntas (Q) desde el último cierre: N*.
+  - **Questions leave a trace:** a turn routed Q in a project with memory gets a short chained record with no task ID (`kind: "Q"`), so it never takes a `T<n>`. `tasks.md` shows `Preguntas (Q) desde el último cierre: N` (shown in the user's language).
 - **Step 3b: the Codex adapter** (`docs/adr/0009`):
   - **Codex CLI runs the same four hooks:** `install-hooks.mjs --agent codex` writes them to `~/.codex/hooks.json` (matcher `Bash|apply_patch`, `commandWindows`). You trust them once in Codex's `/hooks`.
   - **Rollout reader** (`agents/codex.mjs`): it turns the rollout into the core's lines:

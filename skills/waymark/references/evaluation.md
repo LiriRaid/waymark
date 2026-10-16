@@ -22,11 +22,12 @@ Every closed task is already evaluated automatically: the end-of-turn hook judge
 
 ## 4. Report format
 ```
-## Evaluación Waymark · <task ID>
-Contrato (del registro): <label ✔/✘ · … · score>
-Declaraciones sin respaldo: ninguna | <campo: lo declarado → lo que muestran las llamadas>
-Decisión correcta: ✔/✘ — intentos: N — alucinaciones: ninguna | <lista>
-Consumo: <measure.mjs> · cuota estimada X% · real A% → B% (si la anotó)
-Qué mejorar en Waymark: <un cambio en routine.json, un hook o una plantilla — no reglas en prosa>
+## Waymark evaluation · <task ID>
+Contract (from the record): <label ✔/✘ · … · score>
+Unbacked claims: none | <field: what was stated → what the calls show>
+Correct decision: ✔/✘ — attempts: N — hallucinations: none | <list>
+Consumption: <measure.mjs> · estimated quota X% · real A% → B% (if the user noted it)
+What to improve in Waymark: <one change in routine.json, a hook or a template — not prose rules>
 ```
+(The report is written in the user's language.)
 If you maintain Waymark (its repository has a `.waymark/memory.md`), add the improvements to that file → *Work in progress → Open*; otherwise list them in the report only.

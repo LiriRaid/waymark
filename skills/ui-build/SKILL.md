@@ -1,6 +1,6 @@
 ---
 name: ui-build
-description: "Waymark tool (ui.build), owner dept-frontend. Build new UI in any framework: \"crea un modal\", \"nueva pantalla\", \"construye el componente\", \"arma un dashboard\", \"formulario de registro\", \"landing\". Follows the project's design system. Not restyling (ui-refine)."
+description: "ui.build · owner dept-frontend. Build new UI in any framework: \"crea un modal\", \"nueva pantalla\", \"construye el componente\", \"arma un dashboard\", \"landing\"."
 ---
 
 # UI Build

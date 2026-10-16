@@ -1,6 +1,6 @@
 ---
 name: dept-qa
-description: "Waymark · QA department. Use FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\", \"verifica que funcione\", unit, e2e, TDD. Closes every L1+ task."
+description: "QA. FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\", unit, e2e, TDD. Closes every L1+ task."
 ---
 
 # Quality Assurance & Testing

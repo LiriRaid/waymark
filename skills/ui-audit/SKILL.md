@@ -1,6 +1,6 @@
 ---
 name: ui-audit
-description: "Waymark tool (ui.audit), owner dept-ux-ui. Audit UI code against WCAG 2.2 AA and interface guidelines: \"revisa la accesibilidad\", \"audita la UI\", \"cumple WCAG\", \"problemas de foco o teclado\", \"revisa la UX\". Reports file:line findings first. Not redesign (ui-refine)."
+description: "ui.audit · owner dept-ux-ui. Audit UI against WCAG 2.2 AA: \"revisa la accesibilidad\", \"audita la UI\", \"cumple WCAG\", \"problemas de foco o teclado\". Reports file:line first. Not redesign."
 ---
 
 # UI Audit

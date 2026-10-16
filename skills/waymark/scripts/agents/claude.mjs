@@ -18,6 +18,7 @@ export const read = (hook, bytes) => readTail(hook.transcript_path, bytes);
 export function call(hook) {
   const tool = hook.tool_name || '', input = hook.tool_input || {};
   if (/^(Bash|PowerShell)$/.test(tool)) return { command: String(input.command || '') };
+  if (tool === 'Read') return { reads: [input.file_path].filter(Boolean) }; // only the sensitive-path guard looks at reads
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return { files: [input.file_path || input.notebook_path].filter(Boolean) };
   return null;
 }

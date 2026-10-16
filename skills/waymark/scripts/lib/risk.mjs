@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { slash } from './paths.mjs';
+import { slash, waymarkHome } from './paths.mjs';
 
 const ROUTINE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'routine.json');
 const FALLBACK = { review: { mode: 'always' }, sensitive: [], critical: [], allow: [] };
@@ -18,6 +18,7 @@ export function loadRisk(root = null) {
   const cfg = base && typeof base === 'object' ? { ...FALLBACK, ...base, review: { ...FALLBACK.review, ...base.review } } : { ...FALLBACK };
   const mode = process.env.WAYMARK_REVIEW_MODE; // always | proportional, over the file's (tests pin it; a user can force the old rule)
   if (mode === 'always' || mode === 'proportional') cfg.review = { ...cfg.review, mode };
+  cfg.allow = [...cfg.allow, ...userAllow()];
   const own = root ? read(path.join(root, '.waymark', 'risk.json')) : null;
   if (!own || typeof own !== 'object') return cfg;
   return {
@@ -27,6 +28,16 @@ export function loadRisk(root = null) {
     critical: Array.isArray(own.critical) ? own.critical : cfg.critical,
     allow: [...cfg.allow, ...(Array.isArray(own.allow) ? own.allow : [])],
   };
+}
+
+// The user's own allowed paths: a line `Sensitive allow: <path>, <path>` in ~/.waymark/preferences.md (each entry matches as a
+// fragment of the path, case-insensitive). Read at call time, because the user edits the file between tasks.
+export function userAllow() {
+  try {
+    const text = fs.readFileSync(path.join(waymarkHome(), 'preferences.md'), 'utf8');
+    return [...text.matchAll(/^[ \t]*(?:[-*][ \t]*)?Sensitive allow:[ \t]*(.+)$/gim)].flatMap((m) => m[1].split(',')).map((s) => s.trim().replace(/^[`"']|[`"']$/g, '')).filter(Boolean)
+      .map((s) => slash(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  } catch { return []; }
 }
 
 const compile = (list) => list.flatMap((p) => { try { return [new RegExp(p, 'i')]; } catch { return []; } });

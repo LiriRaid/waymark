@@ -863,10 +863,12 @@ export function branchesOf(files) {
 }
 
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
+export const RECORD_SCHEMA = 'waymark.record/v1';
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos")
+    schema: RECORD_SCHEMA, // the shape of this record: a later reader (a verifier, a model trained on the records) knows which fields to expect
     id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook', ...(claimed ? { claimed } : {}) }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
     // Never a secret in the chained record (it cannot be edited later): picked labels only, no free-text answer, and
     // passwords, tokens and keys masked in what is kept as text.
@@ -878,6 +880,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
+    outcome: { result: (gaps.reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null }, // hecho | parcial | bloqueado, as a label
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   });

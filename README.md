@@ -16,6 +16,36 @@ The task then closes with a Definition of Done (typecheck, lint, tests, build, a
 
 Stack- and language-agnostic: department rules are generic. Stack and architecture specifics live in profiles.
 
+## What Waymark is, and what it is not
+
+**Waymark is a chain of custody for the work an agent does on your code.** For each task it keeps one record, chained by hash and anchored in git, of what governed the task, what you decided, what the hooks proved and which commit came out; and it lets someone who was not there check that record.
+
+It is not an environment installer, not an orchestrator that runs agents, and not a workflow framework: it is skills the agent reads, hooks that run beside it and a record. It does not audit your dependencies.
+
+What it records, and where each statement is tested:
+
+| Statement | Source |
+|---|---|
+| One record per task, chained by hash; an edited, deleted or re-chained log is detected | `tests/supply-chain.test.mjs`, `tests/verify.test.mjs` |
+| The log is anchored in git (`refs/notes/waymark-anchor`) and a clone rebuilds its memory from git | `tests/supply-chain.test.mjs`, `tests/memory-chain.test.mjs` |
+| Your decision is the answer you gave in the choice window, recorded as given with its position before or after the first change | `tests/hooks.test.mjs` |
+| Gates, tests, review and build are computed by the hooks from the tool calls, not declared by the agent | `skills/waymark/routine.json`, `tests/integrity.test.mjs` |
+| Evidence is checked against the task's tool calls; a fact no call shows is marked | `tests/supply-chain.test.mjs` |
+| Each record pins the rules that governed it (department, procedures, `routine.json`, profiles) by hash | `tests/verify.test.mjs` |
+| The cost of each task is split into routine, work and reply | `tests/hooks.test.mjs`, `docs/audit-context.md` |
+| The review is required where the risk is: L3, a sensitive path, many files or lines | `tests/risk.test.mjs` |
+| Reading or editing secret-bearing paths is blocked where the agent's hook runs before the tool | `tests/guard.test.mjs` |
+| `waymark.mjs verify` checks the chain, the installed files against `MANIFEST.json` and the release signature; `attest` exports one task | `tests/verify.test.mjs` |
+| Stack profiles for 13 ecosystems and 6 architectures, measured on five outside repositories | `skills/waymark/stacks`, `tests/external.test.mjs` |
+
+What it does not do, so that nobody has to find out later:
+
+- **The records are not signed.** Without a signature the chain resists accidents and partial edits, not someone who can rewrite the repository and chain it again. The release is signed with git when the maintainer's key is in `skills/waymark/ALLOWED_SIGNERS`; `verify` reports `unsigned` as a warning, and `--require-signature` makes it fail. An exported attestation is not signed either.
+- **It stops only where the agent lets a hook run.** The table below says, per agent, what is enforced and what is only asked. The sensitive-path guard does not stop a search that reaches a secret without naming it (`grep -r`, a script).
+- **The cost figures are measured per task and per part, not compared with any other tool.** There is no published token comparison.
+- **Outside the author's own projects it was measured on five repositories** (Rust, Laravel, Terraform, Python data science, documentation only), for detection, profiles and gate recognition. The memory bootstrap, the routing and the token cost of a change there were not measured; a repository with a JS framework and a PHP backend is classed Node; Kotlin or Swift apps, a multi-language monorepo and embedded C are not yet in the corpus.
+
+
 ## A supply chain of the agent's work
 
 A software supply chain tracks how an artifact was built: its inputs, the steps it went through and who approved them, with records that cannot be altered unnoticed. Waymark applies that to the agent's work. The hooks build the record locally from what the session transcript proves, not from what the agent says, and cost 0 model tokens.
@@ -93,17 +123,19 @@ When a new version is published, `waymark.mjs check` reports it (the session hoo
 
 Nothing is preloaded "just in case". Loading is layered:
 
-| Layer | Loaded | Size |
-|---|---|---|
-| Instructions block in `CLAUDE.md` / `AGENTS.md` | always | ~6.5 k chars (~1.6 k tokens): levels, routing, the testigos, memory |
-| Skill descriptions | every session (the agent lists them) | ~4.9 k chars (~1.2 k tokens) for Waymark's 17 skills |
-| Reminder (hook) | every prompt | ~120 tokens (~60 once the last reply followed the routine): the task ID, the repo's stack and a one-line git status |
-| Department `dept-*/SKILL.md` | once per session per department | ~5–7 k chars: rules, brief questions, tools to use, DoD |
-| Department `procedures.md` | only the section the task needs | one procedure |
-| Protocol | by level: an L2 reads `references/protocol/l2.md`, an L3 also `l3.md`, a second failed attempt `stuck.md` | ~3.8 k chars at L2 (~0.9 k tokens) |
-| Core `waymark/references/*`, stack and architecture profiles | only in the situations they list (first time in a project, learning, missing skill) | on demand |
-| Session memory digest (hook) | once per session | this machine's environment and the project's work in progress, its latest learned memories (engram) and gates, injected automatically (~400 tokens); it lists open tasks and asks nothing |
-| Project memory + *Project map* | every task | replaces re-exploring the project each session |
+<!-- size:begin (generated by `node skills/waymark/scripts/size.mjs --readme`; tests/docs.test.mjs checks it against the same command) -->
+| Part | Loaded | What it is | Characters |
+|---|---|---|---|
+| instructions block | every session | instructions block in CLAUDE.md / AGENTS.md: levels, routing, the testigos, memory | 6,494 |
+| skill descriptions | every session | Waymark's 17 skill descriptions, which the agent lists | 3,492 |
+| reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 99 |
+| reminder (short) | every prompt after a reply that followed the routine | the short reminder | 37 |
+| protocol L2 | an L2 task | the protocol an L2 reads | 3,907 |
+| protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 5,285 |
+| held message (max) | only after the context brake | the largest line the session hook adds for a held message | 637 |
+<!-- size:end -->
+
+Other parts, loaded when they apply: a department's `dept-*/SKILL.md` once per session per department (about 5 to 7 thousand characters), its `procedures.md` (the hook hands it over at the task's first change), the project card once per session (a few hundred characters here; it grows with the project's open work and learned memory), the core references and the stack and architecture profiles only in the situations they list. Project memory and its *Project map* replace re-exploring the project each session.
 
 A small L1 task loads the block plus one department and one procedure. `node <skills-dir>/waymark/scripts/size.mjs` measures each of these for the project you run it in, including the lines the session hook may add after the card (`docs/adr/0024`). Memory (project map, verified gate commands, engram) avoids re-discovering the same things every session.
 
@@ -117,7 +149,7 @@ Your MCP servers stay registered where you put them. In each project, `scripts/m
 
 ### Skills you never use, and costly resumes
 
-Each listed skill costs its description in every session. `scripts/skill-fit.mjs` finds the skills you added but have not invoked in 30 days and, after your yes, lists only their names (still invocable); unused plugins are disabled. Waymark's 17 descriptions were also cut from 8,558 to 4,407 characters (~1,000 tokens per session). Resuming a large session after an hour idle re-writes its whole context (the cache expired), so a new task is cheaper in a new session. These are reported, not enforced: `node <skills-dir>/waymark/scripts/waymark.mjs check` lists what is pending (a newer version, skills changed, MCP fit, skill fit, the migration, unconnected agents, a large idle session), and the session hook reminds the agent to run it once a week. The hooks themselves hold only the chain (`docs/adr/0008`).
+Each listed skill costs its description in every session. `scripts/skill-fit.mjs` finds the skills you added but have not invoked in 30 days and, after your yes, lists only their names (still invocable); unused plugins are disabled. Waymark's 17 descriptions went from 8,558 characters (1.x, `CHANGELOG.md`) to the figure in the table above. Resuming a large session after an hour idle re-writes its whole context (the cache expired), so a new task is cheaper in a new session. These are reported, not enforced: `node <skills-dir>/waymark/scripts/waymark.mjs check` lists what is pending (a newer version, skills changed, MCP fit, skill fit, the migration, unconnected agents, a large idle session), and the session hook reminds the agent to run it once a week. The hooks themselves hold only the chain (`docs/adr/0008`).
 
 ### Evaluate a task
 
@@ -253,6 +285,40 @@ The rest is **proposed**, once in the session card and in `waymark.mjs check`, a
 | unsure / seen once | `~/.waymark/learnings/dept-<dept>.md` (staging) |
 
 When a list grows long, the agent folds it into the skill body, so the skills evolve.
+
+## Decision records
+
+Every design decision is written down in [`docs/adr`](docs/adr), numbered; an accepted one is never edited, it is superseded.
+
+<!-- adr-index:begin (generated by skills/waymark/scripts/docs-gen.mjs --write; do not edit) -->
+- [0001 · Provenance chain of the agent's work](docs/adr/0001-provenance-chain.md)
+- [0002 · Waymark is a supply chain of the agent's work](docs/adr/0002-supply-chain-of-the-agents-work.md)
+- [0003 · Strict decision gate, evidence from tool calls only](docs/adr/0003-strict-gate-and-tool-call-evidence.md)
+- [0004 · Provenance generated by the hooks, not declared by the agent](docs/adr/0004-provenance-generated-by-the-hooks.md)
+- [0005 · Three blocks, everything else recorded and scored](docs/adr/0005-three-blocks-and-automatic-evaluation.md)
+- [0006 · One routine contract](docs/adr/0006-routine-contract.md)
+- [0007 · Project memory lives in the project](docs/adr/0007-project-memory-in-the-project.md)
+- [0008 · One agent-agnostic core, a thin adapter per agent, hooks only for the chain](docs/adr/0008-agent-agnostic-core.md)
+- [0009 · Codex adapter: the rollout as core lines, decisions asked in chat, steps an agent lacks](docs/adr/0009-codex-adapter.md)
+- [0010 · Every applicable step blocks once; the branch and the browser are the user's](docs/adr/0010-every-applicable-step-blocks.md)
+- [0011 · The browser only on request, no secrets in the chain, and turns counted from the last close](docs/adr/0011-browser-on-request-and-no-secrets.md)
+- [0012 · Testigos, one decision, git as the source of truth, and a fixed context card (step 3e)](docs/adr/0012-testigos-and-git-as-the-source.md)
+- [0013 · Every agent in the chain, one memory, notes that travel](docs/adr/0013-every-agent-one-memory-portable-notes.md)
+- [0014 · The final test across agents: notes that travel alone, one ID per commit, Recordar and review in every agent](docs/adr/0014-final-test-across-agents.md)
+- [0015 · Three layers of memory, written by the hooks; fewer responses per task](docs/adr/0015-three-layers-of-memory.md)
+- [0016 · Context brake, one project-skills folder, no-change tasks recorded](docs/adr/0016-context-brake-and-one-skills-folder.md)
+- [0017 · The agents' folders stay local, one real copy per skill, fewer extra responses](docs/adr/0017-local-agent-folders-and-one-copy-per-skill.md)
+- [0018 · Dead hooks reported, an idle brake, merges that keep the notes](docs/adr/0018-dead-hooks-idle-brake-and-merge-methods.md)
+- [0019 · The quota % measured by the status line](docs/adr/0019-quota-measured-by-the-status-line.md)
+- [0020 · Testigos without false ✔ or false ✘, and a memory chain that travels](docs/adr/0020-testigo-integrity-and-the-memory-chain.md)
+- [0021 · Every agent on the machine with one install, Cursor included](docs/adr/0021-every-agent-and-cursor.md)
+- [0022 · Agents as data, and the agents Waymark does not know](docs/adr/0022-agents-as-data-and-unknown-agents.md)
+- [0023 · The project learns from its records: the hook writes what it observed, the rest is proposed](docs/adr/0023-the-project-learns-from-its-records.md)
+- [0024 · The context Waymark costs: the protocol by level, a card that asks nothing, a size report that measures it all](docs/adr/0024-the-context-waymark-costs.md)
+- [0025 · The log anchored in git, forget for the removals you ask for, and an Evidencia backed by a check](docs/adr/0025-anchored-log-forget-and-backed-evidence.md)
+- [0026 · One classifier for what a command runs, and an open failure when the hook cannot tell](docs/adr/0026-one-run-classifier-and-open-failure.md)
+- [0027 · Cost per link, review by risk, procedures by the hook, a chain anyone can verify](docs/adr/0027-cost-per-link-risk-review-verifiable-chain.md)
+<!-- adr-index:end -->
 
 ## Contributing back
 

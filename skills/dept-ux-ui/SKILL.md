@@ -1,6 +1,6 @@
 ---
 name: dept-ux-ui
-description: "Waymark · UX/UI department. Use FIRST, before ui-system/ui-refine/ui-audit, for how the UI looks and feels: \"mejora el diseño\", \"se ve feo\", \"más profesional\", \"animación\", \"accesibilidad\", \"contraste\", \"tipografía\", \"paleta\", \"design tokens\", \"tema oscuro\", WCAG."
+description: "UX/UI. FIRST, before ui-system/ui-refine/ui-audit, for how the UI looks: \"mejora el diseño\", \"se ve feo\", \"más profesional\", \"animación\", \"accesibilidad\", \"contraste\", \"paleta\", WCAG."
 ---
 
 # UX/UI Design

@@ -1,6 +1,6 @@
 ---
 name: dept-data
-description: "Waymark · Data & State department. Use FIRST for schema, queries and state: \"migración\", \"nueva tabla\", \"columna\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"modelo\", \"store\", \"estado global\", SQL, ORM, seed."
+description: "Data & State. FIRST for schema, queries, state: \"migración\", \"nueva tabla\", \"columna\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"estado global\", SQL, ORM."
 ---
 
 # Data Engineering & State Management

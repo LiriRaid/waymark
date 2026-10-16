@@ -32,20 +32,20 @@ try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
 // The rules themselves live in the instructions block; this only points at the steps a new session skips most.
 // The rules live once, in the block; the reminder points at the steps a turn skips most (docs/adr/0015, C3).
-const full = 'Waymark Rule 0 (the instructions block): routing line first ("Waymark → L<n> or Q · dept-<owner> · skills: …"); a department not loaded yet in this session → its dept-* skill; one choice-window call before the first change; "## Cierre · <task ID>" after changes. User\'s language.';
+const full = 'Waymark Rule 0: routing line, owner dept-*, choice window before changes, "## Cierre · <ID>" after.';
 const short = 'Waymark Rule 0 as in your last reply.';
 // The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
-export function gitLine(root, max = 8) {
+export function gitLine(root, max = 2) {
   const r = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', timeout: 2000 });
   if (r.status !== 0) return '';
   const [head, ...files] = r.stdout.split('\n').filter(Boolean);
   const branch = head.replace(/^##\s*/, '').replace(/\.\.\.\S+/, '').trim();
-  const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${l.slice(3)}`).join(', ');
-  return ` Git (read now): ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
+  const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${path.basename(l.slice(3).replace(/\/$/, '')) || l.slice(3)}`).join(', ');
+  return ` Git: ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
 }
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
-  return ` Task ID for the Cierre heading: new task → ${ids.next}${ids.followUp ? ` · follow-up of ${ids.last} (it continues that task's files) → ${ids.followUp}` : ''}.`;
+  return ` Cierre ID: new ${ids.next}${ids.followUp ? `; follow-up (same files) ${ids.followUp}` : ''}.`;
 }
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
@@ -117,7 +117,7 @@ export function reminder(hook, agent) {
   try { markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
-  try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo (read now): ${line}.`; } catch {}
+  try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result

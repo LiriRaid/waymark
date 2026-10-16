@@ -10,8 +10,8 @@ const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'taskmd', 'decisions', 'snapshot'];
 const M = Object.fromEntries(await Promise.all(MODULES.map(async (n) => [n, await import(`file://${SCRIPTS}/provenance/${n}.mjs`)])));
 
-// The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one.
-const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'taskLines', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine'];
+// The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one. 2.0.16 adds pinnedRules (point 9).
+const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'taskLines', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'pinnedRules', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine'];
 
 test('provenance.mjs keeps exactly its public API', () => {
   assert.deepEqual(Object.keys(P).sort(), [...API].sort());
@@ -27,7 +27,7 @@ test('every public name is the very function of the module that owns it', () => 
     tasks: ['taskIds', 'validId', 'taskLines', 'taskFiles', 'taskStart', 'taskStartMark', 'markTaskStart', 'clearTaskStart', 'taskInProgress'],
     taskmd: ['INTERRUPTED_AFTER', 'markOpen', 'closeOpen', 'expireOpen', 'taskSummary', 'aprendidoOf', 'writeTaskLine', 'confirmTasks', 'tidyWip', 'tasksMarkdown', 'refreshTasks', 'rebuildFromGit'],
     decisions: ['decisionsIn', 'recordedDecisions', 'askedChoice'],
-    snapshot: ['turnInputs', 'commitsFor', 'gitSnapshot', 'snapshotDiff', 'saveSnapshot', 'loadSnapshot', 'addRepoSnapshot', 'markPaused', 'turnChanged'],
+    snapshot: ['turnInputs', 'pinnedRules', 'commitsFor', 'gitSnapshot', 'snapshotDiff', 'saveSnapshot', 'loadSnapshot', 'addRepoSnapshot', 'markPaused', 'turnChanged'],
   };
   const claimed = Object.values(OWNER).flat();
   assert.deepEqual(claimed.sort(), API.filter((n) => !['changesProject', 'mutatesFiles', 'shellRuns', 'shellSkeleton'].includes(n)).sort());

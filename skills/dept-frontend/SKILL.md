@@ -1,6 +1,6 @@
 ---
 name: dept-frontend
-description: "Waymark · Frontend department. Use FIRST, before any ui-* skill, to build, change or fix UI code: \"crear un modal\", \"nueva pantalla\", \"componente\", \"formulario\", \"tabla\", \"sidebar\", \"layout responsive\", \"SSR\", page, view, client routing. Not for one color or text."
+description: "Frontend. FIRST, before ui-*, to build or fix UI code: \"crear un modal\", \"nueva pantalla\", \"componente\", \"formulario\", \"tabla\", \"layout responsive\", \"SSR\"."
 ---
 
 # Frontend Engineering

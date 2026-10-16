@@ -424,6 +424,19 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     for (const h of [here, ...workspaceSiblings(here.root)]) console.log(`## ${path.basename(h.root)}\n${tasks(h.root, null)}\n`);
   } else if (sub === 'tasks') {
     console.log(tasks(process.cwd(), rest[0] || null));
+  } else if (sub === 'attest') {
+    const { attest } = await import('./attest.mjs');
+    const out = rest.indexOf('--out') >= 0 ? rest[rest.indexOf('--out') + 1] : null;
+    const id = rest.join(' ').match(ID)?.[0];
+    const s = id ? attest(process.cwd(), id) : { error: 'name a task ID' };
+    if (s.error) { console.log(`attest: ${s.error}\nUsage: node waymark.mjs attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
+    else if (out) { fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n'); console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)); check it with: node waymark.mjs verify --attestation ${out}`); }
+    else console.log(JSON.stringify(s, null, 1));
+  } else if (sub === 'verify') {
+    const { verify } = await import('./verify.mjs');
+    const r = verify(process.cwd(), rest);
+    console.log(['Waymark verify', ...r.lines].join('\n'));
+    process.exitCode = r.code;
   } else if (sub === 'tidy') {
     const home = projectHome(process.cwd());
     const changed = tidyWip(home);
@@ -473,7 +486,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | verify [--install] [--require-signature] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

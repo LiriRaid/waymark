@@ -1,6 +1,6 @@
 ---
 name: browser-verify
-description: "Waymark tool (test.browser), owner dept-qa. Verify a web change in a real browser: \"verifica que funcione\", \"pruébalo en el navegador\", \"se ve bien en móvil\", screenshots, console errors, smoke/e2e, responsive. Local dev hosts only. Not unit tests."
+description: "test.browser · owner dept-qa. Verify a web change in a real browser: \"verifica que funcione\", \"pruébalo en el navegador\", \"se ve bien en móvil\", screenshots, console errors, e2e."
 ---
 
 # Browser Verify

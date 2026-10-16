@@ -26,17 +26,17 @@ Identify which agent **you** are, and **every other agent installed on this mach
 - `<instructions-file>` — global instructions file (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
 - how to register MCP servers
 
-If the adapter marks a path as *verify*, check it against your own documentation or the filesystem before using it. Tell the user in one line per agent what you detected:
+If the adapter marks a path as *verify*, check it against your own documentation or the filesystem before using it. Tell the user in one line per agent what you detected (the sample messages in this file are shown in the user's language):
 
 ```
-Agente: Claude Code · skills: ~/.agents/skills (enlaces en ~/.claude/skills) · instrucciones: ~/.claude/CLAUDE.md · capa privada: ~/.waymark
-También encontré: Codex (~/.codex) · Cursor (~/.cursor)
+Agent: Claude Code · skills: ~/.agents/skills (links in ~/.claude/skills) · instructions: ~/.claude/CLAUDE.md · private layer: ~/.waymark
+Also found: Codex (~/.codex) · Cursor (~/.cursor)
 ```
 
 **1.1 Orchestrators and other agent frameworks.** Before the plan, check whether another framework already governs each agent (e.g. gentle-ai): marked blocks in `<instructions-file>` that are not Waymark's (`<!-- <name>:<section> -->`), hooks in the agent settings that do not run Waymark scripts, orchestrator/persona/trigger skills, its own skill registry. Waymark is not an orchestrator: **if one is already installed, Waymark becomes its guest** (no hooks, no Rule 0 block; its skills and memory reach the orchestrator through the orchestrator's own registry and engram). Follow the repository's `skills/waymark/references/coexistence.md` §1–§4: read its sections, write each rule as one line and classify it (Adopted · Fallback · Resolved), and find how its registry is refreshed. **Never edit that framework's files.** Tell the user in one line:
 
 ```
-Orquestador ya instalado: gentle-ai (bloques gentle-ai:*, hooks propios, registro .atl/skill-registry.md) → Waymark entra como invitado: sin hooks ni bloque, sus skills por el registro de gentle-ai, memoria por engram. No toco sus archivos.
+Orchestrator already installed: gentle-ai (gentle-ai:* blocks, its own hooks, registry .atl/skill-registry.md) → Waymark joins as a guest: no hooks and no block, its skills through gentle-ai's registry, memory through engram. I do not touch its files.
 ```
 
 Nothing found → the normal plan below; Waymark leads.
@@ -44,33 +44,67 @@ Nothing found → the normal plan below; Waymark leads.
 **1.2 Plan and confirm [ask].** Before downloading or touching anything, show the user the plan and wait for an explicit yes:
 
 ```
-Voy a instalar Waymark así:
-1. Skills (17)            → ~/.agents/skills/            (una sola copia para todos los agentes; Claude Code las ve por enlaces en ~/.claude/skills; respaldo previo si ya existe algo)
-2. Instrucciones generales → ~/.claude/CLAUDE.md          (bloque marcado arriba; el resto no se toca)
-3. Capa privada            → ~/.waymark/             (fuera de .claude; sirve para cualquier agente y se completa sola)
-4. Hooks              → ~/.claude/settings.json      (tarjeta del proyecto al iniciar sesión ~600 tokens; recordatorio por mensaje ~70 tokens con el ID de la tarea y el git status; el pack de cada archivo en su primera edición; tu decisión antes de cambiar archivos; los testigos, el registro y lo aprendido al terminar el turno)
-5. Agentes: Claude Code (este) + los que encontré (Codex, OpenCode, Gemini CLI…): las skills compartidas del paso 1, y bloque y hooks en cada uno; la misma memoria
-6. Memoria aprendida  → engram (CLI; si falta te ofrezco instalarlo) y su MCP en cada agente
-7. Te preguntaré antes de: quitar skills de terceros, mover contenido de tu archivo de instrucciones, instalar engram y registrar MCP.
+I will install Waymark like this:
+1. Skills (17)           → ~/.agents/skills/            (one copy for every agent; Claude Code sees them through links in ~/.claude/skills; backup first if something exists)
+2. General instructions  → ~/.claude/CLAUDE.md          (a marked block at the top; the rest is not touched)
+3. Private layer         → ~/.waymark/                  (outside .claude; works for any agent and fills itself in)
+4. Hooks                 → ~/.claude/settings.json      (project card at session start ~600 tokens; a reminder per message ~70 tokens with the task ID and the git status; each file's pack at its first edit; your decision before files change; the testigos, the record and what was learned at the end of the turn)
+5. Agents: Claude Code (this one) + the ones I found (Codex, OpenCode, Gemini CLI…): the shared skills of step 1, and the block and hooks in each; the same memory
+6. Learned memory        → engram (CLI; if missing I offer to install it) and its MCP in each agent
+7. I will ask before: removing third-party skills, moving content out of your instructions file, installing engram and registering MCP servers.
 ```
 
 Ask it with your **choice window** if the agent has one (Claude Code: `AskUserQuestion`), the plan in the question, options as buttons:
-- **Instalar en todos mis agentes (Recomendado)** — when §1 found other agents; it lists them. Waymark is a user-level install for every agent: the skills once in `~/.agents/skills`, and the instructions block and hooks in each agent. With no other agent found, the option is **Instalar (Recomendado)**, for this agent.
-- **Solo este agente** — only when §1 found others: the full install here, nothing in the others. After the install, `waymark.mjs check` offers each agent that is not set up yet.
-- **Cambiar algo** — the user says what (another folder, skip the hook, skip a step).
-- **Cancelar**.
+- **Install in all my agents (Recommended)** — when §1 found other agents; it lists them. Waymark is a user-level install for every agent: the skills once in `~/.agents/skills`, and the instructions block and hooks in each agent. With no other agent found, the option is **Install (Recommended)**, for this agent.
+- **Only this agent** — only when §1 found others: the full install here, nothing in the others. After the install, `waymark.mjs check` offers each agent that is not set up yet.
+- **Change something** — the user says what (another folder, skip the hook, skip a step).
+- **Cancel**.
 
 **§1.1 found an orchestrator →** the plan becomes the guest plan (items 2 and 4 disappear; a new step refreshes its registry) and the question offers, one question only:
-- **Invitado de <framework> (Recomendado)** — skills + private layer; no block, no hooks; `<framework>` keeps its flow and loads Waymark's departments through its registry; memory through engram.
-- **Waymark lidera, <framework> de respaldo** — full plan; its compatible rules adopted, its skills as fallback, turn conflicts resolved for Waymark (the user prefers Waymark's routine).
-- **Solo skills** — skills + private layer; no registry step, no block, no hooks.
-- **Cancelar**.
+- **Guest of <framework> (Recommended)** — skills + private layer; no block, no hooks; `<framework>` keeps its flow and loads Waymark's departments through its registry; memory through engram.
+- **Waymark leads, <framework> as fallback** — full plan; its compatible rules adopted, its skills as fallback, turn conflicts resolved for Waymark (the user prefers Waymark's routine).
+- **Skills only** — skills + private layer; no registry step, no block, no hooks.
+- **Cancel**.
 
 Then show the lists (Adopted · Fallback · Resolved) and let the user move any rule **[ask]**; they become `~/.waymark/coexistence.md` in §6.1 with `Mode: guest | waymark-leads | skills-only`.
 
-Agents without a choice window: show the plan and end with *"¿Continúo?"*.
+Agents without a choice window: show the plan and end with *"Shall I continue?"* (in the user's language).
 
 Use the real paths from the adapter. **Several agents chosen** → §5 (skills in `~/.agents/skills`) and §6.1 (private layer) once; §3, §6.2, §7 once per agent with its own adapter (backup, instructions block, hooks, MCP in its own config). If the user says no or changes something (another folder, skip a step), adapt and show the plan again.
+
+### Which hooks each agent gets
+
+Generated from `agents/agents.json` and the adapters (`node skills/waymark/scripts/matrix.mjs`). Tell the user after the install: for an agent whose cell is *advisory*, the step is asked in its instructions and nothing blocks it.
+
+<!-- agent-matrix:begin (generated by skills/waymark/scripts/matrix.mjs --write; do not edit) -->
+**Hook events Waymark registers, per agent** (from `agents/agents.json`):
+
+| Agent | SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop |
+|---|---|---|---|---|---|
+| Claude Code | yes | yes | yes | — | yes |
+| Codex | yes | yes | yes | — | yes |
+| Gemini CLI | yes | yes | yes | yes | yes |
+| OpenCode | yes | yes | yes | yes | yes |
+| Cursor | yes | yes | yes | yes | yes |
+| Antigravity | yes | yes | yes | yes | yes |
+| Kiro | yes | yes | yes | yes | yes |
+| Copilot CLI | yes | yes | yes | yes | yes |
+
+**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it.
+
+| Agent | End-of-turn checks | Decision gate and commit trailer | Memory and procedures handed over | Sensitive paths: edits and shell | Sensitive paths: reads | Context brake |
+|---|---|---|---|---|---|---|
+| Claude Code | enforced | enforced | enforced | enforced | enforced | enforced |
+| Codex | enforced | enforced | enforced | enforced | advisory | enforced |
+| Gemini CLI | enforced | enforced | enforced | enforced | advisory | enforced |
+| OpenCode | enforced | enforced | enforced | enforced | advisory | enforced |
+| Cursor | enforced | enforced | enforced | enforced | advisory | enforced |
+| Antigravity | enforced | enforced | enforced | enforced | advisory | advisory |
+| Kiro | enforced | enforced | enforced | enforced | advisory | advisory |
+| Copilot CLI | enforced | enforced | enforced | enforced | advisory | advisory |
+
+Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Qwen Code, Droid, Amp, Crush.
+<!-- agent-matrix:end -->
 
 ## 2. Get the files
 
@@ -94,7 +128,7 @@ Create `~/.waymark-backups/<YYYY-MM-DD-HHmm>/` and copy into it whatever already
 - `<instructions-file>`
 - `~/.waymark/`
 
-Report the backup path. If nothing exists, say "instalación limpia" and continue.
+Report the backup path. If nothing exists, say "clean install" (in the user's language) and continue.
 
 ## 4. Replaced third-party skills **[ask]**
 
@@ -228,27 +262,28 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
 
 1. Confirm these exist: `<skills-dir>/waymark/SKILL.md`, `<skills-dir>/dept-frontend/SKILL.md`, `<skills-dir>/ui-build/SKILL.md`, `~/.waymark/agent.md`, `~/.waymark/preferences.md`, and the block in `<instructions-file>` (in `guest`: `~/.waymark/coexistence.md` and the orchestrator's registry listing the skills, instead of the block).
 2. Tell the user that skills load at session start: **they must restart the agent** (new session).
-3. In the new session run `node "<skills-dir>/waymark/scripts/waymark.mjs" check` and offer, with the choice window, what it reports: reconnecting an agent whose instructions block changed, the hooks of an agent without them. Nothing pending → say so.
-4. Smoke test for the new session: *"quiero crear un modal de confirmación"* → the agent must start its reply with the `Waymark → L<n> · dept-frontend` line, load `dept-frontend`, then use `ui-build`. In `guest`: the orchestrator's flow runs as before and loads `dept-frontend` from its registry, with no Waymark opener.
-5. Report, listing **every file created or modified** (from §6 on), so the user knows what changed:
+3. Run `node "<skills-dir>/waymark/scripts/waymark.mjs" verify --install`: it compares every installed file with `waymark/MANIFEST.json` (sha256, offline) and, when the install is a git clone, shows whether the release tag is signed by a key in `waymark/ALLOWED_SIGNERS` (`--require-signature` makes an unsigned release fail the exit code). Anything it reports as changed, missing or extra means the install is not what was released: say so before going on.
+4. In the new session run `node "<skills-dir>/waymark/scripts/waymark.mjs" check` and offer, with the choice window, what it reports: reconnecting an agent whose instructions block changed, the hooks of an agent without them. Nothing pending → say so.
+5. Smoke test for the new session: *"quiero crear un modal de confirmación"* → the agent must start its reply with the `Waymark → L<n> · dept-frontend` line, load `dept-frontend`, then use `ui-build`. In `guest`: the orchestrator's flow runs as before and loads `dept-frontend` from its registry, with no Waymark opener.
+6. Report, listing **every file created or modified** (from §6 on), so the user knows what changed:
 
 ```
-## Waymark instalado
-- Agentes / rutas: … (uno por línea)
-- Versión: <skills-dir>/waymark/VERSION
-- Respaldo: ~/.waymark-backups/<fecha>/
-- Skills: 17 copiadas · de terceros eliminadas: …
-- Archivos modificados según INSTALL.md:
-  - <instructions-file> — bloque agregado arriba / reemplazado (resto intacto)
-  - ~/.waymark/agent.md — creado / fila agregada
-  - ~/.waymark/{profile,preferences,subagents,projects}.md — creados (se completan solos al trabajar)
+## Waymark installed
+- Agents / paths: … (one per line)
+- Version: <skills-dir>/waymark/VERSION
+- Backup: ~/.waymark-backups/<date>/
+- Skills: 17 copied · third-party removed: …
+- Files modified according to INSTALL.md:
+  - <instructions-file> — block added at the top / replaced (the rest intact)
+  - ~/.waymark/agent.md — created / row added
+  - ~/.waymark/{profile,preferences,subagents,projects}.md — created (they fill in as work happens)
   - …
-- Movido a la capa privada con tu permiso: …
-- Coexistencia: <framework> · modo … · adoptadas N · respaldo N · resueltas N · sus archivos: sin cambios   (solo si §1.1 encontró otro)
-- MCP: registrados … · omitidos …
-- engram: <versión> · MCP en: … (los hooks usan su CLI aunque un agente no tenga el MCP)
-- Sync: … (skills de otros agentes: N) · Medir una tarea: node <skills-dir>/waymark/scripts/measure.mjs --turns a-b
-- Pendiente: reiniciar el agente y probar la frase de humo
+- Moved to the private layer with your permission: …
+- Coexistence: <framework> · mode … · adopted N · fallback N · resolved N · its files: unchanged   (only if §1.1 found another)
+- MCP: registered … · skipped …
+- engram: <version> · MCP in: … (the hooks use its CLI even when an agent has no MCP)
+- Sync: … (skills of other agents: N) · Measure a task: node <skills-dir>/waymark/scripts/measure.mjs --turns a-b
+- Pending: restart the agent and run the smoke phrase
 ```
 
 ## 9. Update
@@ -260,7 +295,7 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
    `skill-map.json`: take every entry from the repository, then add back the installed entries the repository does not have (skills and MCP servers the user created or mapped, project skills).
 5. Re-run §1.1: a framework or rules that `~/.waymark/coexistence.md` does not list yet → classify only those and ask **[ask]** (no such file yet and a framework found now → the §1.2 question: keep leading or become guest). `Mode: other-leads` from 1.5.0 → offer to switch to `guest`: remove Waymark's block and hooks (backup first).
 6. Per mode: leading → replace the instructions block (§6.2) in every agent and re-run `install-hooks.mjs --agent <agent>` for each one (§7.2) from `~/.agents/skills/waymark/scripts`, so each has all its hooks and they point at the shared folder (an install from before `docs/adr/0017` registered them under `~/.claude/skills`; run `skill-links.mjs --user --apply` first, §5); `guest` → no block, no hooks, re-run the orchestrator's refresh (§7.4). Then run sync (§7.3).
-7. Report with the same list of modified files as §8, plus `Versión: <old> → <new>`.
+7. Report with the same list of modified files as §8, plus `Version: <old> → <new>`.
 
 ## 10. Uninstall **[ask]**
 
@@ -275,11 +310,11 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
 For a machine with Waymark 1.x (the 17 skills copied in `~/.claude/skills`, memory in `~/.waymark/projects/`) that should end with a clean 2.0. Tell the user the plan first:
 
 ```
-Encontré Waymark <versión> (skills en ~/.claude/skills). Voy a:
-1. Respaldar skills, instrucciones, hooks y ~/.waymark      → ~/.waymark-backups/<fecha>/
-2. Quitar la versión vieja: las 17 skills, el bloque y los hooks de Waymark en cada agente (lo demás no se toca)
-3. ~/.waymark (tu memoria): conservarla y migrar cada proyecto a <proyecto>/.waymark (Recomendado) · o empezar vacía (queda en el respaldo)
-4. Instalar 2.0 (§1–§8): skills en ~/.agents/skills con enlaces en ~/.claude/skills, bloque y hooks en cada agente, engram
+I found Waymark <version> (skills in ~/.claude/skills). I will:
+1. Back up skills, instructions, hooks and ~/.waymark      → ~/.waymark-backups/<date>/
+2. Remove the old version: the 17 skills, the block and Waymark's hooks in each agent (nothing else is touched)
+3. ~/.waymark (your memory): keep it and migrate each project to <project>/.waymark (Recommended) · or start empty (it stays in the backup)
+4. Install 2.0 (§1–§8): skills in ~/.agents/skills with links in ~/.claude/skills, the block and hooks in each agent, engram
 ```
 
 1. **Detect** the installed version per agent: `<agent skills folder>/waymark/VERSION` (missing = older than 0.3.0). 2.0 or newer → §9 instead.

@@ -1,6 +1,6 @@
 ---
 name: library-docs
-description: "Waymark tool (docs.library), any department. Use before code that relies on a library/framework API not verified this session, and for setup, config or migration: \"cómo se usa\", \"documentación de\", \"migrar a la versión\", \"sigue sin funcionar\". Docs MCP first, else official site."
+description: "docs.library · Before code that uses a library API not verified this session, and for setup or migration: \"cómo se usa\", \"documentación de\", \"migrar a la versión\", \"sigue sin funcionar\"."
 ---
 
 # Library Docs

@@ -11,3 +11,8 @@ export function packedFiles(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];
   return new Set(st && st.since === since ? st.files : []);
 }
+// → Set of department names whose procedures.md the hook already handed over in this session and task.
+export function procDelivered(session, since = 0, file = PACKED()) {
+  const st = readPacked(file)[session || 'unknown'];
+  return new Set(st && st.since === since ? st.procs || [] : []);
+}

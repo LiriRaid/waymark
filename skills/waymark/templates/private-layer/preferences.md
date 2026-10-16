@@ -21,3 +21,7 @@ How this user wants the agent to communicate and deliver. Read before answering 
 
 ## Learned preferences
 <!-- - [YYYY-MM-DD] <preference> — <the correction that taught it> -->
+
+## Sensitive paths
+The pre-tool hook blocks reading or editing secret-bearing paths (`.env*`, `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `*.pem`, `id_rsa*`, `*.p12`; the `.env.example` family passes). To let the agent use one, add a line `Sensitive allow: <path>, <path>` (each entry matches as a fragment of the path). A project can also list `allow` in `.waymark/risk.json`.
+<!-- Sensitive allow: path/to/file.pem -->

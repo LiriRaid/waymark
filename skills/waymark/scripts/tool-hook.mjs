@@ -13,15 +13,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, inheritedRoute, readTurns } from './transcript.mjs';
+import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
 import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm } from './lib/paths.mjs';
-import { PACKED, readPacked, packedFiles } from './lib/packed.mjs';
-export { PACKED, packedFiles }; // moved to lib/packed.mjs; kept for existing importers
+import { loadRisk, isSensitive } from './lib/risk.mjs';
+import { addDenied } from './lib/denied.mjs';
+import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
+export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
 // Files the routine itself writes (memory, learnings, scratch) never need the opener. The OS temp dir is the one Node
@@ -65,7 +67,9 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
 
 // A git commit the shell runs, read on the command's skeleton (heredoc and here-string bodies blanked): a file written
 // through a heredoc that mentions `git commit` is no commit. The message and its trailer are read on the whole command.
-const isCommit = (command) => /\bgit\b[^|;&\n]*\scommit(?![\w-])/.test(shellSkeleton(command, { quotes: false }));
+// `git` must start the command (after ; && | or a subshell, env assignments allowed) and only its global options may stand
+// before `commit`: `git config --get commit.gpgsign`, `git -c commit.gpgsign=false status` and `echo git commit` are no commit.
+const isCommit = (command) => /(?:^|[;&|(]\s*|\n\s*)(?:[A-Za-z_]\w*=\S*\s+)*git(?:\s+(?:-c\s+\S+|-C\s+\S+|--[\w-]+(?:=\S+)?))*\s+commit(?![\w-])/.test(shellSkeleton(command, { quotes: false }));
 
 // Commit trailer: a "Waymark-Task: <id>" the end-of-turn hook would record under another ID (a follow-up letter whose
 // task shares no staged file, or an ID never offered) is denied with the right one, so a commit and its record carry
@@ -106,10 +110,43 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
   return `Waymark: this commit has no "Waymark-Task: <task ID>" in its message, so the task's record and the commit stay unlinked. Add it as the message's last paragraph, next to Co-Authored-By: "Waymark-Task: ${ids.next}"${ids.followUp ? ` (or "${ids.followUp}" when it continues ${ids.last})` : ''}, and use the same ID in the Cierre heading. Sent again without it, the commit goes through.`;
 }
 
+// Sensitive-path guard (docs/adr/0027): a read or an edit of a secret-bearing path (routine.json `risk.sensitive`: .env*, ~/.ssh,
+// ~/.aws, ~/.config/gcloud, keys) is denied, except what `risk.allow` and the user's `Sensitive allow:` line in
+// ~/.waymark/preferences.md name. It acts where the agent's hook runs before the tool: Claude Code's Read, Edit and Write,
+// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists.
+// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file).
+const expandHome = (w) => String(w).replace(/^(~|\$HOME|\$\{HOME\})(?=[\\/]|$)/, os.homedir());
+export function commandSensitive(command, cwd, cfg) {
+  for (const p of shellRuns(command)) {
+    const dir = path.resolve(cwd, expandHome(String(p.cd || '.').replace(/^["']|["']$/g, '')).replace(/^\/([a-z])\//i, '$1:/'));
+    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    const targets = [...String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    for (const w of [...words.slice(1), ...targets]) {
+      if (!w || /^-|^[<>&|]/.test(w)) continue;
+      const abs = path.resolve(dir, expandHome(w));
+      if (isSensitive(abs, cfg) && (targets.includes(w) || fs.existsSync(abs))) return abs;
+    }
+  }
+  return null;
+}
+export function checkSensitive(c, cwd, session = 'unknown') {
+  if (!c) return null;
+  let root = cwd;
+  try { root = projectHome(cwd).root; } catch {}
+  const cfg = loadRisk(root);
+  const paths = c.reads || c.files || [];
+  const hit = c.command !== undefined ? commandSensitive(c.command, cwd, cfg) : paths.map((f) => path.resolve(cwd, expandHome(f))).find((f) => isSensitive(f, cfg));
+  if (!hit) return null;
+  try { addDenied(session, { tool: c.command !== undefined ? 'shell' : c.reads ? 'read' : 'edit', path: String(hit).replace(/\\/g, '/') }); } catch {}
+  return `Waymark: ${String(hit).replace(/\\/g, '/')} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked. Do not look for another way to read it. If the user wants it allowed, they add it to ~/.waymark/preferences.md as "Sensitive allow: <path>" (or "allow" in the project's .waymark/risk.json); until then, ask them for the value you need.`;
+}
+
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
+  const sensitive = checkSensitive(c, cwd, hook.session_id);
+  if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
   // read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
@@ -118,7 +155,7 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
   }
-  const files = c.files.filter((f) => !exempt(f));
+  const files = (c.files || []).filter((f) => !exempt(f));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
   for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }
@@ -163,6 +200,20 @@ export function commandRepos(command, cwd = process.cwd()) {
   return [...dirs].filter((d) => { try { if (!fs.statSync(d).isDirectory()) return false; } catch { return false; } const t = top(d); return t && t !== own; });
 }
 
+// The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked).
+function ownerDept(hook) {
+  if (!hook.transcript_path) return null;
+  try {
+    const calls = sessionTools(readTail(hook.transcript_path)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
+    return calls.length ? String(calls.at(-1).input.skill) : null;
+  } catch { return null; }
+}
+
+// Procedures by the hook (docs/adr/0027): at the task's first change the owner department's procedures.md goes in as
+// context, once per task and department, so the agent spends no response reading it. The delivery is kept with the packed
+// state and the procedure testigo counts it as read; with no hook before the tool the agent reads the file as before.
+const procedureText = (dept) => { try { return fs.readFileSync(path.join(SKILLS_DIR, dept, 'procedures.md'), 'utf8'); } catch { return null; } };
+
 export async function packContext(hook, agent, file = PACKED()) {
   const c0 = agent.call(hook), cwd = hook.cwd || process.cwd();
   // a shell command that changes files: the files it names (what it will change is known only after it runs)
@@ -183,16 +234,20 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  if (!fresh.length) return null;
+  const dept = ownerDept(hook), procsDone = procDelivered(session, since, file);
+  const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
+  if (!fresh.length && !procText) return null;
   const { pack } = await import('./waymark.mjs');
   const byRepo = new Map();
   for (const f of fresh) { const r = repoOf(f); byRepo.set(r, [...(byRepo.get(r) || []), f]); }
-  const text = [...byRepo].map(([r, list]) => pack(r, list)).join('\n');
+  const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)] };
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
-  return `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}`;
+  const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
+  const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
+  return [memory, procs].filter(Boolean).join('\n\n');
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

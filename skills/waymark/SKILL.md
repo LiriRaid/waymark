@@ -1,6 +1,6 @@
 ---
 name: waymark
-description: "Waymark core. Use when unsure which department owns a task (\"qué departamento aplica\", \"usa waymark\"), for a new project or the first time in one (\"arranca el proyecto\"), a missing skill (\"no hay skill para esto\"), recording learnings or syncing the skill registry. Not for trivial edits."
+description: "Waymark core. When unsure which department owns a task (\"qué departamento aplica\", \"usa waymark\"), a new project (\"arranca el proyecto\"), a missing skill (\"no hay skill para esto\"), learnings, registry sync."
 ---
 
 # Waymark — core

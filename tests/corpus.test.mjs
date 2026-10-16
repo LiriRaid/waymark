@@ -2,6 +2,7 @@
 // testigos read, with what the routine must NOT block on. Run: node --test tests/corpus.test.mjs
 // Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] }, redUntil?: "<point>" }
 //   absent: no `missing` or `findings` entry of the verdict may match any of these
+//   present: at least one entry must match each of these (a block the case must still raise)
 //   redUntil: the case fails today and is expected red until that plan point lands (reported as todo, not as a failure)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -49,6 +50,7 @@ for (const c of cases) {
     const g = judgeCase(c);
     const said = [...(g.missing || []), ...(g.findings || [])];
     for (const re of c.expect.absent) assert.ok(!said.some((s) => new RegExp(re, 'i').test(s)), `${c.source}: /${re}/ in\n  ${said.join('\n  ')}`);
+    for (const re of c.expect.present || []) assert.ok(said.some((s) => new RegExp(re, 'i').test(s)), `${c.source}: /${re}/ expected in\n  ${said.join('\n  ')}`);
   });
 }
 

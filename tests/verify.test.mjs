@@ -97,6 +97,25 @@ test('manifest: MANIFEST.json is current (the release checklist runs manifest.mj
   assert.deepEqual(listed.filter((f) => ['waymark/MANIFEST.json', 'waymark/MANIFEST.json.sig', ...M.GENERATED].includes(f)), [], 'not itself, not its signature, not what sync rewrites');
 });
 
+test('manifest: the lessons a department learned are not a change; any other line of the file still is', () => {
+  const dir = tmp('learned');
+  fs.mkdirSync(path.join(dir, 'dept-x'), { recursive: true });
+  const file = path.join(dir, 'dept-x', 'SKILL.md');
+  const body = (rules) => `# Dept\n\n## Rules\n- one\n\n## Learned rules\n${rules}\n## Tools\n- t\n`;
+  fs.writeFileSync(file, body('_Grows with use._\n'));
+  const m = M.buildManifest(dir);
+  fs.writeFileSync(file, body('_Grows with use._\n- 2026-10-16: run review before the turn ends\n- another lesson\n'));
+  assert.equal(M.checkManifest(dir, m).ok, true, 'a learned rule is not a change');
+  fs.writeFileSync(file, body('_Grows with use._\n').replace('- one', '- two'));
+  assert.deepEqual(M.checkManifest(dir, m).changed, ['dept-x/SKILL.md'], 'a line outside the section is');
+  fs.writeFileSync(file, body('').replace('## Learned rules\n', '## Rules again\n'));
+  assert.equal(M.checkManifest(dir, m).ok, false, 'removing the section is');
+  fs.writeFileSync(file, '# Dept\n\n## Rules\n- one\n\n## Learned notes\nlast section, to the end of the file\n');
+  const m2 = M.buildManifest(dir);
+  fs.appendFileSync(file, '- a note at the end\n');
+  assert.equal(M.checkManifest(dir, m2).ok, true, 'the last section runs to the end of the file');
+});
+
 test('manifest: a changed, a deleted and an added file are each named; CRLF is not a change', () => {
   const dir = tmp('manifest');
   fs.mkdirSync(path.join(dir, 'waymark'), { recursive: true });

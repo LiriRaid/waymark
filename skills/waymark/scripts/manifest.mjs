@@ -21,9 +21,15 @@ export const GENERATED = ['waymark/skill-map.json', 'waymark/skill-registry.md']
 const SKIP = new Set(['waymark/MANIFEST.json', 'waymark/MANIFEST.json.sig', ...GENERATED]);
 const SKIP_DIR = /(^|\/)(node_modules|\.git|\.waymark|\.engram)(\/|$)/;
 
+// What a Markdown file is hashed as: CRLF read as LF, and the body of its `## Learned rules` / `## Learned notes` section left out. That
+// section is where the learning step writes the lessons of the user's own tasks, so an install that learned something is still
+// the release (every other line of the file is verified); the heading stays, so removing the section is still a change.
+const LEARNED = /^(## Learned (?:rules|notes)[^\n]*)\n[\s\S]*?(?=^## |(?![\s\S]))/gm;
 export const hashFile = (file) => {
   const buf = fs.readFileSync(file);
-  return sha(buf.includes(0) ? buf : Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n')));
+  if (buf.includes(0)) return sha(buf);
+  const text = buf.toString('utf8').replace(/\r\n/g, '\n');
+  return sha(/\.md$/i.test(file) ? text.replace(LEARNED, '$1\n') : text);
 };
 
 // → sorted relative paths (forward slashes) of every file under `dir`.

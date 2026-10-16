@@ -1,0 +1,87 @@
+{
+ "schema": "waymark.external-corpus/v1",
+ "note": "Public repositories unlike the author's own projects (docs/adr/0027, point 13). Read-only shallow clones; the commit pins what was measured. `expect` is the author's judgment of what a correct Waymark reports; `sample` is one real source file used for the scripted code task.",
+ "repos": [
+  {
+   "id": "rust-cli",
+   "url": "https://github.com/sharkdp/fd",
+   "commit": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+   "field": "systems CLI",
+   "language": "rust",
+   "sample": "src/exit_codes.rs",
+   "expect": {
+    "stack": "rust (cargo)",
+    "profile": "rust",
+    "gates": {
+     "test": "cargo test",
+     "lint": "cargo clippy --all-targets -- -D warnings",
+     "build": "cargo build"
+    }
+   }
+  },
+  {
+   "id": "php-laravel",
+   "url": "https://github.com/laravel/laravel",
+   "commit": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+   "field": "web application",
+   "language": "php",
+   "sample": "app/Models/User.php",
+   "expect": {
+    "stack": "php (composer)",
+    "profile": "php",
+    "gates": {
+     "test": "php artisan test",
+     "lint": "./vendor/bin/pint --test",
+     "typecheck": "./vendor/bin/phpstan analyse"
+    }
+   }
+  },
+  {
+   "id": "terraform",
+   "url": "https://github.com/terraform-aws-modules/terraform-aws-vpc",
+   "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+   "field": "infrastructure as code",
+   "language": "hcl",
+   "sample": "variables.tf",
+   "expect": {
+    "stack": "terraform",
+    "profile": "terraform",
+    "gates": {
+     "lint": "terraform fmt -check -recursive",
+     "typecheck": "terraform validate",
+     "test": "terraform test"
+    }
+   }
+  },
+  {
+   "id": "python-ml",
+   "url": "https://github.com/scikit-learn-contrib/imbalanced-learn",
+   "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+   "field": "data science / ML library",
+   "language": "python",
+   "sample": "imblearn/base.py",
+   "expect": {
+    "stack": "python (pyproject)",
+    "profile": "python",
+    "gates": {
+     "test": "pytest",
+     "lint": "ruff check .",
+     "typecheck": "mypy ."
+    }
+   }
+  },
+  {
+   "id": "docs-only",
+   "url": "https://github.com/ossu/computer-science",
+   "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+   "field": "documentation only",
+   "language": "markdown",
+   "sample": null,
+   "expect": {
+    "stack": null,
+    "profile": "generic",
+    "gates": {}
+   }
+  }
+ ]
+}

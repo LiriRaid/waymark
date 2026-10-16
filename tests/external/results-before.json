@@ -1,0 +1,231 @@
+{
+ "schema": "waymark.external-corpus/v1",
+ "waymark": "2.0.15",
+ "results": [
+  {
+   "id": "rust-cli",
+   "commit": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+   "detected": {
+    "stack": null,
+    "expected": "rust (cargo)",
+    "ok": false
+   },
+   "profile": {
+    "slug": "generic",
+    "exists": true,
+    "expected": "rust",
+    "ok": false
+   },
+   "gates": {
+    "test": {
+     "command": "cargo test",
+     "recognised": true,
+     "as": "test"
+    },
+    "lint": {
+     "command": "cargo clippy --all-targets -- -D warnings",
+     "recognised": true,
+     "as": "gate"
+    },
+    "build": {
+     "command": "cargo build",
+     "recognised": true,
+     "as": "build"
+    }
+   },
+   "cost": {
+    "context card": 592,
+    "reminder (real)": 152
+   },
+   "hookErrors": [],
+   "tasks": {
+    "doc": {
+     "blocked": [],
+     "noted": []
+    },
+    "code": {
+     "blocked": [],
+     "noted": []
+    }
+   },
+   "ms": 2478,
+   "cloneAt": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+   "atManifestCommit": true
+  },
+  {
+   "id": "php-laravel",
+   "commit": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+   "detected": {
+    "stack": "node (npm)",
+    "expected": "php (composer)",
+    "ok": false
+   },
+   "profile": {
+    "slug": "node",
+    "exists": true,
+    "expected": "php",
+    "ok": false
+   },
+   "gates": {
+    "test": {
+     "command": "php artisan test",
+     "recognised": true,
+     "as": "test"
+    },
+    "lint": {
+     "command": "./vendor/bin/pint --test",
+     "recognised": false,
+     "as": null
+    },
+    "build": {
+     "command": "composer install",
+     "recognised": false,
+     "as": null
+    }
+   },
+   "cost": {
+    "context card": 598,
+    "reminder (real)": 279
+   },
+   "hookErrors": [],
+   "tasks": {
+    "doc": {
+     "blocked": [],
+     "noted": []
+    },
+    "code": {
+     "blocked": [],
+     "noted": []
+    }
+   },
+   "ms": 2524,
+   "cloneAt": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+   "atManifestCommit": true
+  },
+  {
+   "id": "terraform",
+   "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+   "detected": {
+    "stack": null,
+    "expected": "terraform",
+    "ok": false
+   },
+   "profile": {
+    "slug": "generic",
+    "exists": true,
+    "expected": "terraform",
+    "ok": false
+   },
+   "gates": {
+    "lint": {
+     "command": "terraform fmt -check -recursive",
+     "recognised": false,
+     "as": null
+    },
+    "test": {
+     "command": "terraform validate",
+     "recognised": false,
+     "as": null
+    },
+    "build": {
+     "command": "terraform plan",
+     "recognised": false,
+     "as": null
+    }
+   },
+   "cost": {
+    "context card": 594,
+    "reminder (real)": 152
+   },
+   "hookErrors": [],
+   "tasks": {
+    "doc": {
+     "blocked": [],
+     "noted": []
+    },
+    "code": {
+     "blocked": [],
+     "noted": []
+    }
+   },
+   "ms": 2480,
+   "cloneAt": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+   "atManifestCommit": true
+  },
+  {
+   "id": "python-ml",
+   "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+   "detected": {
+    "stack": "python (pyproject)",
+    "expected": "python (pyproject)",
+    "ok": true
+   },
+   "profile": {
+    "slug": "python",
+    "exists": true,
+    "expected": "python",
+    "ok": true
+   },
+   "gates": {
+    "test": {
+     "command": "pytest",
+     "recognised": true,
+     "as": "test"
+    },
+    "lint": {
+     "command": "ruff check .",
+     "recognised": true,
+     "as": "gate"
+    },
+    "typecheck": {
+     "command": "mypy .",
+     "recognised": true,
+     "as": "gate"
+    }
+   },
+   "cost": {
+    "context card": 594,
+    "reminder (real)": 178
+   },
+   "hookErrors": [],
+   "tasks": {
+    "doc": null,
+    "code": null
+   },
+   "ms": 2251,
+   "cloneAt": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+   "atManifestCommit": true
+  },
+  {
+   "id": "docs-only",
+   "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+   "detected": {
+    "stack": null,
+    "expected": null,
+    "ok": true
+   },
+   "profile": {
+    "slug": "generic",
+    "exists": true,
+    "expected": "generic",
+    "ok": true
+   },
+   "gates": {},
+   "cost": {
+    "context card": 594,
+    "reminder (real)": 152
+   },
+   "hookErrors": [],
+   "tasks": {
+    "doc": {
+     "blocked": [],
+     "noted": []
+    },
+    "code": null
+   },
+   "ms": 2303,
+   "cloneAt": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+   "atManifestCommit": true
+  }
+ ]
+}

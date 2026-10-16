@@ -1,0 +1,2 @@
+# Public keys the release is signed with: git allowed-signers format (<principal> <type> <key>), or `gpg <fingerprint>`.
+# Empty until the maintainer adds the key that signs the tag (docs/adr/0027).

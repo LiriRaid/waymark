@@ -424,6 +424,11 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     for (const h of [here, ...workspaceSiblings(here.root)]) console.log(`## ${path.basename(h.root)}\n${tasks(h.root, null)}\n`);
   } else if (sub === 'tasks') {
     console.log(tasks(process.cwd(), rest[0] || null));
+  } else if (sub === 'verify') {
+    const { verify } = await import('./verify.mjs');
+    const r = verify(process.cwd(), rest);
+    console.log(['Waymark verify', ...r.lines].join('\n'));
+    process.exitCode = r.code;
   } else if (sub === 'tidy') {
     const home = projectHome(process.cwd());
     const changed = tidyWip(home);
@@ -473,7 +478,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | verify [--install] [--require-signature] [--manifest <file>] [<task ID>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

@@ -33,10 +33,10 @@ Agent: Claude Code · skills: ~/.agents/skills (links in ~/.claude/skills) · in
 Also found: Codex (~/.codex) · Cursor (~/.cursor)
 ```
 
-**1.1 Orchestrators and other agent frameworks.** Before the plan, check whether another framework already governs each agent (e.g. gentle-ai): marked blocks in `<instructions-file>` that are not Waymark's (`<!-- <name>:<section> -->`), hooks in the agent settings that do not run Waymark scripts, orchestrator/persona/trigger skills, its own skill registry. Waymark is not an orchestrator: **if one is already installed, Waymark becomes its guest** (no hooks, no Rule 0 block; its skills and memory reach the orchestrator through the orchestrator's own registry and engram). Follow the repository's `skills/waymark/references/coexistence.md` §1–§4: read its sections, write each rule as one line and classify it (Adopted · Fallback · Resolved), and find how its registry is refreshed. **Never edit that framework's files.** Tell the user in one line:
+**1.1 Orchestrators and other agent frameworks.** Before the plan, check whether another framework already governs each agent: marked blocks in `<instructions-file>` that are not Waymark's (`<!-- <name>:<section> -->`), hooks in the agent settings that do not run Waymark scripts, orchestrator/persona/trigger skills, its own skill registry. Waymark is not an orchestrator: **if one is already installed, Waymark becomes its guest** (no hooks, no Rule 0 block; its skills and memory reach the orchestrator through the orchestrator's own registry and engram). Follow the repository's `skills/waymark/references/coexistence.md` §1–§4: read its sections, write each rule as one line and classify it (Adopted · Fallback · Resolved), and find how its registry is refreshed. **Never edit that framework's files.** Tell the user in one line:
 
 ```
-Orchestrator already installed: gentle-ai (gentle-ai:* blocks, its own hooks, registry .atl/skill-registry.md) → Waymark joins as a guest: no hooks and no block, its skills through gentle-ai's registry, memory through engram. I do not touch its files.
+Orchestrator already installed: <name> (<name>:* blocks, its own hooks, registry <its path>) → Waymark joins as a guest: no hooks and no block, its skills through its registry, memory through engram. I do not touch its files.
 ```
 
 Nothing found → the normal plan below; Waymark leads.
@@ -256,7 +256,7 @@ node "<skills-dir>/waymark/scripts/sync.mjs"
 
 It indexes installed skills (this agent's, other agents' skill folders such as `~/.cursor/skills` or `~/.agents/skills`, plugins and project skill folders, each with its path) and MCP servers into `skill-registry.md`, applies the department precondition to tool skills and creates the private layer folders. Show its output. Entries marked `auto: true` or under *Unassigned* are third-party skills it found; report them, do not fix them silently. In `waymark-leads` this is how the other framework's skills become available as *Fallback*. Afterwards `waymark.mjs check` reports when skill folders changed, and `waymark.mjs sync` re-runs it.
 
-**7.4 Orchestrator registry (`guest` only).** Run the orchestrator's refresh so it indexes the copied skills (`coexistence.md` §4; gentle-ai: `gentle-ai skill-registry refresh`). Check that its registry now lists `waymark` and the `dept-*` skills and report it. If it does not scan `<skills-dir>`, tell the user where it scans and ask **[ask]** before copying the skills there too. Never edit its registry by hand.
+**7.4 Orchestrator registry (`guest` only).** Run the orchestrator's refresh so it indexes the copied skills (`coexistence.md` §4: its own refresh command). Check that its registry now lists `waymark` and the `dept-*` skills and report it. If it does not scan `<skills-dir>`, tell the user where it scans and ask **[ask]** before copying the skills there too. Never edit its registry by hand.
 
 ## 8. Verify and report
 

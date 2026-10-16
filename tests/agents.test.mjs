@@ -137,7 +137,7 @@ test('check: each agent on the machine without Waymark hooks is offered install-
   write(process.env.WAYMARK_CURSOR_HOOKS, JSON.stringify({ version: 1, hooks: { stop: [{ command: cmd('stop-hook.mjs', ' --agent cursor') }] } }));
   assert.equal(line(await check(repo)), '', 'both have the hooks now');
   write(process.env.WAYMARK_CURSOR_HOOKS, '{}');
-  write(path.join(home, 'coexistence.md'), 'Mode: guest\nFrameworks: gentle-ai\n');
+  write(path.join(home, 'coexistence.md'), 'Mode: guest\nFrameworks: acme-orch\n');
   assert.equal(line(await check(repo)), '', 'guest: the orchestrator owns the hooks');
   fs.rmSync(path.join(home, 'coexistence.md'));
   fs.rmSync(path.join(agentsHome, '.claude'), { recursive: true });

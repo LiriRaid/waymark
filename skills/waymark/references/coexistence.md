@@ -1,6 +1,6 @@
 # Coexistence with orchestrators and other agent frameworks
 
-Read when the installer (INSTALL §1.1), an update (§9) or the session hook finds another framework that also governs the agent: a marked block in the instructions file that is not Waymark's (e.g. `<!-- gentle-ai:persona -->`), hooks that do not run Waymark scripts, or skills/agents that orchestrate work (SDD flows, persona, delegation rules, its own skill registry).
+Read when the installer (INSTALL §1.1), an update (§9) or the session hook finds another framework that also governs the agent: a marked block in the instructions file that is not Waymark's (e.g. `<!-- acme-orch:persona -->`), hooks that do not run Waymark scripts, or skills/agents that orchestrate work (SDD flows, persona, delegation rules, its own skill registry).
 
 **Waymark is not an orchestrator.** An orchestrator decides *who* does the work (sub-agents, phases, models). Waymark is the criteria and the memory the work is done with: departments (what, why, where, how), rules, project memory and learning. The user decides: the agent puts each real decision to them with the optimal options. So Waymark fits two shapes: it **leads** when the agent works alone, and it is a **guest** inside an orchestrator, giving its workers the departments and the memory. It never competes for control of the turn.
 
@@ -51,8 +51,7 @@ In `guest` the lists are short: almost every turn-level rule resolves to the orc
 
 | Orchestrator | Scans | Refresh after copying the skills | Source |
 |---|---|---|---|
-| gentle-ai | project skill roots (`skills/`, `.claude/skills/`, `.opencode/skills/`, `.github/skills/`…) then global agent skill directories; writes `.atl/skill-registry.md` | `gentle-ai skill-registry refresh` | gentle-ai `docs/usage.md` |
-| other | its docs: where it looks for skills and how it re-indexes | its refresh command; none → copying into the agent's `<skills-dir>` is enough | its docs |
+| any orchestrator | its docs: where it looks for skills (project skill roots, then the agents' global skill directories) and where it writes its registry | its own refresh command; none → copying into the agent's `<skills-dir>` is enough | its docs |
 
 Verify after refreshing that the registry lists `waymark` and the `dept-*` skills; report it. Never edit the orchestrator's registry by hand, `--vendor` its skills or patch them.
 
@@ -64,13 +63,13 @@ From `templates/private-layer/coexistence.md`: `Mode`, `Frameworks` (name · mar
 - **Session hook (leading modes only):** an unlisted framework → asks to offer the choice *keep leading* (`waymark-leads`) or *become guest*; a listed framework whose markers are gone → offers to return to the full install.
 - **Switching modes:** to `guest` remove Waymark's block and hook entries (backup first, §3 of INSTALL) and refresh the orchestrator's registry; to a leading mode add them back (§6.2, §7.2).
 
-## Worked example: gentle-ai
+## Worked example: an orchestrator called `acme-orch`
 
 `waymark-leads` (Waymark was installed first):
 
 ```
 Mode: waymark-leads
-Frameworks: gentle-ai · markers gentle-ai:persona, engram-protocol, sdd-orchestrator, trigger-rules · registry .atl/skill-registry.md
+Frameworks: acme-orch · markers acme-orch:persona, acme-orch:memory, acme-orch:flow, acme-orch:triggers · registry <its registry path>
 
 ## Adopted
 - Commits: conventional commits, no AI attribution (overrides the agent's default attribution).
@@ -92,16 +91,16 @@ Frameworks: gentle-ai · markers gentle-ai:persona, engram-protocol, sdd-orchest
 - Pre-commit triggers + Cierre Review → one review; the trigger's result fills the Review field.
 ```
 
-`guest` (gentle-ai was installed first):
+`guest` (`acme-orch` was installed first):
 
 ```
 Mode: guest
-Frameworks: gentle-ai · markers gentle-ai:* · registry .atl/skill-registry.md (refreshed 2026-10-01, lists waymark + 10 dept-*)
+Frameworks: acme-orch · markers acme-orch:* · registry <its registry path> (refreshed 2026-10-01, lists waymark + 10 dept-*)
 
 ## Adopted
-- Everything in gentle-ai's persona, engram protocol and triggers.
+- Everything in the orchestrator's persona, memory protocol and triggers.
 
 ## Resolved
-- Turn flow, delegation, SDD phases, models and reviews → gentle-ai.
+- Turn flow, delegation, flow phases, models and reviews → the orchestrator.
 - Waymark → departments as knowledge (Guest entry) + project memory via engram (topic waymark/<slug>/…).
 ```

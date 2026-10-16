@@ -3056,3 +3056,11 @@ test('held message: the card carries at most HELD_MAX characters of it and the w
   fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), '<!-- x -->\ncorto\n');
   assert.equal(heldPrompt(home2), 'corto', 'a short one is carried as it is');
 });
+
+test('commit trailer: only a real git commit asks for the trailer; git config, a -c option on another command and an echo do not', async () => {
+  const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const repo = memRepo('not-a-commit');
+  const ask = (c) => missingTrailer(c, `s-${Math.random()}`, repo, path.join(home, `trailer-${Math.random()}.json`));
+  for (const c of ['git config --get commit.gpgsign', 'git -c commit.gpgsign=false status', 'echo git commit', 'git log --format=%H -1 && git config user.signingkey']) assert.equal(ask(c), null, c);
+  for (const c of ['git commit -m "x"', 'git -c user.name=t commit -m "x"', 'git -C ../api commit -m "x"', 'cd api && git add . && git commit -m "x"', 'GIT_AUTHOR_NAME=t git commit -m "x"']) assert.match(ask(c) || '', /Waymark-Task/, c);
+});

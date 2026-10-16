@@ -67,7 +67,9 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
 
 // A git commit the shell runs, read on the command's skeleton (heredoc and here-string bodies blanked): a file written
 // through a heredoc that mentions `git commit` is no commit. The message and its trailer are read on the whole command.
-const isCommit = (command) => /\bgit\b[^|;&\n]*\scommit(?![\w-])/.test(shellSkeleton(command, { quotes: false }));
+// `git` must start the command (after ; && | or a subshell, env assignments allowed) and only its global options may stand
+// before `commit`: `git config --get commit.gpgsign`, `git -c commit.gpgsign=false status` and `echo git commit` are no commit.
+const isCommit = (command) => /(?:^|[;&|(]\s*|\n\s*)(?:[A-Za-z_]\w*=\S*\s+)*git(?:\s+(?:-c\s+\S+|-C\s+\S+|--[\w-]+(?:=\S+)?))*\s+commit(?![\w-])/.test(shellSkeleton(command, { quotes: false }));
 
 // Commit trailer: a "Waymark-Task: <id>" the end-of-turn hook would record under another ID (a follow-up letter whose
 // task shares no staged file, or an ID never offered) is denied with the right one, so a commit and its record carry

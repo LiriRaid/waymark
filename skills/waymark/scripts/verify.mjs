@@ -99,7 +99,7 @@ export function pinnedReport(rec, manifest = null) {
 }
 
 // verify [--install] [--require-signature] [--manifest <file>] [<task ID>] → { lines[], code }
-export function verify(cwd, args = []) {
+export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsDir: the install to check (the running one by default)
   const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
   const lines = [];
   let code = 0;
@@ -128,13 +128,13 @@ export function verify(cwd, args = []) {
     try { m = manifestFile ? JSON.parse(fs.readFileSync(manifestFile, 'utf8')) : null; } catch { lines.push(`install: cannot read ${manifestFile}`); code = 1; }
     if (!manifestFile || m) {
       let r;
-      try { r = checkManifest(SKILLS, m); } catch { r = null; lines.push('install: no MANIFEST.json in this install'); code = 1; }
+      try { r = checkManifest(skillsDir, m); } catch { r = null; lines.push('install: no MANIFEST.json in this install'); code = 1; }
       if (r) {
         lines.push(r.ok ? `install: ${r.checked} files match the manifest (version ${r.version})` : `install: DIFFERS from the manifest · ${r.changed.length} changed, ${r.missing.length} missing, ${r.extra.length} extra\n${[...r.changed.map((f) => `  ~ ${f}`), ...r.missing.map((f) => `  - ${f}`), ...r.extra.map((f) => `  + ${f}`)].slice(0, 12).join('\n')}`);
         if (!r.ok) code = 1;
       }
     }
-    const sig = releaseSignature();
+    const sig = releaseSignature(skillsDir);
     if (!sig) lines.push('signature: this install is not a git clone (no history to verify); check the tag from a clone: git tag -v v<version>');
     else {
       lines.push(`signature (${sig.ref}): ${sayState(sig)}`);
@@ -144,7 +144,7 @@ export function verify(cwd, args = []) {
       }
     }
   } else if (args.includes('--require-signature')) {
-    const sig = releaseSignature();
+    const sig = releaseSignature(skillsDir);
     lines.push(`signature (${sig?.ref || 'none'}): ${sig ? sayState(sig) : 'not a git clone'}`);
     if (!sig || sig.state !== 'signed') code = 1;
   }

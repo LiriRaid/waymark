@@ -168,12 +168,17 @@ test('signature: each commit of a record is read as signed, untrusted or unsigne
   assert.equal(V.signatureState(signed.d, head(signed.d), { allowed }).state, 'signed');
 });
 
-test('verify --require-signature: with no signed release the exit code is 1; --install without the flag only warns', () => {
-  const hard = V.verify(project('sighard'), ['--require-signature']);
+test('verify --require-signature: an unsigned install fails it, without the flag only warns, a signed one passes', { skip }, () => {
+  // each case checks its own temporary install, so the result does not depend on whether this repository's tag is signed
+  const unsigned = releaseRepo('rq-unsigned', { sign: false }), signed = releaseRepo('rq-signed');
+  const hard = V.verify(project('sighard'), ['--require-signature'], { skillsDir: unsigned.skills });
   assert.equal(hard.code, 1, 'required means exit 1');
-  const warn = V.verify(project('sigwarn'), ['--install']);
-  assert.match(warn.lines.join('\n'), /install: \d+ files match the manifest/, 'the manifest of this repository is current');
+  const warn = V.verify(project('sigwarn'), ['--install'], { skillsDir: unsigned.skills });
   assert.equal(warn.code, 0, 'an unsigned release is a warning when the flag is not given');
+  assert.match(warn.lines.join('\n'), /install: \d+ files match the manifest[\s\S]*warning: not signed/);
+  const ok = V.verify(project('sigok'), ['--install', '--require-signature'], { skillsDir: signed.skills });
+  assert.equal(ok.code, 0);
+  assert.match(ok.lines.join('\n'), /signature \(v1\.2\.3\): signed by maint@example\.com/);
 });
 
 const A = await import(`file://${SCRIPTS}/attest.mjs`);

@@ -1,6 +1,7 @@
 // Waymark 2.0.3 · point 2: the memory chain (notes that travel, records that are only notes, what a Q learns, the
 // card). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and temporary repos; nothing reads or writes the real ~/.waymark or engram.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -1,5 +1,6 @@
 // Waymark 2.0.16 · point 12: the per-agent capability matrix is generated from agents.json and the adapters, and the copies in
 // README.md and INSTALL.md are the generated text. Run: node --test tests/*.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

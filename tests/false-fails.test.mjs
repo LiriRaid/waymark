@@ -1,5 +1,6 @@
 // Waymark 2.0.3 · point 3: no false ✘ (the routine passes when the work was done). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and temporary repos; nothing reads or writes the real ~/.waymark.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

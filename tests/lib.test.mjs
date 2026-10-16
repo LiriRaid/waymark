@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 5: one definition of the path, file and git helpers (scripts/lib). Run: node --test tests/lib.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

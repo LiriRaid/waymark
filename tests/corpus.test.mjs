@@ -4,6 +4,7 @@
 //   absent: no `missing` or `findings` entry of the verdict may match any of these
 //   present: at least one entry must match each of these (a block the case must still raise)
 //   redUntil: the case fails today and is expected red until that plan point lands (reported as todo, not as a failure)
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

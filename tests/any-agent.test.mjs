@@ -1,6 +1,7 @@
 // Waymark 2.0.3 · point 4b: any agent, the ones Waymark does not know included (agents as data in agents.json, unknown
 // agents detected, the pointer offered, the adapter template). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME, agents home and settings files; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

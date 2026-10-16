@@ -1,6 +1,7 @@
 // Waymark 2.0.16 · point 11: the documentation cannot drift from the code. Fails when the version files disagree, a README figure
 // differs from size.mjs, a documentation file holds Spanish prose outside the allowed places, an ADR is missing from the
 // README's index, or README/INSTALL name a waymark.mjs command that does not exist. Run: node --test tests/*.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

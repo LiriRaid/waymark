@@ -19,19 +19,15 @@ import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
 import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm } from './lib/paths.mjs';
+import { norm, exemptPath } from './lib/paths.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
-// Files the routine itself writes (memory, learnings, scratch) never need the opener. The OS temp dir is the one Node
-// reports (TMPDIR on macOS, /var/folders/…; TEMP on Windows).
-const exempt = (file) => {
-  const f = norm(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()).replace(/\/+$/, '');
-  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || (tmp && f.startsWith(`${tmp}/`)) || f.includes('/scratchpad/');
-};
+// Files the routine itself writes (memory, learnings, scratch) never need the opener; the rule lives in lib/paths.mjs.
+const exempt = (file, root = '') => exemptPath(file, root);
 
 // Decision gate: deny once per prompt (state keyed by session + prompt uuid), never for L0 or exempt files. A turn routed
 // Q that edits a project file is denied once too: a question that became a change must re-route, or every check and
@@ -39,7 +35,7 @@ const exempt = (file) => {
 export function checkDecision(target, lines, session = 'unknown', stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.decision-gate.json'), cwd = process.cwd()) {
   // target: a file path (an edit) or { command } (a shell command that changes files: git checkout --, sed -i, rm, >).
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
-  else if (!target || exempt(target)) return null;
+  else if (!target || exempt(target, cwd)) return null;
   const turn = currentTurn(lines);
   const level = routedLevel(turn.texts, turn.tools) || inheritedRoute(lines)?.level || 0, q = level === 'Q';
   if (!turn.found || !level) return null;
@@ -155,7 +151,7 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
   }
-  const files = (c.files || []).filter((f) => !exempt(f));
+  const files = (c.files || []).filter((f) => !exempt(f, cwd));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
   for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }

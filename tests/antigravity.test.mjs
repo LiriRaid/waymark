@@ -1,6 +1,7 @@
 // Waymark · the Antigravity adapter (docs/adr/0022): its named hooks in ~/.gemini/config/hooks.json, injectSteps and
 // decisions as answers, the journal of its hooks as the turn, install-hooks and uninstall. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and hooks file; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 7: what the adapters' toLines share lives in agents/lines.mjs. Run: node --test tests/agent-lines.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

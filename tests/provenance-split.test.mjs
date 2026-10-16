@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 6: provenance.mjs split by concern (scripts/provenance/*), same public API. Run: node --test tests/provenance-split.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

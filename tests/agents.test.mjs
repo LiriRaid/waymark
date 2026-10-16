@@ -1,6 +1,7 @@
 // Waymark 2.0.3 · point 4: every agent on the machine with one install (Cursor, unknown agents, check, plugin, paths,
 // backups, project skills, uninstall). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME, agents home and settings files; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -95,7 +96,7 @@ test('temp folders: the OS temp dir (TMPDIR on macOS) is exempt from the decisio
     const lines = [{ type: 'user', uuid: 'tp1', message: { role: 'user', content: 'cambia el servicio' } }, { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L1 · dept-backend' }] } }];
     const state = path.join(home, 'gate-tmp.json');
     assert.equal(checkDecision(path.join(fake, 'scratch.mjs'), lines, 'tmp1', state), null, 'a file in the OS temp dir needs no decision');
-    assert.ok(checkDecision(path.join(os.homedir(), 'proyecto', 'src', 'a.mjs'), lines, 'tmp1', state), 'a project file still does');
+    assert.ok(checkDecision(path.join(os.homedir(), 'proyecto', 'src', 'a.mjs'), lines, 'tmp1', state, path.join(os.homedir(), 'proyecto')), 'a project file still does');
   } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 });
 
@@ -200,6 +201,7 @@ test('cursor hooks end to end: the card brings Rule 0, the reminder rides on the
   assert.match(first?.additional_context || '', /Cierre ID/, 'the per-prompt reminder, with the first tool\'s result');
   const second = node('tool-hook.mjs', ['--agent', 'cursor'], ev('postToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r2', tool_output: '""' })).stdout;
   assert.ok(!/Task ID/.test(second), 'once per prompt');
+  fs.writeFileSync(path.join(repo, 'svc.mjs'), 'export const retry = 3;'); // the turn changes a project file: only a change needs the Cierre
   const blocked = json(node('stop-hook.mjs', ['--agent', 'cursor'], ev('stop', { status: 'completed', loop_count: 0 })).stdout);
   assert.ok(blocked?.followup_message, `no Cierre: a followup_message (${JSON.stringify(blocked)})`);
   node('tool-hook.mjs', ['--agent', 'cursor'], ev('afterAgentResponse', { text: `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada el servicio responde\nAprendido: "backoff ← timeouts"` }));

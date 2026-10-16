@@ -1,5 +1,6 @@
 // Waymark hooks · scenario tests with synthetic transcripts. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME; nothing reads or writes the real ~/.waymark or ~/.claude.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -175,7 +176,7 @@ test('3c: the gate asks every work-shaping decision first and offers the browser
   const repo = fs.mkdtempSync(path.join(os.homedir(), '.wm-branch-')); // outside temp, which the gate exempts
   temps.push(repo);
   spawnSync('git', ['init', '-q', '-b', 'feat/other-work'], { cwd: repo });
-  const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`));
+  const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`), repo);
   assert.ok(!/feat\/other-work|include where the work goes/.test(deny), 'no branch option pushed');
   assert.match(deny, /every decision that shapes the work/);
   assert.match(deny, /Never offer, recommend or run browser verification[^.]*unless the user asks/, 'T2l: the browser is never offered');
@@ -338,10 +339,10 @@ test('pre-existing and docs by action: a failing gate asks for a clean copy; the
   assert.equal(docs(judge(failing, cierre(id).replace('observada timeouts en el log de pedidos', 'inferida de la doc de Meta Cloud API (check: x)'))).applies, false, '"inferida de docs" alone triggers nothing');
 });
 test('2b: a .ts with a sibling template counts as UI; a service does not', () => {
-  const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // the OS temp folder is exempt
+  const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // may sit under the OS temp folder: the project root (ctx.cwd) keeps its files out of the scratch rule
   temps.push(dir);
   for (const f of ['article-form.ts', 'article-form.html', 'articles.service.ts']) fs.writeFileSync(path.join(dir, f), '');
-  const ui = (file) => cierreGaps(currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend'), call('Edit', { file_path: path.join(dir, file) })]), '## Cierre · x').observed.browser.ui;
+  const ui = (file) => cierreGaps(currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend'), call('Edit', { file_path: path.join(dir, file) })]), '## Cierre · x', undefined, undefined, { cwd: dir }).observed.browser.ui;
   assert.equal(ui('article-form.ts'), true);
   assert.equal(ui('articles.service.ts'), false);
 });
@@ -466,7 +467,7 @@ test('blocks: a spec next to the changed code untouched, unless Tests: no (<why>
   const code = path.join(dir, 'orders.ts');
   const lines = (extra = []) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('Edit', { file_path: code }), ...extra, call('Bash', { command: 'npx eslint src' }), MEM()]);
   const close = '## Cierre\nResultado: hecho · Decisión: única (un solo cambio)\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"';
-  const near = (turn, reply, blocked = false) => cierreGaps(turn, reply, undefined, undefined, { blocked }).missing.some((f) => /sits next to the changed code/.test(f));
+  const near = (turn, reply, blocked = false) => cierreGaps(turn, reply, undefined, undefined, { blocked, cwd: dir }).missing.some((f) => /sits next to the changed code/.test(f));
   assert.ok(near(lines(), close));
   assert.ok(!near(lines(), `${close}\nTests: no (solo cambia un texto de log)`, true));
   assert.ok(near(lines(), `${close}\nTests: no (solo cambia un texto de log)`), 'only in the reply after the block');
@@ -1209,14 +1210,14 @@ test('3c (T2l): no browser step — a UI change passes with no browser attempt a
     call('Edit', { file_path: ui }), call('Bash', { command: 'npx ng build' }), call('Skill', { skill: 'code-review' }), MEM(), ...extra]);
   const close = (extra = '') => `## Cierre · ${ids.next}\nResultado: hecho · Decisión: elegida A · descartadas B\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"${extra}`;
   const decisions = [{ question: '¿Cómo?', chosen: 'A', discarded: ['B'] }];
-  const g = cierreGaps(turn(), close(), undefined, undefined, { ids, decisions });
+  const g = cierreGaps(turn(), close(), undefined, undefined, { ids, decisions, cwd: dir });
   assert.deepEqual(g.missing, [], 'nothing about the browser blocks');
   assert.ok(!g.steps.some((s) => s.id === 'browser'), 'no browser step in the contract');
   assert.ok(!('Navegador' in evaluate(g, { total: 1 }).steps));
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   assert.ok(!routine.testigos.some((s) => s.id === 'browser'));
   const reviewOffered = [...decisions, { question: '¿Corro el code-review?', chosen: 'Sí, con code-review', discarded: ['Sin review'] }];
-  assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
+  assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered, cwd: dir }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
 });
 
 test('3c: the end-of-turn line asks the real quota % while the model has fewer than 3 pairs', () => {

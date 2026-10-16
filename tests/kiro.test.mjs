@@ -1,6 +1,7 @@
 // Waymark · the Kiro adapter (docs/adr/0022): its hooks file of its own shape, plain-text answers and exit codes, the
 // journal of its hooks as the turn, install-hooks and uninstall. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME, KIRO_HOME and hooks file; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

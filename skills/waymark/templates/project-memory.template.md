@@ -5,7 +5,7 @@ Updated: <YYYY-MM-DD>
 
 ## Work in progress
 Read first at Recall. **One line per task, written by the end-of-turn hook from the Cierre's Aprendido** (≤200 characters); never edit these lines by hand. tasks.md is generated from them; a line without an ID at its head counts as a note. Any agent can resume from here.
-<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) while the task is open; a task done (hecho) leaves this section, its record stays in git and tasks.md. A follow-up replaces its task's line; lines over 200 characters and open lines older than 14 days move whole to history.md. The whole record: `waymark.mjs tasks <task ID>`. -->
+<!-- Format: "- ▶ [<task ID>] <Aprendido>" (parcial / bloqueado) while the task is open; a task done (hecho) leaves this section, its record stays in git and tasks.md. A follow-up replaces its task's line; lines over 200 characters and open lines older than 14 days move whole to history.md. The whole record: `W tasks <task ID>`. -->
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)

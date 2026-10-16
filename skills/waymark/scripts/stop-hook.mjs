@@ -38,7 +38,7 @@ import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { learn } from './learn.mjs';
-import { norm, exemptPath } from './lib/paths.mjs';
+import { norm, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 
 let projectRoot = ''; // the folder the turn's agent works in (cierreGaps sets it), so a checkout under a scratch place still counts
@@ -153,7 +153,7 @@ export function notesChecked(session) {
   delete all[session];
   writePending(all);
   const left = pending.repos.filter((r) => unpushedNotes(r.root, r.remote) !== 0);
-  return left.length ? `Waymark ${pending.id} · las notas siguen sin subir en ${left.map((r) => `${path.basename(r.root)} (${r.remote})`).join(', ')}: node waymark.mjs notes push desde tu shell`
+  return left.length ? `Waymark ${pending.id} · las notas siguen sin subir en ${left.map((r) => `${path.basename(r.root)} (${r.remote})`).join(', ')}: ${WAYMARK_CMD} notes push desde tu shell`
     : `Waymark ${pending.id} · notas de waymark ya en ${[...new Set(pending.repos.map((r) => r.remote))].join(', ')} (${pending.repos.map((r) => path.basename(r.root)).join(', ')})`;
 }
 // → [{ h, dir, msg }] committed in those repos since the turn started (a minute of slack); mine: only by the repo's git
@@ -689,11 +689,11 @@ const WITNESS = {
   },
   memory: (S) => {
     const { observed } = S;
-    return observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'];
+    return observed.memory.searched || observed.memory.late ? [] : [`the project memory was not searched before the first change: run ${WAYMARK_CMD} pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram`];
   },
   review: (S) => {
     const { observed, reviewLeft, skip } = S;
-    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
+    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
   },
   build: (S) => {
     const { buildAfter, buildNo, excepted } = S;
@@ -726,7 +726,7 @@ const WITNESS = {
   },
   chain: (S) => {
     const { ctx } = S;
-    return ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? 'the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through waymark.mjs forget' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [];
+    return ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? `the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through ${WAYMARK_CMD} forget` : 'an earlier record was edited or deleted'} (check: ${WAYMARK_CMD} testigos)`] : [];
   },
 };
 function failsOf(S) {

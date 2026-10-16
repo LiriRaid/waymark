@@ -48,6 +48,7 @@ import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const script = (name) => path.join(SCRIPTS, name).replace(/\\/g, '/');
+const W = `node "${script('waymark.mjs')}"`; // the full command every usage line prints (waymark.mjs is no program on the PATH)
 const section = (text, title) => {
   const m = text.match(new RegExp(`\\n## ${title}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
@@ -429,8 +430,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const out = rest.indexOf('--out') >= 0 ? rest[rest.indexOf('--out') + 1] : null;
     const id = rest.join(' ').match(ID)?.[0];
     const s = id ? attest(process.cwd(), id) : { error: 'name a task ID' };
-    if (s.error) { console.log(`attest: ${s.error}\nUsage: node waymark.mjs attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
-    else if (out) { fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n'); console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)); check it with: node waymark.mjs verify --attestation ${out}`); }
+    if (s.error) { console.log(`attest: ${s.error}\nUsage: ${W} attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
+    else if (out) { fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n'); console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)); check it with: ${W} verify --attestation ${out}`); }
     else console.log(JSON.stringify(s, null, 1));
   } else if (sub === 'verify') {
     const { verify } = await import('./verify.mjs');
@@ -443,9 +444,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'pack') {
-    console.log(rest.length ? pack(process.cwd(), rest) : 'Usage: node waymark.mjs pack <file…>');
+    console.log(rest.length ? pack(process.cwd(), rest) : `Usage: ${W} pack <file…>`);
   } else if (sub === 'review') {
-    console.log(rest.length ? review(process.cwd(), rest) : 'Usage: node waymark.mjs review <file…>   (the task\'s changed files: their diff against HEAD and the review checklist)');
+    console.log(rest.length ? review(process.cwd(), rest) : `Usage: ${W} review <file…>   (the task's changed files: their diff against HEAD and the review checklist)`);
   } else if (sub === 'memory') {
     console.log(memorySection(process.cwd(), rest.join(' ')));
   } else if (sub === 'incidents') {
@@ -457,7 +458,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const home = projectHome(process.cwd());
     const done = ids.length ? confirmTasks(home, ids, { note }) : [];
     if (done.length) refreshTasks(home, true);
-    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
+    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : `Usage: ${W} done "<task ID>" ["<task ID>"…] [--note "<the user's words>"] (no matching Work in progress line)`);
     process.exitCode = done.length ? 0 : 1;
   } else if (sub === 'forget') {
     const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : null; };
@@ -465,7 +466,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const id = rest.join(' ').match(ID)?.[0] || null;
     const home = projectHome(process.cwd());
     const r = forget(process.cwd(), id, { session, reason, dryRun: !apply });
-    if (r.error) console.log(`forget: ${r.error}\nUsage: node waymark.mjs forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
+    if (r.error) console.log(`forget: ${r.error}\nUsage: ${W} forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
     process.exitCode = r.error ? 1 : 0;
@@ -486,7 +487,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | verify [--install] [--require-signature] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

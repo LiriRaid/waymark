@@ -241,7 +241,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
   all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
-  const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
+  const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
   return [memory, procs].filter(Boolean).join('\n\n');
 }

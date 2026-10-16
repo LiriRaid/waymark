@@ -28,14 +28,15 @@ const cases = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map(
 
 let n = 0;
 // The verdict the stop hook would give: the corpus turn, the Cierre it ends with, the decisions its stretch holds.
-// `gate` stands for the repo typecheck the hook re-runs when the agent ran none (green here: the case is about what the agent ran).
+// `gate` stands for the repo typecheck the hook re-runs when the agent ran none (green here: the case is about what the agent ran;
+// a case with rerun: 'none' is a repo where the hook has none to run).
 export const judgeCase = (c) => {
   const cwd = `/work/corpus-${++n}`;
   const turn = T.currentTurn(c.lines);
   const last = turn.texts.filter((t) => /Cierre/.test(t)).pop() || turn.texts.at(-1) || '';
   return cierreGaps(turn, last, T.sessionTools(c.lines), [turn.prompt], {
-    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), outside: true, cwd,
-    packed: 1, rerun: () => ({ cmd: 'typecheck', ok: true, s: 0 }),
+    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), outside: true, cwd, blocked: !!c.blocked, // blocked: the reply that follows a block, where an exception line counts
+    packed: 1, rerun: c.rerun === 'none' ? () => null : () => ({ cmd: 'typecheck', ok: true, s: 0 }), // rerun: 'none' is a repo whose typecheck the hook cannot run
   });
 };
 

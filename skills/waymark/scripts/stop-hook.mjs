@@ -40,12 +40,15 @@ import { deniedSince } from './lib/denied.mjs';
 import { learn } from './learn.mjs';
 import { norm, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
+import { commentOnlyEdit } from './lib/comments.mjs';
 
 let projectRoot = ''; // the folder the turn's agent works in (cierreGaps sets it), so a checkout under a scratch place still counts
 const exempt = (file) => exemptPath(file, projectRoot);
 const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
 const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
+// An edit that only touches comments owes no gate, spec or build (lib/comments.mjs): not a code change for those testigos.
+const codeEdit = (t) => EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !commentOnlyEdit(t);
 // a test case: it()/test() (it.each, test.only…), RSpec's `it "…"`, Python's def test_, Go's func TestX(
 const CASES = /\b(?:it|test)(?:\.\w+)*\s*\(|^\s*it\s+['"]|\bdef test_\w+|\bfunc Test\w+\(/gm;
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$|_spec\.rb$|_test\.(go|py)$|^test_.*\.py$/i;
@@ -195,7 +198,7 @@ const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:
 // command (one repo after another: `… review <api files>; cd ../web && … review <front files>`); a redirect such as
 // `2>&1` is not a file. Applying its findings afterwards needs no second review. Returns the code files left unreviewed.
 function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
-  const first = tools.findIndex((t) => (EDITS.test(t.name) && !failed(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
+  const first = tools.findIndex((t) => (!failed(t) && codeEdit(t)) || (shell(t) && changesProject(t.input.command)));
   const after = tools.slice(first + 1).filter((t) => !failed(t));
   if (skillCalled(after, /(^|:)code-review$/)) return [];
   const named = after.filter(shell).flatMap((t) => [...expandVars(cmdOf(t)).matchAll(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/g)]
@@ -329,7 +332,7 @@ function observeTurn(S) {
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
-  const lastCode = lastIdx((t) => (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || shellChange(t));
+  const lastCode = lastIdx((t) => codeEdit(t) || shellChange(t));
   const lastSpec = lastIdx((t) => EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t))));
   const lastChange = lastIdx(isChange);
   const result = (t) => turn.results?.[t.id];
@@ -367,7 +370,7 @@ function observeTurn(S) {
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
   // Config, scaffolding made by commands (`ng new`, installs) and the spec itself are not the code it tests.
-  const codeEdit = (t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !SPEC.test(path.basename(fileOf(t)));
+  const specEditable = (t) => !denied(t) && codeEdit(t) && !SPEC.test(path.basename(fileOf(t)));
   const cases = (s) => (String(s || '').match(CASES) || []).length;
   const shellSpecs = (t) => (shell(t) ? [...cmdOf(t).matchAll(/(?:>>?|\btee(?:\s+-a)?)\s*["']?([^\s"'<>|;&]+)/g)].map((m) => m[1]).filter((f) => SPEC.test(path.basename(f))) : []);
   const specWrites = new Map(); // spec basename → { at: first write, adds: cases added }
@@ -380,14 +383,15 @@ function observeTurn(S) {
     } else for (const f of shellSpecs(t)) add(f, cases(cmdOf(t)) || 1);
   });
   const ranRed = (w) => {
-    const next = allTools.findIndex((t, i) => i > w.at && codeEdit(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && codeEdit(t));
+    const next = allTools.findIndex((t, i) => i > w.at && specEditable(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && specEditable(t));
     return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && (!codeFirst || failedRun(t, 'test')));
   };
   const inWorktree = allTools.some((t, i) => i >= base && testCmd(t) && inCopy(t));
   const notRed = inWorktree ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
     .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !w || (w.adds > 0 && !ranRed(w)); });
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
-  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT/i.test(String(result(t)?.text || t.out || ''));
+  // A run that never happened: the tool is not installed, or the command was refused (a permission denied, a hook that stopped it).
+  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || ''));
   // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
   // failure, before the next run of that command); retrying blind is how a wrong direction repeats.
   const cmdKey = (t) => cmdOf(t).replace(/\s+/g, ' ').trim();
@@ -398,7 +402,7 @@ function observeTurn(S) {
     if (!runsOf(t).some((p) => p.gate || p.test)) return;
     const key = cmdKey(t), from = lastRun.has(key) ? lastRun.get(key) : -1;
     lastRun.set(key, i);
-    const attempt = turn.tools.slice(from + 1, i).some((x) => codeEdit(x) || shellChange(x));
+    const attempt = turn.tools.slice(from + 1, i).some((x) => specEditable(x) || shellChange(x));
     if (attempt && result(t)?.error && !envFail(t)) failedRuns.set(key, [...(failedRuns.get(key) || []), i]);
   });
   const retried = [...failedRuns].filter(([, at]) => at.length >= 2).map(([cmd, at]) => {
@@ -408,7 +412,11 @@ function observeTurn(S) {
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => runsOf(t).some((p) => p.gate || p.test));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
-  const code = changed.filter((f) => !NOT_CODE.test(f));
+  // a file touched only by comment-only edits (and by no shell change) is no code for the gate, the spec and the build
+  const touched = new Map();
+  for (const t of turn.tools) if (EDITS.test(t.name) && !exempt(fileOf(t))) touched.set(norm(fileOf(t)), (touched.get(norm(fileOf(t))) ?? true) && commentOnlyEdit(t));
+  const shellTouched = turn.tools.some((t) => shell(t) && changesProject(t.input.command));
+  const code = changed.filter((f) => !NOT_CODE.test(f) && !(touched.get(norm(f)) === true && !shellTouched));
   // the code files no review covered, in this turn or earlier in the same task (a follow-up that applies the review's
   // findings needs no second review)
   const turnLeft = unreviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error));
@@ -474,7 +482,7 @@ function observeBuild(S) {
   const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
-  const lastIn = (r) => lastIdx((t) => shellChange(t) || (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && repoAt(path.dirname(fileOf(t))) === r));
+  const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && repoAt(path.dirname(fileOf(t))) === r));
   const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastCode : last) && (!b.repo || !r || b.repo === r)); };
   const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastCode));
   return { near, committed, buildAfter };
@@ -616,7 +624,14 @@ function gateWitness(S) {
     for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
-    if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
+    // a gate the agent tried and the machine could not run (the tool is not installed): not a failure of the code, and not "nothing ran"
+    const tried = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && envFail(t) && !apart(t)).pop();
+    const missing = run?.unavailable || (!run && tried ? (cmdKey(tried).split(/\s+/)[0] || 'the tool') : null);
+    const cannot = (cmd) => `the gate could not run here (${cmd}; ${missing} is not available or the run was refused): write "no comprobado (<why>)" and say what to run where it is installed, or install it and run it`;
+    // the reply that follows the block already says the task is incomplete and why (`Resultado: parcial (<why>)`): that is the exception
+    const partial = ctx.blocked ? String(S.reply || '').match(/Resultado:\s*(?:parcial|bloqueado)\s*\((.{3,}?)\)/i)?.[0] : null;
+    if (missing) { if (noComp || partial) excepted.gate = noComp || partial; else gate.push(cannot(run?.cmd || cmdKey(tried).slice(0, 100))); }
+    else if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
     else if (!run.ok && noComp) excepted.gate = noComp;
     else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);

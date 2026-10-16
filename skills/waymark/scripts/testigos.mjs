@@ -65,8 +65,19 @@ const c = spawn(cmd, { shell: true, stdio: 'ignore', windowsHide: true, detached
 const t = setTimeout(() => { try { if (win) spawnSync('taskkill', ['/pid', String(c.pid), '/T', '/F'], { windowsHide: true }); else process.kill(-c.pid, 'SIGKILL'); } catch {} process.exit(124); }, Number(ms));
 c.on('error', () => process.exit(127));
 c.on('exit', (code) => { clearTimeout(t); process.exit(code ?? 1); });`;
+// The program a gate command starts with, when it is a name looked up on the PATH (not a path, not node/npm, which are here
+// because this hook is): `go vet ./...` → go. null when it cannot be told.
+const programOf = (cmd) => {
+  const first = String(cmd).trim().replace(/^(?:cd\s+\S+\s*&&\s*)/, '').split(/\s+/)[0] || '';
+  return /^[A-Za-z][\w.+-]*$/.test(first) && !/^(node|npm|npx|pnpm|yarn|bun|deno|cd|echo|true|test)$/i.test(first) ? first : null;
+};
+export const onPath = (program) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
+
 export function runGate(gate, cwd, ms = GATE_MS) {
   const t0 = Date.now();
+  // a toolchain that is not installed here cannot fail the code: the gate did not run, and the result says so
+  const program = programOf(gate.cmd);
+  if (program && !onPath(program)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
   const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true });
   const timedOut = r.status === 124 || r.error?.code === 'ETIMEDOUT';
   return { cmd: gate.cmd, from: gate.from, ok: !timedOut && r.status === 0, s: Math.round((Date.now() - t0) / 1000), timedOut };

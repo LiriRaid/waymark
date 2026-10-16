@@ -43,7 +43,7 @@ What it does not do, so that nobody has to find out later:
 - **The records are not signed.** Without a signature the chain resists accidents and partial edits, not someone who can rewrite the repository and chain it again. The release is signed with git when the maintainer's key is in `skills/waymark/ALLOWED_SIGNERS`; `verify` reports `unsigned` as a warning, and `--require-signature` makes it fail. An exported attestation is not signed either.
 - **It stops only where the agent lets a hook run.** The table below says, per agent, what is enforced and what is only asked. The sensitive-path guard does not stop a search that reaches a secret without naming it (`grep -r`, a script).
 - **The cost figures are measured per task and per part, not compared with any other tool.** There is no published token comparison.
-- **Outside the author's own projects it was measured on five repositories** (Rust, Laravel, Terraform, Python data science, documentation only), for detection, profiles and gate recognition. The memory bootstrap, the routing and the token cost of a change there were not measured; a repository with a JS framework and a PHP backend is classed Node; Kotlin or Swift apps, a multi-language monorepo and embedded C are not yet in the corpus.
+- **Outside the author's own projects it was measured on eight repositories** (Rust, Laravel, Terraform, Python data science, documentation only, a Kotlin Android app, a multi-language monorepo, an embedded C library): detection, profiles and gate recognition on all eight, and one real small change made by an agent in each, twice (before and after the fixes it found), with the tokens of the routine, of the work and of the reply counted per run (`tests/external/results-2026-10-16.json`, `docs/adr/0027`). What those runs show: a change that only touches comments no longer owes a gate, a spec or a build; a gate whose tool is not installed is reported as "could not run here" and accepted with `no comprobado (<why>)`, not counted as a failure; Android and C have their own profiles. What they do not show: none of those ecosystems' toolchains was installed on the machine of the run, so whether a gate passes there is not measured; each run happened once with one model; creating `.waymark/memory.md` stays the agent's job and some runs skipped it; a Python docstring and a Terraform description count as code; a repository with a JS framework and a PHP backend is classed Node. No token comparison with any other tool was run.
 
 
 ## A supply chain of the agent's work
@@ -193,7 +193,7 @@ skills/
     SKILL.md (triage, departments, what to read when) · skill-map.json · skill-registry.md (generated)
     references/        protocol, project-detection, learning, skills (find / install / create), maintenance
     scripts/sync.mjs
-    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, rust, php, terraform, generic
+    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, rust, php, terraform, c, android, generic
     architectures/     screaming, feature-sliced, hexagonal, clean, layered, modular-monolith
     templates/         department, stack, architecture, tool skill, project skill, project memory,
                        instructions.md (block for CLAUDE.md / AGENTS.md), private-layer/

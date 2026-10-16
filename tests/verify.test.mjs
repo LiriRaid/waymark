@@ -175,3 +175,43 @@ test('verify --require-signature: with no signed release the exit code is 1; --i
   assert.match(warn.lines.join('\n'), /install: \d+ files match the manifest/, 'the manifest of this repository is current');
   assert.equal(warn.code, 0, 'an unsigned release is a warning when the flag is not given');
 });
+
+const A = await import(`file://${SCRIPTS}/attest.mjs`);
+test('attest: a task becomes an in-toto statement with its commit, decision, gates and chain hash; verify --attestation accepts it', () => {
+  const d = project('attest');
+  const head = gitT(d, 'rev-parse', 'HEAD').stdout.trim();
+  P.appendRecord(d, { ...rec(1), commits: [head], level: 2, decisions: [{ question: '¿Cómo?', chosen: 'A (Recomendado)', discarded: ['B'], position: 'before' }], observed: { gate: { cmd: 'node --test', ok: true }, review: true, build: { none: 'x' }, secrets: [], evidence: { unbacked: [] } }, commands: ['node --test'] });
+  const s = A.attest(d, `${day} · T1`);
+  assert.equal(s._type, A.STATEMENT);
+  assert.equal(s.predicateType, A.PREDICATE);
+  assert.deepEqual(s.subject.map((x) => x.digest.gitCommit), [head]);
+  assert.deepEqual(s.predicate.decisions.map((x) => [x.chosen, x.discarded, x.position]), [['A (Recomendado)', ['B'], 'before']]);
+  assert.equal(s.predicate.evidence.stated, 'observada x');
+  assert.equal(s.predicate.gates.gate.cmd, 'node --test');
+  assert.equal(s.predicate.chain.hash, P.readRecords(P.projectHome(d).log).pop().hash);
+  assert.ok(s.predicate.chain.anchor, 'the anchor of that line');
+  const file = path.join(tmp('att-file'), 'a.json');
+  fs.writeFileSync(file, JSON.stringify(s));
+  const ok = V.verify(d, ['--attestation', file]);
+  assert.equal(ok.code, 0);
+  assert.match(ok.lines.join('\n'), /attestation: valid[\s\S]*record · .* holds the same hash/);
+});
+
+test('attest: an edited predicate, a task this log does not hold and an unknown ID are each refused', () => {
+  const d = project('attest2');
+  P.appendRecord(d, rec(1));
+  const s = A.attest(d, `${day} · T1`);
+  const dir = tmp('att-files');
+  const edited = JSON.parse(JSON.stringify(s)); edited.predicate.request = 'otro pedido';
+  fs.writeFileSync(path.join(dir, 'edited.json'), JSON.stringify(edited));
+  const r1 = V.verify(d, ['--attestation', path.join(dir, 'edited.json')]);
+  assert.equal(r1.code, 1);
+  assert.match(r1.lines.join('\n'), /✘ predicate digest/);
+  const other = project('attest3');
+  fs.writeFileSync(path.join(dir, 'ok.json'), JSON.stringify(s));
+  const r2 = V.verify(other, ['--attestation', path.join(dir, 'ok.json')]);
+  assert.equal(r2.code, 1);
+  assert.match(r2.lines.join('\n'), /✘ record · no such task in this log/);
+  assert.match(A.attest(d, `${day} · T9`).error, /no record for/);
+  assert.equal(A.checkAttestation(d, path.join(dir, 'missing.json')).ok, false);
+});

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { projectHome, readRecords, readNotes, anchorsFor, verifyChain, gitNote } from './provenance.mjs';
 import { SKILLS, checkManifest } from './manifest.mjs';
+import { checkAttestation } from './attest.mjs';
 
 export const ALLOWED_SIGNERS = path.join(SKILLS, 'waymark', 'ALLOWED_SIGNERS');
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 8000, ...opts });
@@ -94,6 +95,12 @@ export function verify(cwd, args = []) {
     ? `chain: intact · ${chain.records} records · ${chain.notes} notes in git · ${chain.anchors} anchors`
     : `chain: BROKEN at ${chain.broken.task} · ${chain.broken.reason}`);
   if (!chain.ok) code = 1;
+  const attFile = opt('--attestation');
+  if (attFile) {
+    const a = checkAttestation(cwd, attFile);
+    lines.push(`attestation: ${a.ok ? 'valid' : 'INVALID'}`, ...a.checks.map((c) => `  ${c.ok ? '✔' : '✘'} ${c.name} · ${c.detail}`));
+    if (!a.ok) code = 1;
+  }
   const id = args.join(' ').match(/\d{4}-\d{2}-\d{2} · T\d+[a-z]*/)?.[0];
   if (id) {
     const rec = readRecords(projectHome(cwd).log).find((r) => r.id === id);

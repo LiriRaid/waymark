@@ -621,9 +621,9 @@ test('catalog of testigos: each states its claim; the instructions block quotes 
 
 test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
-  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T1\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T2 · follow-up of ${DAY} · T1 \\(it continues that task's files\\) → ${DAY} · T1b`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T2; follow-up \\(same files\\) ${DAY} · T1b\\.$`));
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -1912,7 +1912,7 @@ test('stack: the package manager and versions come from the repo (packageManager
   assert.equal(syncIdentity(mem, s), false, 'already right');
   assert.deepEqual(gateCommand(repo, mem), { cmd: 'pnpm exec tsc --noEmit', from: 'memory.md' }, 'the hook re-runs a memory row with the repo manager');
   const line = spawnSync(process.execPath, [path.join(SCRIPTS, 'rule0-hook.mjs')], { input: JSON.stringify({ cwd: repo, session_id: 's-stack', prompt: 'x' }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
-  assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo \(read now\): pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
+  assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo: pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
 });
 
 test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
@@ -2540,9 +2540,10 @@ test('fewer responses: a department loaded earlier in the session owns a task ro
   const { gitLine, REMINDER } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const repo = memRepo('gitline');
   fs.writeFileSync(path.join(repo, 'x.ts'), '1\n');
-  assert.match(gitLine(repo), /^ Git \(read now\): [^·]+ · \d+ changed: .*\?\? x\.ts/);
+  assert.match(gitLine(repo), /^ Git: [^·]+ · \d+ changed: .*\?\? x\.ts/);
+  assert.match(gitLine(repo), /^[^]{0,160}$/, 'the git line stays short: a count and the first two names');
   assert.equal(gitLine(path.join(os.tmpdir(), 'no-such-dir-wm')), '');
-  assert.ok(REMINDER.full.length < 400 && !/procedures\.md section|browser verification|Independent tool calls/.test(REMINDER.full), 'the block holds the rules once');
+  assert.ok(REMINDER.full.length < 150 && !/procedures\.md section|browser verification|Independent tool calls/.test(REMINDER.full), 'the block holds the rules once');
 });
 
 test('learned move: Solved problems, Gotchas and Decisions go to engram once; memory.md keeps the manual, history.md the moved text', async () => {
@@ -3036,4 +3037,17 @@ test('cost per link: a command that only names waymark.mjs (a syntax check, a gi
   const as = (id, command) => ({ type: 'assistant', message: { id, content: [{ type: 'tool_use', name: 'Bash', id, input: { command } }], usage: { output_tokens: 1 } } });
   const l = turnLinks([{ type: 'user', message: { content: 'x' } }, as('a', 'node --check skills/waymark/scripts/waymark.mjs'), as('b', 'node "~/waymark.mjs" pack src/a.js')]);
   assert.deepEqual([l.routine.responses, l.work.responses], [1, 1]);
+});
+
+test('held message: the card carries at most HELD_MAX characters of it and the whole message stays in held-full.md', async () => {
+  const { heldPrompt, HELD_MAX, HELD_MORE, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const repo = memRepo('held-long'), home2 = projectHome(repo);
+  const long = 'pide algo muy largo '.repeat(80).trim();
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${long}\n`);
+  const got = heldPrompt(home2);
+  assert.equal(got, long.slice(0, HELD_MAX) + HELD_MORE);
+  assert.equal(fs.readFileSync(path.join(home2.dir, 'held-full.md'), 'utf8').trim(), long, 'the user\'s words are not lost to the cap');
+  assert.ok(EXTRA.held(got).length <= 700, 'the held message the card adds stays under 700 characters');
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), '<!-- x -->\ncorto\n');
+  assert.equal(heldPrompt(home2), 'corto', 'a short one is carried as it is');
 });

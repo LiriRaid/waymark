@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REMINDER, taskLine, gitLine } from './rule0-hook.mjs';
-import { CARD_HEAD, digest, EXTRA, HELD_MAX, coexistence } from './session-hook.mjs';
+import { CARD_HEAD, digest, EXTRA, HELD_MAX, HELD_MORE, coexistence } from './session-hook.mjs';
 import { found, unprepared, agentLabel, instructionsBlock } from './connect-agents.mjs';
 import { proposals } from './learn.mjs';
 import { projectHome, readTaskRecords } from './provenance.mjs';
@@ -30,7 +30,7 @@ export function sizes(cwd) {
   const descriptions = dirs.map((d) => (read(path.join(SKILLS, d, 'SKILL.md')).match(/^description:.*$/m) || [''])[0].length).reduce((a, b) => a + b, 0);
   const real = () => {
     const repo = stackLine(home.root);
-    return REMINDER.full + taskLine(cwd) + (repo ? ` Repo (read now): ${repo}.` : '') + gitLine(home.root);
+    return REMINDER.full + taskLine(cwd) + (repo ? ` Repo: ${repo}.` : '') + gitLine(home.root);
   };
   const protocol = (part) => read(path.join(CORE, 'references', 'protocol', part)).length;
   const rows = [
@@ -41,7 +41,7 @@ export function sizes(cwd) {
     { group: 'prompt', name: 'reminder (real)', chars: len(real) },
     { group: 'prompt', name: 'reminder (short)', chars: REMINDER.short.length },
     { group: 'outside cap', name: 'check pointer', chars: EXTRA.pointer('never', 'W').length },
-    { group: 'outside cap', name: 'held message (max)', chars: EXTRA.held('x'.repeat(HELD_MAX)).length },
+    { group: 'outside cap', name: 'held message (max)', chars: EXTRA.held('x'.repeat(HELD_MAX) + HELD_MORE).length },
     { group: 'outside cap', name: 'new agents', chars: len(() => { const names = found().filter(unprepared).map(agentLabel); return names.length ? EXTRA.agents(names, 'W') : ''; }) },
     { group: 'outside cap', name: 'proposals', chars: len(() => { const p = home.dir && !home.legacy ? proposals(home, readTaskRecords(home)) : []; return p.length ? EXTRA.proposals(p.map((x) => x.text), 'W') : ''; }) },
     { group: 'outside cap', name: 'coexistence', chars: len(coexistence) },

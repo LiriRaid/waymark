@@ -197,7 +197,7 @@ test('cursor hooks end to end: the card brings Rule 0, the reminder rides on the
   const pre = json(node('tool-hook.mjs', ['--agent', 'cursor'], ev('preToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r1', cwd: repo })).stdout);
   assert.deepEqual(pre, {}, 'no decision: an empty answer, never "allow" (it would skip Cursor\'s own approval)');
   const first = json(node('tool-hook.mjs', ['--agent', 'cursor'], ev('postToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r1', tool_output: '""' })).stdout);
-  assert.match(first?.additional_context || '', /Task ID/, 'the per-prompt reminder, with the first tool\'s result');
+  assert.match(first?.additional_context || '', /Cierre ID/, 'the per-prompt reminder, with the first tool\'s result');
   const second = node('tool-hook.mjs', ['--agent', 'cursor'], ev('postToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r2', tool_output: '""' })).stdout;
   assert.ok(!/Task ID/.test(second), 'once per prompt');
   const blocked = json(node('stop-hook.mjs', ['--agent', 'cursor'], ev('stop', { status: 'completed', loop_count: 0 })).stdout);

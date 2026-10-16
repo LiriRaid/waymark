@@ -1,0 +1,171 @@
+{
+ "schema": "waymark.external-fixtures/v1",
+ "repos": {
+  "rust-cli": {
+   "commit": "14dcd92fb76ca0ebc2e82671a275f67c790d25fc",
+   "files": [
+    ".gitignore",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "Cargo.lock",
+    "Cargo.toml",
+    "Cross.toml",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "Makefile",
+    "README.md",
+    "SECURITY.md",
+    "rustfmt.toml",
+    "src/exit_codes.rs"
+   ],
+   "withContent": [
+    "Cargo.toml",
+    "Makefile"
+   ]
+  },
+  "php-laravel": {
+   "commit": "9ffef3bc4241e3cc333ef267258a404d0d95f194",
+   "files": [
+    ".editorconfig",
+    ".env.example",
+    ".gitattributes",
+    ".gitignore",
+    ".npmrc",
+    ".styleci.yml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "README.md",
+    "app/Models/User.php",
+    "artisan",
+    "composer.json",
+    "package.json",
+    "phpunit.xml",
+    "vite.config.js"
+   ],
+   "withContent": [
+    "composer.json",
+    "package.json"
+   ]
+  },
+  "terraform": {
+   "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+   "files": [
+    ".editorconfig",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".releaserc.json",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "main.tf",
+    "outputs.tf",
+    "variables.tf",
+    "versions.tf",
+    "vpc-flow-logs.tf"
+   ],
+   "withContent": []
+  },
+  "python-ml": {
+   "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+   "files": [
+    ".coveragerc",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    "AUTHORS.rst",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "MANIFEST.in",
+    "README.rst",
+    "conftest.py",
+    "imblearn/base.py",
+    "pixi.lock",
+    "pyproject.toml",
+    "references.bib"
+   ],
+   "withContent": [
+    "pyproject.toml"
+   ]
+  },
+  "docs-only": {
+   "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+   "files": [
+    ".gitignore",
+    "CHANGELOG.md",
+    "CNAME",
+    "CONTRIBUTING.md",
+    "CURRICULAR_GUIDELINES.md",
+    "FAQ.md",
+    "HELP.md",
+    "LICENSE",
+    "README.md",
+    "_config.yml"
+   ],
+   "withContent": []
+  },
+  "android-app": {
+   "commit": "2a357a31551bb53f3fe80382a9ce6d30bcc8b960",
+   "files": [
+    ".gitignore",
+    "ASSETS_LICENSE",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "app/src/main/AndroidManifest.xml",
+    "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
+    "build.gradle.kts",
+    "gradle.properties",
+    "gradlew",
+    "gradlew.bat",
+    "macrobenchmark/src/main/AndroidManifest.xml",
+    "settings.gradle.kts"
+   ],
+   "withContent": [
+    "build.gradle.kts",
+    "settings.gradle.kts"
+   ]
+  },
+  "polyglot-monorepo": {
+   "commit": "38e7348eb289eb5b87c0c6e8cb19ced0449dc389",
+   "files": [
+    ".editorconfig",
+    ".gitattributes",
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "cloudbuild.yaml",
+    "skaffold.yaml",
+    "src/shippingservice/quote.go"
+   ],
+   "withContent": []
+  },
+  "embedded-c": {
+   "commit": "640d0c43705e64cd53f46b31d882de6cd8433933",
+   "files": [
+    ".git-blame-ignore-revs",
+    ".gitattributes",
+    ".gitmodules",
+    "CMakeLists.txt",
+    "GitHub-FreeRTOS-Kernel-Home.url",
+    "History.txt",
+    "LICENSE.md",
+    "MISRA.md",
+    "Quick_Start_Guide.url",
+    "README.md",
+    "croutine.c",
+    "cspell.config.yaml",
+    "event_groups.c",
+    "list.c",
+    "manifest.yml",
+    "queue.c",
+    "stream_buffer.c",
+    "tasks.c",
+    "timers.c"
+   ],
+   "withContent": [
+    "CMakeLists.txt"
+   ]
+  }
+ }
+}

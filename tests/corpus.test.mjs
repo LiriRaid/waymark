@@ -1,9 +1,8 @@
 // Waymark 2.0.15 · point 1: regression corpus. Each tests/corpus/*.json is a real (or synthetic) turn, trimmed to what the
 // testigos read, with what the routine must NOT block on. Run: node --test tests/corpus.test.mjs
-// Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] }, redUntil?: "<point>" }
+// Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] } }
 //   absent: no `missing` or `findings` entry of the verdict may match any of these
 //   present: at least one entry must match each of these (a block the case must still raise)
-//   redUntil: the case fails today and is expected red until that plan point lands (reported as todo, not as a failure)
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,7 +47,7 @@ test('corpus: every case has a source, a note and an expectation', () => {
 });
 
 for (const c of cases) {
-  test(`corpus ${c.file}: ${c.note}`, { todo: c.redUntil ? `red until plan 2.0.15 point ${c.redUntil}` : false }, () => {
+  test(`corpus ${c.file}: ${c.note}`, () => {
     const g = judgeCase(c);
     const said = [...(g.missing || []), ...(g.findings || [])];
     for (const re of c.expect.absent) assert.ok(!said.some((s) => new RegExp(re, 'i').test(s)), `${c.source}: /${re}/ in\n  ${said.join('\n  ')}`);

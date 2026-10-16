@@ -1,12 +1,12 @@
 // Waymark 2.0.16 · point 13: validation outside the author's projects. The manifest of the external corpus, the gaps its first
-// measurement found (kept as regression cases), and an optional live run. Run: node --test tests/*.test.mjs
-//   WAYMARK_EXTERNAL_CORPUS=<dir with a clone per id> node --test tests/external.test.mjs    measures the clones (network not needed here)
+// measurement found (kept as regression cases), and a measurement of committed fixtures (no clone, no network). Run: node --test tests/*.test.mjs
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -89,13 +89,32 @@ test('gate recognition: the commands of the ecosystems the corpus covers are gat
   }
 });
 
-test('live: with WAYMARK_EXTERNAL_CORPUS the clones are measured and nothing misses', { skip: !process.env.WAYMARK_EXTERNAL_CORPUS && 'set WAYMARK_EXTERNAL_CORPUS=<dir with a clone per id>' }, async () => {
+test('fixtures: each repository of the corpus has a committed fixture at its pinned commit, and the fixture holds exactly what was recorded', () => {
+  const index = JSON.parse(fs.readFileSync(path.join(HERE, 'external', 'fixtures', 'fixtures.json'), 'utf8'));
+  assert.equal(index.schema, 'waymark.external-fixtures/v1');
+  assert.deepEqual(Object.keys(index.repos).sort(), manifest.repos.map((r) => r.id).sort());
+  const walk = (d, rel = '') => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name), path.posix.join(rel, e.name)) : [path.posix.join(rel, e.name)]));
+  for (const r of manifest.repos) {
+    const fx = index.repos[r.id], root = path.join(HERE, 'external', 'fixtures', r.id);
+    assert.equal(fx.commit, r.commit, `${r.id}: the fixture is of the commit the corpus pins`);
+    assert.deepEqual(walk(root).sort(), fx.files, `${r.id}: the committed files are the recorded ones`);
+    for (const p of fx.files) assert.equal(fs.statSync(path.join(root, p)).size > 0, fx.withContent.includes(p), `${r.id}/${p}: only the manifests carry text`);
+    if (r.sample) assert.ok(fx.files.includes(r.sample), `${r.id}: the task's sample file is there`);
+  }
+});
+
+test('fixtures: measured with no clone and no network, every repository is detected, profiled, has its gates recognised and runs the hooks clean', async () => {
   const { measure } = await import(`file://${SCRIPTS}/external-corpus.mjs`);
   for (const e of manifest.repos) {
-    const root = path.join(process.env.WAYMARK_EXTERNAL_CORPUS, e.id);
-    if (!fs.existsSync(root)) continue;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-fx-'));
+    temps.push(root);
+    fs.cpSync(path.join(HERE, 'external', 'fixtures', e.id), root, { recursive: true }); // a copy outside this repository, so no project memory is shared
+    for (const args of [['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture']]) spawnSync('git', args, { cwd: root }); // a repository, as the clone was
     const r = await measure(root, e);
-    assert.ok(r.detected.ok && r.profile.ok, `${e.id}: ${r.detected.stack} / ${r.profile.slug}`);
+    assert.ok(r.detected.ok, `${e.id}: stack ${r.detected.stack}, expected ${r.detected.expected}`);
+    assert.ok(r.profile.ok, `${e.id}: profile ${r.profile.slug}`);
+    for (const [name, g] of Object.entries(r.gates)) assert.ok(g.recognised, `${e.id}: gate ${name} (${g.command}) is not recognised`);
     assert.deepEqual(r.hookErrors, [], e.id);
+    for (const t of ['doc', 'code']) if (r.tasks[t]) assert.deepEqual(r.tasks[t].blocked, [], `${e.id}: the scripted ${t} task is blocked for nothing`);
   }
 });

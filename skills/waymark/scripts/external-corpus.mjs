@@ -40,7 +40,7 @@ function scripted(root, file, gateCmd, { P, T, cierreGaps }) {
     ...(gateCmd ? run('Bash', { command: gateCmd }, 'test result: ok. 12 passed; 0 failed') : []),
   ];
   const turn = T.currentTurn(lines);
-  const cierre = `## Cierre · ${P.taskIds(root).next}\nResultado: hecho\nEvidencia: observada 12 passed en la salida del test\nAprendido: cambio pequeño ← pedido; siguiente: nada.`; // the ID the hook offers today, so the measure never ages
+  const cierre = `## Cierre · ${P.taskIds(root).next}\nResultado: hecho\nEvidencia: ${gateCmd ? 'observada 12 passed en la salida del test' : 'inferida de la edición, sin gate que correr (check: leer el archivo editado)'}\nAprendido: cambio pequeño ← pedido; siguiente: nada.`; // the ID the hook offers today, so the measure never ages
   const g = cierreGaps(turn, cierre, T.sessionTools(lines), [turn.prompt], { ids: P.taskIds(root), decisions: [{ question: q, chosen: 'A', discarded: ['B'] }], outside: true, cwd: root, root, packed: 1, rerun: () => ({ cmd: 'typecheck', ok: true, s: 0 }) });
   return g ? { blocked: g.missing || [], noted: g.findings || [] } : { blocked: [], noted: [] };
 }

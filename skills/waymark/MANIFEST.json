@@ -126,7 +126,7 @@
   "waymark/scripts/connect-agents.mjs": "97c683ac5acdf7b913b776ce23499a9d9aae638f834ce2824cdc5e97bdb0ba0c",
   "waymark/scripts/docs-gen.mjs": "fe786925ed429dfb242b79e299dc30eb7134a9709c13191b8eca0a99dfeaf47c",
   "waymark/scripts/engram.mjs": "a3a941b82ea8c6dd4957f46d5485013fc62248dab813bc73a530eb6cf367b354",
-  "waymark/scripts/external-corpus.mjs": "34bd3f06d10c9dd28b7d500707559ce9d8b0c7ae021727991148d3410ec14756",
+  "waymark/scripts/external-corpus.mjs": "8601315c57770990abeb1d9c60dd3726006e1205d06e59db521fc262ffe26cd9",
   "waymark/scripts/incidents.mjs": "932c35785a9a6fad59f5ae4243a26f38a28a63fd96a4b2766b0d6f2d95762150",
   "waymark/scripts/install-hooks.mjs": "f2c4b126f612633433673061715fd831f497bc9b16442632262eeca3aa4fbd0c",
   "waymark/scripts/learn.mjs": "cff34ae2ef5637da8830341660a83ab389ebc0e419e697675c16dde23b5e7635",

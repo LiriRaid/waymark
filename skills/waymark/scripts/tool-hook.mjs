@@ -20,6 +20,8 @@ import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRe
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm } from './lib/paths.mjs';
+import { loadRisk, isSensitive } from './lib/risk.mjs';
+import { addDenied } from './lib/denied.mjs';
 import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
@@ -106,10 +108,43 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
   return `Waymark: this commit has no "Waymark-Task: <task ID>" in its message, so the task's record and the commit stay unlinked. Add it as the message's last paragraph, next to Co-Authored-By: "Waymark-Task: ${ids.next}"${ids.followUp ? ` (or "${ids.followUp}" when it continues ${ids.last})` : ''}, and use the same ID in the Cierre heading. Sent again without it, the commit goes through.`;
 }
 
+// Sensitive-path guard (docs/adr/0027): a read or an edit of a secret-bearing path (routine.json `risk.sensitive`: .env*, ~/.ssh,
+// ~/.aws, ~/.config/gcloud, keys) is denied, except what `risk.allow` and the user's `Sensitive allow:` line in
+// ~/.waymark/preferences.md name. It acts where the agent's hook runs before the tool: Claude Code's Read, Edit and Write,
+// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists.
+// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file).
+const expandHome = (w) => String(w).replace(/^(~|\$HOME|\$\{HOME\})(?=[\\/]|$)/, os.homedir());
+export function commandSensitive(command, cwd, cfg) {
+  for (const p of shellRuns(command)) {
+    const dir = path.resolve(cwd, expandHome(String(p.cd || '.').replace(/^["']|["']$/g, '')).replace(/^\/([a-z])\//i, '$1:/'));
+    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    const targets = [...String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    for (const w of [...words.slice(1), ...targets]) {
+      if (!w || /^-|^[<>&|]/.test(w)) continue;
+      const abs = path.resolve(dir, expandHome(w));
+      if (isSensitive(abs, cfg) && (targets.includes(w) || fs.existsSync(abs))) return abs;
+    }
+  }
+  return null;
+}
+export function checkSensitive(c, cwd, session = 'unknown') {
+  if (!c) return null;
+  let root = cwd;
+  try { root = projectHome(cwd).root; } catch {}
+  const cfg = loadRisk(root);
+  const paths = c.reads || c.files || [];
+  const hit = c.command !== undefined ? commandSensitive(c.command, cwd, cfg) : paths.map((f) => path.resolve(cwd, expandHome(f))).find((f) => isSensitive(f, cfg));
+  if (!hit) return null;
+  try { addDenied(session, { tool: c.command !== undefined ? 'shell' : c.reads ? 'read' : 'edit', path: String(hit).replace(/\\/g, '/') }); } catch {}
+  return `Waymark: ${String(hit).replace(/\\/g, '/')} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked. Do not look for another way to read it. If the user wants it allowed, they add it to ~/.waymark/preferences.md as "Sensitive allow: <path>" (or "allow" in the project's .waymark/risk.json); until then, ask them for the value you need.`;
+}
+
 // → the denial reason, or null.
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
+  const sensitive = checkSensitive(c, cwd, hook.session_id);
+  if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
   // read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
@@ -118,7 +153,7 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
   }
-  const files = c.files.filter((f) => !exempt(f));
+  const files = (c.files || []).filter((f) => !exempt(f));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
   for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }

@@ -186,7 +186,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try {
       text = CARD_HEAD;
       if (rebuilt) text += `Rebuilt from git: .waymark/memory.md and tasks.md from ${rebuilt} records (notes, waymark-log, trailer commits); complete Identity and Quality gates in memory.md (Minimal bootstrap).\n`;
-      if (failed) text += `Notes: the fetch from origin failed (${failed}); the records here are the local ones. Run waymark.mjs notes setup from your shell.\n`;
+      if (failed) text += `Notes: the fetch from origin failed (${failed}); the records here are the local ones. Run ${W_CMD} notes setup from your shell.\n`;
       text += digest(cwd, agent.name);
       if (added) text += '\nNotes: fetches from origin now bring the task records (one fetch refspec added to .git/config).';
       if (joined) text += '\nNotes: the records the remote brought joined the local ones (git notes merge).';

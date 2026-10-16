@@ -1,6 +1,11 @@
 // One definition of the path helpers every script used to copy.
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The command that runs waymark.mjs from anywhere: it is a script, not a program on the PATH, so every message that tells
+// someone to run it carries this full form.
+export const WAYMARK_CMD = `node "${path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'waymark.mjs').replace(/\\/g, '/')}"`;
 
 // The private layer's folder; read at call time because tests and installs set WAYMARK_HOME after load.
 export const waymarkHome = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');

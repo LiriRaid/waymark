@@ -63,7 +63,7 @@ In `procedures.md` (same folder), one section per task:
 | claude.docs | `claude-code-guide` agent | Skills, plugins, MCP, settings or SDK behavior not verified this session | Q |
 | claude.api | `claude-api` | Tooling that calls the Claude API | L1 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Docs for tooling libraries (script runners, doc generators) | Q |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` agent | Auditing names or contradictions across files | L1 |
 | skills.discovery | none yet → waymark `references/skills.md` | Finding new skills (`npx skills find`) | L1 |
 

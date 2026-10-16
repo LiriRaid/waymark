@@ -56,7 +56,7 @@ In `procedures.md` (same folder), one section per task:
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| `memory` | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| `memory` | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | `search.codebase` | `Explore` agent | Scoping needs more than 3 locations | L1 |
 | `plan.implementation` | `Plan` agent (or plan mode when approval is needed) | Multi-layer features, shared/core changes, L3 breakdowns | L3 |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Feasibility depends on an unverified library/framework API | Q |

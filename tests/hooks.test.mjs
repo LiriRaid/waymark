@@ -561,7 +561,7 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
   assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
-  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run waymark\.mjs pack/, 'one memory: Waymark\'s, with or without engram');
+  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/, 'one memory: Waymark\'s, with or without engram');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
@@ -1959,7 +1959,7 @@ test('incidents: a testigo ✘ stays open until it passes in a later task; 3 fai
   assert.deepEqual(found.open.map((o) => [o.label, o.since, o.last, o.count]), [['Commit', 'T2', 'T4', 3], ['Enrutar', 'T4', 'T4', 1]], 'Recordar closed by T2; Índice is not a testigo any more');
   assert.equal(found.open.find((o) => o.label === 'Enrutar').cause, 'no routing line');
   assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
-  assert.equal(incidentsLine(found), 'Incidents: open Commit ✘×3 (T4), Enrutar ✘ (T4); suggested rule: Commit failed 3× (waymark.mjs incidents)');
+  assert.match(incidentsLine(found), /^Incidents: open Commit ✘×3 \(T4\), Enrutar ✘ \(T4\); suggested rule: Commit failed 3× \(node ".*waymark\.mjs" incidents\)$/);
   assert.equal(incidentsLine(incidents([])), '');
 });
 
@@ -2341,7 +2341,7 @@ test('Recordar at every level: an L1 change without pack (or mem_search) is bloc
     ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
   const without = judge(lines(false));
-  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run waymark\.mjs pack/.test(m)), JSON.stringify(without.missing));
+  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/.test(m)), JSON.stringify(without.missing));
   assert.equal(judge(lines(true)).steps.find((s) => s.id === 'memory').pass, true);
 });
 
@@ -2351,7 +2351,7 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   const base = [prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
     ...askWithId('q1', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
-  assert.ok(judge(base).missing.some((m) => /no review ran: .*waymark\.mjs review/.test(m)));
+  assert.ok(judge(base).missing.some((m) => /no review ran: .*waymark\.mjs" review/.test(m)));
   assert.equal(judge([...base, call('Bash', { command: 'node "C:/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs' })]).observed.review, true);
   for (const a of ['codex', 'gemini', 'opencode']) assert.deepEqual((await import(`file://${SCRIPTS}/agents/${a}.mjs`)).lacks, [], `${a} reviews with waymark.mjs review`);
   const cx = await import(`file://${SCRIPTS}/agents/codex.mjs`);
@@ -2415,7 +2415,7 @@ test('waymark.mjs review: the diff of the task\'s files (new ones included) and 
   assert.match(out, /^\+export const a = 2;$/m);
   assert.match(out, /new file n\.ts[\s\S]*export const n = 0;/);
   assert.match(out, /Checklist/);
-  assert.match(W('review'), /^Usage: node waymark\.mjs review <file…>/);
+  assert.match(W('review'), /^Usage: node ".*waymark\.mjs" review <file…>/);
 });
 
 test('OpenCode: a tool lasts from time.start to time.end; the plugin\'s version reaches the record\'s inputs', async () => {

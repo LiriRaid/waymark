@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTaskRecords, projectHome } from './provenance.mjs';
+import { WAYMARK_CMD } from './lib/paths.mjs';
 
 // Only the testigos of the current catalog: one removed since (an older record's label) is no incident.
 const LABELS = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'routine.json'), 'utf8')).testigos.map((t) => t.label)); } catch { return null; } })();
@@ -43,5 +44,5 @@ export function incidentsLine(found) {
   if (!found.open.length && !found.rules.length) return '';
   const open = found.open.map((o) => `${o.label} ✘${o.count > 1 ? `×${o.count}` : ''} (${o.last})`).join(', ');
   const rules = found.rules.map((r) => `${r.label} failed ${r.failures}×`).join(', ');
-  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (waymark.mjs incidents)`;
+  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (${WAYMARK_CMD} incidents)`;
 }

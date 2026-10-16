@@ -1,5 +1,6 @@
 // Waymark 2.0.16 · point 8: the sensitive-path guard of the pre-tool hook. Run: node --test tests/*.test.mjs
 // Temporary WAYMARK_HOME and repos; nothing reads or writes the real ~/.waymark or any real secret.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,6 +48,7 @@ test('guard: a shell command that names an existing sensitive file is denied; a 
   assert.match(commandSensitive('cat .env', proj, cfg) || '', /\.env$/);
   assert.match(commandSensitive('cd cfg && cat id_rsa', proj, cfg) || '', /id_rsa$/);
   assert.match(commandSensitive('echo TOKEN=1 > .env.production', proj, cfg) || '', /\.env\.production$/, 'a redirect creating one');
+  fs.mkdirSync(path.join(os.homedir(), '.ssh'), { recursive: true }); fs.writeFileSync(path.join(os.homedir(), '.ssh', 'known_hosts'), ''); // the sandbox home, never the real one
   assert.match(commandSensitive(`cat ~/.ssh/known_hosts`, proj, cfg) || '', /\.ssh/, '~ expands to the home folder');
   assert.equal(commandSensitive('cat .env.example', proj, cfg), null);
   assert.equal(commandSensitive('git commit -m "fix how .env is loaded"', proj, cfg), null, 'a word inside a message is no path');

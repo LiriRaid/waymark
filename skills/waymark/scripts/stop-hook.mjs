@@ -38,13 +38,11 @@ import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { learn } from './learn.mjs';
-import { norm } from './lib/paths.mjs';
+import { norm, exemptPath } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 
-const exempt = (file) => {
-  const f = norm(file), home = norm(os.homedir());
-  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || f.includes('/scratchpad/');
-};
+let projectRoot = ''; // the folder the turn's agent works in (cierreGaps sets it), so a checkout under a scratch place still counts
+const exempt = (file) => exemptPath(file, projectRoot);
 const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
 const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
@@ -792,6 +790,7 @@ function omittedOf(S, steps) {
 // The turn is observed once (observeTurn); each testigo is a function of what was observed (S) and routine.json says which
 // apply at the level and which block (docs/adr/0026).
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
+  projectRoot = ctx.cwd || '';
   const byKey = new Map();
   for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
   const changed = [...byKey.values()];

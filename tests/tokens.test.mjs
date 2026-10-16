@@ -1,5 +1,6 @@
 // Point 6 of 2.0.3 — tokens: the protocol read by level, a card that says each path once and asks nothing, and a
 // size report that measures what really enters the context.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

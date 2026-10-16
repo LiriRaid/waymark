@@ -1,6 +1,7 @@
 // Waymark 2.0.16 · point 13: validation outside the author's projects. The manifest of the external corpus, the gaps its first
 // measurement found (kept as regression cases), and an optional live run. Run: node --test tests/*.test.mjs
 //   WAYMARK_EXTERNAL_CORPUS=<dir with a clone per id> node --test tests/external.test.mjs    measures the clones (network not needed here)
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

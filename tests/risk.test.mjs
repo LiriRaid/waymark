@@ -1,4 +1,5 @@
 // Waymark 2.0.16 · point 2: review proportional to risk (routine.json `risk`, docs/adr/0027). Run: node --test tests/*.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

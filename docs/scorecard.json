@@ -1,0 +1,153 @@
+{
+  "schema": "waymark.scorecard/v1",
+  "adr": "0028",
+  "about": "The definition of '95 %' (docs/adr/0028-scorecard.md). Every check is deterministic: a file, a pattern, a command's exit or a number computed from the records. A check scores 1 or 0, or a ratio against its threshold (a number above 1 is capped at 1). A criterion is the mean of its checks; the total is the sum of weight x criterion. `point` is the plan 2.0.18 point that makes the check pass (0 = it holds today); a check that fails before its point is the honest baseline, not a mistake. A threshold of null is frozen later by an amendment ADR, from the baseline, and scores 0 until then.",
+  "criteria": [
+    {
+      "id": 1, "name": "Provenance of each task", "weight": 8, "target": 98,
+      "checks": [
+        { "id": "1.1", "what": "the chain of the project's records is intact", "point": 0, "kind": "measure", "measure": "chain.intact", "op": "ge", "threshold": 1 },
+        { "id": "1.2", "what": "recent records hold the ask, the decisions, the Cierre, the evaluation, the inputs and the pinned rules", "point": 0, "kind": "measure", "measure": "records.fieldShare", "op": "ge", "threshold": 0.95 },
+        { "id": "1.3", "what": "record schema v2 exists", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/"], "pattern": "waymark\\.record/v2" },
+        { "id": "1.4", "what": "taskType is derived by the hooks", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/"], "pattern": "taskType" },
+        { "id": "1.5", "what": "cost.byCall is kept per tool call", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/", "skills/waymark/scripts/transcript.mjs"], "pattern": "byCall" },
+        { "id": "1.6", "what": "followUps and reworkFiles are derived", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/"], "pattern": ["followUps", "reworkFiles"] },
+        { "id": "1.7", "what": "the ask is kept as items (asked)", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/"], "pattern": "\\basked:\\s*asked\\w*\\(|record\\.asked\\b|rec\\.asked\\b" },
+        { "id": "1.8", "what": "options carry their attributes (files, risk, estCost, recommended)", "point": 2, "kind": "contains", "files": ["skills/waymark/scripts/provenance/"], "pattern": ["estCost", "recommended"] },
+        { "id": "1.10", "what": "recent tasks keep their full record (the git note that holds the detail can be read)", "point": 0, "kind": "measure", "measure": "records.detailShare", "op": "ge", "threshold": 0.95 },
+        { "id": "1.9", "what": "v1 and v2 records are read together and verify accepts both", "point": 2, "kind": "exists", "files": ["tests/schema-v2.test.mjs"] }
+      ]
+    },
+    {
+      "id": 2, "name": "Tamper evidence", "weight": 8, "target": 96,
+      "checks": [
+        { "id": "2.1", "what": "waymark.mjs verify passes on the project's records", "point": 0, "kind": "run", "command": ["node", "skills/waymark/scripts/waymark.mjs", "verify"] },
+        { "id": "2.2", "what": "an edited, a deleted and a rewritten-and-chained-again record are each named by a test", "point": 0, "kind": "contains", "files": ["tests/verify.test.mjs"], "pattern": ["edited", "deleted", "rewritten"] },
+        { "id": "2.3", "what": "anchors in git chain the records", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/notes.mjs"], "pattern": "ANCHOR_REF" },
+        { "id": "2.4", "what": "verify --remote compares the anchors with the remote's", "point": 7, "kind": "contains", "files": ["skills/waymark/scripts/verify.mjs"], "pattern": "--remote" },
+        { "id": "2.5", "what": "a project with no remote copy is told so, as a warning", "point": 7, "kind": "contains", "files": ["skills/waymark/scripts/verify.mjs"], "pattern": "no remote copy" },
+        { "id": "2.6", "what": "a test with a bare repository as the remote covers intact, local rewrite, remote rewrite, no remote", "point": 7, "kind": "exists", "files": ["tests/verify-remote.test.mjs"] }
+      ]
+    },
+    {
+      "id": 3, "name": "Authenticity", "weight": 8, "target": 95,
+      "checks": [
+        { "id": "3.1", "what": "the latest release tag is signed by a key in ALLOWED_SIGNERS", "point": 0, "kind": "measure", "measure": "release.tagSigned", "op": "ge", "threshold": 1 },
+        { "id": "3.2", "what": "ALLOWED_SIGNERS names at least one key", "point": 0, "kind": "contains", "files": ["skills/waymark/ALLOWED_SIGNERS"], "pattern": "ssh-|ecdsa-|sk-" },
+        { "id": "3.3", "what": "the anchor is signed when the task closes", "point": 6, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "signAnchor" },
+        { "id": "3.4", "what": "attest signs the statement it exports", "point": 6, "kind": "contains", "files": ["skills/waymark/scripts/attest.mjs"], "pattern": "signAttestation" },
+        { "id": "3.5", "what": "a locked key records 'unsigned (key locked)' and sign --pending signs what was left", "point": 6, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": ["key locked", "--pending"] },
+        { "id": "3.6", "what": "several keys with a validity period and a revoked list", "point": 6, "kind": "contains", "files": ["skills/waymark/scripts/verify.mjs"], "pattern": ["valid-before", "key revoked"] },
+        { "id": "3.7", "what": "a test with a throwaway key covers signed, tampered, unknown, revoked, locked and no key", "point": 6, "kind": "exists", "files": ["tests/sign.test.mjs"] }
+      ]
+    },
+    {
+      "id": 4, "name": "Independent verification", "weight": 5, "target": 98,
+      "checks": [
+        { "id": "4.1", "what": "verify checks an attestation file", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/verify.mjs"], "pattern": "--attestation" },
+        { "id": "4.2", "what": "no test is skipped, todo or only", "point": 1, "kind": "absent", "files": ["tests/*.test.mjs"], "pattern": "[{,]\\s*(skip|todo|only)\\s*:|\\b(?:test|it|describe|t)\\.(?:skip|todo|only)\\(" },
+        { "id": "4.3", "what": "one script runs the suite and fails on any skipped, todo or failing test", "point": 1, "kind": "exists", "files": ["scripts/gate-tests.mjs"] },
+        { "id": "4.4", "what": "CI runs the gate, verify and verify --install on push, pull request and tag", "point": 1, "kind": "contains", "files": [".github/workflows/verify.yml"], "pattern": ["gate-tests", "verify --install", "tags"] },
+        { "id": "4.5", "what": "the live external test runs over committed fixtures, with no clones and no network", "point": 1, "kind": "exists", "files": ["tests/external/fixtures/"] },
+        { "id": "4.6", "what": "a clone with no local records rebuilds them from the remote and verifies", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/notes.mjs"], "pattern": "mergeNotes" }
+      ]
+    },
+    {
+      "id": 5, "name": "Enforcement", "weight": 8, "target": 93,
+      "checks": [
+        { "id": "5.1", "what": "recent tasks passed their testigos (evaluation score ratio)", "point": 0, "kind": "measure", "measure": "records.testigoRatio", "op": "ge", "threshold": 0.95 },
+        { "id": "5.2", "what": "the guard has tests that assert what it cannot see (grep -r, find -exec, a script that opens the file)", "point": 0, "kind": "contains", "files": ["tests/guard.test.mjs"], "pattern": ["grep -r", "-exec"] },
+        { "id": "5.3", "what": "the guard's tests cover the shell readers of a protected path (cat, type, Get-Content, less, head, tail)", "point": 9, "kind": "contains", "files": ["tests/guard.test.mjs"], "pattern": ["Get-Content", "\\btype\\b", "\\bhead\\b", "\\btail\\b", "\\bless\\b"] },
+        { "id": "5.4", "what": "an agent with no pre-tool hook has a transcript detection that records an unremovable finding", "point": 9, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "detectGuarded" },
+        { "id": "5.5", "what": "the capability matrix says prevent or detect for every guarded action and agent, never none", "point": 9, "kind": "contains", "files": ["skills/waymark/scripts/matrix.mjs"], "pattern": ["prevent", "detect"] },
+        { "id": "5.6", "what": "the gate and review testigos have one conformance case per agent", "point": 11, "kind": "exists", "files": ["tests/conformance/"] }
+      ]
+    },
+    {
+      "id": 6, "name": "Inputs and dependencies pinned", "weight": 5, "target": 95,
+      "checks": [
+        { "id": "6.1", "what": "recent records pin the rules that governed them", "point": 0, "kind": "measure", "measure": "records.pinnedShare", "op": "ge", "threshold": 0.9 },
+        { "id": "6.2", "what": "Waymark's own scripts import nothing outside Node's built-ins", "point": 0, "kind": "absent", "files": ["skills/waymark/scripts/**"], "flags": "m", "pattern": "^\\s*(?:import|export)\\b[^\\n;]*?\\bfrom\\s+['\"](?!node:|\\.{1,2}/|file:)[^'\"]+['\"]" },
+        { "id": "6.3", "what": "skills.lock pins each vendored third-party skill (source, commit, sha256)", "point": 8, "kind": "exists", "files": ["skills/waymark/skills.lock"] },
+        { "id": "6.4", "what": "verify --install checks skills.lock", "point": 8, "kind": "contains", "files": ["skills/waymark/scripts/manifest.mjs", "skills/waymark/scripts/verify.mjs"], "pattern": "skills\\.lock" },
+        { "id": "6.5", "what": "the engram binary's version and sha256 are checked against a pinned value per OS and architecture", "point": 8, "kind": "contains", "files": ["skills/waymark/scripts/engram.mjs"], "pattern": "sha256" },
+        { "id": "6.6", "what": "a test fails if package.json or a non-built-in import appears in the scripts", "point": 8, "kind": "contains", "files": ["tests/"], "pattern": "no dependencies" }
+      ]
+    },
+    {
+      "id": 7, "name": "Distribution of the records", "weight": 3, "target": 95,
+      "checks": [
+        { "id": "7.1", "what": "no note commit is waiting to be pushed", "point": 0, "kind": "measure", "measure": "notes.unpushed", "op": "le", "threshold": 0 },
+        { "id": "7.2", "what": "a saved preference lets the hook push the notes without a manual step", "point": 7, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "Notes push:" },
+        { "id": "7.3", "what": "a clone's fetch brings the records (notes setup)", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/notes.mjs"], "pattern": "notesSetup" }
+      ]
+    },
+    {
+      "id": 8, "name": "Token efficiency", "weight": 15, "target": 96,
+      "checks": [
+        { "id": "8.1", "what": "recent records measure their tokens and their routine/work/reply split", "point": 0, "kind": "measure", "measure": "records.tokenShare", "op": "ge", "threshold": 0.95 },
+        { "id": "8.2", "what": "the fixed context (instructions block + skill descriptions + card), in characters, is within its frozen threshold", "point": 4, "kind": "measure", "measure": "size.fixedContext", "op": "le", "threshold": null, "frozenIn": 3 },
+        { "id": "8.3", "what": "the per-prompt reminder, in characters, is within its frozen threshold", "point": 4, "kind": "measure", "measure": "size.perPrompt", "op": "le", "threshold": null, "frozenIn": 3 },
+        { "id": "8.4", "what": "waymark.mjs cost prints tokens per task by version and level", "point": 3, "kind": "contains", "files": ["skills/waymark/scripts/waymark.mjs"], "pattern": "cost: 'cost\\.mjs'" },
+        { "id": "8.5", "what": "a deterministic replay bench recomputes the routine cost of recorded tasks under an older version's sizes", "point": 3, "kind": "exists", "files": ["bench/replay.mjs"] },
+        { "id": "8.6", "what": "the routine share of an L2 task is within its frozen threshold", "point": 4, "kind": "measure", "measure": "cost.routineShareL2", "op": "le", "threshold": null, "frozenIn": 3 },
+        { "id": "8.7", "what": "the tokens of a small task (L1) are within their frozen threshold", "point": 4, "kind": "measure", "measure": "cost.smallTaskTokens", "op": "le", "threshold": null, "frozenIn": 3 },
+        { "id": "8.8", "what": "each lever kept has a regression check on the replay", "point": 4, "kind": "exists", "files": ["tests/replay.test.mjs"] }
+      ]
+    },
+    {
+      "id": 9, "name": "Agnostic and adaptive", "weight": 12, "target": 96,
+      "checks": [
+        { "id": "9.1", "what": "every agent Waymark knows has an adapter", "point": 0, "kind": "measure", "measure": "agents.adapterShare", "op": "ge", "threshold": 1 },
+        { "id": "9.2", "what": "the capability matrix is generated and tested", "point": 0, "kind": "exists", "files": ["tests/matrix.test.mjs"] },
+        { "id": "9.3", "what": "one memory is shared by every agent (the chain is tested across agents)", "point": 0, "kind": "exists", "files": ["tests/memory-chain.test.mjs"] },
+        { "id": "9.4", "what": "an unknown agent on the machine is detected", "point": 0, "kind": "exists", "files": ["tests/any-agent.test.mjs"] },
+        { "id": "9.5", "what": "a conformance suite of at least 30 behavioural cases that every adapter must pass", "point": 11, "kind": "measure", "measure": "conformance.cases", "op": "ge", "threshold": 30 },
+        { "id": "9.6", "what": "a task started under one agent's payloads resumes under another's with the same memory, open task, precedent and chain", "point": 11, "kind": "exists", "files": ["tests/handoff.test.mjs"] },
+        { "id": "9.7", "what": "a reference bench measures read-only clones of reference repositories", "point": 11, "kind": "exists", "files": ["bench/reference.mjs"] },
+        { "id": "9.8", "what": "the list of reference repositories lives outside the repository", "point": 11, "kind": "exists", "files": ["~/.waymark/reference-repos.json"] }
+      ]
+    },
+    {
+      "id": 10, "name": "Reuse of earlier evidence", "weight": 8, "target": 93,
+      "checks": [
+        { "id": "10.1", "what": "a project memory pack and the learned layer already hand the agent earlier work", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/waymark.mjs"], "pattern": "export function pack" },
+        { "id": "10.2", "what": "a deterministic lexical search hands the earlier task that resembles the ask", "point": 5, "kind": "exists", "files": ["skills/waymark/scripts/precedent.mjs"] },
+        { "id": "10.3", "what": "precision@3 on the author's held-out tasks is within its frozen threshold", "point": 5, "kind": "measure", "measure": "precedent.precisionAt3", "op": "ge", "threshold": null, "frozenIn": 5 },
+        { "id": "10.4", "what": "the hand-over never exceeds 400 characters", "point": 5, "kind": "measure", "measure": "precedent.maxChars", "op": "le", "threshold": 400 },
+        { "id": "10.5", "what": "the hand-over tests pass, including 'hands nothing on an unrelated ask'", "point": 5, "kind": "run", "command": ["node", "--test", "tests/precedent.test.mjs"] },
+        { "id": "10.6", "what": "tasks that needed redoing are shown in tasks.md", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/provenance/taskmd.mjs"], "pattern": "reworkFiles" }
+      ]
+    },
+    {
+      "id": 11, "name": "No hallucination, good decisions", "weight": 8, "target": 95,
+      "checks": [
+        { "id": "11.1", "what": "recent L2+ tasks answered the choice window before the first change", "point": 0, "kind": "measure", "measure": "records.decisionShare", "op": "ge", "threshold": 0.9 },
+        { "id": "11.2", "what": "the share of cited facts backed by a call is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.backedShare", "op": "ge", "threshold": null, "frozenIn": 10 },
+        { "id": "11.3", "what": "a choice window whose options lack their attributes fails a hook check", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "optionsLint" },
+        { "id": "11.4", "what": "an Evidencia 'observada' must be checked after the last change", "point": 0, "kind": "contains", "files": ["skills/waymark/routine.json"], "pattern": "\"id\": \"evidence\"" },
+        { "id": "11.5", "what": "a command that failed twice runs again only after consulting the docs", "point": 0, "kind": "contains", "files": ["skills/waymark/routine.json"], "pattern": "\"id\": \"docs\"" }
+      ]
+    },
+    {
+      "id": 12, "name": "Self-generating", "weight": 6, "target": 93,
+      "checks": [
+        { "id": "12.1", "what": "templates exist for a stack, an agent adapter, a department and a project skill", "point": 0, "kind": "exists", "files": ["skills/waymark/templates/stack.template.md", "skills/waymark/templates/agent-adapter.template.mjs", "skills/waymark/templates/department.template.md", "skills/waymark/templates/project-skill.template.md"] },
+        { "id": "12.2", "what": "the project proposes learned rules and preferences from its records", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/learn.mjs"], "pattern": "export function proposals" },
+        { "id": "12.3", "what": "waymark.mjs adapter-new drafts an adapter and runs the conformance suite on it", "point": 11, "kind": "contains", "files": ["skills/waymark/scripts/waymark.mjs"], "pattern": "adapter-new" },
+        { "id": "12.4", "what": "waymark.mjs stack-new drafts a stack profile from a repository's manifests, scripts and CI files", "point": 11, "kind": "contains", "files": ["skills/waymark/scripts/waymark.mjs"], "pattern": "stack-new" },
+        { "id": "12.5", "what": "the rust, php and terraform profiles regenerate from their fixtures with the same detection and gates", "point": 11, "kind": "exists", "files": ["tests/stack-new.test.mjs"] }
+      ]
+    },
+    {
+      "id": 13, "name": "Task done completely and as asked", "weight": 6, "target": 93,
+      "checks": [
+        { "id": "13.1", "what": "recent tasks closed with a complete Cierre (Resultado, Evidencia, Aprendido)", "point": 0, "kind": "measure", "measure": "records.cierreShare", "op": "ge", "threshold": 0.95 },
+        { "id": "13.2", "what": "the Pedido is stored as numbered items at L2+", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedItems" },
+        { "id": "13.3", "what": "the hook compares the Cierre's per-item answers with the items: an unanswered item is a warning and Resultado cannot read hecho", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedGaps" },
+        { "id": "13.4", "what": "a corpus case with a missing item is a warning", "point": 10, "kind": "exists", "files": ["tests/corpus/asked-missing-item.json"] },
+        { "id": "13.5", "what": "the share of recent tasks that were redone as a follow-up on the same files is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.followUpShare", "op": "le", "threshold": null, "frozenIn": 10 }
+      ]
+    }
+  ]
+}

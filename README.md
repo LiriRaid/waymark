@@ -60,6 +60,8 @@ A software supply chain tracks how an artifact was built: its inputs, the steps 
 | **Output** | the files changed and the commits | the files git saw change between your message and the end of the turn, whatever tool changed them; each commit carries `Waymark-Task: <task ID>` and the record keeps its hash |
 | **Record** | one line per task in `<project>/.waymark/provenance.jsonl` (with a commit: the whole record as a git note on it, `refs/notes/waymark`), and `tasks.md` next to it: in progress, pending, next step, done | each line holds the hash of the previous one (and of its note): editing or deleting a past task breaks the chain. Each record also anchors the log's length and last hash in git (`refs/notes/waymark-anchor`, travels with the notes), so a log rewritten and chained again breaks it too; a removal you ask for goes through `node "<skills-dir>/waymark/scripts/waymark.mjs" forget`, which leaves a rewrite anchor with your reason (`docs/adr/0025`). What has no commit (a question, a task without one) rides in git too (`refs/notes/waymark-log`), a task committed in several repos has its note in each, and a clone or a cleaned project with no `.waymark/` gets its memory and `tasks.md` rebuilt from git at session start (`docs/adr/0012`, `0013`). The folder is local (kept out of git through the project's `.gitignore`) and plain Markdown/JSONL, so any agent (Codex, Cursor, a new session) resumes from it |
 
+How good is it, in numbers: `node "<skills-dir>/waymark/scripts/waymark.mjs" scorecard` (from this repository's root) scores Waymark against 13 weighted criteria, from the provenance and tamper evidence of the chain to token cost, agnosticism, reuse of earlier evidence and tasks done as asked. Every check is a file, a pattern, a command's exit or a number measured from the records; what is not built scores 0 and names the plan point that adds it, and the total is never rounded up. The weights, checks and thresholds are locked by a hash in [`docs/adr/0028-scorecard.md`](docs/adr/0028-scorecard.md), so the target cannot move without a new decision record.
+
 What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'s job; this chain covers the work the agent does on your code. Decisions: [`docs/adr/`](docs/adr).
 
 ## What each agent enforces
@@ -318,6 +320,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0025 · The log anchored in git, forget for the removals you ask for, and an Evidencia backed by a check](docs/adr/0025-anchored-log-forget-and-backed-evidence.md)
 - [0026 · One classifier for what a command runs, and an open failure when the hook cannot tell](docs/adr/0026-one-run-classifier-and-open-failure.md)
 - [0027 · Cost per link, review by risk, procedures by the hook, a chain anyone can verify](docs/adr/0027-cost-per-link-risk-review-verifiable-chain.md)
+- [0028 · The scorecard: what "95 %" means, computed by checks](docs/adr/0028-scorecard.md)
 <!-- adr-index:end -->
 
 ## Contributing back

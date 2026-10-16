@@ -1,6 +1,6 @@
 ---
 name: dept-architecture
-description: "Waymark · Architecture department. Use FIRST for structure and design: \"refactoriza\", \"dónde pongo esto\", \"estructura de carpetas\", \"nuevo módulo\", hexagonal/clean, \"desacoplar\", \"capas\", \"migrar de X a Y\", \"proyecto desde cero\", ADR, SOLID. Owner of every L3 task."
+description: "Architecture. FIRST for structure and design: \"refactoriza\", \"dónde pongo esto\", \"estructura de carpetas\", \"nuevo módulo\", \"desacoplar\", \"capas\", \"migrar de X a Y\", hexagonal/clean, ADR. Owns every L3."
 ---
 
 # Software Architecture & Design

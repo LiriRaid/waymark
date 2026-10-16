@@ -1,6 +1,6 @@
 ---
 name: dept-security
-description: "Waymark · Security department. Use FIRST for auth, secrets and risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"CSRF\", \"variables de entorno\", \"API key\", \"vulnerabilidad\", \"auditoría de dependencias\", RLS, OWASP. Supports any task touching user data."
+description: "Security. FIRST for auth, secrets, risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"CSRF\", \"API key\", \"vulnerabilidad\", RLS, OWASP."
 ---
 
 # Security / DevSecOps

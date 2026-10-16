@@ -1,6 +1,6 @@
 ---
 name: ui-system
-description: "Waymark tool (ui.system), owner dept-ux-ui. Design systems and visual identity: \"paleta de colores\", \"tipografía\", \"design tokens\", \"tema oscuro\", \"sistema de diseño\", \"qué estilo le queda\", \"qué gráfica uso\", theming. Records the existing system first. Not a component (ui-build)."
+description: "ui.system · owner dept-ux-ui. Design systems and identity: \"paleta de colores\", \"tipografía\", \"design tokens\", \"tema oscuro\", \"sistema de diseño\", \"qué estilo le queda\", theming."
 ---
 
 # UI System

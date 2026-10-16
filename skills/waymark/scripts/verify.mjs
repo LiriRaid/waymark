@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { projectHome, readRecords, readNotes, anchorsFor, verifyChain, gitNote } from './provenance.mjs';
-import { SKILLS, checkManifest } from './manifest.mjs';
+import { SKILLS, checkManifest, checkGenerated, manifestSignature } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
 export const ALLOWED_SIGNERS = path.join(SKILLS, 'waymark', 'ALLOWED_SIGNERS');
@@ -134,15 +134,18 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
         if (!r.ok) code = 1;
       }
     }
-    const sig = releaseSignature(skillsDir);
-    if (!sig) lines.push('signature: this install is not a git clone (no history to verify); check the tag from a clone: git tag -v v<version>');
-    else {
-      lines.push(`signature (${sig.ref}): ${sayState(sig)}`);
-      if (sig.state !== 'signed') {
-        if (args.includes('--require-signature')) code = 1;
-        else lines.push('warning: not signed by a trusted key (pass --require-signature to fail on it)');
-      }
+    const gen = checkGenerated(skillsDir);
+    lines.push(gen.ok ? 'generated: skill-map.json and skill-registry.md are what sync writes (not hashed: sync rewrites them for each machine)' : `generated: ${gen.problems.join('; ')}`);
+    if (!gen.ok) code = 1;
+    // The signature the install carries: MANIFEST.json.sig over the manifest, checked against ALLOWED_SIGNERS (no git needed).
+    const sig = manifestSignature(manifestFile || path.join(skillsDir, 'waymark', 'MANIFEST.json'), path.join(skillsDir, 'waymark', 'ALLOWED_SIGNERS'));
+    lines.push(`signature (MANIFEST.json): ${sig.state === 'signed' ? `signed by ${sig.by}` : sig.state === 'untrusted' ? 'signed, key not in ALLOWED_SIGNERS' : sig.state === 'bad' ? 'BAD signature: the manifest or its signature was edited after signing' : sig.state === 'unchecked' ? 'unchecked (ssh-keygen is not available here)' : 'unsigned'}`);
+    if (sig.state !== 'signed') {
+      if (args.includes('--require-signature')) code = 1;
+      else lines.push('warning: not signed by a trusted key (pass --require-signature to fail on it)');
     }
+    const tag = releaseSignature(skillsDir); // a clone also has the signed release tag: reported, not required
+    if (tag) lines.push(`tag (${tag.ref}): ${sayState(tag)}`);
   } else if (args.includes('--require-signature')) {
     const sig = releaseSignature(skillsDir);
     lines.push(`signature (${sig?.ref || 'none'}): ${sig ? sayState(sig) : 'not a git clone'}`);

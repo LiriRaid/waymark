@@ -85,6 +85,19 @@ export function commitSignatures(repo, commits) {
   return out;
 }
 
+// The rules a record says governed its task (rec.pinned) against this release's manifest: { pinned, match, differ[] }, or
+// null when the record pins nothing (a task before 2.0.16).
+export function pinnedReport(rec, manifest = null) {
+  const p = rec?.pinned;
+  if (!p) return null;
+  let files = manifest?.files;
+  if (!files) { try { files = JSON.parse(fs.readFileSync(path.join(SKILLS, 'waymark', 'MANIFEST.json'), 'utf8')).files; } catch { files = {}; } }
+  const items = [['waymark/routine.json', p.routine], ...(p.department ? [[`${p.department.skill}/SKILL.md`, p.department.sha]] : []), ...(p.procedures ? [[`${p.procedures.dept}/procedures.md`, p.procedures.sha]] : []),
+    ...(p.profiles || []).map((x) => [`waymark/${x.kind === 'stack' ? 'stacks' : 'architectures'}/${x.name}.md`, x.sha])].filter(([, sha]) => sha);
+  const differ = items.filter(([f, sha]) => files[f] !== sha).map(([f]) => f);
+  return { pinned: items.length, match: items.length - differ.length, differ };
+}
+
 // verify [--install] [--require-signature] [--manifest <file>] [<task ID>] → { lines[], code }
 export function verify(cwd, args = []) {
   const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -105,6 +118,8 @@ export function verify(cwd, args = []) {
   if (id) {
     const rec = readRecords(projectHome(cwd).log).find((r) => r.id === id);
     lines.push(rec ? `task ${id}: recorded${rec.commits?.length ? ` · ${rec.commits.length} commit(s)` : ' · no commit'}${rec.signatures ? ` · signatures ${Object.values(rec.signatures).join(', ')}` : ''}` : `task ${id}: no record in this log`);
+    const pr = pinnedReport(rec);
+    if (rec) lines.push(pr ? `rules: ${pr.pinned} pinned · ${pr.match} match this release's manifest${pr.differ.length ? ` · differ: ${pr.differ.join(', ')} (another release, or the file changed)` : ''}` : 'rules: not pinned in this record (a task from before 2.0.16)');
     if (!rec) code = 1;
   }
   if (args.includes('--install')) {

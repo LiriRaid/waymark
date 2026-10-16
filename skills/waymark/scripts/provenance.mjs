@@ -54,6 +54,7 @@ export {
   snapshotDiff,
   turnChanged,
   turnInputs,
+  pinnedRules,
 } from './provenance/snapshot.mjs';
 export {
   anchorsFor,

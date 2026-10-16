@@ -645,6 +645,8 @@ test('stop hook: a backed Cierre is recorded and not blocked', () => {
   assert.deepEqual(records[0].unresolved, []);
   assert.equal(records[0].evaluation.score, '10/10');
   assert.match(records[0].cierre, /^## Cierre · /);
+  assert.match(records[0].pinned.routine, /^[0-9a-f]{64}$/, 'the record pins the rules that governed it');
+  assert.equal(records[0].evaluation.links.v, 1, 'and the cost per link');
 });
 
 test('stop hook: an unbacked Cierre is blocked once, then recorded with what stayed unbacked', () => {

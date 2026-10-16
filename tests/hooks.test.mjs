@@ -8,6 +8,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+process.env.WAYMARK_REVIEW_MODE = 'always'; // these tests judge the review testigo on small edits; the proportional rule has its own tests (risk.test.mjs)
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-test-'));
 process.env.WAYMARK_ENGRAM = ''; // never the real engram: a test that needs it points this at a fake
@@ -620,9 +621,9 @@ test('catalog of testigos: each states its claim; the instructions block quotes 
 
 test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
-  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T1\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`new task → ${DAY} · T2 · follow-up of ${DAY} · T1 \\(it continues that task's files\\) → ${DAY} · T1b`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T2; follow-up \\(same files\\) ${DAY} · T1b\\.$`));
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -644,6 +645,10 @@ test('stop hook: a backed Cierre is recorded and not blocked', () => {
   assert.deepEqual(records[0].unresolved, []);
   assert.equal(records[0].evaluation.score, '10/10');
   assert.match(records[0].cierre, /^## Cierre · /);
+  assert.match(records[0].pinned.routine, /^[0-9a-f]{64}$/, 'the record pins the rules that governed it');
+  assert.equal(records[0].evaluation.links.v, 1, 'and the cost per link');
+  assert.equal(records[0].schema, 'waymark.record/v1', 'the record names its own shape');
+  assert.equal(records[0].outcome.result, 'hecho', 'the result as a label, not only inside the Cierre text');
 });
 
 test('stop hook: an unbacked Cierre is blocked once, then recorded with what stayed unbacked', () => {
@@ -1027,14 +1032,14 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
   assert.equal(first.steps.length, 4);
   assert.equal(first.settings.model, 'x', 'other keys kept');
   assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
-  assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit');
+  assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit|Read');
   assert.deepEqual(planHooks(first.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
   const old = { hooks: {
     PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node "C:\\old\\waymark\\scripts\\tool-hook.mjs"' }] }],
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/rule0-hook.mjs"' }] }, { hooks: [{ type: 'command', command: 'node "/x/waymark/scripts/rule0-hook.mjs"' }, theirs] }],
   } };
   const second = planHooks(old, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs"' }] }]);
+  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs"' }] }]);
   assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
   assert.ok(second.steps.some((s) => /remove duplicate UserPromptSubmit/.test(s)));
   assert.equal(old.hooks.PreToolUse[0].matcher, 'Bash|PowerShell', 'the input is not mutated');
@@ -1049,7 +1054,8 @@ test('adapter: the hooks answer through the agent module; the gate no longer pol
   assert.equal(agentFrom(['node', 'x', '--agent', 'unknown']).name, 'claude', 'unknown → default, never a crash');
   assert.deepEqual(claude.call({ tool_name: 'Edit', tool_input: { file_path: '/a.ts' } }), { files: ['/a.ts'] });
   assert.deepEqual(claude.call({ tool_name: 'PowerShell', tool_input: { command: 'ls' } }), { command: 'ls' });
-  assert.equal(claude.call({ tool_name: 'Read', tool_input: {} }), null);
+  assert.deepEqual(claude.call({ tool_name: 'Read', tool_input: { file_path: '/a.ts' } }), { reads: ['/a.ts'] }, 'a read goes to the sensitive-path guard only');
+  assert.equal(claude.call({ tool_name: 'Grep', tool_input: {} }), null);
   assert.deepEqual(claude.out.deny('no'), { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no' } });
   assert.deepEqual(claude.out.block('r'), { decision: 'block', reason: 'r' });
   const fake = { ...claude, read: () => [prompt('cambia el título'), say('Waymark → L1 · dept-frontend · skills: ninguna')] };
@@ -1911,7 +1917,7 @@ test('stack: the package manager and versions come from the repo (packageManager
   assert.equal(syncIdentity(mem, s), false, 'already right');
   assert.deepEqual(gateCommand(repo, mem), { cmd: 'pnpm exec tsc --noEmit', from: 'memory.md' }, 'the hook re-runs a memory row with the repo manager');
   const line = spawnSync(process.execPath, [path.join(SCRIPTS, 'rule0-hook.mjs')], { input: JSON.stringify({ cwd: repo, session_id: 's-stack', prompt: 'x' }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
-  assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo \(read now\): pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
+  assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo: pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
 });
 
 test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
@@ -2539,9 +2545,10 @@ test('fewer responses: a department loaded earlier in the session owns a task ro
   const { gitLine, REMINDER } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const repo = memRepo('gitline');
   fs.writeFileSync(path.join(repo, 'x.ts'), '1\n');
-  assert.match(gitLine(repo), /^ Git \(read now\): [^·]+ · \d+ changed: .*\?\? x\.ts/);
+  assert.match(gitLine(repo), /^ Git: [^·]+ · \d+ changed: .*\?\? x\.ts/);
+  assert.match(gitLine(repo), /^[^]{0,160}$/, 'the git line stays short: a count and the first two names');
   assert.equal(gitLine(path.join(os.tmpdir(), 'no-such-dir-wm')), '');
-  assert.ok(REMINDER.full.length < 400 && !/procedures\.md section|browser verification|Independent tool calls/.test(REMINDER.full), 'the block holds the rules once');
+  assert.ok(REMINDER.full.length < 150 && !/procedures\.md section|browser verification|Independent tool calls/.test(REMINDER.full), 'the block holds the rules once');
 });
 
 test('learned move: Solved problems, Gotchas and Decisions go to engram once; memory.md keeps the manual, history.md the moved text', async () => {
@@ -3010,4 +3017,50 @@ test('2.0.14 a note in a gate\'s Command cell is not run: "(not verified)" is dr
   assert.equal(gateCell('none (scripts Node sin paso de build)'), 'none (scripts Node sin paso de build)', 'a none row keeps its reason (the card shows it)');
   const guide = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'project-detection.md'), 'utf8');
   assert.match(guide, /leave the \*Verified\* cell empty/, 'the bootstrap says where "not verified" goes');
+});
+
+test('cost per link: each response goes to routine, work or reply by its tool calls; a streamed message counts once', async () => {
+  const { turnLinks } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const as = (id, content, out) => ({ type: 'assistant', message: { id, content, usage: { input_tokens: 1, cache_creation_input_tokens: 10, cache_read_input_tokens: 100, output_tokens: out } } });
+  const lines = [
+    { type: 'user', message: { content: 'haz algo' } },
+    as('m1', [{ type: 'tool_use', name: 'Skill', id: 'a', input: { skill: 'dept-qa', args: 'L1' } }], 5),
+    as('m2', [{ type: 'tool_use', name: 'Edit', id: 'b', input: { file_path: 'x.js' } }], 7),
+    as('m2', [{ type: 'tool_use', name: 'Bash', id: 'c', input: { command: 'node waymark.mjs pack x' } }], 7), // same message streamed: counts once, routine wins
+    as('m3', [{ type: 'tool_use', name: 'Read', id: 'd', input: { file_path: 'src/a.js' } }], 3),
+    as('m4', [{ type: 'text', text: 'Cierre' }], 9),
+  ];
+  const l = turnLinks(lines);
+  assert.equal(l.v, 1);
+  assert.deepEqual([l.routine.responses, l.work.responses, l.reply.responses], [2, 1, 1]);
+  assert.equal(l.routine.output, 12);
+  assert.equal(l.reply.cacheRead, 100);
+});
+
+test('cost per link: a command that only names waymark.mjs (a syntax check, a git add) is work; a waymark.mjs subcommand is routine', async () => {
+  const { turnLinks } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const as = (id, command) => ({ type: 'assistant', message: { id, content: [{ type: 'tool_use', name: 'Bash', id, input: { command } }], usage: { output_tokens: 1 } } });
+  const l = turnLinks([{ type: 'user', message: { content: 'x' } }, as('a', 'node --check skills/waymark/scripts/waymark.mjs'), as('b', 'node "~/waymark.mjs" pack src/a.js')]);
+  assert.deepEqual([l.routine.responses, l.work.responses], [1, 1]);
+});
+
+test('held message: the card carries at most HELD_MAX characters of it and the whole message stays in held-full.md', async () => {
+  const { heldPrompt, HELD_MAX, HELD_MORE, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const repo = memRepo('held-long'), home2 = projectHome(repo);
+  const long = 'pide algo muy largo '.repeat(80).trim();
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${long}\n`);
+  const got = heldPrompt(home2);
+  assert.equal(got, long.slice(0, HELD_MAX) + HELD_MORE);
+  assert.equal(fs.readFileSync(path.join(home2.dir, 'held-full.md'), 'utf8').trim(), long, 'the user\'s words are not lost to the cap');
+  assert.ok(EXTRA.held(got).length <= 700, 'the held message the card adds stays under 700 characters');
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), '<!-- x -->\ncorto\n');
+  assert.equal(heldPrompt(home2), 'corto', 'a short one is carried as it is');
+});
+
+test('commit trailer: only a real git commit asks for the trailer; git config, a -c option on another command and an echo do not', async () => {
+  const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const repo = memRepo('not-a-commit');
+  const ask = (c) => missingTrailer(c, `s-${Math.random()}`, repo, path.join(home, `trailer-${Math.random()}.json`));
+  for (const c of ['git config --get commit.gpgsign', 'git -c commit.gpgsign=false status', 'echo git commit', 'git log --format=%H -1 && git config user.signingkey']) assert.equal(ask(c), null, c);
+  for (const c of ['git commit -m "x"', 'git -c user.name=t commit -m "x"', 'git -C ../api commit -m "x"', 'cd api && git add . && git commit -m "x"', 'GIT_AUTHOR_NAME=t git commit -m "x"']) assert.match(ask(c) || '', /Waymark-Task/, c);
 });

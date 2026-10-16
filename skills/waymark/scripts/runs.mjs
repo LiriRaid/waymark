@@ -49,8 +49,8 @@ const TOKEN = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
 const tokens = (s) => [...String(s).matchAll(TOKEN)].map((m) => m[1] ?? m[2] ?? m[3]);
 const RUNNER = { npx: 1, pnpx: 1, bunx: 1, time: 1, call: 1, '&': 1, exec: 1, env: 1 };
 const RUNNER2 = /^(pnpm (exec|dlx)|yarn (exec|dlx)|bundle exec|poetry run|uv run|pipenv run|python3? -m|py -m|npm exec)$/;
-const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|phpstan|typecheck)$/;
-const TESTERS = /^(vitest|jest|karma|mocha|pytest|rspec|phpunit|ava|tap|playwright|cypress|nyc|c8)$/;
+const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|phpstan|pint|phpcs|php-cs-fixer|tflint|typecheck)$/;
+const TESTERS = /^(vitest|jest|karma|mocha|pytest|rspec|phpunit|pest|ava|tap|playwright|cypress|nyc|c8)$/;
 const SCRIPT_TEST = /(^|[:_-])(test|tests|spec|e2e|unit|vitest|jest)([:_-]|$)/i;
 const SCRIPT_BUILD = /(^|[:_-])build([:_-]|$)/i;
 const SCRIPT_GATE = /(typecheck|type-check|tsc|lint|check|types)/i;
@@ -95,11 +95,13 @@ function classify(words) {
   } else if (prog === 'node' || prog === 'deno') {
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;
-  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php)$/.test(prog)) {
+  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php|terraform|tofu|composer)$/.test(prog)) {
     const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : sub;
     if (/^(test|spec)$/.test(verb)) out.test = true;
     else if (/^(build|package|verify)$/.test(verb)) out.gate = out.build = true;
     else if (/^(lint|vet|check|clippy|compile)$/.test(verb)) out.gate = true;
+    // Terraform and Composer: validate is a gate, fmt only in check mode (plain fmt rewrites files), static analysis too
+    else if (/^(terraform|tofu|composer)$/.test(prog) && (verb === 'validate' || (verb === 'fmt' && subs.includes('-check')) || /^(analy[sz]e|stan|lint)$/.test(verb))) out.gate = true;
   }
   return out;
 }

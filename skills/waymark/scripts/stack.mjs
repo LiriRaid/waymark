@@ -4,6 +4,7 @@
 // Offline, a few small file reads, 0 model tokens.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { read } from './lib/fs.mjs';
 
 const json = (p) => { try { return JSON.parse(read(p)); } catch { return null; } };
@@ -15,12 +16,22 @@ export const RUNNERS = { pnpm: { exec: 'pnpm exec', run: 'pnpm run' }, npm: { ex
 const MAIN = ['@angular/core', 'react', 'next', 'vue', 'nuxt', 'svelte', '@sveltejs/kit', 'astro', '@nestjs/core', 'express', 'fastify', 'prisma', 'primeng',
   'tailwindcss', 'vite', 'vitest', 'jest', '@playwright/test', 'typescript'];
 
+// Manifests that make a project PHP or Rust even when a package.json (assets, tooling) sits beside them.
+const PRIMARY = [['composer.json', 'php (composer)'], ['Cargo.toml', 'rust (cargo)']];
+const FRAMEWORKS = ['@angular/core', 'react', 'next', 'vue', 'nuxt', 'svelte', '@sveltejs/kit', 'astro', '@nestjs/core', 'express', 'fastify'];
+const hasFramework = (pkg) => FRAMEWORKS.some((n) => (pkg.dependencies || {})[n] || (pkg.devDependencies || {})[n]);
+const anyExt = (root, re) => { try { return fs.readdirSync(root).some((f) => re.test(f)); } catch { return false; } };
+
 // → { pm, pmVersion, from, exec, run, deps: [[name, version]] } for a Node project; { pm: null, other } for a Ruby, Python or
 // Go project; null when the folder has no manifest.
 export function stackOf(root) {
-  const pkg = json(path.join(root, 'package.json'));
+  let pkg = json(path.join(root, 'package.json'));
+  // A package.json that names no JS framework is a front-end build next to another stack's manifest (Laravel's Vite assets,
+  // a Rails app's tooling): that other manifest decides, so the commands are not translated to npm for a PHP project.
+  if (pkg && !hasFramework(pkg) && PRIMARY.some(([f]) => fs.existsSync(path.join(root, f)))) pkg = null;
   if (!pkg) {
-    const other = [['Gemfile', 'bundler (bundle exec)'], ['pyproject.toml', 'python (pyproject)'], ['requirements.txt', 'python (pip)'], ['go.mod', 'go']].find(([f]) => fs.existsSync(path.join(root, f)));
+    const other = [...PRIMARY, ['Gemfile', 'bundler (bundle exec)'], ['pyproject.toml', 'python (pyproject)'], ['requirements.txt', 'python (pip)'], ['go.mod', 'go']].find(([f]) => fs.existsSync(path.join(root, f)))
+      || (anyExt(root, /\.tf$/i) ? ['*.tf', 'terraform'] : null);
     if (!other) return null;
     const rails = other[0] === 'Gemfile' ? read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] : null;
     return { pm: null, other: other[1], deps: rails ? [['rails', rails]] : [] };
@@ -101,4 +112,19 @@ export function translate(cmd, stack, { root = null, direct = false } = {}) {
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npx(?:\s+--no-install)?|pnpm\s+exec|pnpm\s+dlx|yarn\s+dlx|bunx)(?=\s)/g, (_, p) => p + to.exec)
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npm|pnpm|yarn|bun)\s+run(?=\s)/g, (_, p) => p + to.run)
     .replace(/(^|&&\s*|;\s*|\|\|\s*)(?:npm|pnpm|yarn|bun)\s+(test|start)\b/g, (_, p, s) => `${p}${stack.pm} ${s}`);
+}
+
+// The stack profile (skills/waymark/stacks/<slug>.md) a project falls under: { slug, exists }, from the same precedence as
+// stackOf. No signal, or a signal with no profile written yet, is `generic` (docs/adr/0027: the external corpus measures it).
+export function profileOf(root) {
+  const s = stackOf(root);
+  let slug = 'generic';
+  if (s?.pm) {
+    const names = new Set(s.deps.map(([n]) => n));
+    slug = names.has('@angular/core') ? 'angular' : names.has('@nestjs/core') ? 'nestjs' : names.has('react') ? 'react' : 'node';
+  } else if (s) {
+    slug = /^rust/.test(s.other) ? 'rust' : /^php/.test(s.other) ? 'php' : s.other === 'terraform' ? 'terraform' : /^python/.test(s.other) ? 'python' : s.other === 'go' ? 'go' : s.deps.some(([n]) => n === 'rails') ? 'rails' : 'generic';
+  } else if (['pom.xml', 'build.gradle', 'build.gradle.kts'].some((f) => fs.existsSync(path.join(root, f)))) slug = 'java';
+  else if (anyExt(root, /\.(csproj|sln)$/i)) slug = 'dotnet';
+  return { slug, exists: fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'stacks', `${slug}.md`)) };
 }

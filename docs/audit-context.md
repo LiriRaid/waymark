@@ -77,3 +77,20 @@ The audit script compared every sentence of the block, the card, the reminder, t
 | C3 | The full reminder no longer repeats the block's opener rules: it keeps the task ID and what changed since the last reply. | ~100 tokens per prompt |
 | C4 | The department boilerplate (Entry, Procedures, Learned rules header) moves once into the block. Each department keeps only its own rules. | ~140 tokens per department loaded |
 | C5 | Recordar and the engram save are done by the hooks (decided above), so they are never a block and never an extra cycle. | 1–2 responses when they used to fail (~58–116k) |
+
+## 3. Cost per link (2.0.16, point 1)
+
+The automatic evaluation now stores `links` (schema `v: 1`) next to `usage`: each main-agent response of the task goes to **routine** (a department, waymark, review or docs skill; a `waymark.mjs` command; a read of a procedures file, the project's memory or the waymark references; the choice window), **reply** (no tool call: the Cierre) or **work** (everything else), with its responses and its input, cache-write, cache-read and output tokens. Subagent tokens stay in `usage.subagents`. Source: `turnLinks` in `skills/waymark/scripts/transcript.mjs`, test in `tests/hooks.test.mjs` ("cost per link").
+
+Measured on the last turn of six sessions of this repository on 2026-10-15 (new = input + cache write + output; read = cache read):
+
+| Session | Routine | Work | Reply |
+|---|---|---|---|
+| c182606a (this one, point 0 and 1) | 5 r · 41k new · 459k read | 15 r · 40k new · 1,622k read | 0 r |
+| d152d068 | 2 r · 2k · 743k | 1 r · 2k · 373k | 1 r · 2k · 373k |
+| d3832f40 | 3 r · 14k · 553k | 1 r · 11k · 190k | 1 r · 9k · 193k |
+| d93063a6 | 2 r · 13k · 414k | 6 r · 26k · 1,303k | 1 r · 2k · 228k |
+| ef326e8c | 8 r · 26k · 1,747k | 43 r · 147k · 9,722k | 8 r · 266k · 1,879k |
+| f317ef1c | 1 r · 3k · 292k | 18 r · 80k · 4,979k | 1 r · 1k · 302k |
+
+Reading: the routine is 1 to 8 responses per turn and 5% to 30% of the cache reads; in the long turns the work dominates. The numbers are one turn per session, not a benchmark: points 2 to 5 are judged by re-measuring with the same function.

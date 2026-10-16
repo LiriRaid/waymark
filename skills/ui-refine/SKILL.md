@@ -1,6 +1,6 @@
 ---
 name: ui-refine
-description: "Waymark tool (ui.refine), owner dept-ux-ui. Improve existing UI by mode (critique, polish, simplify, harden, adapt, animate…): \"mejora esta pantalla\", \"pulir detalles\", \"hazlo más limpio\", \"agrega animaciones\", \"no se adapta al móvil\". Not new UI (ui-build)."
+description: "ui.refine · owner dept-ux-ui. Improve existing UI by mode (polish, simplify, harden, adapt, animate…): \"mejora esta pantalla\", \"pulir detalles\", \"hazlo más limpio\", \"agrega animaciones\"."
 ---
 
 # UI Refine

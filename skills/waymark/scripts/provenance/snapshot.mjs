@@ -6,8 +6,25 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { waymarkHome as HOME } from '../lib/paths.mjs';
 import { sha } from '../lib/hash.mjs';
+import { hashFile } from '../manifest.mjs';
 
 const fileSha = (p) => { try { return sha(fs.readFileSync(p)).slice(0, 16); } catch { return null; } };
+
+// The rules that governed a task, pinned by hash (docs/adr/0027): the owner department's SKILL.md and procedures.md, routine.json,
+// the stack and architecture profiles the task read, the project's risk override and the release manifest. Hashes are the
+// manifest's (text with CRLF read as LF), so `verify <task ID>` can compare them with a release. A file that is not there is null.
+export function pinnedRules({ dept = null, root = null, reads = [], skillsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..') } = {}) {
+  const h = (p) => { try { return hashFile(p); } catch { return null; } };
+  const at = (rel) => h(path.join(skillsDir, rel));
+  const out = { routine: at('waymark/routine.json'), manifest: at('waymark/MANIFEST.json') };
+  if (dept && /^[\w-]+$/.test(dept)) { out.department = { skill: dept, sha: at(`${dept}/SKILL.md`) }; out.procedures = { dept, sha: at(`${dept}/procedures.md`) }; }
+  const profiles = new Map();
+  for (const r of reads) for (const m of String(r).matchAll(/[\\/]waymark[\\/](stacks|architectures)[\\/]([\w.-]+)\.md/g)) profiles.set(`${m[1]}/${m[2]}`, { kind: m[1] === 'stacks' ? 'stack' : 'architecture', name: m[2], sha: at(`waymark/${m[1]}/${m[2]}.md`) });
+  if (profiles.size) out.profiles = [...profiles.values()];
+  const risk = root ? h(path.join(root, '.waymark', 'risk.json')) : null;
+  if (risk) out.risk = risk;
+  return out;
+}
 
 // What the task was built with, from the turn's transcript lines (from its prompt on) and the instruction files.
 export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir(), '.claude', 'CLAUDE.md')) { // the agent adapter names its file

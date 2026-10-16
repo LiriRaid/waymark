@@ -54,14 +54,15 @@ export const W_CMD = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '
 const wIn = (text) => (text.includes(` W = ${W_CMD}`) ? 'W' : W_CMD);
 // The lines added after the card's cap, built here so size.mjs measures the same text.
 export const EXTRA = {
-  held: (msg) => `\nHeld message (the context brake stopped it in a large session; it is the user's request, start with it): ${msg}`,
+  held: (msg) => `\nHeld message (stopped by the context brake; the user's request, start with it): ${msg}`,
   pointer: (last, w = W_CMD) => `\nWaymark check (last run: ${last}): before the task, run ${w} check — read-only: update, skills, MCP fit, migration, agents, frameworks, session size — and offer with your choice window only what it reports as pending; nothing pending → do not mention it.`,
   agents: (names, w = W_CMD) => `\nNew agents on this machine (said once): ${names.join(', ')}. Before the task, run ${w} check and offer in your choice window what it reports for them.`,
   proposals: (texts, w = W_CMD) => `\nProposals (said once; offer each in your choice window, write it only after the user's yes; ${w} check lists them): ${texts.join('; ')}`,
 };
 // The open tasks of Work in progress lines: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]".
 export const openIds = (lines) => lines.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
-export const HELD_MAX = 1200; // characters of the held message
+export const HELD_MAX = 520; // characters of the held message the card carries; a longer one is kept whole in held-full.md
+export const HELD_MORE = ' … (the rest: .waymark/held-full.md)';
 export function digest(cwd, agentName = 'claude') {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
@@ -121,7 +122,10 @@ export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
   let text = '';
   try { if (now - fs.statSync(file).mtimeMs < 86400000) text = fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '').trim(); fs.rmSync(file, { force: true }); } catch {}
-  return text.length > HELD_MAX ? text.slice(0, HELD_MAX - 1) + '…' : text;
+  if (text.length <= HELD_MAX) return text;
+  // the user's words are never lost to the cap: the whole message stays in a file the agent reads on demand
+  try { fs.writeFileSync(path.join(home.dir, 'held-full.md'), text + '\n'); } catch {}
+  return text.slice(0, HELD_MAX) + HELD_MORE;
 }
 
 // One line when neither a check nor this pointer happened in the last week.

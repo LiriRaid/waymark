@@ -1,6 +1,6 @@
 ---
 name: dept-backend
-description: "Waymark · Backend department. Use FIRST to build or change server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"servicio\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", REST, GraphQL, worker, cron, realtime."
+description: "Backend. FIRST for server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"servicio\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", REST, GraphQL, cron."
 ---
 
 # Backend Engineering

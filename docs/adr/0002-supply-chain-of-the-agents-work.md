@@ -19,7 +19,7 @@ The decision gate applies from L1 up: the pre-tool hook denies the first edit of
 - **A software supply chain in the SBOM/dependency sense:** not what this is. Dependency audit stays with `dept-security`. The README states the difference so the claim cannot be refuted on that ground.
 - **Gate only at L2/L3 (0001):** rejected, the agent kept deciding alone at L1.
 - **Asking even when there is one way:** rejected by the user, one extra round on trivial tasks with nothing to decide.
-- **Signed records (sigstore) and a verify command:** not now. Signing needs an account and network; `verifyChain` exists as a function for tests, and a CLI can follow if the A/B needs it.
+- **Signed records (sigstore) and a verify command:** not now. Signing needs an account and network; `verifyChain` exists as a function for tests, and a CLI can follow if the A/B needs it. *Update 2.0.16:* the CLI exists (`waymark.mjs verify`, ADR 0027); signing the records themselves is still not done, the release is signed with git instead.
 
 ## Consequences
 - Positive: every task can be audited end to end (who decided what, when, with which inputs, and which commit it produced); an edited or deleted record breaks the chain; the A/B has hard evidence to compare.

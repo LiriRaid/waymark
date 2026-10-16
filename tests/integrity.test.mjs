@@ -8,6 +8,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+process.env.WAYMARK_REVIEW_MODE = 'always'; // these tests judge the review testigo on small edits; the proportional rule has its own tests (risk.test.mjs)
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-integrity-'));
 process.env.WAYMARK_ENGRAM = '';

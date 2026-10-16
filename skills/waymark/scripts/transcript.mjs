@@ -163,6 +163,37 @@ export function subagentUsage(transcriptPath, since = 0) {
   return s;
 }
 
+// Cost per link (schema v1): each main-agent response of the turn goes to the step its tool calls served.
+// routine = a department/waymark/review/docs skill, a waymark.mjs command, a read of a procedures file, the project's
+// memory or the waymark references, the choice window; reply = a response with no tool call (the Cierre); work = the
+// rest. A response with calls of several kinds takes routine. Subagent tokens stay apart (withSubagents). Messages are
+// counted once, like turnUsage.
+const ROUTINE_CALL = (c) => {
+  const i = c.input || {};
+  if (c.name === 'Skill') return /^(dept-|waymark$|code-review$|library-docs$)/.test(String(i.skill || '').replace(PLUGIN, ''));
+  if (c.name === 'AskUserQuestion') return true;
+  if (c.name === 'Read') return /procedures\.md|[\\/]\.waymark[\\/]|[\\/]waymark[\\/]references[\\/]/.test(String(i.file_path || ''));
+  return /\bwaymark\.mjs["']?\s+(pack|review|memory|tasks|check|engram|incidents|sync|notes|verify|attest)\b/.test(String(i.command || ''));
+};
+export function turnLinks(lines, since = 0) {
+  const { from } = turnStart(lines, since);
+  const byId = new Map();
+  for (const d of lines.slice(from)) {
+    const u = d.type === 'assistant' && !d.isSidechain ? d.message?.usage : null;
+    if (!u) continue;
+    const e = byId.get(d.message.id) || { u, calls: [] };
+    for (const c of d.message.content || []) if (c.type === 'tool_use') e.calls.push(c);
+    byId.set(d.message.id, e);
+  }
+  const zero = () => ({ responses: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });
+  const links = { v: 1, routine: zero(), work: zero(), reply: zero() };
+  for (const { u, calls } of byId.values()) {
+    const l = links[!calls.length ? 'reply' : calls.some(ROUTINE_CALL) ? 'routine' : 'work'];
+    l.responses++; l.input += u.input_tokens || 0; l.cacheWrite += u.cache_creation_input_tokens || 0; l.cacheRead += u.cache_read_input_tokens || 0; l.output += u.output_tokens || 0;
+  }
+  return links;
+}
+
 // A turn's usage plus its subagents' (same shape as turnUsage; `subagents` keeps their total apart).
 export function withSubagents(usage, sub) {
   const fresh = sub.input + sub.cacheWrite + sub.output, total = fresh + sub.cacheRead;

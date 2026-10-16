@@ -1,6 +1,6 @@
 ---
 name: dept-devex
-description: "Waymark · Developer Experience department. Use FIRST for agent tooling and Waymark itself: \"crea una skill\", \"agrega un MCP\", \"CLAUDE.md\", \"settings de Claude\", \"actualiza el registro de skills\", \"agrega un stack al Waymark\", README, docs, memory, agents."
+description: "DevEx. FIRST for agent tooling and Waymark itself: \"crea una skill\", \"agrega un MCP\", \"CLAUDE.md\", \"settings de Claude\", \"agrega un stack al Waymark\", README, docs, agents."
 ---
 
 # Developer Experience & Documentation

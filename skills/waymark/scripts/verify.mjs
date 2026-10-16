@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { projectHome, readRecords, readNotes, anchorsFor, verifyChain, gitNote } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verifyChain, gitNote, RECORD_SCHEMAS } from './provenance.mjs';
 import { SKILLS, checkManifest, checkGenerated, manifestSignature } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
@@ -34,6 +34,15 @@ export function chainReport(cwd) {
   if (r.ok) return { ok: true, ...base, broken: null };
   const rec = records[r.at] || {};
   return { ok: false, ...base, broken: { at: r.at, task: rec.id || `line ${r.at + 1}`, reason: why(r, records) } };
+}
+
+// The shapes of the records this project holds, from the records whose detail (the git note) can be read:
+// { counts: { 'waymark.record/v2': n, … }, unknown: [schema…] }. A shape this release does not know is a warning, never a failure: a
+// newer Waymark wrote it, and the chain does not depend on the shape.
+export function schemaReport(cwd) {
+  const counts = {};
+  try { for (const r of readTaskRecords(projectHome(cwd))) if (r.schema) counts[r.schema] = (counts[r.schema] || 0) + 1; } catch {}
+  return { counts, unknown: Object.keys(counts).filter((k) => !RECORD_SCHEMAS.includes(k)) };
 }
 
 // The signers a project's release trusts: ssh lines of git's allowed-signers format, and `gpg <fingerprint>` lines.
@@ -108,6 +117,8 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
     ? `chain: intact · ${chain.records} records · ${chain.notes} notes in git · ${chain.anchors} anchors`
     : `chain: BROKEN at ${chain.broken.task} · ${chain.broken.reason}`);
   if (!chain.ok) code = 1;
+  const shapes = schemaReport(cwd);
+  if (Object.keys(shapes.counts).length) lines.push(`record shapes: ${Object.entries(shapes.counts).map(([k, n]) => `${k.replace('waymark.record/', '')} ×${n}`).join(' · ')}${shapes.unknown.length ? ` · warning: unknown shape ${shapes.unknown.join(', ')} (written by a newer Waymark; the chain does not depend on it)` : ''}`);
   const attFile = opt('--attestation');
   if (attFile) {
     const a = checkAttestation(cwd, attFile);

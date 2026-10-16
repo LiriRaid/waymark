@@ -648,7 +648,7 @@ test('stop hook: a backed Cierre is recorded and not blocked', () => {
   assert.match(records[0].cierre, /^## Cierre · /);
   assert.match(records[0].pinned.routine, /^[0-9a-f]{64}$/, 'the record pins the rules that governed it');
   assert.equal(records[0].evaluation.links.v, 1, 'and the cost per link');
-  assert.equal(records[0].schema, 'waymark.record/v1', 'the record names its own shape');
+  assert.equal(records[0].schema, 'waymark.record/v2', 'the record names its own shape');
   assert.equal(records[0].outcome.result, 'hecho', 'the result as a label, not only inside the Cierre text');
 });
 

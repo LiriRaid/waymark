@@ -322,6 +322,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0027 · Cost per link, review by risk, procedures by the hook, a chain anyone can verify](docs/adr/0027-cost-per-link-risk-review-verifiable-chain.md)
 - [0028 · The scorecard: what "95 %" means, computed by checks](docs/adr/0028-scorecard.md)
 - [0029 · A suite with nothing skipped, todo or failing, and a CI that runs it](docs/adr/0029-suite-with-nothing-skipped-and-ci.md)
+- [0030 · Record schema v2: the fields the hooks derive](docs/adr/0030-record-schema-v2.md)
 <!-- adr-index:end -->
 
 ## Contributing back

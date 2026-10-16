@@ -24,12 +24,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, sessionState } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
@@ -877,7 +877,7 @@ export function branchesOf(files) {
 }
 
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
-export const RECORD_SCHEMA = 'waymark.record/v1';
+export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as they are (docs/adr/0030)
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
@@ -888,6 +888,8 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     // passwords, tokens and keys masked in what is kept as text.
     level: gaps.level, department: gaps.dept, prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), decisions: recordedDecisions(ctx.decisions),
     files: [...new Set(gaps.changed)],
+    ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm }), // schema v2: taskType, asked, reworks, reworkFiles
+    ...(meta.cost ? { cost: meta.cost } : {}),
     observed: gaps.observed,
     evaluation: meta.evaluation,
     commands: turn.tools.filter(shell).map((t) => maskSecrets(cmdOf(t).slice(0, 200))).slice(0, 30),
@@ -966,7 +968,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
@@ -1021,7 +1023,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let measured = null;
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured, turnLinks(lines, since));
-      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
+      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation, cost: { v: 1, byCall: costByCall(lines, since) } });
       try { rec.pinned = pinnedRules({ dept: gaps.dept?.declared, root: home.root, reads: all.map((t) => String(t.input?.file_path || t.input?.command || '')) }); } catch (e) { logHookError('stop-hook pinned', e); } // the rules that governed the task, by hash
       try { const den = deniedSince(h.session_id, turn.startedAt || 0); if (den.length) rec.denied = den.map((d) => ({ tool: d.tool, path: d.path, at: new Date(d.at).toISOString() })); } catch (e) { logHookError('stop-hook denied', e); } // what the sensitive-path guard stopped
       try { if (ctx.commits?.length) rec.signatures = commitSignatures(home.root, ctx.commits.slice(0, 10)); } catch (e) { logHookError('stop-hook signatures', e); } // git's verdict on each commit: signed, untrusted, bad, unsigned

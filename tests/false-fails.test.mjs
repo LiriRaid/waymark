@@ -166,3 +166,37 @@ test('/compact: the summary that continues a session is not a prompt', () => {
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. Summary: …' } }), false);
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'sigue con el punto 3' } }), true);
 });
+
+test('procedures by the hook: the owner\'s procedures.md goes in once per task at the first change, and the delivery counts as the read', async () => {
+  const repo = withMemory(repoAt('proc'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.writeFileSync(path.join(repo, 'src', 'a.mjs'), 'x');
+  fs.writeFileSync(path.join(repo, 'src', 'b.mjs'), 'y');
+  const transcript = path.join(home, 'proc-session.jsonl');
+  fs.writeFileSync(transcript, [prompt('agrega reintentos', '2026-10-15T10:00:00Z'), ...run('Skill', { skill: 'dept-backend', args: 'L1' })].map((l) => JSON.stringify(l)).join('\n'));
+  const file = path.join(home, 'packed-proc.json');
+  const call = (f) => ({ tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', f) }, cwd: repo, session_id: 's-proc', transcript_path: transcript });
+  const first = await packContext(call('a.mjs'), claude, file);
+  assert.match(first || '', /Waymark procedures of dept-backend/);
+  assert.match(first || '', /Waymark memory for the file/);
+  const second = await packContext(call('b.mjs'), claude, file);
+  assert.doesNotMatch(second || '', /Waymark procedures/, 'once per task and department');
+  assert.match(second || '', /src\/b\.mjs/, 'the next file still gets its pack');
+  const { procDelivered } = await import(`file://${SCRIPTS}/lib/packed.mjs`);
+  assert.deepEqual([...procDelivered('s-proc', 0, file)], ['dept-backend']);
+  // no department invoked yet, or no transcript (an agent without it): nothing is handed over
+  const bare = await packContext({ tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', 'a.mjs') }, cwd: repo, session_id: 's-proc-2' }, claude, path.join(home, 'packed-proc2.json'));
+  assert.doesNotMatch(bare || '', /Waymark procedures/);
+});
+
+test('procedure testigo: a delivery counts as read; with neither a read nor a delivery it still blocks', () => {
+  const lines = [prompt('agrega reintentos'), say('Waymark → L1 · dept-backend · skills: ninguna'), ...run('Skill', { skill: 'dept-backend' }),
+    ...run('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...run('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' })];
+  const handed = step(judge(lines, { procDelivered: ['dept-backend'] }), 'procedure');
+  assert.equal(handed.pass, true, 'handed over by the hook');
+  const none = step(judge(lines), 'procedure');
+  assert.equal(none.pass, false, 'nothing delivered, nothing read');
+  assert.match(none.why.join(' '), /procedures\.md never read/);
+  const other = step(judge(lines, { procDelivered: ['dept-qa'] }), 'procedure');
+  assert.equal(other.pass, false, 'another department\'s delivery is not the owner\'s');
+});

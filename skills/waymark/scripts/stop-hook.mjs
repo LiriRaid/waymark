@@ -34,7 +34,7 @@ import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs'
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { saveLearned, saveQuestion } from './engram.mjs';
-import { packedFiles } from './lib/packed.mjs';
+import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { learn } from './learn.mjs';
 import { norm } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
@@ -335,7 +335,9 @@ function observeTurn(S) {
   const result = (t) => turn.results?.[t.id];
   // the procedure counts as read first only before the first change that happened (an edit the gate denied changed nothing)
   const firstRealChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !(result(t)?.error || t.error));
-  const procBeforeChange = allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
+  // the hook hands the owner's procedures.md at the first change (tool-hook.mjs): a delivery is a read, and it came before the change
+  const procHanded = !!dept.declared && (ctx.procDelivered || []).includes(dept.declared);
+  const procBeforeChange = procHanded || allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
   // Each part of a chained command (&&, ;, |) is judged alone, by its executable (provenance.mjs shellRuns): "npx tsc
   // --noEmit && grep T1 .waymark/memory.md" is a gate, `git commit -m "fix build"` is none. A part that writes Waymark's
@@ -434,7 +436,7 @@ function observeTurn(S) {
       saved: turn.tools.some((t) => /mem_(save|update|session_summary)/.test(t.name)),
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
-    procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')))], readBeforeChange: procBeforeChange },
+    procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')).concat(procHanded ? [`${dept.declared}/procedures.md`] : []))], readBeforeChange: procBeforeChange, ...(procHanded ? { handed: true } : {}) },
     gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}), ...(apart(t) ? { apart: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
@@ -949,6 +951,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
+      try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook

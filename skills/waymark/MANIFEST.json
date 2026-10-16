@@ -1,6 +1,6 @@
 {
  "schema": "waymark.manifest/v1",
- "version": "2.0.15",
+ "version": "2.0.16",
  "algorithm": "sha256",
  "files": {
   "browser-verify/SKILL.md": "ff4d6d11cd8346e4fa96bad6d7986ed05a29bc04cd52f8c3b2b2d21781839fb4",
@@ -86,7 +86,7 @@
   "ui-system/references/type-scale.md": "6b70142a9f1214b07956987e5c3b22bf27e5d7b0ad1c3b88be1dd1cde9477d0c",
   "waymark/ALLOWED_SIGNERS": "78186b76028d039ea2abed61014329d0ee6fa4a21d22103fef0f10c705f6d345",
   "waymark/SKILL.md": "280b88bacb121ad69b640a657fbe50feeae5bc09ad28a84d90836160dc6a6f82",
-  "waymark/VERSION": "6069babe5ff60caea6e23e4201fb43013ca38c144519e0b94a8f1a60f8489326",
+  "waymark/VERSION": "1bb1d330b5984ca97af2ad21f0c7511225831a0b90557a8e84a5c8b92d3f8390",
   "waymark/architectures/clean.md": "5b95b060efc5e894da76d28a6f307aa67cdcd7c7689f6ba7eca2f4f26bfed87f",
   "waymark/architectures/feature-sliced.md": "b0bdaca10ad4cd5390f4b9f1c2c74fdbc7ecce243f6792a2c7a16ac7152e6b4e",
   "waymark/architectures/hexagonal.md": "bc360422487278765b6218bc1854783a2ffc3f965683ffdb0e8ff7c481e14c49",

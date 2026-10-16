@@ -79,7 +79,7 @@ function scanSkillsDir(dir, origin) {
   let entries = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
-    // "_name" folders hold another framework's shared files (gentle-ai's _shared), never a skill
+    // "_name" folders hold another framework's shared files (such as a `_shared` folder), never a skill
     if (e.name.startsWith('.') || e.name.startsWith('_') || e.name === 'synced') continue;
     const skillDir = path.join(dir, e.name);
     const file = path.join(skillDir, 'SKILL.md');

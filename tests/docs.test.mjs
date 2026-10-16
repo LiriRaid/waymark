@@ -89,3 +89,20 @@ test('commands: every waymark.mjs command that README and INSTALL name exists', 
   }
   assert.ok(known.has('verify') && known.has('attest') && known.has('check'));
 });
+
+// ---- No other project is named ----------------------------------------------------------------------------------------------
+// Documentation, ADRs, tests and comments say "an orchestrator, ecosystem or supply chain", never another project's name. The
+// name is built from parts so this file does not hold it either. The one allowed neighbour is the organisation in engram's own
+// repository address (engram is a dependency, named by its address).
+test('docs: no other project is named in any tracked file', () => {
+  const org = ['gentle', 'man'].join(''), proj = `${['gentle'].join('')}[- ]?ai`;
+  const re = new RegExp(`${proj}|${org}[- ]programming(?!/engram)`, 'i');
+  const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' }).stdout.split('\0').filter(Boolean);
+  const hits = [];
+  for (const f of tracked) {
+    if (/\.(png|jpe?g|gif|ico|woff2?|pdf)$/i.test(f)) continue;
+    let text; try { text = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { continue; }
+    text.split('\n').forEach((line, i) => { if (re.test(line)) hits.push(`${f}:${i + 1}`); });
+  }
+  assert.deepEqual(hits, [], 'say "an orchestrator already installed"; use acme-orch as a sample namespace in tests');
+});

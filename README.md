@@ -257,7 +257,7 @@ Waymark is not an orchestrator: an orchestrator decides *who* does the work, Way
 | On this machine | Waymark |
 |---|---|
 | no orchestrator | leads: Rule 0 block, the hooks in every agent, full routine |
-| an orchestrator already installed (e.g. gentle-ai) | **guest**: no hooks, no block; its departments reach the orchestrator through the orchestrator's own skill registry, its memory through engram |
+| an orchestrator already installed | **guest**: no hooks, no block; its departments reach the orchestrator through the orchestrator's own skill registry, its memory through engram |
 | Waymark first, an orchestrator later | keeps leading; the newcomer's rules are sorted into **adopted**, **fallback** (its skills back Waymark up) or **resolved**, and you are asked once whether Waymark should step down to guest |
 
 You can always pick another mode and move any rule. The other framework's files are never edited (`~/.waymark/coexistence.md` holds the adaptation), and uninstalling Waymark leaves it exactly as it was.

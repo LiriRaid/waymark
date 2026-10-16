@@ -75,7 +75,7 @@ const hooked = (a) => {
   return /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(text) || (/waymark[\\/]+scripts/.test(text) && /['"`]stop-hook\.mjs['"`]/.test(text));
 };
 
-// Another framework's marked blocks (`<!-- gentle-ai:persona -->`): an orchestrator already governs that agent.
+// Another framework's marked blocks (`<!-- acme-orch:persona -->`): an orchestrator already governs that agent.
 export const foreignIn = (text) => [...new Set([...String(text).matchAll(/<!--\s*([\w.-]+):[\w.-]+/g)].map((m) => m[1]).filter((n) => n !== 'waymark'))];
 
 // Agents whose folder exists (with one of the agent's own files, when the folder is shared), then the unknown ones, with

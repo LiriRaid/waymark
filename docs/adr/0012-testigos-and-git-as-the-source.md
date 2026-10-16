@@ -153,4 +153,4 @@ After the fixes the replay keeps only the real ✘: Claude T3 Enrutar (the proce
 - Records become portable with the repo (notes), so another clone or agent can read them. Notes need `git push origin refs/notes/waymark` to travel, an explicit step.
   - Amended in 2.0.14: a push the hook's process cannot make (its shell may lack your git credentials) blocks once with `waymark.mjs notes push` for each repo (testigo `notes`, ADR 0013).
 - Old records migrate to notes, or are archived with the chain verified.
-- The order after 3e: the live Codex test, then step 4 (A/B against gentle-ai), then 3d (adapters).
+- The order after 3e: the live Codex test, then step 4 (A/B against an orchestrator already installed), then 3d (adapters).

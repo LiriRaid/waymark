@@ -931,16 +931,16 @@ test('connect-agents: one marked pointer block per agent found, backup first, re
 test('connect-agents: with an orchestrator in the file, Waymark joins as its guest and never touches its blocks', async () => {
   const { found, planFor, apply: connect } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
   fs.mkdirSync(path.join(agentsHome, '.gemini', 'antigravity'), { recursive: true });
-  const theirs = '<!-- gentle-ai:persona -->\nYou are the orchestrator.\n<!-- /gentle-ai:persona -->\n';
+  const theirs = '<!-- acme-orch:persona -->\nYou are the orchestrator.\n<!-- /acme-orch:persona -->\n';
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), theirs);
   assert.ok(!found().some((a) => a.name === 'Gemini CLI'), 'Antigravity alone (antigravity/ + GEMINI.md) is not Gemini CLI');
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'projects.json'), '{}');
   const g = found().find((a) => a.name === 'Gemini CLI');
-  assert.deepEqual(g.guestOf, ['gentle-ai']);
-  assert.match(planFor(g).steps[0], /as a guest of gentle-ai/);
+  assert.deepEqual(g.guestOf, ['acme-orch']);
+  assert.match(planFor(g).steps[0], /as a guest of acme-orch/);
   connect(planFor(g));
   assert.ok(fs.readFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), 'utf8').startsWith(theirs), 'its block intact');
-  assert.match(fs.readFileSync(path.join(home, 'agent.md'), 'utf8'), /\| Gemini CLI \| [^|]+ \| \d{4}-\d\d-\d\d · invitado de gentle-ai \|/);
+  assert.match(fs.readFileSync(path.join(home, 'agent.md'), 'utf8'), /\| Gemini CLI \| [^|]+ \| \d{4}-\d\d-\d\d · invitado de acme-orch \|/);
 });
 
 test('session hook: new location points to tasks.md; the bridge says old location and waymark check offers the migration', async () => {
@@ -1016,10 +1016,10 @@ test('waymark check: skills never indexed or changed since the last sync, framew
   fs.writeFileSync(path.join(repo, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n');
   assert.ok((await check(repo)).some((t) => /^skills: changed since the last sync \(\+mine\)/.test(t)));
   const instr = path.join(home, 'instr-check.md');
-  fs.writeFileSync(instr, '<!-- gentle-ai:persona -->\nx\n');
+  fs.writeFileSync(instr, '<!-- acme-orch:persona -->\nx\n');
   const agentMd = path.join(home, 'agent.md'), keep = fs.existsSync(agentMd) ? fs.readFileSync(agentMd, 'utf8') : null;
   fs.writeFileSync(agentMd, `| Agent | Skills | Project skills | Instructions |\n|---|---|---|---|\n| Test | x | y | ${instr} |\n`);
-  try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*gentle-ai in /.test(t))); }
+  try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*acme-orch in /.test(t))); }
   finally { if (keep === null) fs.rmSync(agentMd); else fs.writeFileSync(agentMd, keep); }
   assert.equal(newer('2.1.0', '2.0.0-dev'), true);
   assert.equal(newer('2.0.0', '2.0.0-dev'), false);

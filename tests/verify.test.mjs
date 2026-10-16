@@ -215,3 +215,31 @@ test('attest: an edited predicate, a task this log does not hold and an unknown 
   assert.match(A.attest(d, `${day} · T9`).error, /no record for/);
   assert.equal(A.checkAttestation(d, path.join(dir, 'missing.json')).ok, false);
 });
+
+test('pinned inputs: the department, procedures, routine, profiles read and the manifest are pinned by the manifest\'s own hashes', () => {
+  const root = tmp('pin');
+  const reads = [path.join(M.SKILLS, 'waymark', 'stacks', 'angular.md'), path.join(M.SKILLS, 'waymark', 'architectures', 'hexagonal.md'), 'src/a.ts'];
+  const p = P.pinnedRules({ dept: 'dept-qa', root, reads });
+  const files = JSON.parse(fs.readFileSync(M.MANIFEST_FILE, 'utf8')).files;
+  assert.equal(p.routine, files['waymark/routine.json']);
+  assert.equal(p.department.sha, files['dept-qa/SKILL.md']);
+  assert.equal(p.procedures.sha, files['dept-qa/procedures.md']);
+  assert.deepEqual(p.profiles.map((x) => [x.kind, x.name, x.sha]), [['stack', 'angular', files['waymark/stacks/angular.md']], ['architecture', 'hexagonal', files['waymark/architectures/hexagonal.md']]]);
+  assert.equal(p.risk, undefined, 'no project override, nothing pinned');
+  fs.mkdirSync(path.join(root, '.waymark'));
+  fs.writeFileSync(path.join(root, '.waymark', 'risk.json'), '{"review":{"maxLines":50}}');
+  assert.equal(typeof P.pinnedRules({ dept: 'dept-qa', root }).risk, 'string', 'a project override is pinned');
+  assert.equal(P.pinnedRules({ dept: '../etc', root }).department, undefined, 'a department name is never a path');
+});
+
+test('verify <task ID>: the pinned rules are compared with the release manifest; a task without them says so', () => {
+  const d = project('pinned');
+  P.appendRecord(d, { ...rec(1), pinned: P.pinnedRules({ dept: 'dept-qa', root: d, reads: [] }) });
+  P.appendRecord(d, rec(2));
+  const ok = V.verify(d, [`${day} · T1`]).lines.join('\n');
+  assert.match(ok, /rules: 3 pinned · 3 match this release's manifest/);
+  const old = V.verify(d, [`${day} · T2`]).lines.join('\n');
+  assert.match(old, /rules: not pinned in this record/);
+  const r = V.pinnedReport({ pinned: { routine: 'f'.repeat(64) } });
+  assert.deepEqual([r.pinned, r.match, r.differ], [1, 0, ['waymark/routine.json']]);
+});

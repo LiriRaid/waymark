@@ -29,7 +29,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
@@ -1005,6 +1005,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured, turnLinks(lines, since));
       const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
+      try { rec.pinned = pinnedRules({ dept: gaps.dept?.declared, root: home.root, reads: all.map((t) => String(t.input?.file_path || t.input?.command || '')) }); } catch (e) { logHookError('stop-hook pinned', e); } // the rules that governed the task, by hash
       try { const den = deniedSince(h.session_id, turn.startedAt || 0); if (den.length) rec.denied = den.map((d) => ({ tool: d.tool, path: d.path, at: new Date(d.at).toISOString() })); } catch (e) { logHookError('stop-hook denied', e); } // what the sensitive-path guard stopped
       try { if (ctx.commits?.length) rec.signatures = commitSignatures(home.root, ctx.commits.slice(0, 10)); } catch (e) { logHookError('stop-hook signatures', e); } // git's verdict on each commit: signed, untrusted, bad, unsigned
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each

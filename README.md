@@ -161,7 +161,7 @@ skills/
     SKILL.md (triage, departments, what to read when) · skill-map.json · skill-registry.md (generated)
     references/        protocol, project-detection, learning, skills (find / install / create), maintenance
     scripts/sync.mjs
-    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, generic
+    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, rust, php, terraform, generic
     architectures/     screaming, feature-sliced, hexagonal, clean, layered, modular-monolith
     templates/         department, stack, architecture, tool skill, project skill, project memory,
                        instructions.md (block for CLAUDE.md / AGENTS.md), private-layer/

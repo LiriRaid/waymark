@@ -622,9 +622,9 @@ test('catalog of testigos: each states its claim; the instructions block quotes 
 
 test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
-  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T1\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T2; follow-up \\(same files\\) ${DAY} · T1b\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T2; follow-up ${DAY} · T1b\\.$`));
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -1804,7 +1804,9 @@ test('tidy: one line per task (the newest of a task and its follow-ups), open li
   for (const l of ['- ▶ [2026-10-04 · T1b] confirm categories', '- ▶ [2026-10-04 · T1] old head', '- ▶ [2026-09-10 · T3] paused long ago', '- [2026-09-12 · T4] pending, old free-form: Pendiente: x', '- ✔ [2026-09-01 · T9] closed long ago']) assert.ok(hist.includes(l), l);
   assert.match(hist, /## Moved 2026-10-05 \d\d:\d\d \(tidy\)/);
   assert.equal(P.tidyWip(h, NOW), false, 'nothing left to tidy');
-  const t = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'tidy'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  // the command runs on the real clock: a project whose only open line is from today has nothing to tidy
+  const fresh = memRepo('tidy-cli', `- ▶ [${new Date().toLocaleDateString('sv')} · T1] recent\n`);
+  const t = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'tidy'], { cwd: fresh, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
   assert.match(t.stdout, /nothing to tidy/);
 });
 

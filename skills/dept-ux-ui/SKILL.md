@@ -1,6 +1,6 @@
 ---
 name: dept-ux-ui
-description: "UX/UI. FIRST, before ui-system/ui-refine/ui-audit, for how the UI looks: \"mejora el diseño\", \"se ve feo\", \"más profesional\", \"animación\", \"accesibilidad\", \"contraste\", \"paleta\", WCAG."
+description: "UX/UI. FIRST, before ui-system/ui-refine/ui-audit, for how the UI looks: \"mejora el diseño\", \"se ve feo\", \"más profesional\", \"animación\", \"accesibilidad\", WCAG."
 ---
 
 # UX/UI Design

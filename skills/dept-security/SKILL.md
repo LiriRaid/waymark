@@ -1,6 +1,6 @@
 ---
 name: dept-security
-description: "Security. FIRST for auth, secrets, risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"CSRF\", \"API key\", \"vulnerabilidad\", RLS, OWASP."
+description: "Security. FIRST for auth, secrets, risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"API key\", \"vulnerabilidad\"."
 ---
 
 # Security / DevSecOps

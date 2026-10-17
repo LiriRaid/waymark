@@ -1,6 +1,6 @@
 ---
 name: waymark
-description: "Waymark core. When unsure which department owns a task (\"qué departamento aplica\", \"usa waymark\"), a new project (\"arranca el proyecto\"), a missing skill (\"no hay skill para esto\"), learnings, registry sync."
+description: "Waymark core. When unsure which department owns a task (\"qué departamento aplica\", \"usa waymark\"), a new project (\"arranca el proyecto\"), a missing skill (\"no hay skill para esto\")."
 ---
 
 # Waymark — core

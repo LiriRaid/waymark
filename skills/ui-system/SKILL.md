@@ -1,6 +1,6 @@
 ---
 name: ui-system
-description: "ui.system · owner dept-ux-ui. Design systems and identity: \"paleta de colores\", \"tipografía\", \"design tokens\", \"tema oscuro\", \"sistema de diseño\", \"qué estilo le queda\", theming."
+description: "owner dept-ux-ui. Design systems and identity: \"paleta de colores\", \"tipografía\", \"design tokens\", \"tema oscuro\", \"sistema de diseño\", \"qué estilo le queda\"."
 ---
 
 # UI System

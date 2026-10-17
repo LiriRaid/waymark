@@ -1,6 +1,6 @@
 ---
 name: dept-data
-description: "Data & State. FIRST for schema, queries, state: \"migración\", \"nueva tabla\", \"columna\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"estado global\", SQL, ORM."
+description: "Data & State. FIRST for schema, queries, state: \"migración\", \"nueva tabla\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"estado global\"."
 ---
 
 # Data Engineering & State Management

@@ -1,6 +1,6 @@
 ---
 name: dept-product
-description: "Product. FIRST when an idea must become scoped work: \"quiero un feature de…\", \"necesito que la app haga…\", \"historia de usuario\", \"criterios de aceptación\", \"alcance\", \"MVP\", \"roadmap\"."
+description: "Product. FIRST when an idea must become scoped work: \"quiero un feature de…\", \"necesito que la app haga…\", \"historia de usuario\", \"criterios de aceptación\", \"alcance\"."
 ---
 
 # Product Management

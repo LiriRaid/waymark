@@ -81,7 +81,7 @@ export function digest(cwd, agentName = 'claude') {
   if (last) {
     const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 180)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 110)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
@@ -100,9 +100,9 @@ export function digest(cwd, agentName = 'claude') {
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 3, 150, last?.id); } catch {} // the last closed is already above
-  if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
+  try { if (!home.legacy) learned = learnedLines(home, 2, 110, last?.id); } catch {} // the last closed is already above
+  if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
+  out.push(`Commands: the hook hands you W pack at your first edit of each file (never run it yourself); on demand: W memory <section> (Conventions · Identity), W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {

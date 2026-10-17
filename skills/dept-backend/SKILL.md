@@ -1,6 +1,6 @@
 ---
 name: dept-backend
-description: "Backend. FIRST for server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"servicio\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", REST, GraphQL, cron."
+description: "Backend. FIRST for server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", cron."
 ---
 
 # Backend Engineering

@@ -129,8 +129,8 @@ Nothing is preloaded "just in case". Loading is layered:
 | Part | Loaded | What it is | Characters |
 |---|---|---|---|
 | instructions block | every session | instructions block in CLAUDE.md / AGENTS.md: levels, routing, the testigos, memory | 6,494 |
-| skill descriptions | every session | Waymark's 17 skill descriptions, which the agent lists | 3,492 |
-| reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 99 |
+| skill descriptions | every session | Waymark's 17 skill descriptions, which the agent lists | 3,127 |
+| reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 93 |
 | reminder (short) | every prompt after a reply that followed the routine | the short reminder | 37 |
 | protocol L2 | an L2 task | the protocol an L2 reads | 3,907 |
 | protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 5,285 |
@@ -326,6 +326,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0029 · A suite with nothing skipped, todo or failing, and a CI that runs it](docs/adr/0029-suite-with-nothing-skipped-and-ci.md)
 - [0030 · Record schema v2: the fields the hooks derive](docs/adr/0030-record-schema-v2.md)
 - [0031 · Cost per version and level, the replay bench, and the thresholds of criterion 8](docs/adr/0031-cost-per-version-replay-and-frozen-thresholds.md)
+- [0032 · The token levers of 2.0.18: measured first, kept only if the measure says so](docs/adr/0032-token-levers-measured-before-kept.md)
 <!-- adr-index:end -->
 
 ## Contributing back

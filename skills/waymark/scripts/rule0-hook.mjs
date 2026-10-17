@@ -32,7 +32,7 @@ try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
 // The rules themselves live in the instructions block; this only points at the steps a new session skips most.
 // The rules live once, in the block; the reminder points at the steps a turn skips most (docs/adr/0015, C3).
-const full = 'Waymark Rule 0: routing line, owner dept-*, choice window before changes, "## Cierre · <ID>" after.';
+const full = 'Waymark Rule 0: routing line, dept-*, choice window before changes, "## Cierre · <ID>" after.';
 const short = 'Waymark Rule 0 as in your last reply.';
 // The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
 export function gitLine(root, max = 2) {
@@ -45,7 +45,7 @@ export function gitLine(root, max = 2) {
 }
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
-  return ` Cierre ID: new ${ids.next}${ids.followUp ? `; follow-up (same files) ${ids.followUp}` : ''}.`;
+  return ` ID: new ${ids.next}${ids.followUp ? `; follow-up ${ids.followUp}` : ''}.`;
 }
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';

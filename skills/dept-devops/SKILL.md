@@ -1,6 +1,6 @@
 ---
 name: dept-devops
-description: "DevOps. FIRST for build, CI/CD, git, deploy: \"deploy\", \"pipeline\", \"GitHub Actions\", \"Docker\", \"rama\", \"commit\", \"PR\", \"merge\", \"release\", \"el build falla\"."
+description: "DevOps. FIRST for build, CI/CD, git, deploy: \"deploy\", \"pipeline\", \"GitHub Actions\", \"Docker\", \"commit\", \"PR\", \"merge\", \"release\", \"el build falla\"."
 ---
 
 # DevOps / Platform Engineering

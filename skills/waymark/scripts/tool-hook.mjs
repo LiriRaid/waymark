@@ -22,6 +22,7 @@ import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath } from './lib/paths.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
+import { commandSensitive, expandHome } from './lib/guard.mjs';
 import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
@@ -109,22 +110,11 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
 // Sensitive-path guard (docs/adr/0027): a read or an edit of a secret-bearing path (routine.json `risk.sensitive`: .env*, ~/.ssh,
 // ~/.aws, ~/.config/gcloud, keys) is denied, except what `risk.allow` and the user's `Sensitive allow:` line in
 // ~/.waymark/preferences.md name. It acts where the agent's hook runs before the tool: Claude Code's Read, Edit and Write,
-// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists.
-// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file).
-const expandHome = (w) => String(w).replace(/^(~|\$HOME|\$\{HOME\})(?=[\\/]|$)/, os.homedir());
-export function commandSensitive(command, cwd, cfg) {
-  for (const p of shellRuns(command)) {
-    const dir = path.resolve(cwd, expandHome(String(p.cd || '.').replace(/^["']|["']$/g, '')).replace(/^\/([a-z])\//i, '$1:/'));
-    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
-    const targets = [...String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)].map((m) => m[1] ?? m[2] ?? m[3]);
-    for (const w of [...words.slice(1), ...targets]) {
-      if (!w || /^-|^[<>&|]/.test(w)) continue;
-      const abs = path.resolve(dir, expandHome(w));
-      if (isSensitive(abs, cfg) && (targets.includes(w) || fs.existsSync(abs))) return abs;
-    }
-  }
-  return null;
-}
+// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists, also through a glob,
+// a flag's value, an attached redirect, a revision (`git show HEAD:.env`) or another shell (`bash -c`; lib/guard.mjs).
+// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file): the end-of-turn
+// hook detects what got through (detectGuarded) and records it.
+export { commandSensitive }; // the reading of a shell command lives in lib/guard.mjs, shared with the end-of-turn detection
 export function checkSensitive(c, cwd, session = 'unknown') {
   if (!c) return null;
   let root = cwd;

@@ -39,6 +39,7 @@ import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
+import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { learn } from './learn.mjs';
 import { norm, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
@@ -458,6 +459,8 @@ function observeTurn(S) {
     // testigo "sin secretos": the memory, the task's diff and commits (ctx.scanSecrets, testigos.mjs) and its mem_save calls;
     // where and which kind only, never the value
     secrets: secretHits([...(ctx.scanSecrets ? ctx.scanSecrets(changed) : []), ...turn.tools.filter((t) => /mem_(save|update)$/.test(t.name)).map((t) => ({ where: 'mem_save', text: `${t.input.title || ''}\n${t.input.content || ''}` }))]),
+    // what reached the agent although no hook stopped it (docs/adr/0037): a sensitive path read, edited or named by a command, a secret in a result
+    guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
@@ -790,6 +793,7 @@ function composeSteps(S) {
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
+  if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);

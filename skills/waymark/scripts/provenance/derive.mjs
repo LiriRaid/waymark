@@ -1,7 +1,8 @@
 // Record schema v2 (docs/adr/0030): what the hooks derive about a task, never what the agent types. A record is chained, so a
 // field is added and never repurposed; a reader takes a missing field as "not derivable then" (a v1 record has none of these).
 //   taskType     a label from the files the task changed and the verbs of the ask: fix, feature, refactor, docs, test, config, question
-//   asked        the items of the ask, when it was written as a list (point 10 fills it from the Pedido line too)
+//   asked        the items of the ask: the numbered items of the Pedido line the agent wrote (L2+), else the user's own list (docs/adr/0038)
+//   answered     what the Cierre's Pedido line says of each item: [{ n, ok, note }]
 //   options      for each decision, its options with their attributes: { label, recommended, files, risk, estCost }
 //   reworks      the earlier tasks of the project that changed the same files within a window; reworkFiles are those files
 //   cost.byCall  the tokens of each tool call (transcript.mjs, costByCall)
@@ -47,6 +48,74 @@ export function askedItems(prompt) {
   return items.length >= 2 ? items.slice(0, 12).map((s) => s.slice(0, 160)) : [];
 }
 
+// The numbered requirements of a Pedido line ("1) a 2) b · Captura: …" → ['a', 'b']): the numbers run from 1 without a gap, and fewer
+// than two is not a list. What follows " · Captura:", " · Copia:", " · Capa:" or " · Cambia:" is not part of an item.
+export function itemsOf(text) {
+  const head = String(text || '').split(/\s[·|]\s*(?:Captura|Copia|Capa|Cambia)\s*:/i)[0];
+  const accepted = [];
+  for (const m of head.matchAll(/(?:^|\s)\(?(\d{1,2})[).]\s+/g)) if (Number(m[1]) === accepted.length + 1) accepted.push(m);
+  if (accepted.length < 2) return [];
+  return accepted.slice(0, 12).map((m, i) => head.slice(m.index + m[0].length, accepted[i + 1]?.index ?? head.length).trim().replace(/[;,.]+$/, '').slice(0, 160)).filter(Boolean);
+}
+
+// The items of the last Pedido line the agent wrote in the task, read from its transcript lines (`lines`: the task's); [] when it wrote none or no list.
+export function pedidoItems(lines) {
+  let line = null;
+  for (const d of lines || []) {
+    if (d.type !== 'assistant' || d.isSidechain) continue;
+    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) {
+      if (c.type !== 'text') continue;
+      for (const m of String(c.text || '').replace(/\*\*|__/g, '').split(/##\s*Cierre/)[0].matchAll(/^[ \t]*(?:[-*]\s*)?Pedido:[ \t]*(.+)$/gim)) line = m[1];
+    }
+  }
+  return line ? itemsOf(line) : [];
+}
+
+const YES = /[✔✓]/, MARK = /([✔✓✘✗✕])\s*(\d{1,2})\b[:)\s]*([^·✔✓✘✗✕\n]*)/g;
+// What the Cierre's Pedido line says of each item: "Pedido: ✔1 <evidence> · ✘2 <why not>" (the marks may continue on the lines below it) →
+// [{ n, ok, note }]. Read only inside the Cierre block.
+export function pedidoAnswers(reply) {
+  const text = String(reply || '').replace(/\*\*|__/g, ''), at = text.search(/##\s*Cierre/);
+  const lines = (at >= 0 ? text.slice(at) : '').split('\n'), i = lines.findIndex((l) => /^[ \t]*(?:[-*]\s*)?Pedido:/i.test(l));
+  if (i < 0) return [];
+  const block = [lines[i]];
+  for (const l of lines.slice(i + 1)) { if (/^[ \t]*(?:[-*]\s*)?[✔✓✘✗✕]/.test(l)) block.push(l.replace(/^[ \t]*[-*]\s*/, '')); else break; }
+  return [...block.join(' ').matchAll(MARK)].map((m) => ({ n: Number(m[2]), ok: YES.test(m[1]), note: m[3].trim().replace(/[;,]+$/, '').slice(0, 120) }));
+}
+
+// What an L2+ Cierre owes the items of its ask: every item answered, and no "hecho" over an item marked ✘. → [what is missing, as a sentence]
+export function askedGaps(items, answers, resultado = '') {
+  if (!Array.isArray(items) || items.length < 2) return [];
+  const have = new Set(answers.map((a) => a.n)), gaps = [];
+  const missing = items.map((_, i) => i + 1).filter((n) => !have.has(n));
+  if (missing.length) gaps.push(`Pedido: answer each numbered item of the ask (missing ${missing.map((n) => `${n}) ${String(items[n - 1]).slice(0, 50)}`).join(' · ')}): "Pedido: ✔1 <evidence> · ✘2 <why not>"`);
+  const failed = answers.filter((a) => !a.ok && a.n >= 1 && a.n <= items.length).map((a) => a.n);
+  if (failed.length && /^hecho$/i.test(String(resultado).trim())) gaps.push(`Resultado: hecho while item ${failed.join(', ')} is ✘: write "Resultado: parcial (<what is missing>)"`);
+  return gaps;
+}
+
+// The first choice window of an L2+ task judged on what it says of each option: its risk, its files or its cost, and exactly one option marked
+// (Recommended). `decisions` are the task's answered questions (decisionsIn: each carries its options). A window of one option, or a question
+// whose options are not known (asked in the chat), is not judged. → { options, missing: [...] } or null.
+const RISK = /riesgo|risk/i, FILES = /archivos?|files?/i, COST = /cost[eo]?\b|coste|tokens?|esfuerzo|effort|minutos?|minutes?/i, REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
+export function optionsLint(decisions, level) {
+  if (!(Number(level) >= 2)) return null;
+  const first = (decisions || []).find((d) => d.optionList?.length >= 2);
+  if (!first) return null;
+  const call = first.callId, window = (decisions || []).filter((d) => d.optionList?.length >= 2 && d.callId === call);
+  const missing = [];
+  for (const d of window) {
+    const q = String(d.question || '').slice(0, 30);
+    for (const o of d.optionList) {
+      const text = String(o.description || ''), lacks = [!RISK.test(text) && 'risk', !(FILES.test(text) || COST.test(text)) && 'files or cost'].filter(Boolean);
+      if (lacks.length) missing.push(`${q} / ${String(o.label || '').slice(0, 30)}: ${lacks.join(', ')}`);
+    }
+    const marked = d.optionList.filter((o) => REC.test(String(o.label || ''))).length;
+    if (marked !== 1) missing.push(`${q}: ${marked ? 'more than one' : 'no'} option marked (Recommended)`);
+  }
+  return { questions: window.length, missing: missing.slice(0, 8) };
+}
+
 // One option of the choice window → { label, recommended, files, risk, estCost }; what its description does not say is null.
 // recommended: the label ends with "(Recomendada)" / "(Recommended)", the convention the choice window uses.
 export function optionAttrs(o = {}) {
@@ -79,8 +148,8 @@ export function followUps(records, id) {
 }
 
 // The v2 fields the hook adds to a new record; a field with nothing to say is left out.
-export function v2Fields({ prompt, files, level, records, now, self, norm } = {}) {
-  const fields = { taskType: taskTypeOf({ prompt, files, level }), asked: askedItems(prompt), ...reworkOf(files, records, { now, self, norm }) };
+export function v2Fields({ prompt, files, level, records, now, self, norm, pedido = [] } = {}) {
+  const fields = { taskType: taskTypeOf({ prompt, files, level }), asked: pedido.length >= 2 ? pedido : askedItems(prompt), ...reworkOf(files, records, { now, self, norm }) };
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => v && (!Array.isArray(v) || v.length)));
 }
 

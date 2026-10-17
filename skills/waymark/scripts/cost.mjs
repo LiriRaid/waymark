@@ -34,6 +34,7 @@ export function tasksOf(cwd) {
       tokens: r.evaluation.tokens, units: units(u), usage: u, links, subagents: r.evaluation.subagents ?? u.subagents ?? 0,
       responses: links ? LINKS.reduce((a, k) => a + (links[k]?.responses || 0), 0) : null,
       quotaPct: r.evaluation.quotaPct ?? null, quotaBy: r.evaluation.quotaBy || null, taskType: r.taskType || null,
+      cited: r.observed?.evidence?.cited || 0, unbacked: r.observed?.evidence?.unbacked?.length || 0, // the Evidencia's facts and those no tool call backs (docs/adr/0038)
     };
   });
 }
@@ -57,6 +58,12 @@ export function routineShare(tasks, level, last = 10) {
   return s ? { share: s.byUnits.routine, tasks: t.length } : null;
 }
 
+// The facts the tasks' Cierres cited and the share a tool call of the task backs: { cited, backed, ratio } ("57/60"), or null when none cited any.
+export function backedOf(tasks) {
+  const cited = tasks.reduce((a, t) => a + (t.cited || 0), 0), backed = cited - tasks.reduce((a, t) => a + (t.unbacked || 0), 0);
+  return cited ? { cited, backed, ratio: round(backed / cited, 3) } : null;
+}
+
 // One row per (version, level).
 export function groups(tasks) {
   const by = new Map();
@@ -67,6 +74,7 @@ export function groups(tasks) {
       version: g[0].version, level: g[0].level, tasks: g.length, tokensMean: Math.round(mean(g.map((x) => x.tokens))), tokensMedian: Math.round(median(g.map((x) => x.tokens))),
       responsesMean: round(mean(g.filter((x) => x.responses !== null).map((x) => x.responses)), 1), shares: linkShares(g),
       subagentShare: round(mean(g.map((x) => (x.subagents || 0) / x.tokens)), 3),
+      backed: backedOf(g),
       windowPct: measured.length ? { mean: round(mean(measured.map((x) => x.quotaPct)), 1), tasks: measured.length } : null,
     };
   }).sort((a, b) => String(a.version).localeCompare(String(b.version)) || Number(a.level) - Number(b.level));
@@ -130,10 +138,10 @@ export function render(r) {
   const out = [`Waymark cost · ${r.schema} · ${r.tasks} recorded task(s) with an evaluation`, ''];
   out.push(`Fixed context: ${r.fixed.chars} chars (≈ ${r.fixed.tokens} tokens: instructions block ${r.fixed.parts.instructionsBlock} + card ${r.fixed.parts.contextCard} + skill descriptions ${r.fixed.parts.skillDescriptions}) · per prompt: ${r.fixed.perPromptChars} chars`);
   if (r.sessions) out.push(`Sessions: ${r.sessions.transcripts} of ${r.sessions.sessions} transcripts on this machine · first context ${r.sessions.firstContext ? `${k(r.sessions.firstContext.median)} tokens (median of ${r.sessions.firstContext.sessions})` : '—'} · a resume writes ${r.sessions.resume ? `${k(r.sessions.resume.median)} tokens (median of ${r.sessions.resume.resumes})` : '— (none seen)'}`);
-  out.push('', 'version · level · tasks · tokens/task (median) · responses · routine / work / reply by cost units (by tokens) · subagents · % of window (measured)');
+  out.push('', 'version · level · tasks · tokens/task (median) · responses · routine / work / reply by cost units (by tokens) · subagents · % of window (measured) · cited facts backed by a call');
   for (const g of r.groups) {
     const s = g.shares;
-    out.push(`${g.version} · L${g.level} · ${g.tasks} · ${k(g.tokensMean)} (${k(g.tokensMedian)}) · ${g.responsesMean ?? '—'} · ${s ? `${pct(s.byUnits.routine)} / ${pct(s.byUnits.work)} / ${pct(s.byUnits.reply)} (${pct(s.byTokens.routine)} routine)` : 'no links'} · ${pct(g.subagentShare)} · ${g.windowPct ? `${g.windowPct.mean} % (${g.windowPct.tasks} measured)` : '—'}`);
+    out.push(`${g.version} · L${g.level} · ${g.tasks} · ${k(g.tokensMean)} (${k(g.tokensMedian)}) · ${g.responsesMean ?? '—'} · ${s ? `${pct(s.byUnits.routine)} / ${pct(s.byUnits.work)} / ${pct(s.byUnits.reply)} (${pct(s.byTokens.routine)} routine)` : 'no links'} · ${pct(g.subagentShare)} · ${g.windowPct ? `${g.windowPct.mean} % (${g.windowPct.tasks} measured)` : '—'} · ${g.backed ? `${g.backed.backed}/${g.backed.cited}` : '—'}`);
   }
   out.push('', 'Q and L0 write no evaluation: their tokens are not recorded here. Cost units weigh each token by its published price ratio (cache read 0.1, cache write 1.25, output 5).');
   return out.join('\n');

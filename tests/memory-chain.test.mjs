@@ -338,7 +338,7 @@ test('2.0.14 no notes in git: the trailer commits are the records, per task ID; 
   const text = card(d);
   assert.match(text, /Notes: the fetch from origin failed/);
   const tasks = fs.readFileSync(path.join(d, '.waymark', 'tasks.md'), 'utf8');
-  assert.ok(tasks.includes(`| ${day} · T1 | solo commit | — | feat: login con Google |`), tasks);
+  assert.ok(tasks.includes(`| ${day} · T1 | solo commit | — | — | feat: login con Google |`), tasks);
   // a repo with a note for one task and only a commit for another: both listed
   const sha2 = commit(d, `${day} · T2`);
   notes.addNote(d, sha2, JSON.stringify(record(`${day} · T2`, sha2)));

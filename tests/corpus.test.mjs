@@ -34,7 +34,7 @@ export const judgeCase = (c) => {
   const turn = T.currentTurn(c.lines);
   const last = turn.texts.filter((t) => /Cierre/.test(t)).pop() || turn.texts.at(-1) || '';
   return cierreGaps(turn, last, T.sessionTools(c.lines), [turn.prompt], {
-    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), outside: true, cwd, blocked: !!c.blocked, // blocked: the reply that follows a block, where an exception line counts
+    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), pedido: P.pedidoItems(P.taskLines(c.lines)), outside: true, cwd, blocked: !!c.blocked, // blocked: the reply that follows a block, where an exception line counts
     packed: 1, rerun: c.rerun === 'none' ? () => null : () => ({ cmd: 'typecheck', ok: true, s: 0 }), // rerun: 'none' is a repo whose typecheck the hook cannot run
   });
 };

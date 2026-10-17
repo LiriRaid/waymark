@@ -785,7 +785,7 @@ test('migration: dry run writes nothing; apply moves memory and log byte for byt
   assert.match(excludeOf(repo), /^\.waymark\/$/m);
   const tasks = fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8');
   assert.match(tasks, /## In progress \/ pending\n- 2026-10-01 · T2 · en curso · próximo: step 2/);
-  assert.match(tasks, /\| 2026-10-01 · T2 \| parcial \(x\) \| 4\/5 \| second \|\n\| 2026-10-01 · T1 \| hecho \| 5\/5 \| first \|/);
+  assert.match(tasks, /\| 2026-10-01 · T2 \| parcial \(x\) \| 4\/5 \| — \| second \|\n\| 2026-10-01 · T1 \| hecho \| 5\/5 \| — \| first \|/);
   assert.equal(projectHome(repo).legacy, false);
   assert.equal(taskIds(repo, new Date(2026, 9, 1)).next, '2026-10-01 · T3', 'IDs continue from the migrated record');
   assert.match(planFor({ slug: 'mig', file: oldFile, root: repo }).skip || '', /already exists/, 'never overwritten');

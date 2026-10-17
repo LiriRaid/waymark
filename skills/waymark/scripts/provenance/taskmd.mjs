@@ -9,6 +9,7 @@ import { ensureLocal, projectHome } from './project.mjs';
 import { appendRecord, gitNote } from './chain.mjs';
 import { readTaskRecords } from './records.mjs';
 import { taskIds } from './tasks.mjs';
+import { followUps } from './derive.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
 // entry per session, written by the per-prompt hook and removed when the turn ends.
@@ -54,6 +55,8 @@ export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED
 }
 
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
+// Cited facts a call backs (observed.evidence): below BACKED_MIN a task is marked ⚠ (the threshold frozen in docs/adr/0038, scorecard check 11.2).
+const BACKED_MIN = 0.95;
 const DONE_MIN = 3; // done rows tasks.md keeps before it leaves in-progress lines out
 const QUESTIONS_SHOWN = 5; // questions (Q) since the last close listed in tasks.md, newest last
 const LINE_CHARS = 200, DONE_KEPT = 0; // a Work in progress line; closed (✔) tasks live in their record (note) and tasks.md, not here
@@ -237,8 +240,17 @@ export function tasksMarkdown(home, now = new Date()) {
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
       .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
     ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception' || v === 'warn').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
-  const rows = records.slice(-8).reverse()
-    .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${clip(cell(r.prompt), 60)} |`);
+  // the facts the Cierre cited that a tool call of the task backs, "10/10" (⚠ below BACKED_MIN); — when it cited none or the record has no evidence
+  const backed = (r) => { const e = r.observed?.evidence; return e?.cited > 0 ? `${e.cited - (e.unbacked?.length || 0) < e.cited * BACKED_MIN ? '⚠ ' : ''}${e.cited - (e.unbacked?.length || 0)}/${e.cited}` : '—'; };
+  const shown = records.slice(-8).reverse();
+  // tasks the same files came back to: redone as a follow-up (derived from the IDs: a chained record cannot be edited when a later one continues it)
+  // or reworked by a later task within the window (the record's reworks and reworkFiles)
+  const redone = shown.flatMap((r) => {
+    const again = followUps(records, r.id), files = (r.reworkFiles || []).slice(0, 3).map((f) => path.basename(f));
+    return again.length || r.reworks?.length ? [clip(`- ${cell(r.id)}${again.length ? ` · redone as ${again.map((x) => cell(x).split(' · ')[1] || cell(x)).join(', ')}` : ''}${r.reworks?.length ? ` · changes the files of ${r.reworks.slice(0, 3).map((x) => cell(x).split(' · ')[1] || cell(x)).join(', ')}${files.length ? ` (${files.join(', ')})` : ''}` : ''}`, 140)] : [];
+  }).slice(0, 4);
+  const rows = shown
+    .map((r) => `| ${cell(r.id)}${who(r)} | ${clip(result(r, records.slice(records.indexOf(r) + 1)), 60)} | ${cell(r.evaluation?.score || '—')} | ${backed(r)} | ${clip(cell(r.prompt), 60)} |`);
   const render = () => [`# Tasks · ${home.slug}`, '',
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (the \`tasks [<task ID>]\` command: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
@@ -246,10 +258,12 @@ export function tasksMarkdown(home, now = new Date()) {
     ...(questions ? [`## Preguntas (Q) desde el último cierre: ${questions} (${qRows.length < questions ? `las últimas ${qRows.length}; ` : ''}provenance.jsonl, kind "Q")`, ...qRows, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,
-    '| Task | Result | Routine | Request |', '|---|---|---|---|', ...rows, ''].join('\n');
+    '| Task | Result | Routine | Backed | Request |', '|---|---|---|---|---|', ...rows, '',
+    ...(redone.length ? ['## Redone or reworked (the same files came back within 7 days)', ...redone, ''] : [])].join('\n');
   // Over budget: the oldest done rows go first down to DONE_MIN, then the in-progress lines with the oldest task IDs
   // (counted as "+n more"), then the remaining done rows.
   let out = render();
+  while (out.length > TASKS_CHARS && redone.length) { redone.pop(); out = render(); } // the rework lines first: they only point at rows
   while (out.length > TASKS_CHARS && rows.length > DONE_MIN) { rows.pop(); out = render(); }
   while (out.length > TASKS_CHARS && qRows.length > 1) { qRows.shift(); out = render(); } // the oldest questions
   const order = withId.length ? withId.map((l) => idOrder(headId(l))) : tasks.map((_, i) => String(i).padStart(6, '0'));

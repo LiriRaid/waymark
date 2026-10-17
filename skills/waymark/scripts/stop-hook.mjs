@@ -30,7 +30,7 @@ import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, RECORD_V2, v2Fields, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
@@ -254,7 +254,7 @@ function userSkip(reply, field, prompts, labels = []) {
 // A Cierre field: its line; a value that ends with ":" continues on the next lines up to the next field ("Evidencia:"
 // with what was seen below it). An empty field never takes the next line. Decisión and Sub-decisiones are not read but
 // still end a field an older Cierre spreads over several lines.
-const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Tests|Review|Build|Secretos)\s*:/i;
+const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Pedido|Tests|Review|Build|Secretos)\s*:/i;
 const field = (reply, name) => {
   const m = reply.match(new RegExp(`${name}:[ \\t]*([^\\n]*)`, 'i'));
   let v = m?.[1]?.trim() || '';
@@ -460,6 +460,8 @@ function observeTurn(S) {
     // where and which kind only, never the value
     secrets: secretHits([...(ctx.scanSecrets ? ctx.scanSecrets(changed) : []), ...turn.tools.filter((t) => /mem_(save|update)$/.test(t.name)).map((t) => ({ where: 'mem_save', text: `${t.input.title || ''}\n${t.input.content || ''}` }))]),
     // what reached the agent although no hook stopped it (docs/adr/0037): a sensitive path read, edited or named by a command, a secret in a result
+    // the first choice window of an L2+ task judged on its options' attributes: risk, files or cost, one marked (docs/adr/0038)
+    options: optionsLint(ctx.decisions, S.level),
     guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
@@ -665,6 +667,8 @@ function cierreWitness(S) {
       // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
       else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
     }
+    // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
+    if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
   }
   return { cierre, renamed };
 }
@@ -793,6 +797,7 @@ function composeSteps(S) {
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
+  if (observed.options?.missing.length) findings.push(`the first choice window's options lack their attributes (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
   if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
@@ -884,8 +889,16 @@ export function branchesOf(files) {
 
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
 export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as they are (docs/adr/0030)
+// The Resultado as a label. An L2+ task whose Cierre left an item of the ask unanswered or marked ✘ never reads "hecho" (docs/adr/0038): the
+// record says "parcial" and keeps what the Cierre said and why.
+function outcome(reply, items, answers, level) {
+  const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
+  const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
+  return said === 'hecho' && gaps.length ? { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' } : { result: said };
+}
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
-  const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
+  const answers = Number(gaps.level) >= 2 && ctx.pedido?.length >= 2 ? pedidoAnswers(gaps.reply).filter((a) => a.n >= 1 && a.n <= ctx.pedido.length).slice(0, 12) : [];
+  const claimed =gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos")
     schema: RECORD_SCHEMA, // the shape of this record: a later reader (a verifier, a model trained on the records) knows which fields to expect
@@ -894,7 +907,8 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     // passwords, tokens and keys masked in what is kept as text.
     level: gaps.level, department: gaps.dept, prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), decisions: recordedDecisions(ctx.decisions),
     files: [...new Set(gaps.changed)],
-    ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm }), // schema v2: taskType, asked, reworks, reworkFiles
+    ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm, pedido: Number(gaps.level) >= 2 ? ctx.pedido || [] : [] }), // schema v2: taskType, asked, reworks, reworkFiles
+    ...(answers.length ? { answered: answers } : {}), // what the Cierre's Pedido line says of each item
     ...(meta.cost ? { cost: meta.cost } : {}),
     observed: gaps.observed,
     evaluation: meta.evaluation,
@@ -902,7 +916,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
-    outcome: { result: (gaps.reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null }, // hecho | parcial | bloqueado, as a label
+    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level), // hecho | parcial | bloqueado, as a label
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   });
@@ -980,6 +994,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
+      ctx.pedido = pedidoItems(task); // the numbered items of the Pedido line the agent wrote (L2+): what the Cierre owes an answer to
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook

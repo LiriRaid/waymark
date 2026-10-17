@@ -1,6 +1,6 @@
 {
   "schema": "waymark.scorecard/v1",
-  "adr": "0033",
+  "adr": "0038",
   "about": "The definition of '95 %' (docs/adr/0028-scorecard.md). Every check is deterministic: a file, a pattern, a command's exit or a number computed from the records. A check scores 1 or 0, or a ratio against its threshold (a number above 1 is capped at 1). A criterion is the mean of its checks; the total is the sum of weight x criterion. `point` is the plan 2.0.18 point that makes the check pass (0 = it holds today); a check that fails before its point is the honest baseline, not a mistake. A threshold of null is frozen later by an amendment ADR, from the baseline, and scores 0 until then.",
   "criteria": [
     {
@@ -123,7 +123,7 @@
       "id": 11, "name": "No hallucination, good decisions", "weight": 8, "target": 95,
       "checks": [
         { "id": "11.1", "what": "recent L2+ tasks answered the choice window before the first change", "point": 0, "kind": "measure", "measure": "records.decisionShare", "op": "ge", "threshold": 0.9 },
-        { "id": "11.2", "what": "the share of cited facts backed by a call is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.backedShare", "op": "ge", "threshold": null, "frozenIn": 10 },
+        { "id": "11.2", "what": "the share of cited facts backed by a call is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.backedShare", "op": "ge", "threshold": 0.95, "frozenIn": 10 },
         { "id": "11.3", "what": "a choice window whose options lack their attributes fails a hook check", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "optionsLint" },
         { "id": "11.4", "what": "an Evidencia 'observada' must be checked after the last change", "point": 0, "kind": "contains", "files": ["skills/waymark/routine.json"], "pattern": "\"id\": \"evidence\"" },
         { "id": "11.5", "what": "a command that failed twice runs again only after consulting the docs", "point": 0, "kind": "contains", "files": ["skills/waymark/routine.json"], "pattern": "\"id\": \"docs\"" }
@@ -146,7 +146,7 @@
         { "id": "13.2", "what": "the Pedido is stored as numbered items at L2+", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedItems" },
         { "id": "13.3", "what": "the hook compares the Cierre's per-item answers with the items: an unanswered item is a warning and Resultado cannot read hecho", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedGaps" },
         { "id": "13.4", "what": "a corpus case with a missing item is a warning", "point": 10, "kind": "exists", "files": ["tests/corpus/asked-missing-item.json"] },
-        { "id": "13.5", "what": "the share of recent tasks that were redone as a follow-up on the same files is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.followUpShare", "op": "le", "threshold": null, "frozenIn": 10 }
+        { "id": "13.5", "what": "the share of recent tasks that were redone as a follow-up on the same files is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.followUpShare", "op": "le", "threshold": 0.2, "frozenIn": 10 }
       ]
     }
   ]

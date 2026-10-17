@@ -5,6 +5,9 @@
 //   anchors    who vouches for each task's anchor (docs/adr/0034): the ssh signature the hook made at the close, against the release's
 //              ALLOWED_SIGNERS and the user's own (~/.waymark/ALLOWED_SIGNERS), several keys each with ssh's valid-after / valid-before,
 //              and the keys in REVOKED_SIGNERS: signed by <key> · signed, key revoked · signed outside its validity · unsigned (key locked)
+//   remote     with --remote [<name>] (default origin): the anchors the remote holds for this log, fetched into a temporary ref, against the
+//              local records (docs/adr/0035): a record rewritten and chained again no longer matches the anchor the remote kept, and the first
+//              task that differs is named. With no remote, "no remote copy" is said as a warning; offline, "not checked"; never silent.
 // Exit 0 only when the chain (and, with --install, the files) are intact; a missing signature is a warning unless
 // --require-signature, because a user with no signing key must still be able to verify the chain.
 import fs from 'node:fs';
@@ -12,6 +15,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verifyChain, gitNote, logId, logFile, RECORD_SCHEMAS } from './provenance.mjs';
 import { anchorStates, fileSignature, trust, say, NS_ATTEST } from './sign.mjs';
+import { remoteAnchors } from './notes-remote.mjs';
+import { hasRemote } from './notes.mjs';
 import { SKILLS, checkManifest, checkGenerated, manifestSignature } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
@@ -58,6 +63,26 @@ export function anchorReport(cwd) {
   const task = (r) => records[r.n - 1]?.id || `record ${r.n}`;
   const problems = rows.map((r, i) => ({ r, i })).filter(({ r, i }) => first >= 0 && i >= first && r.state !== 'signed').map(({ r }) => ({ row: r, text: `${task(r)}: ${say(r)}` }));
   return { rows, first, unsignedBefore: first < 0 ? rows.length : rows.slice(0, first).filter((r) => r.state === 'unsigned').length, problems };
+}
+
+// The remote's copy of this log's anchors against the local records: { state, lines[], differs }. state: 'none' (no remote) |
+// 'unreachable' | 'empty' | 'ok'. The remote anchors go through verifyChain like the local ones: since the last rewrite anchor, each must
+// still name the line it anchored. Local anchors the remote lacks are not a failure: they were not pushed yet.
+export function remoteReport(cwd, remote = 'origin') {
+  const r = remoteAnchors(cwd, remote);
+  if (r.state === 'none') return { state: 'none', lines: [`remote: no remote copy of the records (this repository has no remote ${remote}): a rewrite of the repository, its notes and the log together could not be detected`], differs: false };
+  if (r.state === 'unreachable') return { state: r.state, lines: [`remote ${remote}: not checked (could not reach it: ${String(r.output || '').split('\n')[0].slice(0, 120)})`], differs: false };
+  const home = projectHome(cwd), records = readRecords(home.log), m = logId(logFile(cwd));
+  const mine = r.anchors.filter((a) => a.m === m && a.kind !== 'sig').sort((a, b) => (a.at || 0) - (b.at || 0));
+  if (r.state === 'empty' || !mine.length) return { state: 'empty', lines: [`remote ${remote}: it holds no anchors of this log yet (nothing pushed: "waymark.mjs notes push")${r.anchors.length ? ` · ${r.anchors.length} of other logs` : ''}`], differs: false };
+  const v = verifyChain(records, null, mine);
+  if (!v.ok) {
+    const rec = records[v.at] || {}, a = mine.find((x) => x.n === v.at + 1) || mine[mine.length - 1];
+    return { state: 'ok', differs: true, lines: [`remote ${remote}: DIFFERS at ${rec.id || `record ${v.at + 1}`}: the anchor the remote kept (${a.n} records, last hash ${String(a.hash).slice(0, 12)}) no longer matches this log: one of them was rewritten after it was anchored`] };
+  }
+  const local = anchorsFor(cwd), onRemote = new Set(mine.map((a) => `${a.n}:${a.hash}`));
+  const missing = local.filter((a) => a.kind !== 'rewrite' && !onRemote.has(`${a.n}:${a.hash}`)).length;
+  return { state: 'ok', differs: false, lines: [`remote ${remote}: ${mine.length} anchors of this log match the local records${missing ? ` · ${missing} local anchor${missing > 1 ? 's' : ''} not pushed yet (\"waymark.mjs notes push\")` : ''}`] };
 }
 
 // The signers a project's release trusts: ssh lines of git's allowed-signers format, and `gpg <fingerprint>` lines.
@@ -134,6 +159,13 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
   if (!chain.ok) code = 1;
   const shapes = schemaReport(cwd);
   if (Object.keys(shapes.counts).length) lines.push(`record shapes: ${Object.entries(shapes.counts).map(([k, n]) => `${k.replace('waymark.record/', '')} ×${n}`).join(' · ')}${shapes.unknown.length ? ` · warning: unknown shape ${shapes.unknown.join(', ')} (written by a newer Waymark; the chain does not depend on it)` : ''}`);
+  const at = args.indexOf('--remote');
+  if (at >= 0) {
+    const named = args[at + 1] && !args[at + 1].startsWith('--') && !/^d{4}-/.test(args[at + 1]) ? args[at + 1] : 'origin';
+    const rr = remoteReport(cwd, named);
+    lines.push(...rr.lines.map((l) => (rr.differs ? `✘ ${l}` : rr.state === 'ok' ? l : `⚠ ${l}`)));
+    if (rr.differs) code = 1;
+  } else if (!hasRemote(cwd)) lines.push('⚠ remote: no remote copy of the records (this repository has no remote origin): a rewrite of the repository, its notes and the log together could not be detected');
   const strict = args.includes('--require-signature') || args.includes('--require-signed'); // --require-signed: only the anchors and the attestation, not the release
   const sigs = anchorReport(cwd);
   if (sigs.rows.length) {

@@ -34,6 +34,7 @@ import { ID, RECORD_V2, v2Fields, pinnedRules, taskIds, validId, taskLines, task
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
+import { autoPushNotes } from './notes-remote.mjs';
 import { saveLearned, saveQuestion } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
@@ -1051,6 +1052,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
           else failed.push({ root, remote, output: gitError(r.output) });
         }
       } catch (e) { logHookError('stop-hook notes push', e); }
+      // the user said yes for this project (docs/adr/0035): its notes go to origin at every close, with no prompt, never blocking
+      try { if (home.dir && !home.legacy) { const a = autoPushNotes(home.root, home.slug); if (a.state === 'pushed') pushed += ` · notas subidas a ${a.remote}`; else if (a.state === 'failed') pushed += ` · notas sin subir (${gitError(a.output).slice(0, 60)}): se reintenta en el próximo cierre`; } } catch (e) { logHookError('stop-hook notes auto push', e); }
       let notesStop = '';
       if (failed.length) {
         pushed += ` · notas sin subir: ${failed.map((f) => path.basename(f.root)).join(', ')}`;

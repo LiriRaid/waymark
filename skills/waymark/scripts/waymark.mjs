@@ -54,7 +54,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', scorecard: 'scorecard.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -431,7 +431,12 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const id = rest.join(' ').match(ID)?.[0];
     const s = id ? attest(process.cwd(), id) : { error: 'name a task ID' };
     if (s.error) { console.log(`attest: ${s.error}\nUsage: ${W} attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
-    else if (out) { fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n'); console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)); check it with: ${W} verify --attestation ${out}`); }
+    else if (out) {
+      fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n');
+      const { signAttestation } = await import('./attest.mjs'), sig = signAttestation(out, { interactive: process.stdin.isTTY });
+      const signed = sig.state === 'signed' ? `signed (${sig.file})` : sig.state === 'nokey' ? 'not signed: no signing key (run: sign)' : `not signed (${sig.state})`;
+      console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)), ${signed}; check it with: ${W} verify --attestation ${out}`);
+    }
     else console.log(JSON.stringify(s, null, 1));
   } else if (sub === 'verify') {
     const { verify } = await import('./verify.mjs');

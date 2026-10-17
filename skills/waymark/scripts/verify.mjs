@@ -2,12 +2,16 @@
 //   chain      the records of the project: hash links, the notes in refs/notes/waymark, the anchors in refs/notes/waymark-anchor
 //   install    the installed skills against skills/waymark/MANIFEST.json (or a manifest given with --manifest)
 //   signature  the release tag (v<VERSION>, else HEAD) against skills/waymark/ALLOWED_SIGNERS, with git's own verification
+//   anchors    who vouches for each task's anchor (docs/adr/0034): the ssh signature the hook made at the close, against the release's
+//              ALLOWED_SIGNERS and the user's own (~/.waymark/ALLOWED_SIGNERS), several keys each with ssh's valid-after / valid-before,
+//              and the keys in REVOKED_SIGNERS: signed by <key> · signed, key revoked · signed outside its validity · unsigned (key locked)
 // Exit 0 only when the chain (and, with --install, the files) are intact; a missing signature is a warning unless
 // --require-signature, because a user with no signing key must still be able to verify the chain.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verifyChain, gitNote, RECORD_SCHEMAS } from './provenance.mjs';
+import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verifyChain, gitNote, logId, logFile, RECORD_SCHEMAS } from './provenance.mjs';
+import { anchorStates, fileSignature, trust, say, NS_ATTEST } from './sign.mjs';
 import { SKILLS, checkManifest, checkGenerated, manifestSignature } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
@@ -43,6 +47,17 @@ export function schemaReport(cwd) {
   const counts = {};
   try { for (const r of readTaskRecords(projectHome(cwd))) if (r.schema) counts[r.schema] = (counts[r.schema] || 0) + 1; } catch {}
   return { counts, unknown: Object.keys(counts).filter((k) => !RECORD_SCHEMAS.includes(k)) };
+}
+
+// The signatures of a log's anchors, summed up: { rows, signed: [rows], problems: [{ row, text }], unsignedBefore }. The anchors before the
+// first signed one are history from before signing was set up, not a gap; every one after it should be signed.
+export function anchorReport(cwd) {
+  const home = projectHome(cwd), records = readRecords(home.log);
+  const rows = anchorStates(cwd, logId(logFile(cwd)), trust());
+  const first = rows.findIndex((r) => r.state !== 'unsigned'); // signing began at the first anchor that carries any signature line
+  const task = (r) => records[r.n - 1]?.id || `record ${r.n}`;
+  const problems = rows.map((r, i) => ({ r, i })).filter(({ r, i }) => first >= 0 && i >= first && r.state !== 'signed').map(({ r }) => ({ row: r, text: `${task(r)}: ${say(r)}` }));
+  return { rows, first, unsignedBefore: first < 0 ? rows.length : rows.slice(0, first).filter((r) => r.state === 'unsigned').length, problems };
 }
 
 // The signers a project's release trusts: ssh lines of git's allowed-signers format, and `gpg <fingerprint>` lines.
@@ -119,11 +134,25 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
   if (!chain.ok) code = 1;
   const shapes = schemaReport(cwd);
   if (Object.keys(shapes.counts).length) lines.push(`record shapes: ${Object.entries(shapes.counts).map(([k, n]) => `${k.replace('waymark.record/', '')} ×${n}`).join(' · ')}${shapes.unknown.length ? ` · warning: unknown shape ${shapes.unknown.join(', ')} (written by a newer Waymark; the chain does not depend on it)` : ''}`);
+  const strict = args.includes('--require-signature') || args.includes('--require-signed'); // --require-signed: only the anchors and the attestation, not the release
+  const sigs = anchorReport(cwd);
+  if (sigs.rows.length) {
+    const by = new Map();
+    for (const r of sigs.rows.slice(Math.max(0, sigs.first))) by.set(sigs.first < 0 ? r.state : say(r), (by.get(sigs.first < 0 ? r.state : say(r)) || 0) + 1);
+    lines.push(sigs.first < 0 ? `anchors: ${sigs.rows.length} unsigned (no signing key was set up when they were made; "waymark.mjs sign" says how)`
+      : `anchors: ${[...by].map(([k, n]) => `${n} ${k}`).join(' · ')}${sigs.unsignedBefore ? ` · ${sigs.unsignedBefore} unsigned before signing began` : ''}`);
+    for (const p of sigs.problems.slice(0, 5)) lines.push(`  ${p.row.state === 'bad' ? '✘' : '⚠'} ${p.text}`);
+    if (sigs.problems.some((p) => p.row.state === 'bad')) code = 1; // a signature that does not match its anchor: the anchor or the signature was edited
+    else if (sigs.problems.length && strict) code = 1;
+  }
   const attFile = opt('--attestation');
   if (attFile) {
     const a = checkAttestation(cwd, attFile);
     lines.push(`attestation: ${a.ok ? 'valid' : 'INVALID'}`, ...a.checks.map((c) => `  ${c.ok ? '✔' : '✘'} ${c.name} · ${c.detail}`));
     if (!a.ok) code = 1;
+    const s = fileSignature(attFile, NS_ATTEST);
+    lines.push(`  ${s.state === 'bad' ? '✘' : s.state === 'signed' ? '✔' : '⚠'} signature · ${say(s)}`);
+    if (s.state === 'bad' || (strict && s.state !== 'signed')) code = 1;
   }
   const id = args.join(' ').match(/\d{4}-\d{2}-\d{2} · T\d+[a-z]*/)?.[0];
   if (id) {

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { addNote, readNotes, noteSha, addAnchor, readAnchors, addLogLine, dropLogLines } from '../notes.mjs';
+import { signAnchor } from '../sign.mjs';
 import { norm } from '../lib/paths.mjs';
 import { sha } from '../lib/hash.mjs';
 import { ID } from './ids.mjs';
@@ -51,18 +52,21 @@ export function appendRecord(cwd, record) {
   const hash = sha(JSON.stringify(body));
   fs.appendFileSync(file, JSON.stringify({ ...body, hash }) + '\n');
   if (!line.note) { try { addLogLine(cwd, { ...body, hash }); } catch (e) { logHookError('log line in git', e); } }
-  anchor(cwd, file, { n: count + 1, hash }); // n from the read that gave prev: another session appending meanwhile cannot shift it
+  anchor(cwd, file, { n: count + 1, hash }, { sign: !!record.id }); // a task's close is signed (docs/adr/0034); n from the read that gave prev: another session appending meanwhile cannot shift it
   return file;
 }
 
 // The log's anchor in git (notes.mjs, docs/adr/0025): its length and last hash on HEAD, named by `m`, the log's own id
 // (this machine and this log's path), so the anchors of another clone or machine are not checked against this log.
 export const logId = (file) => sha(`${os.hostname()}|${norm(fs.existsSync(file) ? fs.realpathSync(file) : file)}`).slice(0, 16);
-export function anchor(cwd, file, entry) {
-  try { addAnchor(cwd, { m: logId(file), at: Date.now(), ...entry }); } catch (e) { logHookError('anchor', e); }
+export function anchor(cwd, file, entry, { sign = false } = {}) {
+  try {
+    const a = { m: logId(file), at: Date.now(), ...entry };
+    if (addAnchor(cwd, a) && sign) signAnchor(cwd, a); // with the user's key, if there is one; a locked key is recorded as locked, never asked
+  } catch (e) { logHookError('anchor', e); }
 }
 // This log's anchors, oldest first.
-export const anchorsFor = (cwd) => { const id = logId(logFile(cwd)); return readAnchors(cwd).filter((a) => a.m === id).sort((a, b) => (a.at || 0) - (b.at || 0)); };
+export const anchorsFor = (cwd) => { const id = logId(logFile(cwd)); return readAnchors(cwd).filter((a) => a.m === id && a.kind !== 'sig').sort((a, b) => (a.at || 0) - (b.at || 0)); }; // signature lines are read by sign.mjs
 
 // `waymark.mjs forget`: removes the records of one task ID (exactly that ID: a follow-up is named on its own) or of a session,
 // chains the rest again from prev = null and leaves a rewrite anchor with the reason, what was removed and the head before
@@ -85,7 +89,7 @@ export function forget(cwd, id, { session = null, reason = '', dryRun = false } 
   const keep = lines.filter((r) => !hit(r)).map((r) => { const { hash, prev: _, ...rest } = r; const body = { ...rest, prev }; prev = sha(JSON.stringify(body)); return { ...body, hash: prev }; });
   fs.writeFileSync(file, keep.map((r) => JSON.stringify(r)).join('\n') + (keep.length ? '\n' : ''));
   try { dropLogLines(cwd, hit); } catch (e) { logHookError('forget log lines', e); } // their copy in git; a merged copy elsewhere is skipped by the anchor's `removed`
-  anchor(cwd, file, { kind: 'rewrite', n: keep.length, hash: prev, reason: String(reason).trim(), removed, keys: [...new Set(drop.map(lineKey))], from });
+  anchor(cwd, file, { kind: 'rewrite', n: keep.length, hash: prev, reason: String(reason).trim(), removed, keys: [...new Set(drop.map(lineKey))], from }, { sign: true }); // who rewrote the log signs it
   return { removed, from, to: { n: keep.length, hash: prev } };
 }
 

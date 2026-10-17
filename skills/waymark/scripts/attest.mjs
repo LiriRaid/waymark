@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { projectHome, readTaskRecords, anchorsFor } from './provenance.mjs';
+import { signFile, NS_ATTEST } from './sign.mjs';
 
 export const STATEMENT = 'https://in-toto.io/Statement/v1';
 export const PREDICATE = 'https://github.com/LiriRaid/waymark/attestation/task/v1';
@@ -15,6 +16,9 @@ export const canonical = (v) => JSON.stringify(v, (_, x) => (x && typeof x === '
 export const digestOf = (v) => crypto.createHash('sha256').update(canonical(v)).digest('hex');
 
 const field = (cierre, name) => String(cierre || '').match(new RegExp(`^[ \\t]*${name}:[ \\t]*(.*)$`, 'mi'))?.[1]?.trim() || null;
+
+// Signs an exported statement with the user's key: writes <file>.sig. → { state: 'signed' | 'locked' | 'nokey' | 'error', file? }
+export const signAttestation = (file, opts) => signFile(file, NS_ATTEST, undefined, opts);
 
 // → the Statement, or { error }.
 export function attest(cwd, id) {

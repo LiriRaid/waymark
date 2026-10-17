@@ -35,7 +35,7 @@ import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs'
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { autoPushNotes } from './notes-remote.mjs';
-import { saveLearned, saveQuestion } from './engram.mjs';
+import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
@@ -977,6 +977,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
+      try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));

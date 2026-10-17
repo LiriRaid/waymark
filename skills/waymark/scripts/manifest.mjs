@@ -81,6 +81,43 @@ export function checkManifest(dir = SKILLS, manifest = null) {
   return { ok: !missing.length && !changed.length && !extra.length, version: m.version || null, checked: Object.keys(m.files || {}).length, missing, changed, extra };
 }
 
+// skills.lock (docs/adr/0036): each third-party skill Waymark vendors (`sync --vendor`), pinned to what it was vendored from. The manifest
+// already hashes every file of the release; the lock adds where a vendored skill came from and the hash of its folder, so `verify --install`
+// says which skill moved and what it was pinned to. { schema, skills: { <name>: { source, ref, upstreamHash, vendoredAt, license, sha256 } } }
+export const LOCK_SCHEMA = 'waymark.skills-lock/v1';
+const LOCK_ABOUT = 'Third-party skills vendored into this release: where each came from (source, and ref = the tag or commit, or upstreamHash = the upstream folder hash when the source gives no ref) and the sha256 of its folder as vendored, written by `sync --vendor <name>` and checked by `verify --install`.';
+
+export const readSkillsLock = (dir = SKILLS) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'waymark', 'skills.lock'), 'utf8')); } catch { return null; } };
+
+// The sha256 of one skill's folder: its files, sorted, each by name and hash (hashFile: CRLF as LF, learned sections left out).
+export const skillSha = (name, dir = SKILLS) => sha(listFiles(dir).filter((rel) => rel.startsWith(`${name}/`)).map((rel) => `${rel}:${hashFile(path.join(dir, rel))}`).join('\n'));
+
+// Pins `name` in the lock (created when missing). `entry`: { source, ref, upstreamHash, vendoredAt, license }. → the entry written.
+export function lockSkill(name, entry, dir = SKILLS) {
+  const file = path.join(dir, 'waymark', 'skills.lock');
+  const lock = readSkillsLock(dir) || { schema: LOCK_SCHEMA, about: LOCK_ABOUT, skills: {} };
+  lock.skills[name] = { source: entry.source || null, ref: entry.ref || null, upstreamHash: entry.upstreamHash || null, vendoredAt: entry.vendoredAt || null, license: entry.license || null, sha256: skillSha(name, dir) };
+  lock.skills = Object.fromEntries(Object.entries(lock.skills).sort(([a], [b]) => a.localeCompare(b)));
+  fs.writeFileSync(file, JSON.stringify(lock, null, 1) + '\n');
+  return lock.skills[name];
+}
+
+// The lock against the files: { ok, present, checked, changed[], missing[], unpinned[], problems[] }. changed: the folder is not what was
+// pinned; missing: pinned and gone; unpinned: an entry with neither a ref nor an upstream hash (a warning, it names no upstream to return to).
+export function checkSkillsLock(dir = SKILLS) {
+  const lock = readSkillsLock(dir);
+  if (!lock) return { ok: false, present: false, checked: 0, changed: [], missing: [], unpinned: [], problems: ['no skills.lock in this install'] };
+  const changed = [], missing = [], unpinned = [], problems = [];
+  if (lock.schema !== LOCK_SCHEMA) problems.push(`skills.lock: unknown schema ${lock.schema || '(none)'}`);
+  for (const [name, e] of Object.entries(lock.skills || {})) {
+    if (!fs.existsSync(path.join(dir, name, 'SKILL.md'))) { missing.push(name); continue; }
+    if (!e.sha256 || skillSha(name, dir) !== e.sha256) changed.push(name);
+    if (!e.source) problems.push(`${name}: no source`);
+    if (!e.ref && !e.upstreamHash) unpinned.push(name);
+  }
+  return { ok: !changed.length && !missing.length && !problems.length, present: true, checked: Object.keys(lock.skills || {}).length, changed, missing, unpinned, problems };
+}
+
 // The signature the release carries: ssh-keygen -Y over the manifest, namespace "waymark", in MANIFEST.json.sig. It signs
 // the manifest read with CRLF as LF, so a checkout on any system verifies the same bytes. The public keys it is checked
 // against are the ones in waymark/ALLOWED_SIGNERS, so a copy needs no git history to verify it.

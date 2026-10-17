@@ -1,0 +1,44 @@
+{
+ "schema": "waymark.engram-pin/v1",
+ "version": "3.1.0",
+ "source": "https://github.com/Gentleman-Programming/engram/releases/tag/v3.1.0",
+ "about": "The engram release Waymark's learned layer (docs/adr/0015) was tested with, and the sha256 of each release archive (as published in the release's checksums.txt) and of the binary inside it, per OS and architecture. `waymark.mjs check` compares the engram on the PATH with it; moving to another release is a change of this file.",
+ "platforms": {
+  "darwin_amd64": {
+   "archive": "engram_3.1.0_darwin_amd64.tar.gz",
+   "archiveSha256": "d61ff9b23ea21fc6d524d227086435309351e7ac0761d9548c653fb502cf68b4",
+   "binary": "engram",
+   "binarySha256": "692e1fcf1117c1593219a3cfcbe352dc9f12e0adc086d6f2b4b67388aec50bc7"
+  },
+  "darwin_arm64": {
+   "archive": "engram_3.1.0_darwin_arm64.tar.gz",
+   "archiveSha256": "2501e971e84f8c5875efb7fa300522169bd7d2784f30593778c6a73c12e01fc4",
+   "binary": "engram",
+   "binarySha256": "a783edf16ba632386f53a60db874a7e4abebcb3cd265787e4d0ed5bdd450e7a7"
+  },
+  "linux_amd64": {
+   "archive": "engram_3.1.0_linux_amd64.tar.gz",
+   "archiveSha256": "2ac33b377f9a51a40e9fa7016f6c908b23483ceb0bfe887d3fb575249b1b1547",
+   "binary": "engram",
+   "binarySha256": "1c37983c332202f5167aa8fdd6b70f85305d8ab7b16ee07867989f6735dcb8b1"
+  },
+  "linux_arm64": {
+   "archive": "engram_3.1.0_linux_arm64.tar.gz",
+   "archiveSha256": "d172999bb483e14b1bd80f5ee4db4819be7ea97d6fdadc16af8d8156e9eaa866",
+   "binary": "engram",
+   "binarySha256": "cc9d0b3d2c361d1756a6a2602f85862b463d073606846b5d5f21a5749931d227"
+  },
+  "windows_amd64": {
+   "archive": "engram_3.1.0_windows_amd64.zip",
+   "archiveSha256": "e41d376d93fe615e55954c95a1d93d0f5fb0a586a8e74b44fd3ee568ee4d9575",
+   "binary": "engram.exe",
+   "binarySha256": "c067b05d2f5fe991b442d80611bc921e6b9da8784437de1d80cdcf5a29d7c857"
+  },
+  "windows_arm64": {
+   "archive": "engram_3.1.0_windows_arm64.zip",
+   "archiveSha256": "7e1b645070814cf2a976b94d706c8936cc57b0c1e371b2922ced1d694ba8ebc9",
+   "binary": "engram.exe",
+   "binarySha256": "ad070b86237c1a6758dc1231bcd093490c62793689099b66b4499da73127c2f5"
+  }
+ }
+}

@@ -9,14 +9,20 @@
 // pinned in .engram/config.json so engram's own MCP server resolves the same name.
 // engram missing → every function is a no-op (Waymark keeps git and memory.md). WAYMARK_ENGRAM overrides the binary
 // (a .mjs path runs with node, for tests). The update check is skipped (ENGRAM_NO_UPDATE_CHECK=1).
+// The release Waymark was tested with is pinned in skills/waymark/engram.pin.json (docs/adr/0036): its version and, per OS and
+// architecture, the sha256 of the release archive and of the binary inside it. `check` compares the engram on this machine with it
+// (engramStatus) and each record keeps the version it was written under (engramInput). A mismatch is said, never a stop.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { maskSecrets, ID } from './provenance.mjs';
 
 const ENV = () => ({ ...process.env, ENGRAM_NO_UPDATE_CHECK: '1' });
-let found;
+const VERSION = /\d+\.\d+\.\d+(?:[-+][\w.]+)?/;
+let found, foundVersion;
 // → [command, ...prefixArgs] to run engram, or null when it is not installed.
 export function engramBin() {
   if (process.env.WAYMARK_ENGRAM !== undefined) {
@@ -28,8 +34,64 @@ export function engramBin() {
   const candidates = ['engram', path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'engram', 'engram.exe'), '/opt/homebrew/bin/engram', '/usr/local/bin/engram',
     path.join(os.homedir(), '.local', 'bin', 'engram'), path.join(os.homedir(), 'go', 'bin', 'engram')];
   found = null;
-  for (const c of candidates) if (spawnSync(c, ['version'], { encoding: 'utf8', timeout: 3000, env: ENV() }).status === 0) { found = [c]; break; }
+  for (const c of candidates) {
+    const r = spawnSync(c, ['version'], { encoding: 'utf8', timeout: 3000, env: ENV() });
+    if (r.status === 0) { found = [c]; foundVersion = String(r.stdout).match(VERSION)?.[0] || null; break; }
+  }
   return found;
+}
+
+export const PIN_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'engram.pin.json');
+const OS_NAME = { win32: 'windows', darwin: 'darwin', linux: 'linux' }, CPU_NAME = { x64: 'amd64', arm64: 'arm64' };
+// The key of a platform in the pin file, named as the release names its archives: windows_amd64, darwin_arm64, linux_amd64…
+export const platformKey = (platform = process.platform, arch = process.arch) => `${OS_NAME[platform] || platform}_${CPU_NAME[arch] || arch}`;
+export function enginePin(file = PIN_FILE) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
+
+// The version engram reports (`engram version`), or null: not installed, or it does not say.
+export function engramVersion() {
+  const bin = engramBin();
+  if (!bin) return null;
+  if (foundVersion !== undefined && bin.length === 1 && found) return foundVersion;
+  const r = spawnSync(bin[0], [...bin.slice(1), 'version'], { encoding: 'utf8', timeout: 3000, env: ENV() });
+  return r.status === 0 ? String(r.stdout).match(VERSION)?.[0] || null : null;
+}
+
+// The file a command name runs: itself when it is a path, else the first match on the PATH (PATHEXT on Windows).
+function whereIs(cmd) {
+  if (path.isAbsolute(cmd) || /[\\/]/.test(cmd)) return fs.existsSync(cmd) ? cmd : null;
+  const exts = process.platform === 'win32' ? ['', ...String(process.env.PATHEXT || '.EXE').split(';')] : [''];
+  for (const dir of String(process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
+    for (const e of exts) { const f = path.join(dir, cmd + e); try { if (fs.statSync(f).isFile()) return f; } catch {} }
+  }
+  return null;
+}
+export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+// What was found (the version engram reports, the file it runs) against the pin: { state, version, file, sha256?, pinned?, entry?, platform }.
+// ok (version and binary sha256 match) · version (another release) · binary (the version matches, the bytes do not: not the published release)
+// · unchecked (the version matches, the file cannot be read to hash it) · unpinned (no pin file) · platform (the pin has no entry for this OS).
+export function judgeEngram({ version = null, file = null } = {}, pin = enginePin(), platform = platformKey()) {
+  if (!pin?.version) return { state: 'unpinned', version, file, platform };
+  const entry = pin.platforms?.[platform];
+  if (!entry) return { state: 'platform', version, file, pinned: pin.version, platform };
+  if (version !== pin.version) return { state: 'version', version, file, pinned: pin.version, entry, platform };
+  let sha256 = null;
+  try { if (file) sha256 = sha256File(file); } catch {}
+  return { state: !sha256 ? 'unchecked' : sha256 === entry.binarySha256 ? 'ok' : 'binary', version, file, sha256, pinned: pin.version, entry, platform };
+}
+
+// The engram on this machine against the pin (judgeEngram), or { state: 'missing' } when it is not installed.
+export function engramStatus(pin = enginePin()) {
+  const bin = engramBin();
+  if (!bin) return { state: 'missing', platform: platformKey() };
+  return judgeEngram({ version: engramVersion(), file: bin.length === 1 ? whereIs(bin[0]) : null }, pin); // a stand-in script (tests) has no binary to hash
+}
+
+// What a record keeps of engram in its `inputs`: { version, pinned } (pinned: the version is the pinned one; null with no pin), or null
+// when engram is not installed. The binary's hash is not computed here: a hook runs at every close, `check` reads the bytes.
+export function engramInput(pin = enginePin()) {
+  const version = engramVersion();
+  return version ? { version, pinned: pin?.version ? pin.version === version : null } : null;
 }
 
 const run = (home, args, timeout = 5000) => {

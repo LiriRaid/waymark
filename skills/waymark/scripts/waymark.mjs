@@ -42,7 +42,7 @@ import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { claudeDir } from './agents/paths.mjs';
-import { engramBin } from './engram.mjs';
+import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
@@ -118,10 +118,22 @@ function migration(cwd) {
   return home.legacy ? `migrate: this project's memory and record are still in ~/.waymark (docs/adr/0007). Move them into ${home.root}/.waymark/ (local, excluded from git, any agent resumes from it): node "${script('migrate-memory.mjs')}" --project "${home.root}" shows the plan, --apply on yes (backup first); the old location works until 2.1.0.` : '';
 }
 
+// What `check` says when the engram on this machine is not the release Waymark pinned (docs/adr/0036); nothing when it is.
+function engramPinLines(st) {
+  const short = (h) => `${String(h).slice(0, 12)}…`;
+  if (st.state === 'version') return [`engram: ${st.version || 'an unknown version'} is installed and Waymark was tested with ${st.pinned} (skills/waymark/engram.pin.json): the learned layer may behave differently. Install ${st.entry.archive} from the release (archive sha256 ${short(st.entry.archiveSha256)}) or move the pin on purpose.`];
+  if (st.state === 'binary') return [`engram: ${st.file} reports ${st.version} but its sha256 ${short(st.sha256)} is not the published release's (${short(st.entry.binarySha256)}): a build that is not ${st.entry.archive}. Reinstall it from the release and compare the archive with its sha256 ${short(st.entry.archiveSha256)}.`];
+  if (st.state === 'platform') return [`engram: the pin (skills/waymark/engram.pin.json) has no entry for ${st.platform}, so ${st.version || 'this engram'} cannot be compared with a release: add the sha256 of that release's archive and binary to the pin.`];
+  if (st.state === 'unpinned') return ['engram: skills/waymark/engram.pin.json is missing or unreadable, so the engram on this machine is not checked against a release.'];
+  return [];
+}
+
 // The learned layer (docs/adr/0015): engram installed, and memory.md without the learned sections engram replaced.
 function learnedLayer(cwd) {
   const out = [];
-  if (!engramBin()) out.push('engram: not installed. The learned layer (docs/adr/0015) needs it: engram_<version>_<os>_<arch> from https://github.com/Gentleman-Programming/engram/releases (verify checksums.txt), on the PATH; then each agent\'s MCP with engram setup <claude-code|codex|opencode|gemini-cli>. Until then Waymark keeps git and memory.md.');
+  const pin = enginePin();
+  if (!engramBin()) out.push(`engram: not installed. The learned layer (docs/adr/0015) needs it: engram_${pin?.version || '<version>'}_<os>_<arch> from https://github.com/Gentleman-Programming/engram/releases (the archive's sha256 is in ${pin ? "skills/waymark/engram.pin.json and in the release's checksums.txt" : 'checksums.txt'}), on the PATH; then each agent's MCP with engram setup <claude-code|codex|opencode|gemini-cli>. Until then Waymark keeps git and memory.md.`);
+  else out.push(...engramPinLines(engramStatus(pin)));
   const home = projectHome(cwd);
   try {
     const n = home.legacy ? 0 : learnedEntries(read(home.memory)).length;

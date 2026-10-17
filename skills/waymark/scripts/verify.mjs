@@ -1,6 +1,7 @@
 // Waymark · `waymark.mjs verify` (docs/adr/0027): what someone who was not there can check, offline.
 //   chain      the records of the project: hash links, the notes in refs/notes/waymark, the anchors in refs/notes/waymark-anchor
-//   install    the installed skills against skills/waymark/MANIFEST.json (or a manifest given with --manifest)
+//   install    the installed skills against skills/waymark/MANIFEST.json (or a manifest given with --manifest), and the vendored third-party
+//              skills against skills/waymark/skills.lock (docs/adr/0036)
 //   signature  the release tag (v<VERSION>, else HEAD) against skills/waymark/ALLOWED_SIGNERS, with git's own verification
 //   anchors    who vouches for each task's anchor (docs/adr/0034): the ssh signature the hook made at the close, against the release's
 //              ALLOWED_SIGNERS and the user's own (~/.waymark/ALLOWED_SIGNERS), several keys each with ssh's valid-after / valid-before,
@@ -17,7 +18,7 @@ import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verif
 import { anchorStates, fileSignature, trust, say, NS_ATTEST } from './sign.mjs';
 import { remoteAnchors } from './notes-remote.mjs';
 import { hasRemote } from './notes.mjs';
-import { SKILLS, checkManifest, checkGenerated, manifestSignature } from './manifest.mjs';
+import { SKILLS, checkManifest, checkGenerated, manifestSignature, checkSkillsLock } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
 export const ALLOWED_SIGNERS = path.join(SKILLS, 'waymark', 'ALLOWED_SIGNERS');
@@ -209,6 +210,13 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
     const gen = checkGenerated(skillsDir);
     lines.push(gen.ok ? 'generated: skill-map.json and skill-registry.md are what sync writes (not hashed: sync rewrites them for each machine)' : `generated: ${gen.problems.join('; ')}`);
     if (!gen.ok) code = 1;
+    // skills.lock (docs/adr/0036): each vendored third-party skill is still what it was pinned to.
+    const lk = checkSkillsLock(skillsDir);
+    lines.push(!lk.present ? `skills.lock: ${lk.problems[0]}`
+      : lk.ok ? `skills.lock: ${lk.checked} vendored skill${lk.checked === 1 ? '' : 's'} match${lk.checked === 1 ? 'es' : ''} the pins${lk.checked ? '' : ' (this release vendors none)'}`
+        : `skills.lock: DIFFERS · ${[...lk.changed.map((n) => `${n} changed since it was pinned`), ...lk.missing.map((n) => `${n} is pinned and gone`), ...lk.problems].join('; ')}`);
+    if (lk.unpinned.length) lines.push(`  warning: ${lk.unpinned.join(', ')} ${lk.unpinned.length === 1 ? 'is' : 'are'} pinned to no ref and no upstream hash (re-vendor with --ref <tag|commit>)`);
+    if (!lk.ok) code = 1;
     // The signature the install carries: MANIFEST.json.sig over the manifest, checked against ALLOWED_SIGNERS (no git needed).
     const sig = manifestSignature(manifestFile || path.join(skillsDir, 'waymark', 'MANIFEST.json'), path.join(skillsDir, 'waymark', 'ALLOWED_SIGNERS'));
     lines.push(`signature (MANIFEST.json): ${sig.state === 'signed' ? `signed by ${sig.by}` : sig.state === 'untrusted' ? 'signed, key not in ALLOWED_SIGNERS' : sig.state === 'bad' ? 'BAD signature: the manifest or its signature was edited after signing' : sig.state === 'unchecked' ? 'unchecked (ssh-keygen is not available here)' : 'unsigned'}`);

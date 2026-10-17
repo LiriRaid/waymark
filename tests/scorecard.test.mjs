@@ -80,7 +80,7 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
     { id: '3', what: 'le within', point: 0, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: 5 },
     { id: '4', what: 'le over', point: 0, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: 0.25 },
     { id: '5', what: 'pending', point: 4, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: null, frozenIn: 3 },
-    { id: '6', what: 'not built', point: 5, kind: 'measure', measure: 'precedent.maxChars', op: 'le', threshold: 400 },
+    { id: '6', what: 'not built', point: 11, kind: 'measure', measure: 'conformance.cases', op: 'ge', threshold: 30 },
   ]));
   const r = (await S.scorecard(root)).criteria[0].checks;
   const share = r[0].value;

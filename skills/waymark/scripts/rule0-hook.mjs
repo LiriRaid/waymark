@@ -16,7 +16,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, markTaskStart, taskInProgress, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -115,12 +116,21 @@ export function reminder(hook, agent) {
   try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
   try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
+  // the earlier task that resembles the ask, handed over once, at the task's first prompt (docs/adr/0033); null clears a stale one
+  let prec = '';
+  try {
+    if (!taskStartMark(hook.session_id)) {
+      const home = projectHome(cwd), p = home.dir && !home.legacy ? precedentFor(hook.prompt, readTaskRecords(home)) : null;
+      keepPrecedent(hook.session_id, p);
+      if (p) prec = ` ${p.text}`;
+    }
+  } catch {}
   try { markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
-  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }

@@ -1,6 +1,6 @@
 {
   "schema": "waymark.scorecard/v1",
-  "adr": "0031",
+  "adr": "0033",
   "about": "The definition of '95 %' (docs/adr/0028-scorecard.md). Every check is deterministic: a file, a pattern, a command's exit or a number computed from the records. A check scores 1 or 0, or a ratio against its threshold (a number above 1 is capped at 1). A criterion is the mean of its checks; the total is the sum of weight x criterion. `point` is the plan 2.0.18 point that makes the check pass (0 = it holds today); a check that fails before its point is the honest baseline, not a mistake. A threshold of null is frozen later by an amendment ADR, from the baseline, and scores 0 until then.",
   "criteria": [
     {
@@ -113,7 +113,7 @@
       "checks": [
         { "id": "10.1", "what": "a project memory pack and the learned layer already hand the agent earlier work", "point": 0, "kind": "contains", "files": ["skills/waymark/scripts/waymark.mjs"], "pattern": "export function pack" },
         { "id": "10.2", "what": "a deterministic lexical search hands the earlier task that resembles the ask", "point": 5, "kind": "exists", "files": ["skills/waymark/scripts/precedent.mjs"] },
-        { "id": "10.3", "what": "precision@3 on the author's held-out tasks is within its frozen threshold", "point": 5, "kind": "measure", "measure": "precedent.precisionAt3", "op": "ge", "threshold": null, "frozenIn": 5 },
+        { "id": "10.3", "what": "precision@3 on the author's held-out tasks is within its frozen threshold", "point": 5, "kind": "measure", "measure": "precedent.precisionAt3", "op": "ge", "threshold": 0.85, "frozenIn": 5 },
         { "id": "10.4", "what": "the hand-over never exceeds 400 characters", "point": 5, "kind": "measure", "measure": "precedent.maxChars", "op": "le", "threshold": 400 },
         { "id": "10.5", "what": "the hand-over tests pass, including 'hands nothing on an unrelated ask'", "point": 5, "kind": "run", "command": ["node", "--test", "tests/precedent.test.mjs"] },
         { "id": "10.6", "what": "tasks that needed redoing are shown in tasks.md", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/provenance/taskmd.mjs"], "pattern": "reworkFiles" }

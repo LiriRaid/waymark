@@ -165,6 +165,8 @@ node "$HOME/.agents/skills/waymark/scripts/measure.mjs" --turns 3-5
 
 It reads the agent's own session transcript (offline, no model call) and shows, per prompt: the context it started with (its growth is what every later response re-reads), responses, tool calls, images, new vs cached input tokens, output and sub-agent tokens; the fixed context the session started with; and for a range of prompts (one task) the number of **attempts**.
 
+`node "<skills-dir>/waymark/scripts/waymark.mjs" cost` does the same over your task records: per Waymark version and level, the tokens per task, how the cost splits between routine, work and reply (in cost units, each token weighted by its price ratio, next to raw tokens), the fixed context, the cost of a resume and the measured share of your 5-hour window. `bench/replay.mjs` replays the same recorded tasks under the injection of another version, so a change in what Waymark injects is shown on the same tasks; it does not replay the agent's behaviour. In the author's records, what Waymark injects is under 1 % of a task's cost and the routine responses are 8 to 13 % (`docs/adr/0031`).
+
 ### Your quota, per terminal
 
 In Claude Code with a Pro or Max plan, Waymark's status line reads the real % of the 5-hour window and measures each task's % from its first prompt to its close, with no question to you (`docs/adr/0019`). The window is your account's, so several sessions spend from the same %. Each rise is split among the open sessions by what each one spent, so every terminal shows its own part (`5h 41% · esta sesión ≈12% · tokens 5.9M`). The tokens are everything the session's tasks used, its subagents and cache included (the sum of their evaluations). The line refreshes every 30 s, so a quiet terminal also sees what the others spent. A task that shared the window closes with `medido, con otra sesión activa; esta sesión ≈ X%, prorrateado por costo`. The first reading Waymark sees with none before it (a new install), or of a new window read long after the last reset, is a baseline: what the window already held is no session's. Claude's desktop app shows no status line, but its hooks record what each of its sessions spends (from the transcript, at list price), so a rise is split with it too and a terminal shows only its own part. A rise while no Claude Code session spent (claude.ai, Codex, another machine) goes to none of them; while a session also spent, that session takes it. Elsewhere the % is estimated from your measured tasks of the same model.
@@ -323,6 +325,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0028 · The scorecard: what "95 %" means, computed by checks](docs/adr/0028-scorecard.md)
 - [0029 · A suite with nothing skipped, todo or failing, and a CI that runs it](docs/adr/0029-suite-with-nothing-skipped-and-ci.md)
 - [0030 · Record schema v2: the fields the hooks derive](docs/adr/0030-record-schema-v2.md)
+- [0031 · Cost per version and level, the replay bench, and the thresholds of criterion 8](docs/adr/0031-cost-per-version-replay-and-frozen-thresholds.md)
 <!-- adr-index:end -->
 
 ## Contributing back

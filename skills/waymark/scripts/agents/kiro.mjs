@@ -68,7 +68,7 @@ export function input(h) {
     append(name, session, { event: 'tool', cwd, key: tool, tool: use[0], input: use[1], ...(skill ? { skill } : {}) });
   } else if (event === 'PostToolUse' && tool) {
     const r = h.tool_response ?? h.tool_output ?? h.tool_result;
-    append(name, session, { event: 'result', cwd, key: tool, error: failed(r), output: typeof r === 'string' ? r : '' });
+    append(name, session, { event: 'result', cwd, key: tool, error: failed(r), output: typeof r === 'string' ? r : String(r?.stdout ?? r?.output ?? r?.result ?? '') });
   } else if (event === 'Stop') append(name, session, { event: 'stop', cwd });
   return hook;
 }

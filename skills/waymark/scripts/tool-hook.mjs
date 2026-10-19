@@ -186,11 +186,13 @@ export function commandRepos(command, cwd = process.cwd()) {
   return [...dirs].filter((d) => { try { if (!fs.statSync(d).isDirectory()) return false; } catch { return false; } const t = top(d); return t && t !== own; });
 }
 
-// The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked).
-function ownerDept(hook) {
+// The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked). The calls are read
+// through the agent's own adapter (its rollout, chat or journal as the core's lines): a transcript that is not Claude Code's .jsonl holds no
+// Skill call of its own, so reading it raw would find no department and the procedures would never be handed over there.
+function ownerDept(hook, agent) {
   if (!hook.transcript_path) return null;
   try {
-    const calls = sessionTools(readTail(hook.transcript_path)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
+    const calls = sessionTools(agent.read(hook, 512 * 1024)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
     return calls.length ? String(calls.at(-1).input.skill) : null;
   } catch { return null; }
 }
@@ -220,7 +222,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  const dept = ownerDept(hook), procsDone = procDelivered(session, since, file);
+  const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
   if (!fresh.length && !procText) return null;
   const { pack } = await import('./waymark.mjs');

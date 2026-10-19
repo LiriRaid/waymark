@@ -91,7 +91,7 @@ export const Waymark = async ({ client, $, directory }) => {
       if (!args.has(input.callID)) return;
       const toolInput = args.get(input.callID);
       args.delete(input.callID);
-      const o = await run('tool-hook.mjs', { hook_event_name: 'PostToolUse', session_id: input.sessionID, tool_name: input.tool, tool_input: toolInput });
+      const o = await run('tool-hook.mjs', { hook_event_name: 'PostToolUse', session_id: input.sessionID, tool_name: input.tool, tool_input: toolInput, transcript_path: join(DIR, `${input.sessionID}.jsonl`) }); // the dump the before-hook wrote: the hook finds the task's department in it
       const text = context(o);
       if (text && output) output.output = `${output.output ?? ''}\n\n${text}`;
     },

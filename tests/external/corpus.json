@@ -116,7 +116,7 @@
    "language": "kotlin",
    "sample": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
    "expect": {
-    "stack": null,
+    "stack": "android (gradle)",
     "profile": "android",
     "gates": {
      "test": "./gradlew testDebugUnitTest",

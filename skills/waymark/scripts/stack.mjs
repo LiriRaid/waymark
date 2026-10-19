@@ -31,6 +31,20 @@ export function isAndroid(root) {
   try { return manifest(root) || fs.readdirSync(root, { withFileTypes: true }).some((e) => e.isDirectory() && !/^(\.|node_modules$|build$)/.test(e.name) && manifest(path.join(root, e.name))); } catch { return false; }
 }
 
+// The ecosystems with a profile that are read from a build file rather than a package manager (docs/adr/0039: the reference bench found the
+// card saying nothing about them): Android, Maven, Gradle, .NET and the few that stack-new drafts (Dart, Elixir, Swift). → [file, label] or null.
+function buildLabel(root) {
+  if (isAndroid(root)) return ['AndroidManifest.xml', 'android (gradle)'];
+  const has = (f) => fs.existsSync(path.join(root, f));
+  if (has('pom.xml')) return ['pom.xml', 'java (maven)'];
+  if (has('build.gradle') || has('build.gradle.kts')) return ['build.gradle', 'java (gradle)'];
+  if (anyExt(root, /\.(csproj|fsproj|sln)$/i)) return ['*.csproj', '.net (dotnet)'];
+  if (has('pubspec.yaml')) return ['pubspec.yaml', 'dart (pub)'];
+  if (has('mix.exs')) return ['mix.exs', 'elixir (mix)'];
+  if (has('Package.swift')) return ['Package.swift', 'swift (swiftpm)'];
+  return null;
+}
+
 // → { pm, pmVersion, from, exec, run, deps: [[name, version]] } for a Node project; { pm: null, other } for a Ruby, Python or
 // Go project; null when the folder has no manifest.
 export function stackOf(root) {
@@ -41,7 +55,8 @@ export function stackOf(root) {
   if (!pkg) {
     const other = [...PRIMARY, ['Gemfile', 'bundler (bundle exec)'], ['pyproject.toml', 'python (pyproject)'], ['requirements.txt', 'python (pip)'], ['go.mod', 'go']].find(([f]) => fs.existsSync(path.join(root, f)))
       || (anyExt(root, /\.tf$/i) ? ['*.tf', 'terraform'] : null)
-      || (cBuild(root) ? ['CMakeLists.txt', cBuild(root)] : null);
+      || (cBuild(root) ? ['CMakeLists.txt', cBuild(root)] : null)
+      || buildLabel(root);
     if (!other) return null;
     const rails = other[0] === 'Gemfile' ? read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] : null;
     return { pm: null, other: other[1], deps: rails ? [['rails', rails]] : [] };
@@ -133,9 +148,12 @@ export function profileOf(root) {
     const names = new Set(s.deps.map(([n]) => n));
     slug = names.has('@angular/core') ? 'angular' : names.has('@nestjs/core') ? 'nestjs' : names.has('react') ? 'react' : 'node';
   } else if (s) {
-    slug = /^rust/.test(s.other) ? 'rust' : /^php/.test(s.other) ? 'php' : s.other === 'terraform' ? 'terraform' : /^python/.test(s.other) ? 'python' : s.other === 'go' ? 'go' : /^c \(/.test(s.other) ? 'c' : s.deps.some(([n]) => n === 'rails') ? 'rails' : 'generic';
+    slug = /^rust/.test(s.other) ? 'rust' : /^php/.test(s.other) ? 'php' : s.other === 'terraform' ? 'terraform' : /^python/.test(s.other) ? 'python' : s.other === 'go' ? 'go' : /^c \(/.test(s.other) ? 'c' : /^android/.test(s.other) ? 'android' : /^java/.test(s.other) ? 'java' : /^\.net/.test(s.other) ? 'dotnet' : s.deps.some(([n]) => n === 'rails') ? 'rails' : 'generic';
   } else if (isAndroid(root)) slug = 'android';
   else if (['pom.xml', 'build.gradle', 'build.gradle.kts'].some((f) => fs.existsSync(path.join(root, f)))) slug = 'java';
   else if (anyExt(root, /\.(csproj|sln)$/i)) slug = 'dotnet';
-  return { slug, exists: fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'stacks', `${slug}.md`)) };
+  const stacks = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'stacks');
+  // An ecosystem read from a build file with no profile of its own: a profile dropped in stacks/ under its name (`stack-new` drafts one) applies at once
+  if (slug === 'generic' && s?.other) { const own = String(s.other).split(' ')[0].replace(/^[.]/, ''); if (own && fs.existsSync(path.join(stacks, `${own}.md`))) slug = own; }
+  return { slug, exists: fs.existsSync(path.join(stacks, `${slug}.md`)) };
 }

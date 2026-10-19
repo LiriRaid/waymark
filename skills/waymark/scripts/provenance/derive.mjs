@@ -48,6 +48,9 @@ export function askedItems(prompt) {
   return items.length >= 2 ? items.slice(0, 12).map((s) => s.slice(0, 160)) : [];
 }
 
+// The items of an ask: those the agent numbered in its Pedido line (L2+), else the user's own list.
+const askedFrom = (pedido, prompt) => (pedido.length >= 2 ? pedido : askedItems(prompt));
+
 // The numbered requirements of a Pedido line ("1) a 2) b · Captura: …" → ['a', 'b']): the numbers run from 1 without a gap, and fewer
 // than two is not a list. What follows " · Captura:", " · Copia:", " · Capa:" or " · Cambia:" is not part of an item.
 export function itemsOf(text) {
@@ -149,7 +152,7 @@ export function followUps(records, id) {
 
 // The v2 fields the hook adds to a new record; a field with nothing to say is left out.
 export function v2Fields({ prompt, files, level, records, now, self, norm, pedido = [] } = {}) {
-  const fields = { taskType: taskTypeOf({ prompt, files, level }), asked: pedido.length >= 2 ? pedido : askedItems(prompt), ...reworkOf(files, records, { now, self, norm }) };
+  const fields = { taskType: taskTypeOf({ prompt, files, level }), asked: askedFrom(pedido, prompt), ...reworkOf(files, records, { now, self, norm }) };
   return Object.fromEntries(Object.entries(fields).filter(([, v]) => v && (!Array.isArray(v) || v.length)));
 }
 

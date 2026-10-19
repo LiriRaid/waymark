@@ -18,6 +18,8 @@
 //   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
+//   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
+//   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
@@ -56,7 +58,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -197,7 +199,7 @@ export function adapterless(all = found()) {
   const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
   if (!list.length) return '';
   const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
-  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to write its adapter with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs, scripts/agents/agents.json).`;
+  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
 }
 
 // Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change

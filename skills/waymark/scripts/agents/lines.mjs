@@ -1,11 +1,12 @@
 // What every adapter's toLines builds the same way: a choice-window question and the user line that answers it, in
 // the shape the core reads (Claude Code's AskUserQuestion call and its toolUseResult).
 
-// A question as the agent sent it → { question, options: [{ label }] }. `text` and `options` name the keys the agent
-// uses, in order (the first with a value wins); `plain`: a bare string is the question itself.
+// A question as the agent sent it → { question, options: [{ label, description? }] }. `text` and `options` name the keys the agent
+// uses, in order (the first with a value wins); `plain`: a bare string is the question itself. An option keeps the description the
+// agent wrote: the record's options carry their risk, files and cost from it (docs/adr/0038), so dropping it would read as "none stated".
 export const asQuestion = (q, { text = ['question'], options = ['options'], plain = false } = {}) => ({
   question: String(text.map((k) => q?.[k]).find(Boolean) || (plain ? q : '') || '').trim(),
-  options: (options.map((k) => q?.[k]).find(Boolean) || []).map((o) => ({ label: String(o?.label ?? o) })),
+  options: (options.map((k) => q?.[k]).find(Boolean) || []).map((o) => ({ label: String(o?.label ?? o), ...(o?.description ? { description: String(o.description) } : {}) })),
 });
 
 // The questions without what only the adapter needed (an id).

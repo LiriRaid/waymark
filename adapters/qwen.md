@@ -16,7 +16,7 @@ Written from the documentation (docs/adr/0041, checked 2026-10-19). Nothing here
 ## What it does and does not do
 
 - **Does:** the card at the start of a session, the reminder and the task ID with each prompt (`additionalContext`), the pack of a file and the procedures with the first edit (before the tool runs, `PreToolUse` takes `additionalContext`), the sensitive-path guard (a deny before the tool, reads included), the commit trailer, the record of the task (files, gates, commits, tool results) and the end-of-turn hook with `Stop`'s `decision: block`, at most 8 times in a row (`stopHookBlockingCap`).
-- **Does not:** judge the Cierre, the evidence or the choice window (`lacks: cierre, evidence, decision`), and the gate before the first change lets it through. `Stop` carries the turn's last message only, with no routing line, and the question tool is not documented. The review is `waymark.mjs review <files>`.
+- **Does not:** judge the Cierre, the evidence or the choice window (`lacks: cierre, evidence, decision`), and the gate before the first change lets it through. `Stop` carries the turn's last message only, with no routing line, and the question tool is not documented. The review is `node "<skills-dir>/waymark/scripts/waymark.mjs" review <files>`.
 
 ## First live session: what to check
 
@@ -25,7 +25,7 @@ Written from the documentation (docs/adr/0041, checked 2026-10-19). Nothing here
 3. `UserPromptSubmit`: `prompt` against `submitted_prompt` (the adapter reads `submitted_prompt` first); a `decision: block` must stop the prompt.
 4. `PreToolUse` with `permissionDecision: deny` stops the tool and the model reads the reason; with only `additionalContext` the tool runs.
 5. `Stop`: whether the `reason` of a `decision: block` reaches the model for a command hook (documented only for prompt hooks), and whether `MessageDisplay` could carry each message and so the routing line (not read).
-6. `node <skills-dir>/waymark/scripts/waymark.mjs tasks` after a task: the record must show the agent `qwen` and the files.
+6. `node "<skills-dir>/waymark/scripts/waymark.mjs" tasks` after a task: the record must show the agent `qwen` and the files.
 
 Anything that differs: fix `agents/qwen.mjs`, its driver `tests/conformance/agents/qwen.mjs` and the spec `tests/new-adapters.test.mjs` with the real payload.
 
@@ -35,4 +35,4 @@ Not read for this adapter: find where Qwen Code registers MCP servers in its doc
 
 ## Capability mapping
 
-Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `waymark.mjs review <files>` for the review. The choice window is asked in the chat.
+Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `node "<skills-dir>/waymark/scripts/waymark.mjs" review <files>` for the review. The choice window is asked in the chat.

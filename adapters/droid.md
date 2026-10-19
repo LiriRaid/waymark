@@ -16,7 +16,7 @@ Written from the documentation (docs/adr/0041, checked 2026-10-19). Nothing here
 ## What it does and does not do
 
 - **Does:** the card at the start of a session, the reminder and the task ID with each prompt (`additionalContext`, both bare and under `hookSpecificOutput`: the guide writes it bare), the pack of a file and the procedures with the first edit's result (`PostToolUse`), the sensitive-path guard (a deny before the tool, reads included), the commit trailer, the record of the task and the end-of-turn hook with `Stop`'s `decision: block`.
-- **Does not:** judge the Cierre, the evidence or the choice window (`lacks: cierre, evidence, decision`): no hook carries the reply. The gate before the first change lets it through. The review is `waymark.mjs review <files>`.
+- **Does not:** judge the Cierre, the evidence or the choice window (`lacks: cierre, evidence, decision`): no hook carries the reply. The gate before the first change lets it through. The review is `node "<skills-dir>/waymark/scripts/waymark.mjs" review <files>`.
 
 ## First live session: what to check
 
@@ -25,7 +25,7 @@ Written from the documentation (docs/adr/0041, checked 2026-10-19). Nothing here
 3. Whether the hook's shell and Windows are the ones the command needs (`node "<path>" "<path>"` with forward slashes) — the docs say nothing about Windows hooks.
 4. `UserPromptSubmit`'s `additionalContext` arrives once, not twice, and `decision: block` stops a prompt.
 5. `PreToolUse` with `permissionDecision: deny` stops the tool; exit 2 stderr reaches the agent; `Stop` with `decision: block` makes it continue once.
-6. `node <skills-dir>/waymark/scripts/waymark.mjs tasks` after a task: the record must show the agent `droid` and the files.
+6. `node "<skills-dir>/waymark/scripts/waymark.mjs" tasks` after a task: the record must show the agent `droid` and the files.
 
 Anything that differs: fix `agents/droid.mjs`, its driver `tests/conformance/agents/droid.mjs` and the spec `tests/new-adapters.test.mjs` with the real payload.
 
@@ -35,4 +35,4 @@ Not read for this adapter: find where Droid registers MCP servers in its documen
 
 ## Capability mapping
 
-Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `waymark.mjs review <files>` for the review. The choice window is asked in the chat.
+Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `node "<skills-dir>/waymark/scripts/waymark.mjs" review <files>` for the review. The choice window is asked in the chat.

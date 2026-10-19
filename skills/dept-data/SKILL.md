@@ -1,6 +1,6 @@
 ---
 name: dept-data
-description: "Data & State. FIRST for schema, queries, state: \"migración\", \"nueva tabla\", \"columna\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"estado global\", SQL, ORM."
+description: "Data & State. FIRST for schema, queries, state: \"migración\", \"nueva tabla\", \"índice\", \"consulta lenta\", \"N+1\", \"cache\", \"Redis\", \"estado global\"."
 ---
 
 # Data Engineering & State Management
@@ -64,7 +64,7 @@ In `procedures.md` (same folder), one section per task:
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | ORM, migration DSL, DB engine, cache client, store/reactivity API not verified this session | Q |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Find all readers/writers of a table, cache key or store (mandatory for destructive changes) | L1 |
 | review.diff | `code-review` | Before declaring done | L2 |
 | plan.implementation | `Plan` (agent) | Destructive migration, new store architecture | L3 |

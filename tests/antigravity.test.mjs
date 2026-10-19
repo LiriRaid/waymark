@@ -1,6 +1,7 @@
 // Waymark · the Antigravity adapter (docs/adr/0022): its named hooks in ~/.gemini/config/hooks.json, injectSteps and
 // decisions as answers, the journal of its hooks as the turn, install-hooks and uninstall. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and hooks file; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -110,8 +111,8 @@ test('install-hooks --agent antigravity: a "waymark" hook in ~/.gemini/config/ho
   const { planHooks, registered } = await import(url('install-hooks.mjs'));
   const { settings, steps } = planHooks({}, { scripts: '/s/waymark/scripts', agent: 'antigravity' });
   assert.deepEqual(Object.keys(settings.waymark), ['SessionStart', 'PreInvocation', 'PreToolUse', 'Stop', 'PostToolUse']);
-  assert.deepEqual(settings.waymark.PreToolUse, [{ matcher: '*', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent antigravity --event PreToolUse' }] }]);
-  assert.equal(settings.waymark.PreInvocation[0].command, 'node "/s/waymark/scripts/rule0-hook.mjs" --agent antigravity --event UserPromptSubmit');
+  assert.deepEqual(settings.waymark.PreToolUse, [{ matcher: '*', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent antigravity --event PreToolUse' }] }]);
+  assert.equal(settings.waymark.PreInvocation[0].command, 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/rule0-hook.mjs" --agent antigravity --event UserPromptSubmit');
   assert.equal(settings.waymark.Stop[0].timeout, 60, 'the end-of-turn hook gets more than the default 30 s');
   assert.equal(steps.length, 5);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'antigravity' }).steps, [], 'idempotent');

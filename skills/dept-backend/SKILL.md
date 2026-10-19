@@ -1,6 +1,6 @@
 ---
 name: dept-backend
-description: "Backend. FIRST for server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"servicio\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", REST, GraphQL, cron."
+description: "Backend. FIRST for server-side code: \"crear un endpoint\", \"nueva API\", \"webhook\", \"job en background\", \"cola\", \"websocket\", \"integración con un proveedor\", cron."
 ---
 
 # Backend Engineering
@@ -68,7 +68,7 @@ In `procedures.md` (same folder), one section per task:
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Any framework/ORM/queue API not verified this session; always for new APIs at L2+ | Q |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Pattern lookup across >3 locations | L1 |
 | claude.api | `claude-api` | Code that calls the Claude / Anthropic API | L1 |
 | app.run | `run` | Endpoint touches external I/O, realtime or jobs | L2 |

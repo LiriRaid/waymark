@@ -1,6 +1,6 @@
 ---
 name: dept-devops
-description: "DevOps. FIRST for build, CI/CD, git, deploy: \"deploy\", \"pipeline\", \"GitHub Actions\", \"Docker\", \"rama\", \"commit\", \"PR\", \"merge\", \"release\", \"el build falla\"."
+description: "DevOps. FIRST for build, CI/CD, git, deploy: \"deploy\", \"pipeline\", \"GitHub Actions\", \"Docker\", \"commit\", \"PR\", \"merge\", \"release\", \"el build falla\"."
 ---
 
 # DevOps / Platform Engineering
@@ -61,7 +61,7 @@ In `procedures.md` (same folder), one section per task:
 | review.diff | `code-review` | Before opening a PR or merging | L2 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | CI provider, container, build tool or SSR config syntax not verified this session | Q |
 | search.codebase | `Explore` agent | Locating env variable usages or build scripts across the repo | L1 |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | ci.authoring / containers / IaC | none yet → waymark `references/skills.md` | Dedicated CI, Docker or Terraform skill | L2 |
 
 ## Definition of Done

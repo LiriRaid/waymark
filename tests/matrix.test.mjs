@@ -1,5 +1,6 @@
 // Waymark 2.0.16 · point 12: the per-agent capability matrix is generated from agents.json and the adapters, and the copies in
 // README.md and INSTALL.md are the generated text. Run: node --test tests/*.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,9 +22,9 @@ test('events: an agent with all five, one without PreToolUse and an agent with n
   assert.deepEqual(Object.values(generic), [false, false, false, false, false], 'an agent with no adapter has none');
 });
 
-test('matrix: Claude Code enforces everything including reads; the others leave reads advisory; unknown agents are named as having no adapter', () => {
-  assert.deepEqual(Object.values(row('claude').cells), ['enforced', 'enforced', 'enforced', 'enforced', 'enforced', 'enforced']);
-  assert.equal(row('codex').cells.reads, 'advisory', 'Codex reads through its shell');
+test('matrix: Claude Code enforces everything including reads; the others detect reads at the end of the turn; unknown agents are named as having no adapter', () => {
+  assert.deepEqual(Object.values(row('claude').cells), ['enforced', 'enforced', 'enforced', 'enforced', 'prevent', 'prevent', 'detect']);
+  assert.equal(row('codex').cells.reads, 'detect', 'Codex reads through its shell: nothing refuses it before, the end-of-turn hook finds it (docs/adr/0037)');
   assert.equal(row('copilot').cells.brake, 'advisory', 'no way to stop a prompt there: the brake is a line in the reminder');
   assert.equal(row('windsurf').adapter, null);
   assert.equal(row('windsurf').cells, null);

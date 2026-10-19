@@ -194,6 +194,30 @@ export function turnLinks(lines, since = 0) {
   return links;
 }
 
+// The tokens of each tool call of the turn, as compact tuples [tool, link, input, cacheWrite, cacheRead, output] (record
+// schema v2, docs/adr/0030). link is "r" for a routine call and "w" for work (ROUTINE_CALL, the same rule as turnLinks). A
+// response that issues several calls is one billed response: its tokens are split among its calls in equal parts, the
+// remainder going to the first ones, so the calls add up to the response and the turn's calls to links minus its replies.
+export function costByCall(lines, since = 0) {
+  const { from } = turnStart(lines, since);
+  const byId = new Map();
+  for (const d of lines.slice(from)) {
+    const u = d.type === 'assistant' && !d.isSidechain ? d.message?.usage : null;
+    if (!u) continue;
+    const e = byId.get(d.message.id) || { u, calls: [] };
+    for (const c of d.message.content || []) if (c.type === 'tool_use') e.calls.push(c);
+    byId.set(d.message.id, e);
+  }
+  const out = [];
+  for (const { u, calls } of byId.values()) {
+    const n = calls.length;
+    if (!n) continue;
+    const q = [u.input_tokens || 0, u.cache_creation_input_tokens || 0, u.cache_read_input_tokens || 0, u.output_tokens || 0];
+    calls.forEach((c, i) => out.push([String(c.name || '?').slice(0, 60), ROUTINE_CALL(c) ? 'r' : 'w', ...q.map((x) => Math.floor(x / n) + (i < x % n ? 1 : 0))]));
+  }
+  return out;
+}
+
 // A turn's usage plus its subagents' (same shape as turnUsage; `subagents` keeps their total apart).
 export function withSubagents(usage, sub) {
   const fresh = sub.input + sub.cacheWrite + sub.output, total = fresh + sub.cacheRead;

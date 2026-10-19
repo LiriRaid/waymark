@@ -1,6 +1,7 @@
 // Waymark 2.0.3 · point 2: the memory chain (notes that travel, records that are only notes, what a Q learns, the
 // card). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and temporary repos; nothing reads or writes the real ~/.waymark or engram.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -132,7 +133,7 @@ test('notes merge: a conflict on one commit keeps the local note (its stub hashe
   assert.deepEqual([n.get(shaB), n.get(sha3), n.has(sha)], ['{"id":"local"}', '{"id":"three"}', true]);
 });
 
-test('notes push: check says how many note commits are not pushed; the hook pushes on any push it sees', () => {
+test('notes push: check says how many note commits are not pushed; shouldPushNotes says when there is something to push (the hook pushes only with the project yes, ADR 0042)', () => {
   const { b } = pair();
   notes.notesSetup(b);
   assert.equal(notes.unpushedNotes(b), 0);
@@ -337,7 +338,7 @@ test('2.0.14 no notes in git: the trailer commits are the records, per task ID; 
   const text = card(d);
   assert.match(text, /Notes: the fetch from origin failed/);
   const tasks = fs.readFileSync(path.join(d, '.waymark', 'tasks.md'), 'utf8');
-  assert.ok(tasks.includes(`| ${day} · T1 | solo commit | — | feat: login con Google |`), tasks);
+  assert.ok(tasks.includes(`| ${day} · T1 | solo commit | — | — | feat: login con Google |`), tasks);
   // a repo with a note for one task and only a commit for another: both listed
   const sha2 = commit(d, `${day} · T2`);
   notes.addNote(d, sha2, JSON.stringify(record(`${day} · T2`, sha2)));

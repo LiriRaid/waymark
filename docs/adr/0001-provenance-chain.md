@@ -18,4 +18,4 @@ Each L1–L3 task gets an ID `YYYY-MM-DD · T<n>[a-z]` (n per project and day; a
 ## Consequences
 - Positive: every closed task leaves a record the user can audit; the record says which claims were not backed instead of trusting the reply; wrong-direction work is cut by the user's choice before editing.
 - Negative: one extra deny per L2+ prompt when the agent skips the choice (and one retry when there is a single real option); ~25 tokens per prompt for the task ID line; a log that grows (~1 KB per task).
-- Follow-up: step 2 (log and project memory in `<project>/.waymark/`, git-excluded), step 3 (smaller block), step 4 (A/B against plain Claude Code and gentle-ai). Gate of this step: `node --test tests/*.test.mjs` + one real L2 task.
+- Follow-up: step 2 (log and project memory in `<project>/.waymark/`, git-excluded), step 3 (smaller block), step 4 (A/B against plain Claude Code and an orchestrator already installed). Gate of this step: `node --test tests/*.test.mjs` + one real L2 task.

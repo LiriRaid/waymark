@@ -1,6 +1,6 @@
 ---
 name: browser-verify
-description: "test.browser · owner dept-qa. Verify a web change in a real browser: \"verifica que funcione\", \"pruébalo en el navegador\", \"se ve bien en móvil\", screenshots, console errors, e2e."
+description: "owner dept-qa. Verify a web change in a real browser: \"verifica que funcione\", \"pruébalo en el navegador\", \"se ve bien en móvil\", console errors, e2e."
 ---
 
 # Browser Verify

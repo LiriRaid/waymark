@@ -61,5 +61,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     process.exit(0);
   }
   const n = moveLearned(home);
-  console.log(n === null ? 'engram is not installed: nothing moved (waymark.mjs check offers it).' : `moved ${n} entries to engram (project ${home.slug}); memory.md keeps the manual, history.md the moved text.`);
+  console.log(n === null ? 'engram is not installed: nothing moved (the check command offers it).' : `moved ${n} entries to engram (project ${home.slug}); memory.md keeps the manual, history.md the moved text.`);
 }

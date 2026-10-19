@@ -6,7 +6,8 @@
 //   node waymark.mjs mcp-fit | skill-fit | migrate | connect | install-hooks | uninstall [args]   the existing scripts, args passed on
 //   node waymark.mjs testigos [<task ID>]   re-run the testigos that execute (chain, commit + trailer, secrets, typecheck)
 //   node waymark.mjs tasks [<task ID>]      the task records, newest first (git notes + provenance.jsonl); one task → its whole record
-//   node waymark.mjs notes push [<remote>]  send the records (refs/notes/waymark) to the remote (default origin)
+//   node waymark.mjs notes push [<remote>] [--always | --never]  send the records (refs/notes/waymark) to the remote (default origin);
+//                                         --always: and let the hook push this project's at each close; --never: never offer it here
 //   node waymark.mjs notes setup [<remote>] by hand (the session hook adds it in a repo with .waymark/): a fetch refspec so fetches bring the remote's records, fetched at once
 //                                           (into refs/notes/remotes/<remote>/waymark, merged at session start), then a fetch
 //   node waymark.mjs tidy                   tidy memory.md → Work in progress now (what each close does); moved lines go to history.md
@@ -17,6 +18,8 @@
 //   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
+//   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
+//   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
 // sync, framework MCP servers that do not fit this project, skills never used, memory still in the old location, other
@@ -34,13 +37,14 @@ import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
-import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes } from './notes.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes } from './notes.mjs';
+import { pushPref, savePushPref } from './notes-remote.mjs';
 import { stackOf } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { claudeDir } from './agents/paths.mjs';
-import { engramBin } from './engram.mjs';
+import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
@@ -48,12 +52,13 @@ import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const script = (name) => path.join(SCRIPTS, name).replace(/\\/g, '/');
+const W = `node "${script('waymark.mjs')}"`; // the full command every usage line prints (waymark.mjs is no program on the PATH)
 const section = (text, title) => {
   const m = text.match(new RegExp(`\\n## ${title}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`));
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -61,11 +66,12 @@ export const newer = (a, b) => {
   return false;
 };
 
-async function update() {
+export async function update() {
   const repo = process.env.WAYMARK_REPO || 'LiriRaid/waymark';
   const installed = read(path.join(SCRIPTS, '..', 'VERSION')).trim();
   try {
-    const res = await fetch(`https://raw.githubusercontent.com/${repo}/main/skills/waymark/VERSION`, { signal: AbortSignal.timeout(3000) });
+    // WAYMARK_UPDATE_URL points the check at another file holding the version (the tests serve one from localhost)
+    const res = await fetch(process.env.WAYMARK_UPDATE_URL || `https://raw.githubusercontent.com/${repo}/main/skills/waymark/VERSION`, { signal: AbortSignal.timeout(3000) });
     const latest = res.ok ? (await res.text()).trim() : '';
     if (installed && latest && newer(latest, installed)) return `update: Waymark ${installed} → ${latest}. Offer it (Actualizar ahora / Más tarde / Ver cambios): "Actualizar ahora" → INSTALL.md §9 from https://github.com/${repo}; "Ver cambios" → CHANGELOG.md entries since ${installed}.`;
   } catch {}
@@ -115,10 +121,22 @@ function migration(cwd) {
   return home.legacy ? `migrate: this project's memory and record are still in ~/.waymark (docs/adr/0007). Move them into ${home.root}/.waymark/ (local, excluded from git, any agent resumes from it): node "${script('migrate-memory.mjs')}" --project "${home.root}" shows the plan, --apply on yes (backup first); the old location works until 2.1.0.` : '';
 }
 
+// What `check` says when the engram on this machine is not the release Waymark pinned (docs/adr/0036); nothing when it is.
+function engramPinLines(st) {
+  const short = (h) => `${String(h).slice(0, 12)}…`;
+  if (st.state === 'version') return [`engram: ${st.version || 'an unknown version'} is installed and Waymark was tested with ${st.pinned} (skills/waymark/engram.pin.json): the learned layer may behave differently. Install ${st.entry.archive} from the release (archive sha256 ${short(st.entry.archiveSha256)}) or move the pin on purpose.`];
+  if (st.state === 'binary') return [`engram: ${st.file} reports ${st.version} but its sha256 ${short(st.sha256)} is not the published release's (${short(st.entry.binarySha256)}): a build that is not ${st.entry.archive}. Reinstall it from the release and compare the archive with its sha256 ${short(st.entry.archiveSha256)}.`];
+  if (st.state === 'platform') return [`engram: the pin (skills/waymark/engram.pin.json) has no entry for ${st.platform}, so ${st.version || 'this engram'} cannot be compared with a release: add the sha256 of that release's archive and binary to the pin.`];
+  if (st.state === 'unpinned') return ['engram: skills/waymark/engram.pin.json is missing or unreadable, so the engram on this machine is not checked against a release.'];
+  return [];
+}
+
 // The learned layer (docs/adr/0015): engram installed, and memory.md without the learned sections engram replaced.
 function learnedLayer(cwd) {
   const out = [];
-  if (!engramBin()) out.push('engram: not installed. The learned layer (docs/adr/0015) needs it: engram_<version>_<os>_<arch> from https://github.com/Gentleman-Programming/engram/releases (verify checksums.txt), on the PATH; then each agent\'s MCP with engram setup <claude-code|codex|opencode|gemini-cli>. Until then Waymark keeps git and memory.md.');
+  const pin = enginePin();
+  if (!engramBin()) out.push(`engram: not installed. The learned layer (docs/adr/0015) needs it: engram_${pin?.version || '<version>'}_<os>_<arch> from https://github.com/Gentleman-Programming/engram/releases (the archive's sha256 is in ${pin ? "skills/waymark/engram.pin.json and in the release's checksums.txt" : 'checksums.txt'}), on the PATH; then each agent's MCP with engram setup <claude-code|codex|opencode|gemini-cli>. Until then Waymark keeps git and memory.md.`);
+  else out.push(...engramPinLines(engramStatus(pin)));
   const home = projectHome(cwd);
   try {
     const n = home.legacy ? 0 : learnedEntries(read(home.memory)).length;
@@ -133,10 +151,11 @@ export function hooksHealth(list = registered()) {
   const dead = [];
   for (const { agent, commands } of list) {
     for (const c of commands) {
-      const m = c.match(/node\s+"([^"]+)"(.*)$/) || c.match(/node\s+(\S+)(.*)$/);
-      if (!m) continue;
-      const r = spawnSync(process.execPath, [m[1], ...m[2].trim().split(/\s+/).filter(Boolean)], { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
-      if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(m[1])}`);
+      if (!/^\s*node\s/.test(c)) continue;
+      // the launcher and the hook script it runs are both quoted paths: everything after `node` is the argument list
+      const args = [...c.replace(/^\s*node\s+/, '').matchAll(/"([^"]*)"|(\S+)/g)].map((t) => t[1] ?? t[2]);
+      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
+      if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(args.find((t) => /-hook\.mjs$/.test(t)) || args[0])}`);
     }
   }
   return dead.length ? `hooks: not answering: ${[...new Set(dead)].join(', ')} — tasks there are not recorded. Re-register them: node "${script('install-hooks.mjs')}" --agent <agent> (plan), then --apply.` : '';
@@ -182,7 +201,7 @@ export function adapterless(all = found()) {
   const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
   if (!list.length) return '';
   const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
-  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to write its adapter with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs, scripts/agents/agents.json).`;
+  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
 }
 
 // Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change
@@ -277,7 +296,8 @@ export function notesState(cwd) {
   if (!home.dir || home.legacy || !hasRemote(root)) return '';
   if (!hasFetchSpec(root)) return `notes: fetches from origin here do not bring the task records (git notes; a clone brings branches only), so another machine's tasks are missing from tasks.md and the card. Offer, with the choice window: node "${script('waymark.mjs')}" notes setup — adds one fetch refspec to .git/config (into refs/notes/remotes/origin/waymark, never over the local notes), fetches and merges.`;
   const n = unpushedNotes(root);
-  return n > 0 ? `notes: ${n} commit${n > 1 ? 's' : ''} of task records (git notes) not pushed to origin. Offer: node "${script('waymark.mjs')}" notes push` : '';
+  if (!(n > 0 || (n === null && hasNotes(root))) || pushPref(home.slug)) return ''; // 'yes': the hook pushes them at the next close; 'never': the user said no for this project; null: the remote has no notes yet
+  return `notes: ${n === null ? 'the' : `${n} commit${n > 1 ? 's' : ''} of`} task records (git notes) ${n === null ? 'were never pushed to origin' : 'not pushed to origin'}. They hold the user's requests and Cierres, and a public remote publishes them. Offer, with the choice window: push once and keep pushing this project's notes at each close (node "${script('waymark.mjs')}" notes push --always), push once (notes push), or never for this project (notes push --never).`;
 }
 
 // A hook's own failures (provenance.mjs logHookError) of the last 7 days: their count and the newest. → the line, or ''.
@@ -429,8 +449,13 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const out = rest.indexOf('--out') >= 0 ? rest[rest.indexOf('--out') + 1] : null;
     const id = rest.join(' ').match(ID)?.[0];
     const s = id ? attest(process.cwd(), id) : { error: 'name a task ID' };
-    if (s.error) { console.log(`attest: ${s.error}\nUsage: node waymark.mjs attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
-    else if (out) { fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n'); console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)); check it with: node waymark.mjs verify --attestation ${out}`); }
+    if (s.error) { console.log(`attest: ${s.error}\nUsage: ${W} attest "<task ID>" [--out <file>]`); process.exitCode = 1; }
+    else if (out) {
+      fs.writeFileSync(out, JSON.stringify(s, null, 1) + '\n');
+      const { signAttestation } = await import('./attest.mjs'), sig = signAttestation(out, { interactive: process.stdin.isTTY });
+      const signed = sig.state === 'signed' ? `signed (${sig.file})` : sig.state === 'nokey' ? 'not signed: no signing key (run: sign)' : `not signed (${sig.state})`;
+      console.log(`attestation of ${id} written to ${out} (${s.subject.length} commit(s)), ${signed}; check it with: ${W} verify --attestation ${out}`);
+    }
     else console.log(JSON.stringify(s, null, 1));
   } else if (sub === 'verify') {
     const { verify } = await import('./verify.mjs');
@@ -443,9 +468,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'pack') {
-    console.log(rest.length ? pack(process.cwd(), rest) : 'Usage: node waymark.mjs pack <file…>');
+    console.log(rest.length ? pack(process.cwd(), rest) : `Usage: ${W} pack <file…>`);
   } else if (sub === 'review') {
-    console.log(rest.length ? review(process.cwd(), rest) : 'Usage: node waymark.mjs review <file…>   (the task\'s changed files: their diff against HEAD and the review checklist)');
+    console.log(rest.length ? review(process.cwd(), rest) : `Usage: ${W} review <file…>   (the task's changed files: their diff against HEAD and the review checklist)`);
   } else if (sub === 'memory') {
     console.log(memorySection(process.cwd(), rest.join(' ')));
   } else if (sub === 'incidents') {
@@ -457,7 +482,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const home = projectHome(process.cwd());
     const done = ids.length ? confirmTasks(home, ids, { note }) : [];
     if (done.length) refreshTasks(home, true);
-    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : 'Usage: node waymark.mjs done "<task ID>" ["<task ID>"…] [--note "<the user\'s words>"] (no matching Work in progress line)');
+    console.log(done.length ? `confirmed by the user: ${done.join(', ')} (removed from Work in progress in ${home.memory}; record kind "confirm")` : `Usage: ${W} done "<task ID>" ["<task ID>"…] [--note "<the user's words>"] (no matching Work in progress line)`);
     process.exitCode = done.length ? 0 : 1;
   } else if (sub === 'forget') {
     const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : null; };
@@ -465,7 +490,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const id = rest.join(' ').match(ID)?.[0] || null;
     const home = projectHome(process.cwd());
     const r = forget(process.cwd(), id, { session, reason, dryRun: !apply });
-    if (r.error) console.log(`forget: ${r.error}\nUsage: node waymark.mjs forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
+    if (r.error) console.log(`forget: ${r.error}\nUsage: ${W} forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
     process.exitCode = r.error ? 1 : 0;
@@ -474,9 +499,14 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
     process.exitCode = r.ok ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
-    const r = pushNotes(process.cwd(), rest[1] || 'origin');
-    console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
-    process.exitCode = r.ok ? 0 : 1;
+    const flag = rest.find((a) => a === '--always' || a === '--never'), slug = projectHome(process.cwd()).slug, remote = rest.slice(1).find((a) => !a.startsWith('--')) || 'origin';
+    if (flag === '--never') { savePushPref(slug, 'never'); console.log(`notes: ${slug} will not be offered the push again (Notes push never: in ~/.waymark/preferences.md)`); }
+    else {
+      const r = pushNotes(process.cwd(), remote);
+      console.log(r.output || (r.ok ? 'notes pushed' : 'notes push failed'));
+      if (r.ok && flag === '--always') { savePushPref(slug, 'yes'); console.log(`notes: the hook will push ${slug}'s notes to ${remote} at each close (Notes push: in ~/.waymark/preferences.md)`); }
+      process.exitCode = r.ok ? 0 : 1;
+    }
   } else if (COMMANDS[sub]) {
     const r = spawnSync(process.execPath, [path.join(SCRIPTS, COMMANDS[sub]), ...rest], { stdio: 'inherit' });
     if (sub === 'sync' && r.status === 0 && !rest.includes('--dry-run')) { // remember the skills seen from this folder
@@ -486,7 +516,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: node waymark.mjs [check | tasks [<task ID>] | verify [--install] [--require-signature] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push|setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

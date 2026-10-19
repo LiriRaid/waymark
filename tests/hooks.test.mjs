@@ -1,5 +1,6 @@
 // Waymark hooks · scenario tests with synthetic transcripts. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME; nothing reads or writes the real ~/.waymark or ~/.claude.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -59,8 +60,14 @@ test('task IDs: first of the day, next number, follow-up letters', () => {
 test('project slug: the project memory whose Path holds the folder, else the folder name', () => {
   fs.mkdirSync(path.join(home, 'projects'), { recursive: true });
   fs.writeFileSync(path.join(home, 'projects', 'shop-api.md'), '# Project: shop-api\n\nPath: C:/Work/Shop API\n');
-  assert.equal(projectSlug('c:\\work\\shop api\\src'), 'shop-api');
-  assert.equal(projectSlug('/home/me/My App'), 'my-app');
+  // On POSIX a Windows path is relative to the working folder: run from an empty one, so no .waymark/memory.md another
+  // test left in the checkout is found walking up before the memory whose Path holds it.
+  const was = process.cwd(), empty = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slug-'));
+  process.chdir(empty);
+  try {
+    assert.equal(projectSlug('c:\\work\\shop api\\src'), 'shop-api');
+    assert.equal(projectSlug('/home/me/My App'), 'my-app');
+  } finally { process.chdir(was); fs.rmSync(empty, { recursive: true, force: true }); }
 });
 
 test('decisions: chosen and discarded options from the choice window', () => {
@@ -175,7 +182,7 @@ test('3c: the gate asks every work-shaping decision first and offers the browser
   const repo = fs.mkdtempSync(path.join(os.homedir(), '.wm-branch-')); // outside temp, which the gate exempts
   temps.push(repo);
   spawnSync('git', ['init', '-q', '-b', 'feat/other-work'], { cwd: repo });
-  const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`));
+  const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`), repo);
   assert.ok(!/feat\/other-work|include where the work goes/.test(deny), 'no branch option pushed');
   assert.match(deny, /every decision that shapes the work/);
   assert.match(deny, /Never offer, recommend or run browser verification[^.]*unless the user asks/, 'T2l: the browser is never offered');
@@ -338,10 +345,10 @@ test('pre-existing and docs by action: a failing gate asks for a clean copy; the
   assert.equal(docs(judge(failing, cierre(id).replace('observada timeouts en el log de pedidos', 'inferida de la doc de Meta Cloud API (check: x)'))).applies, false, '"inferida de docs" alone triggers nothing');
 });
 test('2b: a .ts with a sibling template counts as UI; a service does not', () => {
-  const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // the OS temp folder is exempt
+  const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // may sit under the OS temp folder: the project root (ctx.cwd) keeps its files out of the scratch rule
   temps.push(dir);
   for (const f of ['article-form.ts', 'article-form.html', 'articles.service.ts']) fs.writeFileSync(path.join(dir, f), '');
-  const ui = (file) => cierreGaps(currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend'), call('Edit', { file_path: path.join(dir, file) })]), '## Cierre · x').observed.browser.ui;
+  const ui = (file) => cierreGaps(currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend'), call('Edit', { file_path: path.join(dir, file) })]), '## Cierre · x', undefined, undefined, { cwd: dir }).observed.browser.ui;
   assert.equal(ui('article-form.ts'), true);
   assert.equal(ui('articles.service.ts'), false);
 });
@@ -466,7 +473,7 @@ test('blocks: a spec next to the changed code untouched, unless Tests: no (<why>
   const code = path.join(dir, 'orders.ts');
   const lines = (extra = []) => currentTurn([prompt('x'), say('Waymark → L1 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('Edit', { file_path: code }), ...extra, call('Bash', { command: 'npx eslint src' }), MEM()]);
   const close = '## Cierre\nResultado: hecho · Decisión: única (un solo cambio)\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"';
-  const near = (turn, reply, blocked = false) => cierreGaps(turn, reply, undefined, undefined, { blocked }).missing.some((f) => /sits next to the changed code/.test(f));
+  const near = (turn, reply, blocked = false) => cierreGaps(turn, reply, undefined, undefined, { blocked, cwd: dir }).missing.some((f) => /sits next to the changed code/.test(f));
   assert.ok(near(lines(), close));
   assert.ok(!near(lines(), `${close}\nTests: no (solo cambia un texto de log)`, true));
   assert.ok(near(lines(), `${close}\nTests: no (solo cambia un texto de log)`), 'only in the reply after the block');
@@ -560,7 +567,7 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
   assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
-  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run waymark\.mjs pack/, 'one memory: Waymark\'s, with or without engram');
+  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/, 'one memory: Waymark\'s, with or without engram');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
@@ -621,9 +628,9 @@ test('catalog of testigos: each states its claim; the instructions block quotes 
 
 test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
-  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T1\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`Cierre ID: new ${DAY} · T2; follow-up \\(same files\\) ${DAY} · T1b\\.$`));
+  assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T2; follow-up ${DAY} · T1b\\.$`));
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -647,7 +654,7 @@ test('stop hook: a backed Cierre is recorded and not blocked', () => {
   assert.match(records[0].cierre, /^## Cierre · /);
   assert.match(records[0].pinned.routine, /^[0-9a-f]{64}$/, 'the record pins the rules that governed it');
   assert.equal(records[0].evaluation.links.v, 1, 'and the cost per link');
-  assert.equal(records[0].schema, 'waymark.record/v1', 'the record names its own shape');
+  assert.equal(records[0].schema, 'waymark.record/v2', 'the record names its own shape');
   assert.equal(records[0].outcome.result, 'hecho', 'the result as a label, not only inside the Cierre text');
 });
 
@@ -689,7 +696,9 @@ const oldMemory = (slug, root, wip = '- ▶ task A (2026-10-01 · T2): NEXT step
   return file;
 };
 const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'); // where Waymark keeps .waymark/ out of git
-const same = (a, b) => assert.equal(path.resolve(a).toLowerCase(), path.resolve(b).toLowerCase());
+// Two spellings of one path (an 8.3 short name and its long name, a link and its target) compare as the filesystem has them.
+const LP = await import(`file://${SCRIPTS}/lib/paths.mjs`);
+const same = (a, b) => assert.equal(LP.norm(LP.real(a)), LP.norm(LP.real(b)));
 
 test('project home: nearest .waymark/memory.md walking up, else the old memory (bridge), else the git root, else the home layout', () => {
   const repo = tmpRepo('home');
@@ -784,7 +793,7 @@ test('migration: dry run writes nothing; apply moves memory and log byte for byt
   assert.match(excludeOf(repo), /^\.waymark\/$/m);
   const tasks = fs.readFileSync(path.join(repo, '.waymark', 'tasks.md'), 'utf8');
   assert.match(tasks, /## In progress \/ pending\n- 2026-10-01 · T2 · en curso · próximo: step 2/);
-  assert.match(tasks, /\| 2026-10-01 · T2 \| parcial \(x\) \| 4\/5 \| second \|\n\| 2026-10-01 · T1 \| hecho \| 5\/5 \| first \|/);
+  assert.match(tasks, /\| 2026-10-01 · T2 \| parcial \(x\) \| 4\/5 \| — \| second \|\n\| 2026-10-01 · T1 \| hecho \| 5\/5 \| — \| first \|/);
   assert.equal(projectHome(repo).legacy, false);
   assert.equal(taskIds(repo, new Date(2026, 9, 1)).next, '2026-10-01 · T3', 'IDs continue from the migrated record');
   assert.match(planFor({ slug: 'mig', file: oldFile, root: repo }).skip || '', /already exists/, 'never overwritten');
@@ -930,16 +939,16 @@ test('connect-agents: one marked pointer block per agent found, backup first, re
 test('connect-agents: with an orchestrator in the file, Waymark joins as its guest and never touches its blocks', async () => {
   const { found, planFor, apply: connect } = await import(`file://${SCRIPTS}/connect-agents.mjs`);
   fs.mkdirSync(path.join(agentsHome, '.gemini', 'antigravity'), { recursive: true });
-  const theirs = '<!-- gentle-ai:persona -->\nYou are the orchestrator.\n<!-- /gentle-ai:persona -->\n';
+  const theirs = '<!-- acme-orch:persona -->\nYou are the orchestrator.\n<!-- /acme-orch:persona -->\n';
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), theirs);
   assert.ok(!found().some((a) => a.name === 'Gemini CLI'), 'Antigravity alone (antigravity/ + GEMINI.md) is not Gemini CLI');
   fs.writeFileSync(path.join(agentsHome, '.gemini', 'projects.json'), '{}');
   const g = found().find((a) => a.name === 'Gemini CLI');
-  assert.deepEqual(g.guestOf, ['gentle-ai']);
-  assert.match(planFor(g).steps[0], /as a guest of gentle-ai/);
+  assert.deepEqual(g.guestOf, ['acme-orch']);
+  assert.match(planFor(g).steps[0], /as a guest of acme-orch/);
   connect(planFor(g));
   assert.ok(fs.readFileSync(path.join(agentsHome, '.gemini', 'GEMINI.md'), 'utf8').startsWith(theirs), 'its block intact');
-  assert.match(fs.readFileSync(path.join(home, 'agent.md'), 'utf8'), /\| Gemini CLI \| [^|]+ \| \d{4}-\d\d-\d\d · invitado de gentle-ai \|/);
+  assert.match(fs.readFileSync(path.join(home, 'agent.md'), 'utf8'), /\| Gemini CLI \| [^|]+ \| \d{4}-\d\d-\d\d · invitado de acme-orch \|/);
 });
 
 test('session hook: new location points to tasks.md; the bridge says old location and waymark check offers the migration', async () => {
@@ -1015,10 +1024,10 @@ test('waymark check: skills never indexed or changed since the last sync, framew
   fs.writeFileSync(path.join(repo, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n');
   assert.ok((await check(repo)).some((t) => /^skills: changed since the last sync \(\+mine\)/.test(t)));
   const instr = path.join(home, 'instr-check.md');
-  fs.writeFileSync(instr, '<!-- gentle-ai:persona -->\nx\n');
+  fs.writeFileSync(instr, '<!-- acme-orch:persona -->\nx\n');
   const agentMd = path.join(home, 'agent.md'), keep = fs.existsSync(agentMd) ? fs.readFileSync(agentMd, 'utf8') : null;
   fs.writeFileSync(agentMd, `| Agent | Skills | Project skills | Instructions |\n|---|---|---|---|\n| Test | x | y | ${instr} |\n`);
-  try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*gentle-ai in /.test(t))); }
+  try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*acme-orch in /.test(t))); }
   finally { if (keep === null) fs.rmSync(agentMd); else fs.writeFileSync(agentMd, keep); }
   assert.equal(newer('2.1.0', '2.0.0-dev'), true);
   assert.equal(newer('2.0.0', '2.0.0-dev'), false);
@@ -1031,7 +1040,7 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
   const first = planHooks({ model: 'x', hooks: { Stop: [{ hooks: [theirs] }] } }, { scripts: '/s/waymark/scripts' });
   assert.equal(first.steps.length, 4);
   assert.equal(first.settings.model, 'x', 'other keys kept');
-  assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
+  assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
   assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit|Read');
   assert.deepEqual(planHooks(first.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
   const old = { hooks: {
@@ -1039,8 +1048,8 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/rule0-hook.mjs"' }] }, { hooks: [{ type: 'command', command: 'node "/x/waymark/scripts/rule0-hook.mjs"' }, theirs] }],
   } };
   const second = planHooks(old, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs"' }] }]);
-  assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
+  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs"' }] }]);
+  assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
   assert.ok(second.steps.some((s) => /remove duplicate UserPromptSubmit/.test(s)));
   assert.equal(old.hooks.PreToolUse[0].matcher, 'Bash|PowerShell', 'the input is not mutated');
   assert.match(planHooks({}, { scripts: '/s/waymark/scripts', agent: 'codex' }).settings.hooks.Stop[0].hooks[0].command, /stop-hook\.mjs" --agent codex$/);
@@ -1143,7 +1152,7 @@ test('install-hooks --agent codex: hooks.json entries with --agent codex, apply_
   const { planHooks } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   const { settings, steps } = planHooks({}, { scripts: '/s/waymark/scripts', agent: 'codex' });
   assert.equal(steps.length, 4);
-  assert.deepEqual(settings.hooks.PreToolUse, [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent codex', commandWindows: 'node "/s/waymark/scripts/tool-hook.mjs" --agent codex' }] }]);
+  assert.deepEqual(settings.hooks.PreToolUse, [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent codex', commandWindows: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent codex' }] }]);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'codex' }).steps, [], 'idempotent');
   assert.equal(planHooks({}, { scripts: '/s/waymark/scripts' }).settings.hooks.PreToolUse[0].hooks[0].commandWindows, undefined, 'Claude Code: no commandWindows');
 });
@@ -1209,14 +1218,14 @@ test('3c (T2l): no browser step — a UI change passes with no browser attempt a
     call('Edit', { file_path: ui }), call('Bash', { command: 'npx ng build' }), call('Skill', { skill: 'code-review' }), MEM(), ...extra]);
   const close = (extra = '') => `## Cierre · ${ids.next}\nResultado: hecho · Decisión: elegida A · descartadas B\nSub-decisiones: ninguna\nEvidencia: observada x\nAprendido: "a ← b"${extra}`;
   const decisions = [{ question: '¿Cómo?', chosen: 'A', discarded: ['B'] }];
-  const g = cierreGaps(turn(), close(), undefined, undefined, { ids, decisions });
+  const g = cierreGaps(turn(), close(), undefined, undefined, { ids, decisions, cwd: dir });
   assert.deepEqual(g.missing, [], 'nothing about the browser blocks');
   assert.ok(!g.steps.some((s) => s.id === 'browser'), 'no browser step in the contract');
   assert.ok(!('Navegador' in evaluate(g, { total: 1 }).steps));
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   assert.ok(!routine.testigos.some((s) => s.id === 'browser'));
   const reviewOffered = [...decisions, { question: '¿Corro el code-review?', chosen: 'Sí, con code-review', discarded: ['Sin review'] }];
-  assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
+  assert.ok(cierreGaps(turn(), close('\nReview: omitido (usuario: "code-review")'), undefined, undefined, { ids, decisions: reviewOffered, cwd: dir }).findings.some((f) => /Review: skip quoted/.test(f)), 'a fragment of the accepted option is not a skip');
 });
 
 test('3c: the end-of-turn line asks the real quota % while the model has fewer than 3 pairs', () => {
@@ -1803,7 +1812,9 @@ test('tidy: one line per task (the newest of a task and its follow-ups), open li
   for (const l of ['- ▶ [2026-10-04 · T1b] confirm categories', '- ▶ [2026-10-04 · T1] old head', '- ▶ [2026-09-10 · T3] paused long ago', '- [2026-09-12 · T4] pending, old free-form: Pendiente: x', '- ✔ [2026-09-01 · T9] closed long ago']) assert.ok(hist.includes(l), l);
   assert.match(hist, /## Moved 2026-10-05 \d\d:\d\d \(tidy\)/);
   assert.equal(P.tidyWip(h, NOW), false, 'nothing left to tidy');
-  const t = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'tidy'], { cwd: repo, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  // the command runs on the real clock: a project whose only open line is from today has nothing to tidy
+  const fresh = memRepo('tidy-cli', `- ▶ [${new Date().toLocaleDateString('sv')} · T1] recent\n`);
+  const t = spawnSync(process.execPath, [path.join(SCRIPTS, 'waymark.mjs'), 'tidy'], { cwd: fresh, encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
   assert.match(t.stdout, /nothing to tidy/);
 });
 
@@ -1958,7 +1969,7 @@ test('incidents: a testigo ✘ stays open until it passes in a later task; 3 fai
   assert.deepEqual(found.open.map((o) => [o.label, o.since, o.last, o.count]), [['Commit', 'T2', 'T4', 3], ['Enrutar', 'T4', 'T4', 1]], 'Recordar closed by T2; Índice is not a testigo any more');
   assert.equal(found.open.find((o) => o.label === 'Enrutar').cause, 'no routing line');
   assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
-  assert.equal(incidentsLine(found), 'Incidents: open Commit ✘×3 (T4), Enrutar ✘ (T4); suggested rule: Commit failed 3× (waymark.mjs incidents)');
+  assert.match(incidentsLine(found), /^Incidents: open Commit ✘×3 \(T4\), Enrutar ✘ \(T4\); suggested rule: Commit failed 3× \(node ".*waymark\.mjs" incidents\)$/);
   assert.equal(incidentsLine(incidents([])), '');
 });
 
@@ -2107,7 +2118,7 @@ test('install-hooks: Gemini gets its own event names and matcher; OpenCode gets 
   const { settings, steps } = planHooks({ general: { x: 1 } }, { scripts: '/s/waymark/scripts', agent: 'gemini' });
   assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterAgent', 'AfterTool']);
   assert.equal(steps.length, 5);
-  assert.deepEqual(settings.hooks.BeforeTool, [{ matcher: 'run_shell_command|write_file|replace', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent gemini' }] }]);
+  assert.deepEqual(settings.hooks.BeforeTool, [{ matcher: 'run_shell_command|write_file|replace', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent gemini' }] }]);
   assert.deepEqual(settings.general, { x: 1 }, 'the rest of the settings stays');
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'gemini' }).steps, [], 'idempotent');
   const plugin = pluginText('/s/waymark/scripts');
@@ -2126,7 +2137,7 @@ test('OpenCode plugin: context into the system prompt, a deny throws, a stop blo
   const calls = [], prompts = [];
   const $ = (strings, ...values) => {
     if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) }; // opencode --version, once per load
-    const script = String(values[0]).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
+    const script = String(values.find((v) => /-hook\.mjs$/.test(String(v)))).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
   const client = { session: { messages: async () => ({ data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'listo' }] }] }), prompt: async (x) => prompts.push(x) } };
   const { Waymark } = await import(`file://${file.replace(/\\/g, '/')}`);
   const hooks = await Waymark({ client, $, directory: dir });
@@ -2186,7 +2197,36 @@ test('repairNotes: after an amend the task note is copied to the new commit with
   assert.deepEqual(repairNotes(repo, [{ id: 'other', note: { commit: old, sha: 'x' } }]), [], 'no commit of the branch carries that task');
 });
 
-test('stop hook: when the agent pushes the task, its note goes to the same remote', () => {
+// The project's yes to publish its notes (docs/adr/0035, 0042): `Notes push: all` in the preferences, removed after the test.
+const notesYes = (fn) => {
+  const prefs = path.join(home, 'preferences.md');
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(prefs, '- Notes push: all\n');
+  try { return fn(); } finally { fs.rmSync(prefs, { force: true }); }
+};
+
+test('stop hook: a push in a project with no yes publishes no note and never blocks (ADR 0042)', () => {
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-'));
+  temps.push(remote);
+  gitT(remote, 'init', '-q', '--bare');
+  const repo = memRepo('notes-no-yes'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(repo, 'remote', 'add', 'origin', remote);
+  commitTask(repo, id);
+  gitT(repo, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', path.join(remote, 'no-access.git')); // a push of the notes would fail and block
+  const lines = [...l2Lines, ...ran('push1', 'git push origin HEAD:main')];
+  const transcript = path.join(home, 't-push-no-yes.jsonl');
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-push-no', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  const out = JSON.parse(r.stdout || '{}');
+  assert.notEqual(out.decision, 'block', JSON.stringify(out));
+  assert.doesNotMatch(out.systemMessage || '', /notas (subidas|sin subir)/);
+  assert.equal(gitT(remote, 'for-each-ref', 'refs/notes').stdout.trim(), '', 'the remote has no notes');
+  assert.ok(readNotes(repo).size > 0, 'the record stays a local note');
+});
+
+test('stop hook: when the agent pushes the task, its note goes to the same remote', () => notesYes(() => {
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-'));
   temps.push(remote);
   gitT(remote, 'init', '-q', '--bare');
@@ -2201,7 +2241,7 @@ test('stop hook: when the agent pushes the task, its note goes to the same remot
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-push', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.match(JSON.parse(r.stdout).systemMessage, /notas subidas a origin/);
   assert.match(gitT(repo, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/);
-});
+}));
 
 // ---- 2.0.14: git holds what was done, why and what for ----
 const stopRun = (name, lines, input) => {
@@ -2213,7 +2253,7 @@ const stopRun = (name, lines, input) => {
 };
 const bareRemote = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-')); temps.push(d); gitT(d, 'init', '-q', '--bare'); return d; };
 
-test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => {
+test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => notesYes(() => {
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   const t = routine.testigos.find((x) => x.id === 'notes');
   assert.ok(t && t.enforce === 'block' && t.when === 'push', 'a testigo of the catalog that blocks');
@@ -2234,9 +2274,9 @@ test('2.0.14 notes the hook cannot push: the close blocks once naming notes push
   const again = stopRun('notes-fail-2', [say('Subí los notes.'), ...ran('np', 'node waymark.mjs notes push')], { cwd: repo, session_id: 's-nf', stop_hook_active: true, last_assistant_message: 'Subí los notes.' });
   assert.equal(again.decision, undefined, 'blocked once');
   assert.match(again.systemMessage || '', /notas .*en origin/);
-});
+}));
 
-test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => {
+test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => notesYes(() => {
   const remote = bareRemote(), repo = memRepo('two-fe'), api = tmpRepo('two-api'), id = `${new Date().toLocaleDateString('sv')} · T1`;
   gitT(api, 'remote', 'add', 'origin', remote);
   const fe = commitTask(repo, id), apiSha = commitTask(api, id);
@@ -2248,7 +2288,7 @@ test('2.0.14 a task committed in two repos: its record is a note in each, and th
   const stub = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0];
   assert.deepEqual((stub.repos || []).map((r) => [path.basename(r.root), r.commits[0]]), [[path.basename(api), apiSha]], 'the stub names the other repo');
   assert.match(gitT(api, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/, 'pushed where the agent pushed');
-});
+}));
 
 test('2.0.14 the remote of a push skips flags and refspecs, and a git error never carries a URL\'s credentials', async () => {
   const { pushedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
@@ -2340,7 +2380,7 @@ test('Recordar at every level: an L1 change without pack (or mem_search) is bloc
     ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
   const without = judge(lines(false));
-  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run waymark\.mjs pack/.test(m)), JSON.stringify(without.missing));
+  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/.test(m)), JSON.stringify(without.missing));
   assert.equal(judge(lines(true)).steps.find((s) => s.id === 'memory').pass, true);
 });
 
@@ -2350,7 +2390,7 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   const base = [prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
     ...askWithId('q1', '¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
-  assert.ok(judge(base).missing.some((m) => /no review ran: .*waymark\.mjs review/.test(m)));
+  assert.ok(judge(base).missing.some((m) => /no review ran: .*waymark\.mjs" review/.test(m)));
   assert.equal(judge([...base, call('Bash', { command: 'node "C:/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs' })]).observed.review, true);
   for (const a of ['codex', 'gemini', 'opencode']) assert.deepEqual((await import(`file://${SCRIPTS}/agents/${a}.mjs`)).lacks, [], `${a} reviews with waymark.mjs review`);
   const cx = await import(`file://${SCRIPTS}/agents/codex.mjs`);
@@ -2414,7 +2454,7 @@ test('waymark.mjs review: the diff of the task\'s files (new ones included) and 
   assert.match(out, /^\+export const a = 2;$/m);
   assert.match(out, /new file n\.ts[\s\S]*export const n = 0;/);
   assert.match(out, /Checklist/);
-  assert.match(W('review'), /^Usage: node waymark\.mjs review <file…>/);
+  assert.match(W('review'), /^Usage: node ".*waymark\.mjs" review <file…>/);
 });
 
 test('OpenCode: a tool lasts from time.start to time.end; the plugin\'s version reaches the record\'s inputs', async () => {
@@ -2706,7 +2746,7 @@ test('context brake in OpenCode: the plugin shows the reason and throws from cha
   const toasts = [];
   const $ = (strings, ...values) => {
     if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) };
-    const script = String(values[0]).split(/[\\/]/).pop();
+    const script = String(values.find((v) => /-hook\.mjs$/.test(String(v)))).split(/[\\/]/).pop();
     const r = { stdout: Buffer.from(JSON.stringify(script === 'rule0-hook.mjs' ? { decision: 'block', reason: 'Waymark: this session holds ~180k' } : {})) };
     return { nothrow: () => ({ quiet: async () => r }) };
   };

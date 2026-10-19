@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Waymark · the per-agent capability matrix (docs/adr/0027), generated from agents/agents.json and the adapters, never written by hand:
 // which hook events each agent has, and from them which testigos are ENFORCED (a hook runs and can stop or hand something to the agent)
-// and which are ADVISORY (the agent is told in its instructions; nothing stops it). README.md and INSTALL.md carry the result between
-// the markers below; tests/docs.test.mjs fails when they differ.
+// and which are ADVISORY (the agent is told in its instructions; nothing stops it). The guarded actions (a sensitive path edited, named by
+// a shell command or read, a secret printed in a tool's result) are never advisory: each is PREVENT (a hook before the tool can refuse it)
+// or DETECT (the end-of-turn hook reads the agent's transcript and records it where it cannot be removed, docs/adr/0037). README.md and
+// INSTALL.md carry the result between the markers below; tests/docs.test.mjs fails when they differ.
 //   node matrix.mjs           print the tables
 //   node matrix.mjs --write   put them between the markers of README.md and INSTALL.md
 import fs from 'node:fs';
@@ -36,11 +38,12 @@ export async function agentMatrix() {
       out = m.out || {};
     }
     const has = (x) => (x ? 'enforced' : 'advisory');
+    const guarded = (prevented) => (prevented ? 'prevent' : ev.Stop ? 'detect' : 'none'); // the transcript is read at the end of the turn wherever a Stop hook runs
     rows.push({
       key: a.key, name: a.name || a.key, adapter: a.adapter || null, events: ev,
       cells: a.adapter ? {
         stop: has(ev.Stop && out.block), gate: has(ev.PreToolUse && out.deny), brake: has(ev.UserPromptSubmit && out.blockPrompt), hand: ev.PreToolUse && preContext ? 'enforced' : ev.PostToolUse ? 'enforced' : 'advisory',
-        guard: has(ev.PreToolUse && out.deny), reads: readsGuarded ? 'enforced' : 'advisory',
+        guard: guarded(ev.PreToolUse && out.deny), reads: guarded(ev.PreToolUse && out.deny && readsGuarded), secrets: guarded(false),
       } : null,
     });
   }
@@ -52,11 +55,11 @@ export function matrixMarkdown(rows) {
   const withHooks = rows.filter((r) => r.adapter), without = rows.filter((r) => !r.adapter);
   const t1 = ['| Agent | SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop |', '|---|---|---|---|---|---|',
     ...withHooks.map((r) => `| ${r.name} | ${EVENTS.map((e) => yes(r.events[e])).join(' | ')} |`)];
-  const t2 = ['| Agent | End-of-turn checks | Decision gate and commit trailer | Memory and procedures handed over | Sensitive paths: edits and shell | Sensitive paths: reads | Context brake |', '|---|---|---|---|---|---|---|',
-    ...withHooks.map((r) => `| ${r.name} | ${r.cells.stop} | ${r.cells.gate} | ${r.cells.hand} | ${r.cells.guard} | ${r.cells.reads} | ${r.cells.brake} |`)];
+  const t2 = ['| Agent | End-of-turn checks | Decision gate and commit trailer | Memory and procedures handed over | Sensitive paths: edits and shell | Sensitive paths: reads | Secret printed in a tool result | Context brake |', '|---|---|---|---|---|---|---|---|',
+    ...withHooks.map((r) => `| ${r.name} | ${r.cells.stop} | ${r.cells.gate} | ${r.cells.hand} | ${r.cells.guard} | ${r.cells.reads} | ${r.cells.secrets} | ${r.cells.brake} |`)];
   return [
     '**Hook events Waymark registers, per agent** (from `agents/agents.json`):', '', ...t1, '',
-    '**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it.', '', ...t2, '',
+    '**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it. For what the guard protects, *prevent*: a hook before the tool refuses the call; *detect*: nothing refuses it, and the end-of-turn hook reads the transcript of the agent and records what got through in the record of the task, where it cannot be removed. No guarded action is left with neither.', '', ...t2, '',
     `Agents Waymark knows with no adapter yet (nothing is recorded or checked there): ${without.map((r) => r.name).join(', ') || 'none'}.`,
   ].join('\n');
 }

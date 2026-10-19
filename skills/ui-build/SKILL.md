@@ -1,6 +1,6 @@
 ---
 name: ui-build
-description: "ui.build · owner dept-frontend. Build new UI in any framework: \"crea un modal\", \"nueva pantalla\", \"construye el componente\", \"arma un dashboard\", \"landing\"."
+description: "owner dept-frontend. Build new UI in any framework: \"crea un modal\", \"nueva pantalla\", \"construye el componente\", \"arma un dashboard\"."
 ---
 
 # UI Build

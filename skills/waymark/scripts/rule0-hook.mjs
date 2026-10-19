@@ -16,7 +16,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, markOpen, markTaskStart, taskInProgress, projectHome, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -32,7 +33,7 @@ try { mode = fs.readFileSync(path.join(HOME, 'coexistence.md'), 'utf8').match(/^
 // guest / skills-only (and 1.5.0's other-leads): the orchestrator owns the turn, so no reminder at all.
 // The rules themselves live in the instructions block; this only points at the steps a new session skips most.
 // The rules live once, in the block; the reminder points at the steps a turn skips most (docs/adr/0015, C3).
-const full = 'Waymark Rule 0: routing line, owner dept-*, choice window before changes, "## Cierre · <ID>" after.';
+const full = 'Waymark Rule 0: routing line, dept-*, choice window before changes, "## Cierre · <ID>" after.';
 const short = 'Waymark Rule 0 as in your last reply.';
 // The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
 export function gitLine(root, max = 2) {
@@ -45,7 +46,7 @@ export function gitLine(root, max = 2) {
 }
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
-  return ` Cierre ID: new ${ids.next}${ids.followUp ? `; follow-up (same files) ${ids.followUp}` : ''}.`;
+  return ` ID: new ${ids.next}${ids.followUp ? `; follow-up ${ids.followUp}` : ''}.`;
 }
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
@@ -111,15 +112,25 @@ export function reminder(hook, agent) {
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
   let ids = '';
   try { ids = taskLine(cwd); } catch {}
+  try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change
   try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
   try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
+  // the earlier task that resembles the ask, handed over once, at the task's first prompt (docs/adr/0033); null clears a stale one
+  let prec = '';
+  try {
+    if (!taskStartMark(hook.session_id)) {
+      const home = projectHome(cwd), p = home.dir && !home.legacy ? precedentFor(hook.prompt, readTaskRecords(home)) : null;
+      keepPrecedent(hook.session_id, p);
+      if (p) prec = ` ${p.text}`;
+    }
+  } catch {}
   try { markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
-  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }

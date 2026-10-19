@@ -1,6 +1,7 @@
 // Waymark 2.0.16 · point 11: the documentation cannot drift from the code. Fails when the version files disagree, a README figure
 // differs from size.mjs, a documentation file holds Spanish prose outside the allowed places, an ADR is missing from the
 // README's index, or README/INSTALL name a waymark.mjs command that does not exist. Run: node --test tests/*.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -87,4 +88,43 @@ test('commands: every waymark.mjs command that README and INSTALL name exists', 
     for (const m of read(f).matchAll(/waymark\.mjs["']?\s+(?!--)([a-z][\w-]*)/g)) assert.ok(known.has(m[1]) || m[1] === 'sync', `${f} names "waymark.mjs ${m[1]}", which does not exist`);
   }
   assert.ok(known.has('verify') && known.has('attest') && known.has('check'));
+});
+
+// ---- No other project is named ----------------------------------------------------------------------------------------------
+// Documentation, ADRs, tests and comments say "an orchestrator, ecosystem or supply chain", never another project's name. The
+// name is built from parts so this file does not hold it either. The one allowed neighbour is the organisation in engram's own
+// repository address (engram is a dependency, named by its address).
+test('docs: no other project is named in any tracked file', () => {
+  const org = ['gentle', 'man'].join(''), proj = `${['gentle'].join('')}[- ]?ai`;
+  const re = new RegExp(`${proj}|${org}[- ]programming(?!/engram)`, 'i');
+  const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' }).stdout.split('\0').filter(Boolean);
+  const hits = [];
+  for (const f of tracked) {
+    if (/\.(png|jpe?g|gif|ico|woff2?|pdf)$/i.test(f)) continue;
+    let text; try { text = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { continue; }
+    text.split('\n').forEach((line, i) => { if (re.test(line)) hits.push(`${f}:${i + 1}`); });
+  }
+  assert.deepEqual(hits, [], 'say "an orchestrator already installed"; use acme-orch as a sample namespace in tests');
+});
+
+// ---- Commands are written the way they run ----------------------------------------------------------------------------------
+// waymark.mjs is a script, not a program on the PATH: typed bare it fails. A document that tells someone to run it shows
+// `node "<skills-dir>/waymark/scripts/waymark.mjs" <command>`; text the agent reads may use W, the full command the session
+// card defines. History (CHANGELOG, ADRs) and the tests are left as written.
+test('commands: no document shows waymark.mjs bare as a command to type', () => {
+  const scope = /^(README\.md|INSTALL\.md|docs\/audit-context\.md|adapters\/.*\.md|skills\/.*\.md|skills\/waymark\/routine\.json)$/;
+  const bare = /(?:node\s+)?waymark\.mjs(?!["'`])(?=\s+[a-z<\[-])/;
+  const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' }).stdout.split('\0').filter((f) => scope.test(f) && !/skill-registry\.md$/.test(f));
+  const hits = [];
+  for (const f of tracked) read(f).split('\n').forEach((line, i) => { if (bare.test(line)) hits.push(`${f}:${i + 1}`); });
+  assert.deepEqual(hits, [], 'write node "<skills-dir>/waymark/scripts/waymark.mjs" <command> (or W in text the agent reads)');
+  assert.ok(tracked.includes('INSTALL.md') && tracked.some((f) => /^adapters\//.test(f)), 'the scope found the documents');
+});
+
+test('commands: the messages the hooks print carry the full command', () => {
+  for (const f of ['stop-hook.mjs', 'tool-hook.mjs', 'session-hook.mjs', 'waymark.mjs', 'incidents.mjs', 'learned.mjs']) {
+    const text = read('skills', 'waymark', 'scripts', f);
+    const lines = text.split('\n').filter((l) => !/^\s*\/\//.test(l) && /waymark\.mjs/.test(l) && /node waymark\.mjs|run waymark\.mjs|Run waymark\.mjs|\(waymark\.mjs [a-z]/.test(l.replace(/\/\/.*$/, '')));
+    assert.deepEqual(lines.map((l) => l.trim().slice(0, 80)), [], `${f} prints a bare command`);
+  }
 });

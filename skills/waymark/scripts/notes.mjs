@@ -152,10 +152,12 @@ export function noteLateCommits(cwd, records) {
 
 // Pushes the notes refs to a remote (default origin) and moves the tracking refs to what was pushed (git does it only
 // with the fetch refspec), so unpushedNotes knows without network that the remote has them. → { ok, output }
-export function pushNotes(cwd, remote = 'origin') {
+// quiet: no credential prompt and a shorter wait, for the push the hook makes at a close (notes-remote.mjs).
+export function pushNotes(cwd, remote = 'origin', { timeout = 60000, quiet = false } = {}) {
   const refs = REFS.map((ref) => [ref, refSha(cwd, ref)]).filter(([, sha]) => sha);
   if (!refs.length) return { ok: true, output: 'no notes' };
-  const r = git(cwd, ['push', remote, ...refs.map(([ref]) => `${ref}:${ref}`)], { encoding: 'utf8', timeout: 60000 });
+  const env = quiet ? { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } : process.env;
+  const r = git(cwd, ['push', remote, ...refs.map(([ref]) => `${ref}:${ref}`)], { encoding: 'utf8', timeout, env });
   if (r.status === 0) for (const [ref, sha] of refs) git(cwd, ['update-ref', trackRef(remote, ref), sha]);
   return { ok: r.status === 0, output: `${r.stdout || ''}${r.stderr || ''}`.trim() };
 }
@@ -174,6 +176,7 @@ export const trackRef = (remote = 'origin', ref = NOTES_REF) => `refs/notes/remo
 const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
 const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
 const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
+export const hasNotes = (cwd) => REFS.some((ref) => !!refSha(cwd, ref));
 export const hasRemote = (cwd, remote = 'origin') => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
 export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;
 

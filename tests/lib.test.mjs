@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 5: one definition of the path, file and git helpers (scripts/lib). Run: node --test tests/lib.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,9 +16,31 @@ const L = {
 const packed = await import(`file://${SCRIPTS}/lib/packed.mjs`);
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wm-lib-'));
 
+// A folder reached through a junction (Windows) or a symlink (POSIX) is spelled two ways, as an 8.3 short name
+// (C:\Users\RUNNER~1) and its long name are: git reports one, the agent types the other.
+const linked = () => {
+  const base = tmp(), target = path.join(base, 'Target');
+  fs.mkdirSync(path.join(target, 'src'), { recursive: true });
+  const link = path.join(base, 'link');
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  return { target, link };
+};
+
+test('real: a path as the filesystem spells it, links resolved, the missing tail kept on its nearest existing folder', () => {
+  const { target, link } = linked();
+  assert.equal(L.paths.norm(L.paths.real(path.join(link, 'src'))), L.paths.norm(fs.realpathSync.native(path.join(target, 'src'))));
+  assert.equal(L.paths.norm(L.paths.real(path.join(link, 'src', 'new', 'a.ts'))), L.paths.norm(path.join(fs.realpathSync.native(target), 'src', 'new', 'a.ts')), 'a file not written yet');
+});
+
+test('exemptPath: a project file spelled through another name of its folder is still the project\'s', () => {
+  const { target, link } = linked();
+  assert.equal(L.paths.exemptPath(path.join(link, 'src', 'a.ts'), target), false, 'the file through the link, the root as git reports it');
+  assert.equal(L.paths.exemptPath(path.join(target, 'src', 'a.ts'), link), false, 'and the other way round');
+});
+
 test('norm: forward slashes, lower case, no trailing slash — one answer for every caller', () => {
   const { norm } = L.paths;
-  assert.equal(norm('C:\\Users\\Gabri\\Proj\\'), 'c:/users/gabri/proj');
+  assert.equal(norm('C:\\Users\\Dev\\Proj\\'), 'c:/users/dev/proj');
   assert.equal(norm('/Home/Me/Proj//'), '/home/me/proj');
   assert.equal(norm(null), '');
   assert.equal(norm(undefined), '');
@@ -70,7 +93,7 @@ test('git runs in the given folder and returns the spawn result', () => {
   assert.equal(init.status, 0);
   const top = L.git.git(d, ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
   assert.equal(top.status, 0);
-  assert.equal(L.paths.norm(top.stdout.trim()), L.paths.norm(fs.realpathSync(d)));
+  assert.equal(L.paths.norm(top.stdout.trim()), L.paths.norm(fs.realpathSync.native(d)), 'git reports the long name of an 8.3 short one');
 });
 
 test('no script defines its own copy of these helpers any more', () => {

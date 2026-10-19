@@ -81,7 +81,7 @@ export function digest(cwd, agentName = 'claude') {
   if (last) {
     const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 180)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 110)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
@@ -100,9 +100,9 @@ export function digest(cwd, agentName = 'claude') {
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 3, 150, last?.id); } catch {} // the last closed is already above
-  if (learned.length) out.push(`Learned (engram, newest first; more: engram search "<words>" --project ${home.slug}):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at your first edit of each file (what earlier tasks did there, from git; never run it yourself); on demand, W memory <section> (Conventions · Identity) and W tasks.`);
+  try { if (!home.legacy) learned = learnedLines(home, 2, 110, last?.id); } catch {} // the last closed is already above
+  if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
+  out.push(`Commands: the hook hands you W pack at your first edit of each file (never run it yourself); on demand: W memory <section> (Conventions · Identity), W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -186,7 +186,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try {
       text = CARD_HEAD;
       if (rebuilt) text += `Rebuilt from git: .waymark/memory.md and tasks.md from ${rebuilt} records (notes, waymark-log, trailer commits); complete Identity and Quality gates in memory.md (Minimal bootstrap).\n`;
-      if (failed) text += `Notes: the fetch from origin failed (${failed}); the records here are the local ones. Run waymark.mjs notes setup from your shell.\n`;
+      if (failed) text += `Notes: the fetch from origin failed (${failed}); the records here are the local ones. Run ${W_CMD} notes setup from your shell.\n`;
       text += digest(cwd, agent.name);
       if (added) text += '\nNotes: fetches from origin now bring the task records (one fetch refspec added to .git/config).';
       if (joined) text += '\nNotes: the records the remote brought joined the local ones (git notes merge).';

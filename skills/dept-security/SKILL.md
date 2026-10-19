@@ -1,6 +1,6 @@
 ---
 name: dept-security
-description: "Security. FIRST for auth, secrets, risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"CSRF\", \"API key\", \"vulnerabilidad\", RLS, OWASP."
+description: "Security. FIRST for auth, secrets, risk: \"login\", \"permisos\", \"roles\", \"JWT\", \"proteger una ruta\", \"CORS\", \"API key\", \"vulnerabilidad\"."
 ---
 
 # Security / DevSecOps
@@ -66,7 +66,7 @@ Mapped to OWASP Top 10 (2021) and ASVS chapters.
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Framework security APIs (auth, CSRF, CSP, sanitization) not verified this session | Q |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | search.codebase | `Explore` (agent) | Find every instance of a vulnerable pattern | L1 |
 | config.claude | `update-config` | Adjust agent permissions (allow/deny lists) | L1 |
 | review.security | `security-review` | Changes touch auth, input, secrets, config, dependencies, uploads, webhooks (L3 always) | L2 |

@@ -1,5 +1,6 @@
 // Waymark 2.0.16 · point 8: the sensitive-path guard of the pre-tool hook. Run: node --test tests/*.test.mjs
 // Temporary WAYMARK_HOME and repos; nothing reads or writes the real ~/.waymark or any real secret.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,6 +48,7 @@ test('guard: a shell command that names an existing sensitive file is denied; a 
   assert.match(commandSensitive('cat .env', proj, cfg) || '', /\.env$/);
   assert.match(commandSensitive('cd cfg && cat id_rsa', proj, cfg) || '', /id_rsa$/);
   assert.match(commandSensitive('echo TOKEN=1 > .env.production', proj, cfg) || '', /\.env\.production$/, 'a redirect creating one');
+  fs.mkdirSync(path.join(os.homedir(), '.ssh'), { recursive: true }); fs.writeFileSync(path.join(os.homedir(), '.ssh', 'known_hosts'), ''); // the sandbox home, never the real one
   assert.match(commandSensitive(`cat ~/.ssh/known_hosts`, proj, cfg) || '', /\.ssh/, '~ expands to the home folder');
   assert.equal(commandSensitive('cat .env.example', proj, cfg), null);
   assert.equal(commandSensitive('git commit -m "fix how .env is loaded"', proj, cfg), null, 'a word inside a message is no path');
@@ -86,4 +88,44 @@ test('guard: where the agent has no hook before that tool, nothing is stopped (t
   // Claude Code's Read is covered, and the hook registration includes it
   const agents = JSON.parse(fs.readFileSync(path.join(SCRIPTS, 'agents', 'agents.json'), 'utf8')).agents;
   assert.match(agents.find((a) => a.key === 'claude').hooks.matcher, /\bRead\b/);
+});
+
+// ---- 2.0.18 point 9 (docs/adr/0037): the shell readers of a protected path, and the ways round the guard that were closed ----
+
+test('guard: every shell reader of a protected path is denied, whatever the program (cat, type, Get-Content, head, tail, less…)', () => {
+  const cfg = loadRisk(proj);
+  for (const c of ['cat .env', 'type .env', 'Get-Content .env', 'Get-Content -Path .env', 'gc .env', 'head -n 5 .env', 'tail -f .env', 'less .env', 'more .env', 'bat .env',
+    'sed -n 1p .env', 'awk 1 .env', 'grep KEY .env', 'base64 .env', 'cp .env /tmp/x', 'source .env', '. .env', 'cat .env | head -3', 'cd cfg && tail id_rsa', 'cat "./.env"']) {
+    assert.match(commandSensitive(c, proj, cfg) || '', /(\.env|id_rsa)$/, c);
+    assert.match(gate(bash(c), claude) || '', /sensitive path/, `the hook denies: ${c}`);
+  }
+});
+
+test('guard: a glob, an attached redirect, a flag value, a revision and another shell no longer hide the path', () => {
+  const cfg = loadRisk(proj);
+  const hit = (c, re) => assert.match(commandSensitive(c, proj, cfg) || '', re, c);
+  hit('cat .env*', /\.env/);
+  hit('cat .e?v', /\.env$/);
+  hit('cat cfg/*.pem', /server\.pem$/);
+  hit('head cfg/id_*', /id_rsa$/);
+  hit('cat<.env', /\.env$/);
+  hit('cat < .env', /\.env$/);
+  hit('docker run --env-file=.env app', /\.env$/);
+  hit('Get-Content -Path:.env', /\.env$/);
+  hit('git show HEAD:.env', /\.env$/);
+  hit('git show HEAD:cfg/id_rsa', /id_rsa$/);
+  hit('bash -c "cat .env"', /\.env$/);
+  hit('pwsh -Command "Get-Content .env"', /\.env$/);
+  hit('echo $(cat .env)', /\.env$/);
+  hit('cat $HOME/.ssh/known_hosts', /\.ssh/);
+  hit('cat $env:USERPROFILE/.ssh/known_hosts', /\.ssh/);
+  assert.match(gate(bash('cat .env*'), claude) || '', /sensitive path/);
+});
+
+test('guard: what only names a pattern, or nothing sensitive, still passes', () => {
+  const cfg = loadRisk(proj);
+  for (const c of ['git add *', 'ls *', 'cat *', 'find . -name "*.pem"', 'grep --include=*.pem -r x .', 'grep -e .env* README.md', 'git show HEAD:README.md', 'cat .env.example', 'cat .env*example',
+    'git commit -m "read .env* with care"', 'echo hello > notes.txt', 'cat missing/*.pem']) {
+    assert.equal(commandSensitive(c, proj, cfg), null, c);
+  }
 });

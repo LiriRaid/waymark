@@ -1,6 +1,7 @@
 // Point 8 of 2.0.3 — the quota shared by session: the 5-hour window is the account's, so each rise of its % is split
 // among the Claude Code sessions by what each one spent (cost.total_cost_usd) since the last reading; each terminal
 // shows its share and the close of a task shared with another session says its own part (docs/adr/0019, amended).
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

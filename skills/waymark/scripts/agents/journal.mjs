@@ -3,7 +3,7 @@
 // toLines() turns the journal into the core's lines (Claude Code's .jsonl shape). A row: { at, event, cwd, ... } where
 // event is prompt (prompt), tool (tool: the canonical name Bash/Edit/Read/AskUserQuestion or the agent's own, input,
 // key: the agent's tool name, id when the agent gives one, skill when it reads <dir>/<skill>/SKILL.md), result (key, id,
-// error, output) or stop. Journals untouched for 14 days go when a new session starts one.
+// error, output), reply (text: the agent's last message, as its stop hook carries it) or stop. Journals untouched for 14 days go when a new session starts one.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,6 +48,7 @@ export function toLines(rows, tag = 'j') {
   for (const r of rows) {
     if (r?.event === 'prompt') { open.clear(); asked.clear(); } // an id the agent reuses in a later turn is a new call
     if (r?.event === 'prompt') lines.push({ type: 'user', uuid: `${tag}-${n++}`, timestamp: r.at, message: { role: 'user', content: String(r.prompt || '') } });
+    else if (r?.event === 'reply') { if (String(r.text || '').trim()) assistant(r, [{ type: 'text', text: String(r.text) }]); } // the text a stop hook carries, for the agents that give it only there
     else if (r?.event === 'tool') {
       const id = r.id ? `${tag}-${r.id}` : `${tag}-call-${n++}`;
       open.set(r.key || r.tool, id);

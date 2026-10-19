@@ -3,13 +3,15 @@
 // department and a capability, and (re)applies the waymark precondition to installed tool skills.
 // Third-party skills are indexed too: other agents' skill folders (Cursor, Codex, .agents, Gemini, OpenCode…)
 // and project skill folders, with their path so any agent can read and follow them.
-// Usage: node sync.mjs [--dry-run] [--unpatch] [--quiet]
+// Usage: node sync.mjs [--dry-run] [--unpatch] [--quiet] [--vendor <name> [--ref <tag|commit>]]
+// --vendor makes the skill an owned real copy and pins it in skills.lock (docs/adr/0036).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { discoverMcp } from './agents/paths.mjs'; // every agent's MCP config, where its environment variables put it
 import { readJson } from './lib/fs.mjs';
+import { lockSkill } from './manifest.mjs';
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = os.homedir();
@@ -79,7 +81,7 @@ function scanSkillsDir(dir, origin) {
   let entries = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
-    // "_name" folders hold another framework's shared files (gentle-ai's _shared), never a skill
+    // "_name" folders hold another framework's shared files (such as a `_shared` folder), never a skill
     if (e.name.startsWith('.') || e.name.startsWith('_') || e.name === 'synced') continue;
     const skillDir = path.join(dir, e.name);
     const file = path.join(skillDir, 'SKILL.md');
@@ -239,6 +241,7 @@ function render(map, installed, mcpNames, projects) {
 
 const map = readJson(MAP_FILE);
 
+let vendored = null;
 const vi = process.argv.indexOf('--vendor');
 if (vi > 0) {
   const name = process.argv[vi + 1];
@@ -263,6 +266,8 @@ if (vi > 0) {
   });
   if (!e.patch) e.patch = e.departments.find((d) => d.startsWith('dept-')) || 'waymark';
   map.skills[name] = e;
+  const ri = process.argv.indexOf('--ref');
+  vendored = { name, e, ref: (ri > 0 && process.argv[ri + 1]) || lock?.ref || lock?.commit || lock?.sha || null };
 }
 
 const { skills, projects } = discover();
@@ -306,6 +311,12 @@ for (const s of skills) {
 for (const d of fs.readdirSync(SKILLS_HOME)) {
   if (!/^dept-/.test(d)) continue;
   if (!unpatch && ensureSection(path.join(SKILLS_HOME, d, 'SKILL.md'), '## Learned rules', LEARNED_DEPT)) evolved.push(`${d} (+Learned rules)`);
+}
+
+// Pinned last: the precondition and the NOTICE above are part of the folder as vendored.
+if (vendored && !dryRun && !unpatch) {
+  const pin = lockSkill(vendored.name, { source: vendored.e.vendoredFrom, ref: vendored.ref, upstreamHash: vendored.e.upstreamHash, vendoredAt: vendored.e.vendoredAt, license: vendored.e.license });
+  evolved.push(`${vendored.name} (pinned in skills.lock${pin.ref || pin.upstreamHash ? '' : ': no ref and no upstream hash, pass --ref <tag|commit>'})`);
 }
 
 const registry = render(map, installed, discoverMcp(), projects);

@@ -1,6 +1,6 @@
 ---
 name: ui-refine
-description: "ui.refine · owner dept-ux-ui. Improve existing UI by mode (polish, simplify, harden, adapt, animate…): \"mejora esta pantalla\", \"pulir detalles\", \"hazlo más limpio\", \"agrega animaciones\"."
+description: "owner dept-ux-ui. Improve existing UI by mode (polish, simplify, harden, adapt, animate…): \"mejora esta pantalla\", \"hazlo más limpio\", \"agrega animaciones\"."
 ---
 
 # UI Refine

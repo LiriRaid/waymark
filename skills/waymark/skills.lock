@@ -1,0 +1,5 @@
+{
+ "schema": "waymark.skills-lock/v1",
+ "about": "Third-party skills vendored into this release: where each came from (source, and ref = the tag or commit, or upstreamHash = the upstream folder hash when the source gives no ref) and the sha256 of its folder as vendored, written by `sync --vendor <name>` and checked by `verify --install`.",
+ "skills": {}
+}

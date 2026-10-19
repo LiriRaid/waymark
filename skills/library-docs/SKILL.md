@@ -1,6 +1,6 @@
 ---
 name: library-docs
-description: "docs.library · Before code that uses a library API not verified this session, and for setup or migration: \"cómo se usa\", \"documentación de\", \"migrar a la versión\", \"sigue sin funcionar\"."
+description: "Before code that uses a library API not verified this session, and for setup or migration: \"cómo se usa\", \"documentación de\", \"migrar a la versión\", \"sigue sin funcionar\"."
 ---
 
 # Library Docs

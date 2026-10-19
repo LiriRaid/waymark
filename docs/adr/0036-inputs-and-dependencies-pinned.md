@@ -1,0 +1,32 @@
+# 0036 · Inputs and dependencies pinned: the engram release, `skills.lock`, and no dependencies of our own
+
+**Status:** accepted (2.0.18, point 8). Amends ADR 0015 (what the learned layer needs from engram) and ADR 0027 (what `verify --install` checks).
+
+## Context
+
+A record says which rules governed a task (`pinned`, since 2.0.16) and the manifest hashes every file of the release, but two inputs were still taken on trust: the `engram` binary the hooks run (any version on the PATH, installed by the agent from a release page) and the third-party skills Waymark vendors (the manifest says they have not changed since the release, not where they came from). Scorecard criterion 6 asks for each to be pinned, and for Waymark's own scripts to be shown to have no dependencies.
+
+## Decision
+
+- **The engram pin** (the user's choice, 2026-10-17: the archive and the binary, version 3.1.0, a notice on mismatch). `skills/waymark/engram.pin.json` holds the version Waymark was tested with and, for each of the six release platforms (`windows`, `darwin`, `linux` × `amd64`, `arm64`), the sha256 of the release archive, as `checksums.txt` publishes it (what whoever installs compares before extracting), and of the binary inside it (what `check` compares afterwards). The binary hashes were computed by extracting each archive of the release; the installed binary on the author's machine matches its entry. Version 3.1.0 is the one the author runs and Waymark was built against; a newer release is adopted by changing the file on purpose.
+- **`check` compares, and says.** `engramStatus` reports `ok`, `version` (another release), `binary` (the version matches and the bytes do not: not the published release), `unchecked` (no file to hash), `platform` (the pin has no entry for this OS and architecture) or `unpinned`. Everything but `ok` and `unchecked` becomes a line of `check` that names the archive and its sha256 to install; nothing stops. engram is local, optional memory and a version change must not block the work; the cost of a mismatch is that the learned layer may behave differently, and that is said.
+- **The record keeps the version.** `inputs.engram = { version, pinned }` is added by the end-of-turn hook (a field added to `inputs`, never repurposed; a task without engram keeps its old shape). The binary's hash is not computed at each close: reading 20 MB at every turn is a cost for a fact `check` already reads.
+- **`skills/waymark/skills.lock`** (`waymark.skills-lock/v1`). `sync.mjs --vendor <name> [--ref <tag|commit>]` writes, after the precondition and the NOTICE are in place, one entry: `source`, `ref` (the flag, or what npx skills' own lock holds), `upstreamHash` (its upstream folder hash), `vendoredAt`, `license` and `sha256`, the hash of the folder as vendored (each file by the manifest's `hashFile`, so a CRLF checkout matches and the body of the `## Learned notes` section, which grows with use, does not count). `verify --install` fails when a pinned skill changed or is gone, and warns when an entry has neither a ref nor an upstream hash (nothing to return to). A release with no lock fails `verify --install` like one with no manifest. Today the release vendors no third-party skill, so the lock is empty and valid; the manifest already hashes the six tool skills Waymark itself owns.
+- **No dependencies of our own.** Waymark's scripts are plain JavaScript. `tests/pins.test.mjs` (`no dependencies`) fails on a `package.json` at the root or anywhere under `skills/`, and on any import, dynamic import or `require` in `skills/waymark/scripts` that is neither a Node built-in nor a file that exists. Scorecard check 6.2 reads the same rule from the sources.
+
+## What it proves, and what it does not
+
+A match proves that the binary on a machine has the bytes of the release Waymark was tested with, and that a vendored skill is what was pinned. It does not prove the release is free of faults, that the upstream of a vendored skill was honest on the day it was vendored, or that the pin was not changed together with the file it pins: the manifest hashes the pin, and the manifest's signature (and the signed tag) are what protect that. A mismatch is a notice, not a prevention: the hooks still run whatever `engram` is on the PATH.
+
+## Alternatives considered
+
+- **Only the binary, or only the archive.** The binary alone leaves the installer with nothing to compare before extracting; the archive alone leaves `check` unable to verify what is installed. Both are small.
+- **The latest release (3.4.0).** Untested with Waymark's calls (`save`, `context`, topics) and it would have asked the author to upgrade to satisfy a check. Rejected for the tested one.
+- **Refuse to use an engram that does not match.** Strict, but a legitimate upgrade would cut the learned memory until the pin moved, and the hash would be computed at every close. Rejected for the notice.
+- **A pin per vendored skill inside `skill-map.json`.** That file is regenerated by `sync` for each machine and left out of the manifest, so a pin there protects nothing.
+
+## Consequences
+
+- Scorecard checks 6.3 to 6.6 pass (criterion 6 reaches 100 %); 6.1 and 6.2 held before.
+- `skills/waymark/` gains two files (`engram.pin.json`, `skills.lock`), both in the manifest.
+- Moving to a newer engram, or vendoring a skill, is a visible edit of a pinned file in the repository.

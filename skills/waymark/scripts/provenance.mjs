@@ -19,6 +19,24 @@ export {
   ID,
 } from './provenance/ids.mjs';
 export {
+  RECORD_SCHEMAS,
+  RECORD_V1,
+  RECORD_V2,
+  TASK_TYPES,
+  askedItems,
+  followUps,
+  askedGaps,
+  itemsOf,
+  optionAttrs,
+  optionsLint,
+  pedidoAnswers,
+  pedidoItems,
+  replayV2,
+  reworkOf,
+  taskTypeOf,
+  v2Fields,
+} from './provenance/derive.mjs';
+export {
   INTERRUPTED_AFTER,
   aprendidoOf,
   closeOpen,

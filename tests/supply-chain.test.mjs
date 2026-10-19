@@ -1,6 +1,7 @@
 // Waymark 2.0.8: the log anchored in git (a rewrite shows), forget (a removal the user asked for, in view) and the
 // Evidencia testigo (an "observada" backed by a check after the last change). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME and temporary repos; nothing reads or writes the real ~/.waymark or engram.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

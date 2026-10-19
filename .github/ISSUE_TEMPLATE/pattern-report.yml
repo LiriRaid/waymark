@@ -1,0 +1,66 @@
+name: Pattern report
+description: Share what your work taught about Waymark — the pattern, never the case.
+title: "[pattern] "
+labels: ["pattern"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Share the **pattern**, not your **case**: no code, no prompts, no file paths, no names of your projects or clients, no logs or transcripts. See CONTRIBUTING.md → *The pattern, not the case* for examples.
+  - type: input
+    id: version
+    attributes:
+      label: Waymark version
+      description: The content of `<skills-dir>/waymark/VERSION`.
+      placeholder: 2.0.18
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and model
+      placeholder: Claude Code · Sonnet 5.5
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: Level of the tasks
+      multiple: true
+      options: [Q, L0, L1, L2, L3]
+    validations:
+      required: true
+  - type: input
+    id: stack
+    attributes:
+      label: Stack, in general terms
+      placeholder: Angular front + NestJS API
+  - type: textarea
+    id: pattern
+    attributes:
+      label: The pattern
+      description: What happens, in words anyone could reuse without knowing your project. Which department, testigo or hook was involved?
+    validations:
+      required: true
+  - type: input
+    id: frequency
+    attributes:
+      label: How often
+      placeholder: 4 of my last 10 L2 tasks
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Numbers (optional)
+      description: Lines from `waymark.mjs cost` or `waymark.mjs scorecard`. Check them before pasting; they should hold no project content.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you send
+      options:
+        - label: This report holds no code, prompts, file paths, or names of my projects or clients.
+          required: true

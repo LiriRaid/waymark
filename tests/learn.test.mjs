@@ -2,6 +2,7 @@
 // map's areas, the count of repeated procedures); the rest is proposed (a project skill, a Learned rule of the owner
 // department, a preference) once in the session card and in check, and written only after the user's yes.
 // Run: node --test tests/*.test.mjs. Every test uses a temporary WAYMARK_HOME and project; nothing real is touched.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

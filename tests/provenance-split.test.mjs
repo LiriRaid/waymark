@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 6: provenance.mjs split by concern (scripts/provenance/*), same public API. Run: node --test tests/provenance-split.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,11 +8,11 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
-const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'taskmd', 'decisions', 'snapshot'];
+const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'taskmd', 'decisions', 'snapshot', 'derive'];
 const M = Object.fromEntries(await Promise.all(MODULES.map(async (n) => [n, await import(`file://${SCRIPTS}/provenance/${n}.mjs`)])));
 
-// The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one. 2.0.16 adds pinnedRules (point 9).
-const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'taskLines', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'pinnedRules', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine'];
+// The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one. 2.0.16 adds pinnedRules (point 9); 2.0.18 adds the record schema v2 names of provenance/derive.mjs (point 2).
+const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'taskLines', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'pinnedRules', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine', 'RECORD_SCHEMAS', 'RECORD_V1', 'RECORD_V2', 'TASK_TYPES', 'askedGaps', 'askedItems', 'followUps', 'itemsOf', 'optionAttrs', 'optionsLint', 'pedidoAnswers', 'pedidoItems', 'replayV2', 'reworkOf', 'taskTypeOf', 'v2Fields'];
 
 test('provenance.mjs keeps exactly its public API', () => {
   assert.deepEqual(Object.keys(P).sort(), [...API].sort());
@@ -27,6 +28,7 @@ test('every public name is the very function of the module that owns it', () => 
     tasks: ['taskIds', 'validId', 'taskLines', 'taskFiles', 'taskStart', 'taskStartMark', 'markTaskStart', 'clearTaskStart', 'taskInProgress'],
     taskmd: ['INTERRUPTED_AFTER', 'markOpen', 'closeOpen', 'expireOpen', 'taskSummary', 'aprendidoOf', 'writeTaskLine', 'confirmTasks', 'tidyWip', 'tasksMarkdown', 'refreshTasks', 'rebuildFromGit'],
     decisions: ['decisionsIn', 'recordedDecisions', 'askedChoice'],
+    derive: ['RECORD_SCHEMAS', 'RECORD_V1', 'RECORD_V2', 'TASK_TYPES', 'askedGaps', 'askedItems', 'followUps', 'itemsOf', 'optionAttrs', 'optionsLint', 'pedidoAnswers', 'pedidoItems', 'replayV2', 'reworkOf', 'taskTypeOf', 'v2Fields'],
     snapshot: ['turnInputs', 'pinnedRules', 'commitsFor', 'gitSnapshot', 'snapshotDiff', 'saveSnapshot', 'loadSnapshot', 'addRepoSnapshot', 'markPaused', 'turnChanged'],
   };
   const claimed = Object.values(OWNER).flat();

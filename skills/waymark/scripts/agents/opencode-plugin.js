@@ -35,7 +35,7 @@ export const Waymark = async ({ client, $, directory }) => {
   const run = async (script, payload) => {
     try {
       const input = new Response(JSON.stringify({ cwd: directory, agent_version: await agentVersion(), ...payload }));
-      const r = await $`node ${join(SCRIPTS, script)} --agent opencode < ${input}`.nothrow().quiet();
+      const r = await $`node ${join(SCRIPTS, 'hook-run.cjs')} ${join(SCRIPTS, script)} --agent opencode < ${input}`.nothrow().quiet();
       return JSON.parse(r.stdout.toString().trim() || '{}');
     } catch { return {}; }
   };
@@ -91,7 +91,7 @@ export const Waymark = async ({ client, $, directory }) => {
       if (!args.has(input.callID)) return;
       const toolInput = args.get(input.callID);
       args.delete(input.callID);
-      const o = await run('tool-hook.mjs', { hook_event_name: 'PostToolUse', session_id: input.sessionID, tool_name: input.tool, tool_input: toolInput });
+      const o = await run('tool-hook.mjs', { hook_event_name: 'PostToolUse', session_id: input.sessionID, tool_name: input.tool, tool_input: toolInput, transcript_path: join(DIR, `${input.sessionID}.jsonl`) }); // the dump the before-hook wrote: the hook finds the task's department in it
       const text = context(o);
       if (text && output) output.output = `${output.output ?? ''}\n\n${text}`;
     },

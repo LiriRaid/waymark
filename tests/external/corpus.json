@@ -1,6 +1,6 @@
 {
- "schema": "waymark.external-corpus/v1",
- "note": "Public repositories unlike the author's own projects (docs/adr/0027, point 13). Read-only shallow clones; the commit pins what was measured. `expect` is the author's judgment of what a correct Waymark reports; `sample` is one real source file used for the scripted code task.",
+ "schema": "waymark.external-corpus/v2",
+ "note": "Public repositories unlike the author's own (docs/adr/0027, point 13 and 2.0.17 point 4). Shallow clones pinned to a commit. `expect` is the author's judgment of what a correct Waymark reports; `sample` is one real source file used for the scripted code task; `task` is the real change an agent makes in the run (tests/external/run-agent.mjs): a Spanish request, as the author writes them.",
  "repos": [
   {
    "id": "rust-cli",
@@ -17,6 +17,11 @@
      "lint": "cargo clippy --all-targets -- -D warnings",
      "build": "cargo build"
     }
+   },
+   "task": {
+    "file": "src/exit_codes.rs",
+    "kind": "docs",
+    "prompt": "En src/exit_codes.rs agrega un comentario de documentación (///) a la función `merge_exitcodes` que explique qué devuelve."
    }
   },
   {
@@ -34,6 +39,11 @@
      "lint": "./vendor/bin/pint --test",
      "typecheck": "./vendor/bin/phpstan analyse"
     }
+   },
+   "task": {
+    "file": "app/Models/User.php",
+    "kind": "docs",
+    "prompt": "En app/Models/User.php agrega un comentario en línea dentro del método `casts` que explique para qué sirve el cast de `password`."
    }
   },
   {
@@ -51,6 +61,11 @@
      "typecheck": "terraform validate",
      "test": "terraform test"
     }
+   },
+   "task": {
+    "file": "variables.tf",
+    "kind": "docs",
+    "prompt": "En variables.tf mejora la `description` de la variable `name` para que diga que es el prefijo del nombre de los recursos de la VPC."
    }
   },
   {
@@ -68,6 +83,11 @@
      "lint": "ruff check .",
      "typecheck": "mypy ."
     }
+   },
+   "task": {
+    "file": "imblearn/base.py",
+    "kind": "docs",
+    "prompt": "En imblearn/base.py agrega un docstring corto al método `_check_X_y` de la clase `BaseSampler`."
    }
   },
   {
@@ -81,6 +101,72 @@
     "stack": null,
     "profile": "generic",
     "gates": {}
+   },
+   "task": {
+    "file": "README.md",
+    "kind": "docs",
+    "prompt": "Al final de README.md agrega una línea que diga \"Gracias por contribuir.\" y nada más."
+   }
+  },
+  {
+   "id": "android-app",
+   "url": "https://github.com/android/sunflower",
+   "commit": "2a357a31551bb53f3fe80382a9ce6d30bcc8b960",
+   "field": "mobile app",
+   "language": "kotlin",
+   "sample": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
+   "expect": {
+    "stack": "android (gradle)",
+    "profile": "android",
+    "gates": {
+     "test": "./gradlew testDebugUnitTest",
+     "lint": "./gradlew lint",
+     "typecheck": "./gradlew compileDebugKotlin",
+     "build": "./gradlew assembleDebug"
+    }
+   },
+   "task": {
+    "file": "app/src/main/java/com/google/samples/apps/sunflower/utilities/GrowZoneUtil.kt",
+    "kind": "docs",
+    "prompt": "En GrowZoneUtil.kt agrega la anotación KDoc @param y @return a la documentación de la función pública de ese archivo."
+   }
+  },
+  {
+   "id": "polyglot-monorepo",
+   "url": "https://github.com/GoogleCloudPlatform/microservices-demo",
+   "commit": "38e7348eb289eb5b87c0c6e8cb19ced0449dc389",
+   "field": "multi-language monorepo",
+   "language": "go, python, csharp, java, node",
+   "sample": "src/shippingservice/quote.go",
+   "expect": {
+    "stack": null,
+    "profile": "generic",
+    "gates": {}
+   },
+   "task": {
+    "file": "src/shippingservice/quote.go",
+    "kind": "docs",
+    "prompt": "En src/shippingservice/quote.go mejora el comentario de la función `String` de `Quote` para que describa el formato del texto que devuelve."
+   }
+  },
+  {
+   "id": "embedded-c",
+   "url": "https://github.com/FreeRTOS/FreeRTOS-Kernel",
+   "commit": "640d0c43705e64cd53f46b31d882de6cd8433933",
+   "field": "embedded C library",
+   "language": "c",
+   "sample": "list.c",
+   "expect": {
+    "stack": "c (cmake)",
+    "profile": "c",
+    "gates": {
+     "build": "cmake --build build"
+    }
+   },
+   "task": {
+    "file": "list.c",
+    "kind": "docs",
+    "prompt": "En list.c agrega un comentario de una línea sobre la función `vListInitialise` que diga qué deja inicializado."
    }
   }
  ]

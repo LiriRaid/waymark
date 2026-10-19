@@ -2,6 +2,7 @@
 import { isPrompt, promptText } from '../transcript.mjs';
 import { clip } from './ids.mjs';
 import { maskSecrets } from './secrets.mjs';
+import { optionAttrs } from './derive.mjs';
 
 // Choices the user made in the choice window (Claude Code: AskUserQuestion → toolUseResult.{questions, answers}).
 // A window the user rejected ("User rejected tool use") is answered by their next message: that message is their
@@ -37,6 +38,7 @@ export function decisionsIn(lines) {
       const picked = (l) => parts.includes(l) || (l.includes(',') && String(chosen).includes(l));
       const d = { question: q.question, chosen, discarded: (q.options || []).map((o) => o.label).filter((l) => !picked(l)), ...(r.source ? { source: r.source } : {}) }; // source "chat": asked in the chat (agents without a choice window, docs/adr/0009)
       Object.defineProperty(d, 'labels', { value: (q.options || []).map((o) => o.label), enumerable: false }); // for recordedDecisions only
+      Object.defineProperty(d, 'optionList', { value: q.options || [], enumerable: false }); // the options with their descriptions: record schema v2 keeps their attributes
       // the choice-window call that asked it, to place it before or after the task's first change (testigo decision)
       Object.defineProperty(d, 'callId', { value: callId, enumerable: false });
       out.push(d);
@@ -55,7 +57,7 @@ export function recordedDecisions(decisions = []) {
     const labels = d.labels, chosen = String(d.chosen ?? '');
     const kept = labels.includes(chosen) ? chosen
       : chosen.split(',').map((p) => p.trim()).filter(Boolean).map((p) => (labels.includes(p) ? p : answerText(p))).join(', ');
-    return { ...d, chosen: kept };
+    return { ...d, chosen: kept, ...(d.optionList?.length ? { options: d.optionList.map(optionAttrs) } : {}) };
   });
 }
 

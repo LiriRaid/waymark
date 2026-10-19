@@ -21,6 +21,8 @@ Run the first time Waymark works in a project, for a new project from scratch, o
 | `pyproject.toml`, `requirements.txt` | python |
 | `go.mod` · `pom.xml`/`build.gradle` · `*.csproj` | go · java · dotnet |
 | `Cargo.toml` · `composer.json` · `*.tf` | rust · php · terraform |
+| `CMakeLists.txt` or `Makefile` beside `*.c` / `*.h` | c |
+| Gradle build with an `AndroidManifest.xml` in a module | android |
 
 A `package.json` that names no JS framework next to a `composer.json` or `Cargo.toml` is that stack's asset tooling: the other manifest decides.
 | nothing known | generic |

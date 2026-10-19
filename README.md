@@ -1,6 +1,6 @@
 # Waymark
 
-**A supply chain for your coding agent's work.** Every change goes through defined stages: the department that owns it, **your** decision among the optimal options, evidence, gates and review. It comes out with a verifiable record: what it was built with, who decided what and when, what was proven, which commit it produced.
+**The supply chain of AI-agent work.** Provenance, evidence and verification for every change an AI agent makes to your code. Every change goes through defined stages: the department that owns it, **your** decision among the optimal options, evidence, gates and review. It comes out with a verifiable record: what it was built with, who decided what and when, what was proven, which commit it produced.
 
 For Claude Code, Codex, Cursor, Gemini CLI, OpenCode and any agent that reads [Agent Skills](https://agentskills.io) (`SKILL.md`).
 
@@ -35,15 +35,19 @@ What it records, and where each statement is tested:
 | The cost of each task is split into routine, work and reply | `tests/hooks.test.mjs`, `docs/audit-context.md` |
 | The review is required where the risk is: L3, a sensitive path, many files or lines | `tests/risk.test.mjs` |
 | Reading or editing secret-bearing paths is blocked where the agent's hook runs before the tool | `tests/guard.test.mjs` |
-| `waymark.mjs verify` checks the chain, the installed files against `MANIFEST.json` and the release signature; `attest` exports one task | `tests/verify.test.mjs` |
+| `node "<skills-dir>/waymark/scripts/waymark.mjs" verify` checks the chain, the installed files against `MANIFEST.json` and the release signature; `attest` exports one task | `tests/verify.test.mjs` |
 | Stack profiles for 13 ecosystems and 6 architectures, measured on five outside repositories | `skills/waymark/stacks`, `tests/external.test.mjs` |
 
 What it does not do, so that nobody has to find out later:
 
-- **The records are not signed.** Without a signature the chain resists accidents and partial edits, not someone who can rewrite the repository and chain it again. The release is signed with git when the maintainer's key is in `skills/waymark/ALLOWED_SIGNERS`; `verify` reports `unsigned` as a warning, and `--require-signature` makes it fail. An exported attestation is not signed either.
-- **It stops only where the agent lets a hook run.** The table below says, per agent, what is enforced and what is only asked. The sensitive-path guard does not stop a search that reaches a secret without naming it (`grep -r`, a script).
+- **A signed anchor proves little, and says what.** With a signing key set up (`WAYMARK_SIGNING_KEY`, a `Signing key: <path>` line in `~/.waymark/preferences.md`, or git's `user.signingkey`), the hook signs each task's anchor when it closes, with your ssh key and without ever asking for a passphrase (a locked key is recorded as `unsigned (key locked)`; `node "<skills-dir>/waymark/scripts/waymark.mjs" sign --pending` signs those from your terminal). The signature proves that the holder of that key vouched, at the close, for the log's length and last hash, so a log rewritten and chained again can no longer be re-anchored without the key. It does not prove the content is true, that the key belongs to the person it names (the keys `verify` trusts come from `skills/waymark/ALLOWED_SIGNERS` and your own `~/.waymark/ALLOWED_SIGNERS`; whoever controls those files controls the verdict), or when it was signed: the time is the hook's claim, not a timestamp authority. A key left unlocked on a machine signs whatever runs there. The anchors from before signing began stay unsigned, and without a key the chain resists accidents and partial edits, not someone who can rewrite the repository and chain it again. `verify` reports `unsigned` as a warning; `--require-signed` (or `--require-signature`, which also asks for the release's) makes it fail. `attest --out` signs the statement it exports (a `.sig` beside it); `docs/adr/0034`.
+- **A copy on a remote is what makes a rewrite visible.** The notes hold your requests and Cierres, so pushing them is your yes, per project: `check` offers it with the choice window (`node "<skills-dir>/waymark/scripts/waymark.mjs" notes push --always` keeps pushing that project's notes at each close, with no prompt and without ever blocking a turn; a public remote publishes them). With no yes, nothing leaves the machine, even when the agent pushes your code: the records stay local notes (`docs/adr/0042`). `node "<skills-dir>/waymark/scripts/waymark.mjs" verify --remote` then fetches the remote's anchors into a temporary ref and compares them with this log: a record rewritten and chained again, even with the local anchors rewritten to match, no longer matches what the remote kept, and the first task that differs is named. With no remote, or one it cannot reach, `verify` says `no remote copy` or `not checked` as a warning, never in silence. It does not stop a rewrite that also force-pushes the notes to that remote; `docs/adr/0035`.
+- **The inputs are pinned, and what that proves.** The engram release the learned layer was tested with is pinned in `skills/waymark/engram.pin.json` (its version and, for each OS and architecture, the sha256 of the release archive and of the binary inside it); `check` compares the engram on the machine with it and each record keeps the version it was written under (`inputs.engram`). `skills/waymark/skills.lock` pins each third-party skill the release vendors (`sync.mjs --vendor <name> --ref <tag|commit>` writes it) to its source, ref and the sha256 of its folder, and `verify --install` names a skill that moved. Waymark's own scripts import nothing outside Node's built-ins (a test fails on a package or a `package.json`), so there is nothing to install and nothing to resolve. A pin proves that these bytes are the ones that were tested; it does not prove they are free of faults, that the pin itself was not changed together with the file (the manifest and its signature are what protect the pin), or anything about a release newer than the pin. `docs/adr/0036`.
+- **"Done as asked" is the agent's own list, checked for completeness.** At L2+ the agent numbers the requirements of the `Pedido` line and the Cierre answers each one (`Pedido: ✔1 <evidence> · ✘2 <why not>`); an item left out, or `Resultado: hecho` over a ✘, is sent back once, and if it stays the record says `parcial`. That proves every item has an answer and none contradicts its own result; it does not prove an answer is true or that the list is what you meant (the Evidencia testigo checks what each answer cites). The first choice window is judged on its options carrying their risk, files or cost and one marked recommended (a finding, never a block); `tasks.md` shows the claims a call backs per task (`10/10`, ⚠ below 0.95) and the tasks whose files came back; `docs/adr/0038`.
+- **The same behaviour in every agent is tested, not claimed; a live session is not.** One list of 35 behavioural cases (`tests/conformance/`) runs the real hooks with each adapter's own payloads and transcript, and a task handed from one agent to the next keeps the memory, the open task, the precedent and an intact chain (`tests/handoff.test.mjs`). That is as far as the documentation of each agent and Waymark's journal of its events go: no adapter has been run by this suite on a live session, and Qwen Code, Droid and Amp, whose adapters were written from their documentation in 2.0.18 (`docs/adr/0041`), have a file of what their first live session must check (`adapters/<agent>.md`). Windsurf and Crush have no adapter because their hooks cannot carry the chain: Windsurf has no session start and no way to give the model context, and Crush has a single event, before a tool. `node "<skills-dir>/waymark/scripts/waymark.mjs" adapter-new <agent>` drafts one from the template and the agent's documentation, runs the same list on the draft and installs it only if it passes; `stack-new <path>` drafts a stack profile for a repository with none, every command "to verify once". `bench/reference.mjs` measures read-only clones of the repositories you list in `~/.waymark/reference-repos.json` (never in this repository): the stack Waymark detects, whether the hooks recognise the gates, what it injects against what the repository's own agent assets weigh. Guest mode (a repository that carries an orchestrator's blocks) is detected there and tested by its own cases, not exercised on a real one; `docs/adr/0039`.
+- **It stops only where the agent lets a hook run.** The table below says, per agent, what is enforced and what is only asked. The sensitive-path guard refuses a shell command that names a secret-bearing file that exists, whatever the program (`cat`, `type`, `Get-Content`, `head`, `tail`, `less`…), also through a glob, a flag's value, an attached redirect, a revision (`git show HEAD:.env`) or another shell (`bash -c`); it does not stop a search that reaches a secret without naming it (`grep -r`, a script). Where nothing can refuse a call (the reads of seven agents, a script, a secret a command prints), the end-of-turn hook reads the transcript of any agent and records what got through (`observed.guarded`: the kind, the tool and the path, never the value) with a finding that does not block: the table says *prevent* or *detect* for each, never neither. Detection happens after the read, so it does not undo it; `docs/adr/0037`.
 - **The cost figures are measured per task and per part, not compared with any other tool.** There is no published token comparison.
-- **Outside the author's own projects it was measured on five repositories** (Rust, Laravel, Terraform, Python data science, documentation only), for detection, profiles and gate recognition. The memory bootstrap, the routing and the token cost of a change there were not measured; a repository with a JS framework and a PHP backend is classed Node; Kotlin or Swift apps, a multi-language monorepo and embedded C are not yet in the corpus.
+- **Outside the author's own projects it was measured on eight repositories** (Rust, Laravel, Terraform, Python data science, documentation only, a Kotlin Android app, a multi-language monorepo, an embedded C library): detection, profiles and gate recognition on all eight, and one real small change made by an agent in each, twice (before and after the fixes it found), with the tokens of the routine, of the work and of the reply counted per run (`tests/external/results-2026-10-16.json`, `docs/adr/0027`). What those runs show: a change that only touches comments no longer owes a gate, a spec or a build; a gate whose tool is not installed is reported as "could not run here" and accepted with `no comprobado (<why>)`, not counted as a failure; Android and C have their own profiles. What they do not show: none of those ecosystems' toolchains was installed on the machine of the run, so whether a gate passes there is not measured; each run happened once with one model; creating `.waymark/memory.md` stays the agent's job and some runs skipped it; a Python docstring and a Terraform description count as code; a repository with a JS framework and a PHP backend is classed Node. No token comparison with any other tool was run.
 
 
 ## A supply chain of the agent's work
@@ -56,11 +60,21 @@ A software supply chain tracks how an artifact was built: its inputs, the steps 
 | **Department** | the department that owns the task (frontend, backend, data, security, QA, devops, architecture, UX/UI, product, devex): its procedure, rules, tools and Definition of Done | the owner named in the routing line must have been invoked, and its procedure read before the first change; the record keeps declared vs invoked. A question that turns into a change is re-routed, or it is stopped |
 | **Decision** | the options put to you, the one you picked and the ones you discarded, on a dated task ID (`2026-10-02 · T3`), each answer with its position (before or after the first change) | your answer in the choice window, recorded as is: no file changes, by edit or by shell, until you were asked; the agent never restates it |
 | **Evidence** | what was observed vs inferred, and the check you were given before the fix | written by the agent, and checked by the hook: «observada» needs a tool call that checked the state after the last change (a commit or push is none), and each fact it cites (`84/84`, `exit 0`, a hash, text in backticks) is looked up in the task's tool calls, never in the agent's own edits; a `file:line` also counts when a call named the file and printed that line (`grep -n`, Read); one no call shows is recorded as *sin respaldo* and shown as ⚠, without lowering the score. The hook also judges actions: a failing gate needs a clean-copy check, a command failing twice needs a docs call before the next run (`docs/adr/0025`) |
-| **Gates and review** | lint, typecheck, tests, build, code review (a browser check only when the user asks), memory and procedure used, with the time each gate took and whether it failed | **computed by the hooks** from the tool calls, never declared by the agent (the platform generates the provenance, as in SLSA). What blocks and what is only scored is one contract, [`skills/waymark/routine.json`](skills/waymark/routine.json), that you can change: by default the project memory searched (`waymark.mjs pack`) before the first change, a gate after the last change and, at L2+ with code, code-review (or `waymark.mjs review` in agents without it) and the build at the end. Everything is scored in an automatic evaluation of each task (✔/✘ per step, tokens, estimated quota), shown to you in one line |
+| **Gates and review** | lint, typecheck, tests, build, code review (a browser check only when the user asks), memory and procedure used, with the time each gate took and whether it failed | **computed by the hooks** from the tool calls, never declared by the agent (the platform generates the provenance, as in SLSA). What blocks and what is only scored is one contract, [`skills/waymark/routine.json`](skills/waymark/routine.json), that you can change: by default the project memory searched (`node "<skills-dir>/waymark/scripts/waymark.mjs" pack`) before the first change, a gate after the last change and, at L2+ with code, code-review (or `node "<skills-dir>/waymark/scripts/waymark.mjs" review` in agents without it) and the build at the end. Everything is scored in an automatic evaluation of each task (✔/✘ per step, tokens, estimated quota), shown to you in one line |
 | **Output** | the files changed and the commits | the files git saw change between your message and the end of the turn, whatever tool changed them; each commit carries `Waymark-Task: <task ID>` and the record keeps its hash |
-| **Record** | one line per task in `<project>/.waymark/provenance.jsonl` (with a commit: the whole record as a git note on it, `refs/notes/waymark`), and `tasks.md` next to it: in progress, pending, next step, done | each line holds the hash of the previous one (and of its note): editing or deleting a past task breaks the chain. Each record also anchors the log's length and last hash in git (`refs/notes/waymark-anchor`, travels with the notes), so a log rewritten and chained again breaks it too; a removal you ask for goes through `waymark.mjs forget`, which leaves a rewrite anchor with your reason (`docs/adr/0025`). What has no commit (a question, a task without one) rides in git too (`refs/notes/waymark-log`), a task committed in several repos has its note in each, and a clone or a cleaned project with no `.waymark/` gets its memory and `tasks.md` rebuilt from git at session start (`docs/adr/0012`, `0013`). The folder is local (kept out of git through the project's `.gitignore`) and plain Markdown/JSONL, so any agent (Codex, Cursor, a new session) resumes from it |
+| **Record** | one line per task in `<project>/.waymark/provenance.jsonl` (with a commit: the whole record as a git note on it, `refs/notes/waymark`), and `tasks.md` next to it: in progress, pending, next step, done | each line holds the hash of the previous one (and of its note): editing or deleting a past task breaks the chain. Each record also anchors the log's length and last hash in git (`refs/notes/waymark-anchor`, travels with the notes), so a log rewritten and chained again breaks it too; a removal you ask for goes through `node "<skills-dir>/waymark/scripts/waymark.mjs" forget`, which leaves a rewrite anchor with your reason (`docs/adr/0025`). What has no commit (a question, a task without one) rides in git too (`refs/notes/waymark-log`), a task committed in several repos has its note in each, and a clone or a cleaned project with no `.waymark/` gets its memory and `tasks.md` rebuilt from git at session start (`docs/adr/0012`, `0013`). The folder is local (kept out of git through the project's `.gitignore`) and plain Markdown/JSONL, so any agent (Codex, Cursor, a new session) resumes from it |
+
+How good is it, in numbers: `node "<skills-dir>/waymark/scripts/waymark.mjs" scorecard` (from this repository's root) scores Waymark against 13 weighted criteria, from the provenance and tamper evidence of the chain to token cost, agnosticism, reuse of earlier evidence and tasks done as asked. Every check is a file, a pattern, a command's exit or a number measured from the records; what is not built scores 0 and names the plan point that adds it, and the total is never rounded up. The weights, checks and thresholds are locked by a hash in [`docs/adr/0028-scorecard.md`](docs/adr/0028-scorecard.md), so the target cannot move without a new decision record.
+
+Where it stands at the close of 2.0.18 (the baseline was 33.2 %): **98.1 %**, above the release target of 95, with two criteria below their own target and every failing check listed here as it is, not averaged away. Provenance 96.6 % (target 98): ten tasks have a commit and no record, because their end-of-turn hook did not run on the Node 14 the author's version manager had active, and said nothing; every hook now goes through a launcher that finds a Node able to run it (`docs/adr/0040`), and those ten stay a documented gap. Token efficiency 91.3 % (target 96): the routine share is 9.2 % of the last 10 L2 tasks (frozen limit 9 %) and 19.7 % of the last 5 L1 tasks (limit 6.5 %), because the short release steps of the last day (a push, a signature, a tag) were mostly the routine the hooks ask for; and the fixed context is 11,036 characters against 11,000, as the session card lists the tasks still open. Inside criteria that meet their targets: two known agents have no adapter (Windsurf and Crush, whose hooks cannot carry the chain, `docs/adr/0041`), and the share of cited facts backed by a call is 0.927 against 0.95. These numbers are read from the author's recorded tasks, almost all of them run on the installed 2.0.16; the tasks run on 2.0.18 from now on are what moves them. The suite passes its three runs on Ubuntu and Windows in CI, and the release (manifest and tag) is signed. The adapters of Qwen Code, Droid and Amp were written from their documentation and have not run in a live session. Not measured, because only time and use can show it: learning over months, several models, several users, an adapter in a live session of its own agent, guest mode against a repository that carries its own orchestrator blocks, and the cost per version beyond the one version with recorded data. Details and the table: `docs/adr/0028`.
 
 What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'s job; this chain covers the work the agent does on your code. Decisions: [`docs/adr/`](docs/adr).
+
+## Share what you learn: the pattern, not the case
+
+Waymark learns on your machine: each task you close teaches your own install, and nothing leaves it unless you send it (`docs/adr/0042`). To know whether it works beyond one machine, it needs **patterns** from people who use it: what happened, with which agent, version and level, and how often, said so that anyone could reuse it without knowing your project. Your **case** (code, prompts, paths, client names) stays with you. Share a pattern with the *Pattern report* issue form; send a change as a pull request against `develop`, which the author reviews and signs. How, with examples of a pattern and a case: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Every task the author has recorded ran on Claude Code; the other adapters are judged by the conformance list, not yet by live use, so a report from Codex, Cursor, Gemini CLI or any other agent is worth the most. Waymark 2.0.19 is the baseline: its numbers come from tasks run on 2.0.18 and later, and each release after it says how much it improved.
 
 ## What each agent enforces
 
@@ -79,21 +93,27 @@ Hooks differ by agent, so what Waymark can stop differs too. The tables are gene
 | Antigravity | yes | yes | yes | yes | yes |
 | Kiro | yes | yes | yes | yes | yes |
 | Copilot CLI | yes | yes | yes | yes | yes |
+| Qwen Code | yes | yes | yes | yes | yes |
+| Droid | yes | yes | yes | yes | yes |
+| Amp | yes | yes | yes | yes | yes |
 
-**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it.
+**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it. For what the guard protects, *prevent*: a hook before the tool refuses the call; *detect*: nothing refuses it, and the end-of-turn hook reads the transcript of the agent and records what got through in the record of the task, where it cannot be removed. No guarded action is left with neither.
 
-| Agent | End-of-turn checks | Decision gate and commit trailer | Memory and procedures handed over | Sensitive paths: edits and shell | Sensitive paths: reads | Context brake |
-|---|---|---|---|---|---|---|
-| Claude Code | enforced | enforced | enforced | enforced | enforced | enforced |
-| Codex | enforced | enforced | enforced | enforced | advisory | enforced |
-| Gemini CLI | enforced | enforced | enforced | enforced | advisory | enforced |
-| OpenCode | enforced | enforced | enforced | enforced | advisory | enforced |
-| Cursor | enforced | enforced | enforced | enforced | advisory | enforced |
-| Antigravity | enforced | enforced | enforced | enforced | advisory | advisory |
-| Kiro | enforced | enforced | enforced | enforced | advisory | advisory |
-| Copilot CLI | enforced | enforced | enforced | enforced | advisory | advisory |
+| Agent | End-of-turn checks | Decision gate and commit trailer | Memory and procedures handed over | Sensitive paths: edits and shell | Sensitive paths: reads | Secret printed in a tool result | Context brake |
+|---|---|---|---|---|---|---|---|
+| Claude Code | enforced | enforced | enforced | prevent | prevent | detect | enforced |
+| Codex | enforced | enforced | enforced | prevent | detect | detect | enforced |
+| Gemini CLI | enforced | enforced | enforced | prevent | detect | detect | enforced |
+| OpenCode | enforced | enforced | enforced | prevent | detect | detect | enforced |
+| Cursor | enforced | enforced | enforced | prevent | detect | detect | enforced |
+| Antigravity | enforced | enforced | enforced | prevent | detect | detect | advisory |
+| Kiro | enforced | enforced | enforced | prevent | detect | detect | advisory |
+| Copilot CLI | enforced | enforced | enforced | prevent | detect | detect | advisory |
+| Qwen Code | enforced | enforced | enforced | prevent | prevent | detect | enforced |
+| Droid | enforced | enforced | enforced | prevent | prevent | detect | enforced |
+| Amp | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 
-Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Qwen Code, Droid, Amp, Crush.
+Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Crush.
 <!-- agent-matrix:end -->
 
 ## Install
@@ -117,7 +137,7 @@ There is no installer script. [`INSTALL.md`](INSTALL.md) is written **for the ag
 
 It can configure every agent on the machine in one run (Claude Code, Codex, OpenCode, Gemini CLI, Cursor…); all of them share the same memory, so you can **start a task in one agent and continue it in another**: `.waymark/tasks.md` and the git notes say where the work stands, and engram what each task learned. Known agents are data (`skills/waymark/scripts/agents/agents.json`: Copilot CLI, Kiro and Antigravity with their hooks, and Windsurf, Qwen Code and others with the pointer, besides the five above). An agent Waymark does not know is detected by its home folder: it gets the pointer to `.waymark/tasks.md`, and writing its adapter is a procedure (`docs/adr/0022`). The task records are git notes, so they travel with the repo: in a repo with Waymark memory the session hook makes fetches bring them, and another machine sees what this one did (`docs/adr/0020`).
 
-When a new version is published, `waymark.mjs check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it (`uninstall.mjs`). Node.js 18+ is required: the skill links, the hooks, the status line and every script run on it.
+When a new version is published, `node "<skills-dir>/waymark/scripts/waymark.mjs" check` reports it (the session hook asks the agent to run it once a week) and the agent asks whether to update. **Update** without reinstalling: *"actualiza Waymark desde https://github.com/LiriRaid/waymark siguiendo su INSTALL.md"*. The agent compares `VERSION`, shows the [CHANGELOG](CHANGELOG.md), keeps what your skills learned and replaces the rest. The same sentence with "uninstall" removes it (`uninstall.mjs`). Node.js 18+ is required: the skill links, the hooks, the status line and every script run on it.
 
 ## Built to save tokens
 
@@ -127,8 +147,8 @@ Nothing is preloaded "just in case". Loading is layered:
 | Part | Loaded | What it is | Characters |
 |---|---|---|---|
 | instructions block | every session | instructions block in CLAUDE.md / AGENTS.md: levels, routing, the testigos, memory | 6,494 |
-| skill descriptions | every session | Waymark's 17 skill descriptions, which the agent lists | 3,492 |
-| reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 99 |
+| skill descriptions | every session | Waymark's 17 skill descriptions, which the agent lists | 3,127 |
+| reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 93 |
 | reminder (short) | every prompt after a reply that followed the routine | the short reminder | 37 |
 | protocol L2 | an L2 task | the protocol an L2 reads | 3,907 |
 | protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 5,285 |
@@ -145,11 +165,11 @@ Measured on real tasks ([`docs/audit-context.md`](docs/audit-context.md)), each 
 
 ### MCP servers only where their framework is used
 
-Your MCP servers stay registered where you put them. In each project, `scripts/mcp-fit.mjs` reads its manifests and blocks (a deny rule in that project's private `.claude/settings.local.json`, after your yes) the framework servers it does not use: no Angular CLI or PrimeNG in a React app or a docs repo, no React docs in an Angular app. When the project adopts the framework the rule is lifted. Docs and memory servers are never blocked. `waymark.mjs check` reports it for the project it runs in.
+Your MCP servers stay registered where you put them. In each project, `scripts/mcp-fit.mjs` reads its manifests and blocks (a deny rule in that project's private `.claude/settings.local.json`, after your yes) the framework servers it does not use: no Angular CLI or PrimeNG in a React app or a docs repo, no React docs in an Angular app. When the project adopts the framework the rule is lifted. Docs and memory servers are never blocked. `node "<skills-dir>/waymark/scripts/waymark.mjs" check` reports it for the project it runs in.
 
 ### Skills you never use, and costly resumes
 
-Each listed skill costs its description in every session. `scripts/skill-fit.mjs` finds the skills you added but have not invoked in 30 days and, after your yes, lists only their names (still invocable); unused plugins are disabled. Waymark's 17 descriptions went from 8,558 characters (1.x, `CHANGELOG.md`) to the figure in the table above. Resuming a large session after an hour idle re-writes its whole context (the cache expired), so a new task is cheaper in a new session. These are reported, not enforced: `node <skills-dir>/waymark/scripts/waymark.mjs check` lists what is pending (a newer version, skills changed, MCP fit, skill fit, the migration, unconnected agents, a large idle session), and the session hook reminds the agent to run it once a week. The hooks themselves hold only the chain (`docs/adr/0008`).
+Each listed skill costs its description in every session. `scripts/skill-fit.mjs` finds the skills you added but have not invoked in 30 days and, after your yes, lists only their names (still invocable); unused plugins are disabled. Waymark's 17 descriptions went from 8,558 characters (1.x, `CHANGELOG.md`) to the figure in the table above. Resuming a large session after an hour idle re-writes its whole context (the cache expired), so a new task is cheaper in a new session. These are reported, not enforced: `node <skills-dir>/waymark/scripts/node "<skills-dir>/waymark/scripts/waymark.mjs" check` lists what is pending (a newer version, skills changed, MCP fit, skill fit, the migration, unconnected agents, a large idle session), and the session hook reminds the agent to run it once a week. The hooks themselves hold only the chain (`docs/adr/0008`).
 
 ### Evaluate a task
 
@@ -162,6 +182,10 @@ node "$HOME/.agents/skills/waymark/scripts/measure.mjs" --turns 3-5
 ```
 
 It reads the agent's own session transcript (offline, no model call) and shows, per prompt: the context it started with (its growth is what every later response re-reads), responses, tool calls, images, new vs cached input tokens, output and sub-agent tokens; the fixed context the session started with; and for a range of prompts (one task) the number of **attempts**.
+
+`node "<skills-dir>/waymark/scripts/waymark.mjs" cost` does the same over your task records: per Waymark version and level, the tokens per task, how the cost splits between routine, work and reply (in cost units, each token weighted by its price ratio, next to raw tokens), the fixed context, the cost of a resume and the measured share of your 5-hour window. `bench/replay.mjs` replays the same recorded tasks under the injection of another version, so a change in what Waymark injects is shown on the same tasks; it does not replay the agent's behaviour. In the author's records, what Waymark injects is under 1 % of a task's cost and the routine responses are 8 to 13 % (`docs/adr/0031`).
+
+A task that resembles an earlier one starts from it: at the first prompt of a task the hook searches the project's earlier tasks (the words of the ask and of what each learned, offline, no model) and hands over, in about 400 characters, the best match with its files, the gates it needed and its lesson, marked as earlier evidence to check; it hands nothing when nothing resembles the ask. `node "<skills-dir>/waymark/scripts/waymark.mjs" precedent --eval` replays that on your own history (the best three contain an earlier task on the same files 87 % of the time in the author's, against 66 % by chance; `docs/adr/0033`).
 
 ### Your quota, per terminal
 
@@ -193,7 +217,7 @@ skills/
     SKILL.md (triage, departments, what to read when) · skill-map.json · skill-registry.md (generated)
     references/        protocol, project-detection, learning, skills (find / install / create), maintenance
     scripts/sync.mjs
-    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, rust, php, terraform, generic
+    stacks/            angular, react, node, nestjs, rails, python, go, java, dotnet, rust, php, terraform, c, android, generic
     architectures/     screaming, feature-sliced, hexagonal, clean, layered, modular-monolith
     templates/         department, stack, architecture, tool skill, project skill, project memory,
                        instructions.md (block for CLAUDE.md / AGENTS.md), private-layer/
@@ -227,7 +251,7 @@ When a department needs a capability no installed skill provides, the agent inst
 
 ### Third-party skills are used too
 
-`sync.mjs` indexes every skill it can find, not only Waymark's: the agent's own folder, other agents' folders (`~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, Gemini, OpenCode), plugins and each project's `.claude/`, `.cursor/`, `.agents/`… `skills/`. Each one gets a department and a capability from its description and its path in `skill-registry.md`, so a department can read and follow it even when the agent did not load it. `waymark.mjs check` reports new or removed skills, and `waymark.mjs sync` refreshes the registry. The six community skills Waymark replaces are listed as *Replaced* and never used.
+`sync.mjs` indexes every skill it can find, not only Waymark's: the agent's own folder, other agents' folders (`~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, Gemini, OpenCode), plugins and each project's `.claude/`, `.cursor/`, `.agents/`… `skills/`. Each one gets a department and a capability from its description and its path in `skill-registry.md`, so a department can read and follow it even when the agent did not load it. `node "<skills-dir>/waymark/scripts/waymark.mjs" check` reports new or removed skills, and `node "<skills-dir>/waymark/scripts/waymark.mjs" sync` refreshes the registry. The six community skills Waymark replaces are listed as *Replaced* and never used.
 
 ### Tool skills that grow
 
@@ -257,7 +281,7 @@ Waymark is not an orchestrator: an orchestrator decides *who* does the work, Way
 | On this machine | Waymark |
 |---|---|
 | no orchestrator | leads: Rule 0 block, the hooks in every agent, full routine |
-| an orchestrator already installed (e.g. gentle-ai) | **guest**: no hooks, no block; its departments reach the orchestrator through the orchestrator's own skill registry, its memory through engram |
+| an orchestrator already installed | **guest**: no hooks, no block; its departments reach the orchestrator through the orchestrator's own skill registry, its memory through engram |
 | Waymark first, an orchestrator later | keeps leading; the newcomer's rules are sorted into **adopted**, **fallback** (its skills back Waymark up) or **resolved**, and you are asked once whether Waymark should step down to guest |
 
 You can always pick another mode and move any rule. The other framework's files are never edited (`~/.waymark/coexistence.md` holds the adaptation), and uninstalling Waymark leaves it exactly as it was.
@@ -269,7 +293,7 @@ You can always pick another mode and move any rule. The other framework's files 
 - the *Areas* each task touched;
 - how many tasks repeated the same procedure.
 
-The rest is **proposed**, once in the session card and in `waymark.mjs check`, and written only after your yes:
+The rest is **proposed**, once in the session card and in `node "<skills-dir>/waymark/scripts/waymark.mjs" check`, and written only after your yes:
 - a repeated procedure → a **project skill** inside that project;
 - an incident that keeps failing → a Learned rule of the owner department;
 - a correction you made in two tasks → your `preferences.md`.
@@ -318,6 +342,21 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0025 · The log anchored in git, forget for the removals you ask for, and an Evidencia backed by a check](docs/adr/0025-anchored-log-forget-and-backed-evidence.md)
 - [0026 · One classifier for what a command runs, and an open failure when the hook cannot tell](docs/adr/0026-one-run-classifier-and-open-failure.md)
 - [0027 · Cost per link, review by risk, procedures by the hook, a chain anyone can verify](docs/adr/0027-cost-per-link-risk-review-verifiable-chain.md)
+- [0028 · The scorecard: what "95 %" means, computed by checks](docs/adr/0028-scorecard.md)
+- [0029 · A suite with nothing skipped, todo or failing, and a CI that runs it](docs/adr/0029-suite-with-nothing-skipped-and-ci.md)
+- [0030 · Record schema v2: the fields the hooks derive](docs/adr/0030-record-schema-v2.md)
+- [0031 · Cost per version and level, the replay bench, and the thresholds of criterion 8](docs/adr/0031-cost-per-version-replay-and-frozen-thresholds.md)
+- [0032 · The token levers of 2.0.18: measured first, kept only if the measure says so](docs/adr/0032-token-levers-measured-before-kept.md)
+- [0033 · Precedent: a similar task starts from the evidence of an earlier one](docs/adr/0033-precedent-a-similar-task-starts-from-an-earlier-one.md)
+- [0034 · The anchor signed at the close, a signed attestation, and a key lifecycle](docs/adr/0034-signed-anchors-and-attestations.md)
+- [0035 · The notes reach a remote without a manual step, and `verify --remote` checks the copy](docs/adr/0035-notes-reach-a-remote-and-verify-checks-it.md)
+- [0036 · Inputs and dependencies pinned: the engram release, `skills.lock`, and no dependencies of our own](docs/adr/0036-inputs-and-dependencies-pinned.md)
+- [0037 · The guard closes the gaps it can, and the end-of-turn detection backs it where it cannot](docs/adr/0037-guard-closes-gaps-and-detection-backs-it.md)
+- [0038 · The ask kept as items and answered, options with their attributes, claims backed, redone work shown](docs/adr/0038-task-done-as-asked-and-decisions-the-user-can-judge.md)
+- [0039 · Conformance across adapters, handoff between agents, adapters and stacks that draft themselves, and the reference bench](docs/adr/0039-conformance-handoff-generated-adapters-and-stacks-reference-bench.md)
+- [0040 · Every hook runs through a launcher that finds a Node able to run it, and the update notice is tested](docs/adr/0040-hooks-through-a-launcher-and-the-update-notice-tested.md)
+- [0041 · Qwen Code, Droid and Amp get an adapter, written from their documentation](docs/adr/0041-qwen-code-droid-and-amp-adapters.md)
+- [0042 · The public repository holds no data of the projects Waymark runs on](docs/adr/0042-no-data-of-the-projects-waymark-runs-on.md)
 <!-- adr-index:end -->
 
 ## Contributing back
@@ -336,7 +375,7 @@ git diff
 - **Stack**: copy `templates/stack.template.md` → `stacks/<slug>.md`, add its detection signal to `waymark/SKILL.md` §6.
 - **Architecture**: copy `templates/architecture.template.md`.
 - **Department**: copy `templates/department.template.md` → `skills/dept-<name>/SKILL.md`, add it to the core table and to `sync.mjs`.
-- **Agent**: every agent Waymark knows is one entry in [`skills/waymark/scripts/agents/agents.json`](skills/waymark/scripts/agents/agents.json) (folder, instructions file, skills folder, hooks, docs). An agent installed later, or one Waymark does not know (a hidden home folder with an instructions file, `skills/` or hooks), is reported by `waymark.mjs check` and said once in the session card; it gets the pointer block first. Its hooks cost one module in `skills/waymark/scripts/agents/` from `templates/agent-adapter.template.mjs` (the exports of `claude.mjs`), its `adapter` in `agents.json` and `adapters/<agent>.md`: `dept-devex` procedures → *Add an agent* (`docs/adr/0022`).
+- **Agent**: every agent Waymark knows is one entry in [`skills/waymark/scripts/agents/agents.json`](skills/waymark/scripts/agents/agents.json) (folder, instructions file, skills folder, hooks, docs). An agent installed later, or one Waymark does not know (a hidden home folder with an instructions file, `skills/` or hooks), is reported by `node "<skills-dir>/waymark/scripts/waymark.mjs" check` and said once in the session card; it gets the pointer block first. Its hooks cost one module in `skills/waymark/scripts/agents/` from `templates/agent-adapter.template.mjs` (the exports of `claude.mjs`), its `adapter` in `agents.json` and `adapters/<agent>.md`: `dept-devex` procedures → *Add an agent* (`docs/adr/0022`).
 
 ## License
 

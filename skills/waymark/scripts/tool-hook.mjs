@@ -19,19 +19,16 @@ import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
 import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm } from './lib/paths.mjs';
+import { norm, exemptPath } from './lib/paths.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
+import { commandSensitive, expandHome } from './lib/guard.mjs';
 import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
-// Files the routine itself writes (memory, learnings, scratch) never need the opener. The OS temp dir is the one Node
-// reports (TMPDIR on macOS, /var/folders/…; TEMP on Windows).
-const exempt = (file) => {
-  const f = norm(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()).replace(/\/+$/, '');
-  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || (tmp && f.startsWith(`${tmp}/`)) || f.includes('/scratchpad/');
-};
+// Files the routine itself writes (memory, learnings, scratch) never need the opener; the rule lives in lib/paths.mjs.
+const exempt = (file, root = '') => exemptPath(file, root);
 
 // Decision gate: deny once per prompt (state keyed by session + prompt uuid), never for L0 or exempt files. A turn routed
 // Q that edits a project file is denied once too: a question that became a change must re-route, or every check and
@@ -39,7 +36,7 @@ const exempt = (file) => {
 export function checkDecision(target, lines, session = 'unknown', stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.decision-gate.json'), cwd = process.cwd()) {
   // target: a file path (an edit) or { command } (a shell command that changes files: git checkout --, sed -i, rm, >).
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
-  else if (!target || exempt(target)) return null;
+  else if (!target || exempt(target, cwd)) return null;
   const turn = currentTurn(lines);
   const level = routedLevel(turn.texts, turn.tools) || inheritedRoute(lines)?.level || 0, q = level === 'Q';
   if (!turn.found || !level) return null;
@@ -113,22 +110,11 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
 // Sensitive-path guard (docs/adr/0027): a read or an edit of a secret-bearing path (routine.json `risk.sensitive`: .env*, ~/.ssh,
 // ~/.aws, ~/.config/gcloud, keys) is denied, except what `risk.allow` and the user's `Sensitive allow:` line in
 // ~/.waymark/preferences.md name. It acts where the agent's hook runs before the tool: Claude Code's Read, Edit and Write,
-// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists.
-// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file).
-const expandHome = (w) => String(w).replace(/^(~|\$HOME|\$\{HOME\})(?=[\\/]|$)/, os.homedir());
-export function commandSensitive(command, cwd, cfg) {
-  for (const p of shellRuns(command)) {
-    const dir = path.resolve(cwd, expandHome(String(p.cd || '.').replace(/^["']|["']$/g, '')).replace(/^\/([a-z])\//i, '$1:/'));
-    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
-    const targets = [...String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)].map((m) => m[1] ?? m[2] ?? m[3]);
-    for (const w of [...words.slice(1), ...targets]) {
-      if (!w || /^-|^[<>&|]/.test(w)) continue;
-      const abs = path.resolve(dir, expandHome(w));
-      if (isSensitive(abs, cfg) && (targets.includes(w) || fs.existsSync(abs))) return abs;
-    }
-  }
-  return null;
-}
+// every agent's edit tools, and a shell command whose arguments (or redirect target) name such a path that exists, also through a glob,
+// a flag's value, an attached redirect, a revision (`git show HEAD:.env`) or another shell (`bash -c`; lib/guard.mjs).
+// It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file): the end-of-turn
+// hook detects what got through (detectGuarded) and records it.
+export { commandSensitive }; // the reading of a shell command lives in lib/guard.mjs, shared with the end-of-turn detection
 export function checkSensitive(c, cwd, session = 'unknown') {
   if (!c) return null;
   let root = cwd;
@@ -155,7 +141,7 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
   }
-  const files = (c.files || []).filter((f) => !exempt(f));
+  const files = (c.files || []).filter((f) => !exempt(f, cwd));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
   for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }
@@ -200,11 +186,13 @@ export function commandRepos(command, cwd = process.cwd()) {
   return [...dirs].filter((d) => { try { if (!fs.statSync(d).isDirectory()) return false; } catch { return false; } const t = top(d); return t && t !== own; });
 }
 
-// The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked).
-function ownerDept(hook) {
+// The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked). The calls are read
+// through the agent's own adapter (its rollout, chat or journal as the core's lines): a transcript that is not Claude Code's .jsonl holds no
+// Skill call of its own, so reading it raw would find no department and the procedures would never be handed over there.
+function ownerDept(hook, agent) {
   if (!hook.transcript_path) return null;
   try {
-    const calls = sessionTools(readTail(hook.transcript_path)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
+    const calls = sessionTools(agent.read(hook, 512 * 1024)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
     return calls.length ? String(calls.at(-1).input.skill) : null;
   } catch { return null; }
 }
@@ -234,7 +222,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  const dept = ownerDept(hook), procsDone = procDelivered(session, since, file);
+  const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
   if (!fresh.length && !procText) return null;
   const { pack } = await import('./waymark.mjs');
@@ -245,7 +233,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
   all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
-  const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (waymark.mjs pack, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
+  const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
   return [memory, procs].filter(Boolean).join('\n\n');
 }

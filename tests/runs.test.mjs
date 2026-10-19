@@ -1,4 +1,5 @@
 // Waymark 2.0.15 · point 2: one classifier for what a shell command runs (runs.mjs). Run: node --test tests/runs.test.mjs
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

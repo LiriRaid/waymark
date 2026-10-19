@@ -1,6 +1,7 @@
 // Waymark · the Kiro adapter (docs/adr/0022): its hooks file of its own shape, plain-text answers and exit codes, the
 // journal of its hooks as the turn, install-hooks and uninstall. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME, KIRO_HOME and hooks file; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -118,7 +119,7 @@ test('install-hooks --agent kiro: ~/.kiro/hooks/waymark.json, version v1, one ho
   assert.equal(settings.version, 'v1');
   assert.deepEqual(settings.hooks.map((h) => h.trigger), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'PostToolUse']);
   const pre = settings.hooks.find((h) => h.trigger === 'PreToolUse');
-  assert.deepEqual(pre.action, { type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent kiro --event PreToolUse' });
+  assert.deepEqual(pre.action, { type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent kiro --event PreToolUse' });
   assert.equal(pre.matcher, undefined, 'every tool: the journal keeps reads too');
   assert.equal(steps.length, 5);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'kiro' }).steps, [], 'idempotent');

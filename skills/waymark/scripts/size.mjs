@@ -14,6 +14,7 @@ import { REMINDER, taskLine, gitLine } from './rule0-hook.mjs';
 import { CARD_HEAD, digest, EXTRA, HELD_MAX, HELD_MORE, coexistence } from './session-hook.mjs';
 import { found, unprepared, agentLabel, instructionsBlock } from './connect-agents.mjs';
 import { proposals } from './learn.mjs';
+import { MAX_CHARS } from './precedent.mjs';
 import { projectHome, readTaskRecords } from './provenance.mjs';
 import { stackLine } from './stack.mjs';
 import { read } from './lib/fs.mjs';
@@ -54,6 +55,7 @@ export function sizes(cwd) {
     { group: 'prompt', name: 'reminder (short)', chars: REMINDER.short.length },
     { group: 'outside cap', name: 'check pointer', chars: EXTRA.pointer('never', 'W').length },
     { group: 'outside cap', name: 'held message (max)', chars: EXTRA.held('x'.repeat(HELD_MAX) + HELD_MORE).length },
+    { group: 'outside cap', name: 'precedent (max)', chars: MAX_CHARS },
     { group: 'outside cap', name: 'new agents', chars: len(() => { const names = found().filter(unprepared).map(agentLabel); return names.length ? EXTRA.agents(names, 'W') : ''; }) },
     { group: 'outside cap', name: 'proposals', chars: len(() => { const p = home.dir && !home.legacy ? proposals(home, readTaskRecords(home)) : []; return p.length ? EXTRA.proposals(p.map((x) => x.text), 'W') : ''; }) },
     { group: 'outside cap', name: 'coexistence', chars: len(coexistence) },

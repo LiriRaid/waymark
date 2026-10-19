@@ -1,9 +1,10 @@
-// Waymark 2.0.15 · point 1: regression corpus. Each tests/corpus/*.json is a real (or synthetic) turn, trimmed to what the
+// Waymark 2.0.15 · point 1: regression corpus. Each tests/corpus/*.json is a synthetic turn, or a real one redacted
+// (no other project's code, no real user's paths or addresses: tests/privacy.test.mjs, docs/adr/0042), trimmed to what the
 // testigos read, with what the routine must NOT block on. Run: node --test tests/corpus.test.mjs
-// Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] }, redUntil?: "<point>" }
+// Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] } }
 //   absent: no `missing` or `findings` entry of the verdict may match any of these
 //   present: at least one entry must match each of these (a block the case must still raise)
-//   redUntil: the case fails today and is expected red until that plan point lands (reported as todo, not as a failure)
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -27,14 +28,15 @@ const cases = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map(
 
 let n = 0;
 // The verdict the stop hook would give: the corpus turn, the Cierre it ends with, the decisions its stretch holds.
-// `gate` stands for the repo typecheck the hook re-runs when the agent ran none (green here: the case is about what the agent ran).
+// `gate` stands for the repo typecheck the hook re-runs when the agent ran none (green here: the case is about what the agent ran;
+// a case with rerun: 'none' is a repo where the hook has none to run).
 export const judgeCase = (c) => {
   const cwd = `/work/corpus-${++n}`;
   const turn = T.currentTurn(c.lines);
   const last = turn.texts.filter((t) => /Cierre/.test(t)).pop() || turn.texts.at(-1) || '';
   return cierreGaps(turn, last, T.sessionTools(c.lines), [turn.prompt], {
-    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), outside: true, cwd,
-    packed: 1, rerun: () => ({ cmd: 'typecheck', ok: true, s: 0 }),
+    ids: P.taskIds(cwd), decisions: P.decisionsIn(P.taskLines(c.lines)), pedido: P.pedidoItems(P.taskLines(c.lines)), outside: true, cwd, blocked: !!c.blocked, // blocked: the reply that follows a block, where an exception line counts
+    packed: 1, rerun: c.rerun === 'none' ? () => null : () => ({ cmd: 'typecheck', ok: true, s: 0 }), // rerun: 'none' is a repo whose typecheck the hook cannot run
   });
 };
 
@@ -46,7 +48,7 @@ test('corpus: every case has a source, a note and an expectation', () => {
 });
 
 for (const c of cases) {
-  test(`corpus ${c.file}: ${c.note}`, { todo: c.redUntil ? `red until plan 2.0.15 point ${c.redUntil}` : false }, () => {
+  test(`corpus ${c.file}: ${c.note}`, () => {
     const g = judgeCase(c);
     const said = [...(g.missing || []), ...(g.findings || [])];
     for (const re of c.expect.absent) assert.ok(!said.some((s) => new RegExp(re, 'i').test(s)), `${c.source}: /${re}/ in\n  ${said.join('\n  ')}`);

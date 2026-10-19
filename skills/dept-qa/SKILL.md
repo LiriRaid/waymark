@@ -1,6 +1,6 @@
 ---
 name: dept-qa
-description: "QA. FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\", unit, e2e, TDD. Closes every L1+ task."
+description: "QA. FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\". Closes every L1+ task."
 ---
 
 # Quality Assurance & Testing
@@ -59,7 +59,7 @@ In `procedures.md` (same folder), one section per task; a reported bug → **Qui
 | ui.audit | `ui-audit` | Significant UI change; WCAG 2.2 AA check | L2 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | Test runner, assertion or mocking API not verified this session | Q |
 | search.codebase | `Explore` agent | Finding existing tests, fixtures, helpers across >3 locations | L1 |
-| memory | Waymark memory: the pack the hook hands over, `waymark.mjs memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
+| memory | Waymark memory: the pack the hook hands over, `W memory` / `tasks`, and `engram search` (or mem_search) | Prior decisions and root causes; what you learn goes in the Cierre's Aprendido (the hook saves it to engram) | L1 |
 | mutation / load testing | none yet → waymark `references/skills.md` | Critical logic or performance budgets | L3 |
 
 ## Definition of Done

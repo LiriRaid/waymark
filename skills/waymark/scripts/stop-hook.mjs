@@ -24,30 +24,34 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, sessionState } from './transcript.mjs';
+import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
+import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
-import { saveLearned, saveQuestion } from './engram.mjs';
+import { autoPushNotes, pushPref } from './notes-remote.mjs';
+import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
+import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { learn } from './learn.mjs';
-import { norm } from './lib/paths.mjs';
+import { norm, real, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
+import { commentOnlyEdit } from './lib/comments.mjs';
 
-const exempt = (file) => {
-  const f = norm(file), home = norm(os.homedir());
-  return f.startsWith(`${home}/.waymark/`) || f.includes('/.waymark/') || f.includes('/.claude/projects/') || f.includes('/appdata/local/temp/') || f.startsWith('/tmp/') || f.includes('/scratchpad/');
-};
+let projectRoot = ''; // the folder the turn's agent works in (cierreGaps sets it), so a checkout under a scratch place still counts
+const exempt = (file) => exemptPath(file, projectRoot);
 const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
 const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
+// An edit that only touches comments owes no gate, spec or build (lib/comments.mjs): not a code change for those testigos.
+const codeEdit = (t) => EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !commentOnlyEdit(t);
 // a test case: it()/test() (it.each, test.only…), RSpec's `it "…"`, Python's def test_, Go's func TestX(
 const CASES = /\b(?:it|test)(?:\.\w+)*\s*\(|^\s*it\s+['"]|\bdef test_\w+|\bfunc Test\w+\(/gm;
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$|_spec\.rb$|_test\.(go|py)$|^test_.*\.py$/i;
@@ -109,7 +113,8 @@ function gitRuns(tools, cwd, verb) {
 // The repos the turn's commit commands ran in.
 const commitRepos = (tools, cwd) => new Set(gitRuns(tools, cwd, 'commit').map((r) => r.dir));
 const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; };
-const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+// one folder however it is spelled: git's long name, an 8.3 short name or a link (lib/paths real)
+const sameDir = (a, b) => norm(real(a)) === norm(real(b));
 
 // The other repos the task committed in with its ID (its tool calls' `cd <repo> && git commit`, `git -C <repo> commit`).
 // → [{ root, commits }] (commits newest first), the session's repo left out.
@@ -155,7 +160,7 @@ export function notesChecked(session) {
   delete all[session];
   writePending(all);
   const left = pending.repos.filter((r) => unpushedNotes(r.root, r.remote) !== 0);
-  return left.length ? `Waymark ${pending.id} · las notas siguen sin subir en ${left.map((r) => `${path.basename(r.root)} (${r.remote})`).join(', ')}: node waymark.mjs notes push desde tu shell`
+  return left.length ? `Waymark ${pending.id} · las notas siguen sin subir en ${left.map((r) => `${path.basename(r.root)} (${r.remote})`).join(', ')}: ${WAYMARK_CMD} notes push desde tu shell`
     : `Waymark ${pending.id} · notas de waymark ya en ${[...new Set(pending.repos.map((r) => r.remote))].join(', ')} (${pending.repos.map((r) => path.basename(r.root)).join(', ')})`;
 }
 // → [{ h, dir, msg }] committed in those repos since the turn started (a minute of slack); mine: only by the repo's git
@@ -197,7 +202,7 @@ const waymarkCmd = (t, sub) => shell(t) && new RegExp(`waymark\\.mjs["']?\\s+(?:
 // command (one repo after another: `… review <api files>; cd ../web && … review <front files>`); a redirect such as
 // `2>&1` is not a file. Applying its findings afterwards needs no second review. Returns the code files left unreviewed.
 function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
-  const first = tools.findIndex((t) => (EDITS.test(t.name) && !failed(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || (shell(t) && changesProject(t.input.command)));
+  const first = tools.findIndex((t) => (!failed(t) && codeEdit(t)) || (shell(t) && changesProject(t.input.command)));
   const after = tools.slice(first + 1).filter((t) => !failed(t));
   if (skillCalled(after, /(^|:)code-review$/)) return [];
   const named = after.filter(shell).flatMap((t) => [...expandVars(cmdOf(t)).matchAll(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/g)]
@@ -250,7 +255,7 @@ function userSkip(reply, field, prompts, labels = []) {
 // A Cierre field: its line; a value that ends with ":" continues on the next lines up to the next field ("Evidencia:"
 // with what was seen below it). An empty field never takes the next line. Decisión and Sub-decisiones are not read but
 // still end a field an older Cierre spreads over several lines.
-const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Tests|Review|Build|Secretos)\s*:/i;
+const FIELD = /^\s*(?:[-*]\s*)?(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido|Pedido|Tests|Review|Build|Secretos)\s*:/i;
 const field = (reply, name) => {
   const m = reply.match(new RegExp(`${name}:[ \\t]*([^\\n]*)`, 'i'));
   let v = m?.[1]?.trim() || '';
@@ -331,7 +336,7 @@ function observeTurn(S) {
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
-  const lastCode = lastIdx((t) => (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t))) || shellChange(t));
+  const lastCode = lastIdx((t) => codeEdit(t) || shellChange(t));
   const lastSpec = lastIdx((t) => EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t))));
   const lastChange = lastIdx(isChange);
   const result = (t) => turn.results?.[t.id];
@@ -369,7 +374,7 @@ function observeTurn(S) {
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
   // Config, scaffolding made by commands (`ng new`, installs) and the spec itself are not the code it tests.
-  const codeEdit = (t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !SPEC.test(path.basename(fileOf(t)));
+  const specEditable = (t) => !denied(t) && codeEdit(t) && !SPEC.test(path.basename(fileOf(t)));
   const cases = (s) => (String(s || '').match(CASES) || []).length;
   const shellSpecs = (t) => (shell(t) ? [...cmdOf(t).matchAll(/(?:>>?|\btee(?:\s+-a)?)\s*["']?([^\s"'<>|;&]+)/g)].map((m) => m[1]).filter((f) => SPEC.test(path.basename(f))) : []);
   const specWrites = new Map(); // spec basename → { at: first write, adds: cases added }
@@ -382,14 +387,15 @@ function observeTurn(S) {
     } else for (const f of shellSpecs(t)) add(f, cases(cmdOf(t)) || 1);
   });
   const ranRed = (w) => {
-    const next = allTools.findIndex((t, i) => i > w.at && codeEdit(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && codeEdit(t));
+    const next = allTools.findIndex((t, i) => i > w.at && specEditable(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && specEditable(t));
     return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && (!codeFirst || failedRun(t, 'test')));
   };
   const inWorktree = allTools.some((t, i) => i >= base && testCmd(t) && inCopy(t));
   const notRed = inWorktree ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
     .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !w || (w.adds > 0 && !ranRed(w)); });
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
-  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT/i.test(String(result(t)?.text || t.out || ''));
+  // A run that never happened: the tool is not installed, or the command was refused (a permission denied, a hook that stopped it).
+  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || ''));
   // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
   // failure, before the next run of that command); retrying blind is how a wrong direction repeats.
   const cmdKey = (t) => cmdOf(t).replace(/\s+/g, ' ').trim();
@@ -400,7 +406,7 @@ function observeTurn(S) {
     if (!runsOf(t).some((p) => p.gate || p.test)) return;
     const key = cmdKey(t), from = lastRun.has(key) ? lastRun.get(key) : -1;
     lastRun.set(key, i);
-    const attempt = turn.tools.slice(from + 1, i).some((x) => codeEdit(x) || shellChange(x));
+    const attempt = turn.tools.slice(from + 1, i).some((x) => specEditable(x) || shellChange(x));
     if (attempt && result(t)?.error && !envFail(t)) failedRuns.set(key, [...(failedRuns.get(key) || []), i]);
   });
   const retried = [...failedRuns].filter(([, at]) => at.length >= 2).map(([cmd, at]) => {
@@ -410,7 +416,11 @@ function observeTurn(S) {
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => runsOf(t).some((p) => p.gate || p.test));
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
-  const code = changed.filter((f) => !NOT_CODE.test(f));
+  // a file touched only by comment-only edits (and by no shell change) is no code for the gate, the spec and the build
+  const touched = new Map();
+  for (const t of turn.tools) if (EDITS.test(t.name) && !exempt(fileOf(t))) touched.set(norm(fileOf(t)), (touched.get(norm(fileOf(t))) ?? true) && commentOnlyEdit(t));
+  const shellTouched = turn.tools.some((t) => shell(t) && changesProject(t.input.command));
+  const code = changed.filter((f) => !NOT_CODE.test(f) && !(touched.get(norm(f)) === true && !shellTouched));
   // the code files no review covered, in this turn or earlier in the same task (a follow-up that applies the review's
   // findings needs no second review)
   const turnLeft = unreviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error));
@@ -450,6 +460,10 @@ function observeTurn(S) {
     // testigo "sin secretos": the memory, the task's diff and commits (ctx.scanSecrets, testigos.mjs) and its mem_save calls;
     // where and which kind only, never the value
     secrets: secretHits([...(ctx.scanSecrets ? ctx.scanSecrets(changed) : []), ...turn.tools.filter((t) => /mem_(save|update)$/.test(t.name)).map((t) => ({ where: 'mem_save', text: `${t.input.title || ''}\n${t.input.content || ''}` }))]),
+    // what reached the agent although no hook stopped it (docs/adr/0037): a sensitive path read, edited or named by a command, a secret in a result
+    // the first choice window of an L2+ task judged on its options' attributes: risk, files or cost, one marked (docs/adr/0038)
+    options: optionsLint(ctx.decisions, S.level),
+    guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
@@ -476,7 +490,7 @@ function observeBuild(S) {
   const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
-  const lastIn = (r) => lastIdx((t) => shellChange(t) || (EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && repoAt(path.dirname(fileOf(t))) === r));
+  const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && repoAt(path.dirname(fileOf(t))) === r));
   const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastCode : last) && (!b.repo || !r || b.repo === r)); };
   const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastCode));
   return { near, committed, buildAfter };
@@ -618,7 +632,14 @@ function gateWitness(S) {
     for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
-    if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
+    // a gate the agent tried and the machine could not run (the tool is not installed): not a failure of the code, and not "nothing ran"
+    const tried = turn.tools.slice(lastCode + 1).filter((t) => gateCmd(t) && envFail(t) && !apart(t)).pop();
+    const missing = run?.unavailable || (!run && tried ? (cmdKey(tried).split(/\s+/)[0] || 'the tool') : null);
+    const cannot = (cmd) => `the gate could not run here (${cmd}; ${missing} is not available or the run was refused): write "no comprobado (<why>)" and say what to run where it is installed, or install it and run it`;
+    // the reply that follows the block already says the task is incomplete and why (`Resultado: parcial (<why>)`): that is the exception
+    const partial = ctx.blocked ? String(S.reply || '').match(/Resultado:\s*(?:parcial|bloqueado)\s*\((.{3,}?)\)/i)?.[0] : null;
+    if (missing) { if (noComp || partial) excepted.gate = noComp || partial; else gate.push(cannot(run?.cmd || cmdKey(tried).slice(0, 100))); }
+    else if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
     else if (!run.ok && noComp) excepted.gate = noComp;
     else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
@@ -647,6 +668,8 @@ function cierreWitness(S) {
       // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
       else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
     }
+    // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
+    if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
   }
   return { cierre, renamed };
 }
@@ -691,11 +714,11 @@ const WITNESS = {
   },
   memory: (S) => {
     const { observed } = S;
-    return observed.memory.searched || observed.memory.late ? [] : ['the project memory was not searched before the first change: run waymark.mjs pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram'];
+    return observed.memory.searched || observed.memory.late ? [] : [`the project memory was not searched before the first change: run ${WAYMARK_CMD} pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram`];
   },
   review: (S) => {
     const { observed, reviewLeft, skip } = S;
-    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or node waymark.mjs review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
+    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
   },
   build: (S) => {
     const { buildAfter, buildNo, excepted } = S;
@@ -728,7 +751,7 @@ const WITNESS = {
   },
   chain: (S) => {
     const { ctx } = S;
-    return ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? 'the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through waymark.mjs forget' : 'an earlier record was edited or deleted'} (check: node waymark.mjs testigos)`] : [];
+    return ctx.chain && !ctx.chain.ok ? [`provenance.jsonl chain broken at record ${ctx.chain.at + 1}: ${ctx.chain.note ? 'its git note is missing or was edited (a rebase or amend leaves the note on the old commit)' : ctx.chain.anchor ? `the log no longer holds a line anchored in git (refs/notes/waymark-anchor): it was rewritten or cut; a removal the user asks for goes through ${WAYMARK_CMD} forget` : 'an earlier record was edited or deleted'} (check: ${WAYMARK_CMD} testigos)`] : [];
   },
 };
 function failsOf(S) {
@@ -775,6 +798,8 @@ function composeSteps(S) {
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
+  if (observed.options?.missing.length) findings.push(`the first choice window's options lack their attributes (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
+  if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
@@ -792,6 +817,7 @@ function omittedOf(S, steps) {
 // The turn is observed once (observeTurn); each testigo is a function of what was observed (S) and routine.json says which
 // apply at the level and which block (docs/adr/0026).
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
+  projectRoot = ctx.cwd || '';
   const byKey = new Map();
   for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
   const changed = [...byKey.values()];
@@ -863,9 +889,17 @@ export function branchesOf(files) {
 }
 
 // The provenance record of a closed turn: what was observed, what the agent said, the evaluation and what stayed open.
-export const RECORD_SCHEMA = 'waymark.record/v1';
+export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as they are (docs/adr/0030)
+// The Resultado as a label. An L2+ task whose Cierre left an item of the ask unanswered or marked ✘ never reads "hecho" (docs/adr/0038): the
+// record says "parcial" and keeps what the Cierre said and why.
+function outcome(reply, items, answers, level) {
+  const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
+  const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
+  return said === 'hecho' && gaps.length ? { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' } : { result: said };
+}
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
-  const claimed = gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
+  const answers = Number(gaps.level) >= 2 && ctx.pedido?.length >= 2 ? pedidoAnswers(gaps.reply).filter((a) => a.n >= 1 && a.n <= ctx.pedido.length).slice(0, 12) : [];
+  const claimed =gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
   const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos")
     schema: RECORD_SCHEMA, // the shape of this record: a later reader (a verifier, a model trained on the records) knows which fields to expect
@@ -874,13 +908,16 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     // passwords, tokens and keys masked in what is kept as text.
     level: gaps.level, department: gaps.dept, prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), decisions: recordedDecisions(ctx.decisions),
     files: [...new Set(gaps.changed)],
+    ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm, pedido: Number(gaps.level) >= 2 ? ctx.pedido || [] : [] }), // schema v2: taskType, asked, reworks, reworkFiles
+    ...(answers.length ? { answered: answers } : {}), // what the Cierre's Pedido line says of each item
+    ...(meta.cost ? { cost: meta.cost } : {}),
     observed: gaps.observed,
     evaluation: meta.evaluation,
     commands: turn.tools.filter(shell).map((t) => maskSecrets(cmdOf(t).slice(0, 200))).slice(0, 30),
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
-    outcome: { result: (gaps.reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null }, // hecho | parcial | bloqueado, as a label
+    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level), // hecho | parcial | bloqueado, as a label
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   });
@@ -952,13 +989,15 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
+      ctx.pedido = pedidoItems(task); // the numbered items of the Pedido line the agent wrote (L2+): what the Cierre owes an answer to
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
+      try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
@@ -1007,8 +1046,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let measured = null;
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured, turnLinks(lines, since));
-      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation });
+      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation, cost: { v: 1, byCall: costByCall(lines, since) } });
       try { rec.pinned = pinnedRules({ dept: gaps.dept?.declared, root: home.root, reads: all.map((t) => String(t.input?.file_path || t.input?.command || '')) }); } catch (e) { logHookError('stop-hook pinned', e); } // the rules that governed the task, by hash
+      try { const p = takePrecedent(h.session_id); if (p) { rec.precedent = { task: p.task, score: p.score, chars: p.chars, files: p.files.length, used: usedOf(p, turn) }; keepPrecedent(h.session_id, null); } } catch (e) { logHookError('stop-hook precedent', e); } // what the first prompt was handed, and whether the task used it
       try { const den = deniedSince(h.session_id, turn.startedAt || 0); if (den.length) rec.denied = den.map((d) => ({ tool: d.tool, path: d.path, at: new Date(d.at).toISOString() })); } catch (e) { logHookError('stop-hook denied', e); } // what the sensitive-path guard stopped
       try { if (ctx.commits?.length) rec.signatures = commitSignatures(home.root, ctx.commits.slice(0, 10)); } catch (e) { logHookError('stop-hook signatures', e); } // git's verdict on each commit: signed, untrusted, bad, unsigned
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
@@ -1021,18 +1061,21 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch (e) { logHookError('stop-hook engram', e); } // the learned layer: engram, written here, never by the agent
-      // the agent pushed (the user asked): in each repo it pushed, the notes the remote lacks go to the same remote, this
-      // task's included; a push the hook's process cannot make blocks once, after the record (testigo "notes")
+      // the agent pushed (the user asked): in each repo it pushed whose project the user said yes for (`Notes push:`,
+      // docs/adr/0035, 0042), the notes the remote lacks go to the same remote, this task's included; with no yes they stay
+      // local. A push the hook's process cannot make blocks once, after the record (testigo "notes")
       let pushed = '';
       const failed = [];
       try {
         for (const { root, remote } of pushedRepos(turn.tools, turn.results, cwd)) {
-          if (!shouldPushNotes(root, remote)) continue;
+          if (pushPref(projectHome(root).slug) !== 'yes' || !shouldPushNotes(root, remote)) continue;
           const r = pushNotes(root, remote), where = sameDir(root, home.root) ? '' : ` (${path.basename(root)})`;
           if (r.ok) pushed += ` · notas subidas a ${remote}${where}`;
           else failed.push({ root, remote, output: gitError(r.output) });
         }
       } catch (e) { logHookError('stop-hook notes push', e); }
+      // the user said yes for this project (docs/adr/0035): its notes go to origin at every close, with no prompt, never blocking
+      try { if (home.dir && !home.legacy) { const a = autoPushNotes(home.root, home.slug); if (a.state === 'pushed') pushed += ` · notas subidas a ${a.remote}`; else if (a.state === 'failed') pushed += ` · notas sin subir (${gitError(a.output).slice(0, 60)}): se reintenta en el próximo cierre`; } } catch (e) { logHookError('stop-hook notes auto push', e); }
       let notesStop = '';
       if (failed.length) {
         pushed += ` · notas sin subir: ${failed.map((f) => path.basename(f.root)).join(', ')}`;

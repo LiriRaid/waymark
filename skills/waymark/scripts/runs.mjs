@@ -49,7 +49,7 @@ const TOKEN = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
 const tokens = (s) => [...String(s).matchAll(TOKEN)].map((m) => m[1] ?? m[2] ?? m[3]);
 const RUNNER = { npx: 1, pnpx: 1, bunx: 1, time: 1, call: 1, '&': 1, exec: 1, env: 1 };
 const RUNNER2 = /^(pnpm (exec|dlx)|yarn (exec|dlx)|bundle exec|poetry run|uv run|pipenv run|python3? -m|py -m|npm exec)$/;
-const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|phpstan|pint|phpcs|php-cs-fixer|tflint|typecheck)$/;
+const LINTERS = /^(tsc|vue-tsc|svelte-check|eslint|biome|oxlint|stylelint|mypy|ruff|rubocop|pyright|flake8|pylint|golangci-lint|gofmt|phpstan|pint|phpcs|php-cs-fixer|tflint|typecheck)$/;
 const TESTERS = /^(vitest|jest|karma|mocha|pytest|rspec|phpunit|pest|ava|tap|playwright|cypress|nyc|c8)$/;
 const SCRIPT_TEST = /(^|[:_-])(test|tests|spec|e2e|unit|vitest|jest)([:_-]|$)/i;
 const SCRIPT_BUILD = /(^|[:_-])build([:_-]|$)/i;
@@ -95,11 +95,16 @@ function classify(words) {
   } else if (prog === 'node' || prog === 'deno') {
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;
-  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|rails|rake|artisan|php|terraform|tofu|composer)$/.test(prog)) {
-    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : sub;
-    if (/^(test|spec)$/.test(verb)) out.test = true;
-    else if (/^(build|package|verify)$/.test(verb)) out.gate = out.build = true;
-    else if (/^(lint|vet|check|clippy|compile)$/.test(verb)) out.gate = true;
+  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|cmake|ctest|rails|rake|artisan|php|terraform|tofu|composer|flutter|dart|mix|swift)$/.test(prog)) {
+    // The verb is the first word that is no flag: `mvn -q test`, `cargo +nightly test`, `dotnet --nologo build`, `make -j8 test`, `terraform -chdir=x validate`
+    // (docs/adr/0039: the reference bench found `mvn -q test` taken for no test at all). The value of make's -C and -f is no verb.
+    const bare = subs.filter((x, i) => !/^[-+]/.test(x) && !(prog === 'make' && /^-[cfi]$/.test(subs[i - 1] || '')));
+    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : /^(php|ng|vite|next|nuxt|astro|ctest|rails|rake|artisan|cmake)$/.test(prog) ? sub : bare[0] || '';
+    if (/^(test|spec)$/.test(verb) || prog === 'ctest' || (/^(gradle|gradlew)$/.test(prog) && /^test/i.test(verb))) out.test = true;
+    else if (/^(build|package|verify)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^assemble/i.test(verb)) || (prog === 'cmake' && subs.includes('--build')) || (prog === 'make' && (!verb || /^(all|build)$/.test(verb)))) out.gate = out.build = true;
+    else if (/^(lint|vet|check|clippy|compile|analy[sz]e)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^(lint|compile)/i.test(verb))) out.gate = true;
+    // formatting only in check mode (plain format rewrites files): dotnet format --verify-no-changes, mix format --check-formatted
+    else if (verb === 'format' && /^(dotnet|mix)$/.test(prog) && (subs.includes('--verify-no-changes') || subs.includes('--check-formatted'))) out.gate = true;
     // Terraform and Composer: validate is a gate, fmt only in check mode (plain fmt rewrites files), static analysis too
     else if (/^(terraform|tofu|composer)$/.test(prog) && (verb === 'validate' || (verb === 'fmt' && subs.includes('-check')) || /^(analy[sz]e|stan|lint)$/.test(verb))) out.gate = true;
   }

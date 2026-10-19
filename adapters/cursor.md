@@ -9,7 +9,7 @@
 | Skill loading | native Agent Skills; reading `<skills-dir>/<name>/SKILL.md` counts as invoking it |
 | Restart needed | no: Cursor reloads `hooks.json` when it changes; a new chat gets the card |
 | Hooks (Waymark 2.0.3, `docs/adr/0021`) | `~/.cursor/hooks.json` (`CURSOR_CONFIG_DIR` moves it), `"version": 1`: `sessionStart` → `session-hook.mjs`, `beforeSubmitPrompt` → `rule0-hook.mjs`, `preToolUse`, `postToolUse`, `postToolUseFailure` and `afterAgentResponse` → `tool-hook.mjs` (every tool, no matcher), `stop` → `stop-hook.mjs`, each with `--agent cursor`. Written by `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent cursor` (plan, then `--apply`). User hooks need no trust |
-| Hook adapter | `skills/waymark/scripts/agents/cursor.mjs`. The transcript's format is not documented, so each hook's event is journaled to `~/.waymark/cursor/<conversation>.jsonl` and read from there. The per-prompt reminder rides on the turn's first tool result (`beforeSubmitPrompt` cannot add context). A missing Cierre is sent back as the `stop` hook's `followup_message`. The choice window is Cursor's ask-questions tool; without it, the options in the chat and your reply count as the decision. Its review is `node <skills-dir>/waymark/scripts/waymark.mjs review <files>`. Built from the documentation (2026-10-12), not yet tried in a live session |
+| Hook adapter | `skills/waymark/scripts/agents/cursor.mjs`. The transcript's format is not documented, so each hook's event is journaled to `~/.waymark/cursor/<conversation>.jsonl` and read from there. The per-prompt reminder rides on the turn's first tool result (`beforeSubmitPrompt` cannot add context). A missing Cierre is sent back as the `stop` hook's `followup_message`. The choice window is Cursor's ask-questions tool; without it, the options in the chat and your reply count as the decision. Its review is `node <skills-dir>/waymark/scripts/W review <files>`. Built from the documentation (2026-10-12), not yet tried in a live session |
 
 Cursor also runs Claude Code's hooks from `~/.claude/settings.json` (Settings → "Include third-party … configs", on by default). Waymark's Claude Code hooks see that Cursor runs them (`cursor_version` in their input) and do nothing, so the work happens once, in Cursor's own hooks.
 
@@ -29,4 +29,4 @@ Cursor also runs Claude Code's hooks from `~/.claude/settings.json` (Settings �
 
 ## Capability mapping
 
-Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `waymark.mjs review <files>` for the review.
+Claude-only agents (`Explore`, `Plan`) and review skills have no direct equivalent: do the step yourself (search with your tools, write the plan in the chat) and use `W review <files>` for the review.

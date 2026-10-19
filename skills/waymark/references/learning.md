@@ -9,7 +9,7 @@ Run at the end of every L1+ task (Exit → Learn). **Work in progress** is writt
 - *Project map* → *Areas*: each folder the task touched, with the task and its Aprendido, at most 12 lines.
 - *Repeated procedures*: how many tasks repeated the same 3 to 5 action commands.
 
-The rest is only proposed, and the session card says each proposal once (`waymark.mjs check` lists them):
+The rest is only proposed, and the session card says each proposal once (`W check` lists them):
 - a repeated procedure → a project skill (§5);
 - an incident repeated 3 times → a Learned rule of the owner department;
 - a correction the user made in 2 tasks → `preferences.md`.

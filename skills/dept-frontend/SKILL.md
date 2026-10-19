@@ -1,6 +1,6 @@
 ---
 name: dept-frontend
-description: "Frontend. FIRST, before ui-*, to build or fix UI code: \"crear un modal\", \"nueva pantalla\", \"componente\", \"formulario\", \"tabla\", \"layout responsive\", \"SSR\"."
+description: "Frontend. FIRST, before ui-*, to build or fix UI code: \"crear un modal\", \"nueva pantalla\", \"componente\", \"formulario\", \"tabla\", \"layout responsive\"."
 ---
 
 # Frontend Engineering

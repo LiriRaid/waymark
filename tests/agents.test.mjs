@@ -1,6 +1,7 @@
 // Waymark 2.0.3 · point 4: every agent on the machine with one install (Cursor, unknown agents, check, plugin, paths,
 // backups, project skills, uninstall). Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME, agents home and settings files; nothing reads or writes the real ones.
+import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -95,7 +96,7 @@ test('temp folders: the OS temp dir (TMPDIR on macOS) is exempt from the decisio
     const lines = [{ type: 'user', uuid: 'tp1', message: { role: 'user', content: 'cambia el servicio' } }, { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L1 · dept-backend' }] } }];
     const state = path.join(home, 'gate-tmp.json');
     assert.equal(checkDecision(path.join(fake, 'scratch.mjs'), lines, 'tmp1', state), null, 'a file in the OS temp dir needs no decision');
-    assert.ok(checkDecision(path.join(os.homedir(), 'proyecto', 'src', 'a.mjs'), lines, 'tmp1', state), 'a project file still does');
+    assert.ok(checkDecision(path.join(os.homedir(), 'proyecto', 'src', 'a.mjs'), lines, 'tmp1', state, path.join(os.homedir(), 'proyecto')), 'a project file still does');
   } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 });
 
@@ -136,7 +137,7 @@ test('check: each agent on the machine without Waymark hooks is offered install-
   write(process.env.WAYMARK_CURSOR_HOOKS, JSON.stringify({ version: 1, hooks: { stop: [{ command: cmd('stop-hook.mjs', ' --agent cursor') }] } }));
   assert.equal(line(await check(repo)), '', 'both have the hooks now');
   write(process.env.WAYMARK_CURSOR_HOOKS, '{}');
-  write(path.join(home, 'coexistence.md'), 'Mode: guest\nFrameworks: gentle-ai\n');
+  write(path.join(home, 'coexistence.md'), 'Mode: guest\nFrameworks: acme-orch\n');
   assert.equal(line(await check(repo)), '', 'guest: the orchestrator owns the hooks');
   fs.rmSync(path.join(home, 'coexistence.md'));
   fs.rmSync(path.join(agentsHome, '.claude'), { recursive: true });
@@ -197,9 +198,10 @@ test('cursor hooks end to end: the card brings Rule 0, the reminder rides on the
   const pre = json(node('tool-hook.mjs', ['--agent', 'cursor'], ev('preToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r1', cwd: repo })).stdout);
   assert.deepEqual(pre, {}, 'no decision: an empty answer, never "allow" (it would skip Cursor\'s own approval)');
   const first = json(node('tool-hook.mjs', ['--agent', 'cursor'], ev('postToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r1', tool_output: '""' })).stdout);
-  assert.match(first?.additional_context || '', /Cierre ID/, 'the per-prompt reminder, with the first tool\'s result');
+  assert.match(first?.additional_context || '', /ID: new/, 'the per-prompt reminder, with the first tool\'s result');
   const second = node('tool-hook.mjs', ['--agent', 'cursor'], ev('postToolUse', { tool_name: 'Read', tool_input: { file_path: path.join(repo, 'a.md') }, tool_use_id: 'r2', tool_output: '""' })).stdout;
   assert.ok(!/Task ID/.test(second), 'once per prompt');
+  fs.writeFileSync(path.join(repo, 'svc.mjs'), 'export const retry = 3;'); // the turn changes a project file: only a change needs the Cierre
   const blocked = json(node('stop-hook.mjs', ['--agent', 'cursor'], ev('stop', { status: 'completed', loop_count: 0 })).stdout);
   assert.ok(blocked?.followup_message, `no Cierre: a followup_message (${JSON.stringify(blocked)})`);
   node('tool-hook.mjs', ['--agent', 'cursor'], ev('afterAgentResponse', { text: `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada el servicio responde\nAprendido: "backoff ← timeouts"` }));
@@ -219,7 +221,7 @@ test('install-hooks --agent cursor: hooks.json version 1, flat entries for every
   const { settings, steps } = planHooks({ version: 1, hooks: { afterFileEdit: [{ command: './format.sh' }] } }, { scripts: '/s/waymark/scripts', agent: 'cursor' });
   assert.equal(settings.version, 1);
   assert.deepEqual(Object.keys(settings.hooks), ['afterFileEdit', 'sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'stop', 'postToolUse', 'postToolUseFailure', 'afterAgentResponse']);
-  assert.deepEqual(settings.hooks.preToolUse, [{ command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent cursor' }], 'every tool: the journal needs reads and questions too');
+  assert.deepEqual(settings.hooks.preToolUse, [{ command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent cursor' }], 'every tool: the journal needs reads and questions too');
   assert.deepEqual(settings.hooks.afterFileEdit, [{ command: './format.sh' }], 'the user\'s hooks stay');
   assert.equal(steps.length, 7);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'cursor' }).steps, [], 'idempotent');
@@ -231,6 +233,19 @@ test('install-hooks --agent cursor: hooks.json version 1, flat entries for every
   assert.ok(c && planFor(c).skip, 'no global instructions file: its session card brings the block');
   fs.rmSync(path.join(agentsHome, '.cursor'), { recursive: true });
   fs.rmSync(process.env.WAYMARK_CURSOR_HOOKS);
+});
+
+test('mcp-fit realFolder: the folder a lower-case state key names, spelled as the filesystem has it, so --restore finds it on Linux and macOS', async () => {
+  const { realFolder } = await import(`file://${SCRIPTS}/mcp-fit.mjs`);
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-fit-')));
+  const dir = path.join(base, 'Shop-API', 'Front');
+  fs.mkdirSync(dir, { recursive: true });
+  const key = path.resolve(dir).replace(/\\/g, '/').toLowerCase();
+  const found = realFolder(key);
+  assert.ok(found, `found ${key}`);
+  assert.deepEqual(path.resolve(found).split(path.sep).slice(-2), ['Shop-API', 'Front'], 'each segment as it is on disk');
+  assert.equal(realFolder(`${key}/missing`), null);
+  fs.rmSync(base, { recursive: true, force: true });
 });
 
 test('uninstall: the plan, then --apply removes every agent\'s hooks, the status line (yours back), the OpenCode plugin and the blocks, and restores mcp-fit; backup first', async () => {

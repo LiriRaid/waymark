@@ -46,16 +46,16 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 
 ### Add a stack, architecture or department
 1. Copy the matching file in `../waymark/templates/`; keep the exact section order.
-2. Stack: concrete *Detect* signals; *Commands* for every gate, run once for real; add the signal to `waymark/references/project-detection.md`.
+2. Stack: start from `W stack-new <repo>` (a draft, every command "to verify once"); concrete *Detect* signals; *Commands* for every gate, run once for real; add the signal to `waymark/references/project-detection.md`.
 3. Architecture: From / May import / Must not import table; conformance items verifiable by Grep.
 4. Department: Quick ref ≤ 6 lines, Brief questions, stack-agnostic rules, DoD starting with the Exit protocol, `SKILL.md` ≤ ~8,000 characters with the Procedures index, steps in `procedures.md` (`templates/procedures.template.md`); add it to `waymark` SKILL.md §2 and the `depts` list and keywords in `sync.mjs`.
 
 ### Add an agent
-Trigger: `waymark.mjs check` reports `agents: … no Waymark adapter` (an agent in `agents/agents.json` with hooks and no module, or an unknown one), the session card says *New agents on this machine*, or the user asks. Each step after the user's yes, one agent at a time (docs/adr/0022).
+Trigger: `W check` reports `agents: … no Waymark adapter` (an agent in `agents/agents.json` with hooks and no module, or an unknown one), the session card says *New agents on this machine*, or the user asks. Each step after the user's yes, one agent at a time (docs/adr/0022).
 1. Minimal level first: `connect-agents.mjs` (plan, then `--apply`) writes the pointer to `.waymark/tasks.md` in its instructions file, so "¿por dónde voy?" works there from the first prompt. If it does not read `~/.agents/skills`, tell the user where it reads skills.
 2. Unknown agent: find its documentation with `library-docs` (else the official site): folder and the variable that moves it, global instructions file, skills folder, hooks (user-level file, format, events, whether they need trust, whether a hook can add context or block). Add its entry to `skills/waymark/scripts/agents/agents.json` with `docs` and `checked`, `adapter: null`.
-3. Hooks: copy `skills/waymark/templates/agent-adapter.template.mjs` to `scripts/agents/<key>.mjs` and fill every TODO from the docs; add it to `agents/index.mjs`; set `adapter` and `hooks` (file, format, events, matcher, extra) in `agents.json`. A format other than nested or flat (a plugin, its own JSON) also needs its branch in `install-hooks.mjs`, as OpenCode's plugin has.
-4. Spec in `tests/` with the documented payloads (the Cursor tests in `tests/agents.test.mjs` are the model), `adapters/<key>.md` from `adapters/cursor.md`, then `install-hooks.mjs --agent <key>` (plan, `--apply` on yes; trust the hooks if the agent asks).
+3. Hooks: `node "<skills-dir>/waymark/scripts/waymark.mjs" adapter-new <key> --shell <tool> --edit <tool|tool> --read <tool>` drafts the adapter from `templates/agent-adapter.template.mjs` with the tool names the docs give and runs the conformance suite on it; adapt the draft until it passes, then `--install` (the user's yes; a failing draft never installs). By hand: copy the template to `scripts/agents/<key>.mjs`, fill every TODO, add it to `agents/index.mjs`, set `adapter` and `hooks` in `agents.json`. A format other than nested or flat (a plugin, its own JSON) also needs its branch in `install-hooks.mjs`, as OpenCode's plugin has.
+4. Its driver in `tests/conformance/agents/<key>.mjs` (documented payloads and transcript; `caps` says what it cannot do), a spec for what is its own (the Cursor tests in `tests/agents.test.mjs`), `adapters/<key>.md` from `adapters/cursor.md`, then `install-hooks.mjs --agent <key>` (plan, `--apply` on yes; trust the hooks if the agent asks).
 5. Unconfirmed points (no live session yet) go to `adapters/<key>.md` as checks for its first live session.
 
 ### CLAUDE.md hygiene

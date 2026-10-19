@@ -221,7 +221,7 @@ test('install-hooks --agent cursor: hooks.json version 1, flat entries for every
   const { settings, steps } = planHooks({ version: 1, hooks: { afterFileEdit: [{ command: './format.sh' }] } }, { scripts: '/s/waymark/scripts', agent: 'cursor' });
   assert.equal(settings.version, 1);
   assert.deepEqual(Object.keys(settings.hooks), ['afterFileEdit', 'sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'stop', 'postToolUse', 'postToolUseFailure', 'afterAgentResponse']);
-  assert.deepEqual(settings.hooks.preToolUse, [{ command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent cursor' }], 'every tool: the journal needs reads and questions too');
+  assert.deepEqual(settings.hooks.preToolUse, [{ command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent cursor' }], 'every tool: the journal needs reads and questions too');
   assert.deepEqual(settings.hooks.afterFileEdit, [{ command: './format.sh' }], 'the user\'s hooks stay');
   assert.equal(steps.length, 7);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'cursor' }).steps, [], 'idempotent');

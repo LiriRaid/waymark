@@ -119,7 +119,7 @@ test('install-hooks --agent kiro: ~/.kiro/hooks/waymark.json, version v1, one ho
   assert.equal(settings.version, 'v1');
   assert.deepEqual(settings.hooks.map((h) => h.trigger), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'PostToolUse']);
   const pre = settings.hooks.find((h) => h.trigger === 'PreToolUse');
-  assert.deepEqual(pre.action, { type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent kiro --event PreToolUse' });
+  assert.deepEqual(pre.action, { type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent kiro --event PreToolUse' });
   assert.equal(pre.matcher, undefined, 'every tool: the journal keeps reads too');
   assert.equal(steps.length, 5);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'kiro' }).steps, [], 'idempotent');

@@ -230,14 +230,16 @@ The agent offers each item with the choice window. `node "<skills-dir>/waymark/s
 
 ```json
 { "hooks": {
-  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/rule0-hook.mjs\"" } ] } ],
-  "SessionStart":     [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/session-hook.mjs\"" } ] } ],
-  "PreToolUse":       [ { "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/tool-hook.mjs\"" } ] } ],
-  "Stop":             [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/stop-hook.mjs\"" } ] } ]
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/hook-run.cjs\" \"<skills-dir>/waymark/scripts/rule0-hook.mjs\"" } ] } ],
+  "SessionStart":     [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/hook-run.cjs\" \"<skills-dir>/waymark/scripts/session-hook.mjs\"" } ] } ],
+  "PreToolUse":       [ { "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/hook-run.cjs\" \"<skills-dir>/waymark/scripts/tool-hook.mjs\"" } ] } ],
+  "Stop":             [ { "hooks": [ { "type": "command", "command": "node \"<skills-dir>/waymark/scripts/hook-run.cjs\" \"<skills-dir>/waymark/scripts/stop-hook.mjs\"" } ] } ]
 } }
 ```
 
-  Verify: `echo {} | node "<skills-dir>/waymark/scripts/rule0-hook.mjs"` and `echo {} | node "<skills-dir>/waymark/scripts/session-hook.mjs"` each print JSON with `additionalContext`. `echo {} | node "<skills-dir>/waymark/scripts/tool-hook.mjs"` and `echo {} | node "<skills-dir>/waymark/scripts/stop-hook.mjs"` print nothing (they only answer when a check fires).
+  Every hook runs through `hook-run.cjs` (`docs/adr/0040`). The agent starts a hook with whatever `node` comes first on the `PATH`, and a version manager changes it per project: on a Node older than 18 the end-of-turn hook does not even parse and used to die without a word, leaving the task unrecorded. The launcher is written in plain CommonJS, so any Node can start it: with Node 18 or newer it runs the hook in the same process; with an older one it hands the hook to the Node `install-hooks` pinned in `~/.waymark/node`, then `WAYMARK_NODE`, then the newest nvm version of 18 or more, and when there is none it says so in a message the agent shows. `install-hooks --apply` pins the Node it runs with, so run it with the Node you want the hooks to use.
+
+  Verify: `echo {} | node "<skills-dir>/waymark/scripts/hook-run.cjs" "<skills-dir>/waymark/scripts/rule0-hook.mjs"` and the same with `session-hook.mjs` each print JSON with `additionalContext`. The same with `tool-hook.mjs` and `stop-hook.mjs` prints nothing (they only answer when a check fires). `node "<skills-dir>/waymark/scripts/waymark.mjs" check` runs each registered hook with a probe and lists the ones that do not answer.
 - **Coexistence mode:** `guest` or `skills-only` → register **none** of the hooks (the orchestrator's hooks own the turn). `waymark-leads` → all four, added after the other framework's; never remove or reorder its hooks.
 - **Codex CLI:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent codex` shows the plan for `~/.codex/hooks.json` **[ask]**; then re-run it with `--apply`. Tell the user to open `/hooks` in Codex and trust the four Waymark hooks, because Codex skips them until then (`adapters/codex.md`, `docs/adr/0009`).
 - **Gemini CLI:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent gemini` shows the plan for `~/.gemini/settings.json` (its event names: SessionStart, BeforeAgent, BeforeTool, AfterAgent, plus AfterTool for the pack with the edit's result) **[ask]**; then re-run it with `--apply`. A new Gemini session picks them up.
@@ -298,7 +300,8 @@ It indexes installed skills (this agent's, other agents' skill folders such as `
    `skill-map.json`: take every entry from the repository, then add back the installed entries the repository does not have (skills and MCP servers the user created or mapped, project skills).
 5. Re-run §1.1: a framework or rules that `~/.waymark/coexistence.md` does not list yet → classify only those and ask **[ask]** (no such file yet and a framework found now → the §1.2 question: keep leading or become guest). `Mode: other-leads` from 1.5.0 → offer to switch to `guest`: remove Waymark's block and hooks (backup first).
 6. Per mode: leading → replace the instructions block (§6.2) in every agent and re-run `install-hooks.mjs --agent <agent>` for each one (§7.2) from `~/.agents/skills/waymark/scripts`, so each has all its hooks and they point at the shared folder (an install from before `docs/adr/0017` registered them under `~/.claude/skills`; run `skill-links.mjs --user --apply` first, §5); `guest` → no block, no hooks, re-run the orchestrator's refresh (§7.4). Then run sync (§7.3).
-7. Report with the same list of modified files as §8, plus `Version: <old> → <new>`.
+7. Verify the copy: `node "<skills-dir>/waymark/scripts/waymark.mjs" verify --install --require-signature` must pass (every installed file matches the manifest and the manifest carries a signature by a trusted key, `docs/adr/0027`); if it does not, say which file or signature failed and do not report the update as done. The notice that offered it (`check`, which compares this `VERSION` with the one on `main`) is not proof of anything: the signature is.
+8. Report with the same list of modified files as §8, plus `Version: <old> → <new>`.
 
 ## 10. Uninstall **[ask]**
 

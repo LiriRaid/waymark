@@ -117,7 +117,7 @@ test('install-hooks --agent copilot: ~/.copilot/hooks/waymark.json, version 1, f
   const { settings, steps } = planHooks({}, { scripts: '/s/waymark/scripts', agent: 'copilot' });
   assert.equal(settings.version, 1);
   assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'PostToolUse']);
-  assert.equal(settings.hooks.PreToolUse[0].command, 'node "/s/waymark/scripts/tool-hook.mjs" --agent copilot');
+  assert.equal(settings.hooks.PreToolUse[0].command, 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent copilot');
   assert.match(settings.hooks.PreToolUse[0].matcher, /^Bash\|PowerShell\|Edit\|Write\b/);
   assert.equal(steps.length, 5);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'copilot' }).steps, [], 'idempotent');

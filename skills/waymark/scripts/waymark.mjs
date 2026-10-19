@@ -66,11 +66,12 @@ export const newer = (a, b) => {
   return false;
 };
 
-async function update() {
+export async function update() {
   const repo = process.env.WAYMARK_REPO || 'LiriRaid/waymark';
   const installed = read(path.join(SCRIPTS, '..', 'VERSION')).trim();
   try {
-    const res = await fetch(`https://raw.githubusercontent.com/${repo}/main/skills/waymark/VERSION`, { signal: AbortSignal.timeout(3000) });
+    // WAYMARK_UPDATE_URL points the check at another file holding the version (the tests serve one from localhost)
+    const res = await fetch(process.env.WAYMARK_UPDATE_URL || `https://raw.githubusercontent.com/${repo}/main/skills/waymark/VERSION`, { signal: AbortSignal.timeout(3000) });
     const latest = res.ok ? (await res.text()).trim() : '';
     if (installed && latest && newer(latest, installed)) return `update: Waymark ${installed} → ${latest}. Offer it (Actualizar ahora / Más tarde / Ver cambios): "Actualizar ahora" → INSTALL.md §9 from https://github.com/${repo}; "Ver cambios" → CHANGELOG.md entries since ${installed}.`;
   } catch {}
@@ -150,10 +151,11 @@ export function hooksHealth(list = registered()) {
   const dead = [];
   for (const { agent, commands } of list) {
     for (const c of commands) {
-      const m = c.match(/node\s+"([^"]+)"(.*)$/) || c.match(/node\s+(\S+)(.*)$/);
-      if (!m) continue;
-      const r = spawnSync(process.execPath, [m[1], ...m[2].trim().split(/\s+/).filter(Boolean)], { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
-      if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(m[1])}`);
+      if (!/^\s*node\s/.test(c)) continue;
+      // the launcher and the hook script it runs are both quoted paths: everything after `node` is the argument list
+      const args = [...c.replace(/^\s*node\s+/, '').matchAll(/"([^"]*)"|(\S+)/g)].map((t) => t[1] ?? t[2]);
+      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
+      if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(args.find((t) => /-hook\.mjs$/.test(t)) || args[0])}`);
     }
   }
   return dead.length ? `hooks: not answering: ${[...new Set(dead)].join(', ')} — tasks there are not recorded. Re-register them: node "${script('install-hooks.mjs')}" --agent <agent> (plan), then --apply.` : '';

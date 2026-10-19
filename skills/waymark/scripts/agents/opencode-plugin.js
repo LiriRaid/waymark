@@ -35,7 +35,7 @@ export const Waymark = async ({ client, $, directory }) => {
   const run = async (script, payload) => {
     try {
       const input = new Response(JSON.stringify({ cwd: directory, agent_version: await agentVersion(), ...payload }));
-      const r = await $`node ${join(SCRIPTS, script)} --agent opencode < ${input}`.nothrow().quiet();
+      const r = await $`node ${join(SCRIPTS, 'hook-run.cjs')} ${join(SCRIPTS, script)} --agent opencode < ${input}`.nothrow().quiet();
       return JSON.parse(r.stdout.toString().trim() || '{}');
     } catch { return {}; }
   };

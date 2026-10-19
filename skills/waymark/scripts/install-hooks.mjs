@@ -35,6 +35,9 @@ import { fileURLToPath } from 'node:url';
 import { KNOWN, known, agentDir } from './agents/paths.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url)).replace(/\\/g, '/');
+// A hook is registered as `node hook-run.cjs <hook script> …`: the launcher finds a Node that can run it (docs/adr/0040), and the
+// hook script stays in the command, so everything that looks for `waymark/scripts/<hook>.mjs` in a command still finds it.
+export const hookCommand = (scripts, file) => `node "${scripts}/hook-run.cjs" "${scripts}/${file}"`;
 export const HOOKS = [
   { event: 'SessionStart', file: 'session-hook.mjs' },
   { event: 'UserPromptSubmit', file: 'rule0-hook.mjs' },
@@ -111,7 +114,7 @@ export const withoutOwn = (agent, s) => OWN[agent].strip(s || {});
 function planOwn(input, { scripts, agent, spec }) {
   const s = structuredClone(input || {}), own = OWN[agent];
   const want = HOOKS.filter((x) => !x.extra || spec.extra?.includes(x.event))
-    .map((h) => ({ event: spec.events?.[h.event] || h.event, file: h.file, command: `node "${scripts}/${h.file}" --agent ${agent} --event ${h.event}` }));
+    .map((h) => ({ event: spec.events?.[h.event] || h.event, file: h.file, command: `${hookCommand(scripts, h.file)} --agent ${agent} --event ${h.event}` }));
   const before = own.commands(s);
   own.put(s, want);
   if (JSON.stringify(s) === JSON.stringify(input || {})) return { settings: s, steps: [] };
@@ -131,7 +134,7 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
   s.hooks = s.hooks || {};
   const inner = (e) => (flat ? [e] : e.hooks || []);
   for (const h of HOOKS.filter((x) => !x.extra || spec.extra?.includes(x.event))) {
-    const command = `node "${scripts}/${h.file}"${agent === 'claude' ? '' : ` --agent ${agent}`}`;
+    const command = `${hookCommand(scripts, h.file)}${agent === 'claude' ? '' : ` --agent ${agent}`}`;
     const matcher = h.matcher ? (spec.matcher ?? null) : null; // null: every tool
     const windows = spec.commandWindows ? { commandWindows: command } : {}; // Codex's Windows override, the same command
     const event = spec.events?.[h.event] || h.event; // the core's event names → the agent's
@@ -191,9 +194,23 @@ export function registered() {
   }
   try {
     const file = PLUGIN(), text = fs.readFileSync(file, 'utf8'), scripts = text.match(/const SCRIPTS = "([^"]+)"/)?.[1];
-    if (scripts) out.push({ agent: 'opencode', file, commands: ['session-hook.mjs', 'rule0-hook.mjs', 'tool-hook.mjs', 'stop-hook.mjs'].map((f) => `node "${scripts}/${f}" --agent opencode`) });
+    if (scripts) out.push({ agent: 'opencode', file, commands: ['session-hook.mjs', 'rule0-hook.mjs', 'tool-hook.mjs', 'stop-hook.mjs'].map((f) => `${hookCommand(scripts, f)} --agent opencode`) });
   } catch {}
   return out;
+}
+
+// The Node that registered the hooks, written to ~/.waymark/node, is the one hook-run.cjs hands a hook to when the active Node
+// is too old. The real path, not the version manager's link, which moves with `nvm use`. → the path, or null (too old to pin).
+export const MIN_NODE = 18; // hook-run.cjs holds the same number (it is plain CommonJS and cannot import this)
+export function pinNode(exec = process.execPath) {
+  if (Number(process.versions.node.split('.')[0]) < MIN_NODE) return null;
+  try {
+    const real = fs.realpathSync(exec).replace(/\\/g, '/');
+    const home = process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'node'), real);
+    return real;
+  } catch { return null; } // the hooks are registered already: a folder that cannot be written is no reason to fail the install
 }
 
 function coexistMode() {
@@ -211,6 +228,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (have !== null) fs.copyFileSync(file, file + '.waymark-bak');
     fs.writeFileSync(file, want);
+    pinNode();
     console.log(`installed${have !== null ? ` (backup ${file}.waymark-bak)` : ''}. Restart OpenCode.`);
     process.exit(0);
   }
@@ -238,5 +256,6 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     fs.writeFileSync(path.join(home, 'statusline.json'), JSON.stringify({ next: line.next }, null, 1) + '\n');
   }
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+  pinNode();
   console.log(`updated${raw ? ` (backup ${file}.waymark-bak)` : ''}. ${agent === 'cursor' ? 'Cursor reloads hooks.json when it changes; user hooks need no trust.' : 'Start a new session.'}${agent === 'codex' ? ' In Codex, open /hooks and trust the four Waymark hooks: until then Codex skips them.' : ''}`);
 }

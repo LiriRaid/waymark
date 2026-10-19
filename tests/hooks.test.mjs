@@ -1032,7 +1032,7 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
   const first = planHooks({ model: 'x', hooks: { Stop: [{ hooks: [theirs] }] } }, { scripts: '/s/waymark/scripts' });
   assert.equal(first.steps.length, 4);
   assert.equal(first.settings.model, 'x', 'other keys kept');
-  assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
+  assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
   assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit|Read');
   assert.deepEqual(planHooks(first.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
   const old = { hooks: {
@@ -1040,8 +1040,8 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/rule0-hook.mjs"' }] }, { hooks: [{ type: 'command', command: 'node "/x/waymark/scripts/rule0-hook.mjs"' }, theirs] }],
   } };
   const second = planHooks(old, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs"' }] }]);
-  assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
+  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs"' }] }]);
+  assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
   assert.ok(second.steps.some((s) => /remove duplicate UserPromptSubmit/.test(s)));
   assert.equal(old.hooks.PreToolUse[0].matcher, 'Bash|PowerShell', 'the input is not mutated');
   assert.match(planHooks({}, { scripts: '/s/waymark/scripts', agent: 'codex' }).settings.hooks.Stop[0].hooks[0].command, /stop-hook\.mjs" --agent codex$/);
@@ -1144,7 +1144,7 @@ test('install-hooks --agent codex: hooks.json entries with --agent codex, apply_
   const { planHooks } = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   const { settings, steps } = planHooks({}, { scripts: '/s/waymark/scripts', agent: 'codex' });
   assert.equal(steps.length, 4);
-  assert.deepEqual(settings.hooks.PreToolUse, [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent codex', commandWindows: 'node "/s/waymark/scripts/tool-hook.mjs" --agent codex' }] }]);
+  assert.deepEqual(settings.hooks.PreToolUse, [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent codex', commandWindows: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent codex' }] }]);
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'codex' }).steps, [], 'idempotent');
   assert.equal(planHooks({}, { scripts: '/s/waymark/scripts' }).settings.hooks.PreToolUse[0].hooks[0].commandWindows, undefined, 'Claude Code: no commandWindows');
 });
@@ -2110,7 +2110,7 @@ test('install-hooks: Gemini gets its own event names and matcher; OpenCode gets 
   const { settings, steps } = planHooks({ general: { x: 1 } }, { scripts: '/s/waymark/scripts', agent: 'gemini' });
   assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterAgent', 'AfterTool']);
   assert.equal(steps.length, 5);
-  assert.deepEqual(settings.hooks.BeforeTool, [{ matcher: 'run_shell_command|write_file|replace', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/tool-hook.mjs" --agent gemini' }] }]);
+  assert.deepEqual(settings.hooks.BeforeTool, [{ matcher: 'run_shell_command|write_file|replace', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs" --agent gemini' }] }]);
   assert.deepEqual(settings.general, { x: 1 }, 'the rest of the settings stays');
   assert.deepEqual(planHooks(settings, { scripts: '/s/waymark/scripts', agent: 'gemini' }).steps, [], 'idempotent');
   const plugin = pluginText('/s/waymark/scripts');
@@ -2129,7 +2129,7 @@ test('OpenCode plugin: context into the system prompt, a deny throws, a stop blo
   const calls = [], prompts = [];
   const $ = (strings, ...values) => {
     if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) }; // opencode --version, once per load
-    const script = String(values[0]).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
+    const script = String(values.find((v) => /-hook\.mjs$/.test(String(v)))).split(/[\\/]/).pop(); calls.push(script); const r = { stdout: Buffer.from(JSON.stringify(answers[script] || {})) }; return { nothrow: () => ({ quiet: async () => r }) }; };
   const client = { session: { messages: async () => ({ data: [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'listo' }] }] }), prompt: async (x) => prompts.push(x) } };
   const { Waymark } = await import(`file://${file.replace(/\\/g, '/')}`);
   const hooks = await Waymark({ client, $, directory: dir });
@@ -2709,7 +2709,7 @@ test('context brake in OpenCode: the plugin shows the reason and throws from cha
   const toasts = [];
   const $ = (strings, ...values) => {
     if (!values.length) return { nothrow: () => ({ quiet: async () => ({ stdout: Buffer.from('1.18.34\n') }) }) };
-    const script = String(values[0]).split(/[\\/]/).pop();
+    const script = String(values.find((v) => /-hook\.mjs$/.test(String(v)))).split(/[\\/]/).pop();
     const r = { stdout: Buffer.from(JSON.stringify(script === 'rule0-hook.mjs' ? { decision: 'block', reason: 'Waymark: this session holds ~180k' } : {})) };
     return { nothrow: () => ({ quiet: async () => r }) };
   };

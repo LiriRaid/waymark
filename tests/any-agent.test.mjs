@@ -52,8 +52,8 @@ test('agents as data: agents.json lists every known agent with its docs; the ada
   assert.ok(AGENTS().some((a) => a.key === 'kiro' && a.dir === at('.kiro')));
   const ih = await import(`file://${SCRIPTS}/install-hooks.mjs`);
   assert.equal(ih.settingsFile('codex'), process.env.WAYMARK_CODEX_HOOKS);
-  assert.equal(ih.settingsFile('qwen'), null, 'no adapter: no hooks written');
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'qwen'], { encoding: 'utf8' });
+  assert.equal(ih.settingsFile('windsurf'), null, 'no adapter: no hooks written');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'windsurf'], { encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stdout, /no adapter yet[\s\S]*Add an agent/, r.stdout);
 });
@@ -117,18 +117,18 @@ test('unknown agents: a home folder with an agent\'s signals is found, a tool\'s
 test('check: agents with no adapter (known with hooks, or unknown) are named once with the procedure; install-hooks is offered only where an adapter exists', async () => {
   const { check } = await import(`file://${SCRIPTS}/waymark.mjs`);
   const repo = withMemory(repoAt('check'));
-  fs.mkdirSync(at('.qwen'), { recursive: true });
+  fs.mkdirSync(at('.codeium', 'windsurf'), { recursive: true });
   write(at('.foo', 'AGENTS.md'), '');
   fs.mkdirSync(at('.codex'), { recursive: true });
   const items = await check(repo);
   const line = items.find((t) => t.startsWith('agents: ')) || '';
-  assert.match(line, /Qwen Code/, line);
+  assert.match(line, /Windsurf/, line);
   assert.match(line, /\.foo \(unknown/, line);
   assert.match(line, /Add an agent/);
   assert.match(line, /agent-adapter\.template\.mjs/);
   const hooks = items.find((t) => t.startsWith('hooks: ')) || '';
   assert.match(hooks, /Codex \(--agent codex\)/, hooks);
-  assert.doesNotMatch(hooks, /Qwen|\.foo/, 'no adapter: nothing to install yet');
+  assert.doesNotMatch(hooks, /Windsurf|\.foo/, 'no adapter: nothing to install yet');
   clean();
 });
 
@@ -140,8 +140,8 @@ test('session card: a new agent that is not prepared is said once; the next sess
   assert.match(first, /New agents on this machine[^\n]*\.foo/, first);
   assert.match(first, /run (W|node "[^"]+waymark\.mjs") check/);
   assert.doesNotMatch(run(), /New agents on this machine/, 'said once');
-  write(at('.qwen', 'settings.json'), '{}');
-  assert.match(run(), /New agents on this machine[^\n]*Qwen Code/, 'a later one is said too');
+  fs.mkdirSync(at('.codeium', 'windsurf'), { recursive: true });
+  assert.match(run(), /New agents on this machine[^\n]*Windsurf/, 'a later one is said too');
   clean();
 });
 

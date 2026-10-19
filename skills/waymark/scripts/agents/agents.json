@@ -54,18 +54,18 @@
     },
     {
       "key": "qwen", "name": "Qwen Code", "dir": "~/.qwen", "env": "QWEN_HOME", "instructions": "QWEN.md", "skills": "~/.qwen/skills",
-      "hooks": { "file": "settings.json", "format": "nested" },
-      "adapter": null, "docs": "https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/", "checked": "2026-10-12"
+      "hooks": { "file": "settings.json", "override": "WAYMARK_QWEN_SETTINGS", "format": "nested", "matcher": "run_shell_command|write_file|edit|replace|read_file", "extra": ["PostToolUse"] },
+      "adapter": "qwen", "docs": "https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/", "checked": "2026-10-19"
     },
     {
       "key": "droid", "name": "Droid", "dir": "~/.factory", "instructions": "AGENTS.md", "skills": true,
-      "hooks": { "file": "hooks.json", "format": "nested" },
-      "adapter": null, "docs": "https://docs.factory.com/cli/configuration/hooks-guide", "checked": "2026-10-12"
+      "hooks": { "file": "hooks.json", "override": "WAYMARK_DROID_HOOKS", "format": "nested", "top": true, "matcher": "Execute|Create|Edit|ApplyPatch|Read", "extra": ["PostToolUse"] },
+      "adapter": "droid", "docs": "https://docs.factory.com/cli/configuration/hooks-guide", "checked": "2026-10-19"
     },
     {
       "key": "amp", "name": "Amp", "dir": "$XDG/amp", "instructions": "AGENTS.md", "skills": true,
-      "hooks": { "file": "plugins/waymark.ts", "format": "plugin" },
-      "adapter": null, "docs": "https://ampcode.com/docs/customize/plugins", "checked": "2026-10-12"
+      "hooks": { "file": "plugins/waymark.js", "override": "WAYMARK_AMP_PLUGIN", "format": "plugin" },
+      "adapter": "amp", "docs": "https://ampcode.com/docs/customize/plugins", "checked": "2026-10-19"
     },
     {
       "key": "crush", "name": "Crush", "dir": "$XDG/crush", "instructions": "CRUSH.md", "skills": true,

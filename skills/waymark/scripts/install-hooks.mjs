@@ -53,7 +53,8 @@ const hooksOf = (agent) => { const a = known(agent); return a?.adapter && a.hook
 const SETTINGS = Object.fromEntries(KNOWN.filter((a) => a.adapter && a.hooks && a.hooks.format !== 'plugin')
   .map((a) => [a.key, () => process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file)]));
 export const settingsFile = (agent) => SETTINGS[agent]?.() || null;
-export const PLUGIN = () => { const a = known('opencode'); return process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file); };
+export const PLUGINS = KNOWN.filter((a) => a.adapter && a.hooks?.format === 'plugin').map((a) => a.key); // OpenCode, Amp: a plugin file instead of a settings entry
+export const PLUGIN = (agent = 'opencode') => { const a = known(agent); return process.env[a.hooks.override] || path.join(agentDir(a), a.hooks.file); };
 const ours = (file) => (h) => new RegExp(`waymark[\\\\/]+scripts[\\\\/]+${file.replace('.', '\\.')}`).test(String(h?.command || ''));
 
 // Agents whose hooks file has its own shape (agents.json format "own"). commands(s) → [event, command] of Waymark's
@@ -131,14 +132,14 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
   if (spec.format === 'own') return planOwn(input, { scripts, agent, spec });
   const s = structuredClone(input || {}), steps = [];
   if (flat) s.version ??= 1;
-  s.hooks = s.hooks || {};
+  const root = spec.top ? s : (s.hooks = s.hooks || {}); // `top`: the events are the file's own keys (Droid's hooks.json), not under "hooks"
   const inner = (e) => (flat ? [e] : e.hooks || []);
   for (const h of HOOKS.filter((x) => !x.extra || spec.extra?.includes(x.event))) {
     const command = `${hookCommand(scripts, h.file)}${agent === 'claude' ? '' : ` --agent ${agent}`}`;
     const matcher = h.matcher ? (spec.matcher ?? null) : null; // null: every tool
     const windows = spec.commandWindows ? { commandWindows: command } : {}; // Codex's Windows override, the same command
     const event = spec.events?.[h.event] || h.event; // the core's event names → the agent's
-    const list = (s.hooks[event] = Array.isArray(s.hooks[event]) ? s.hooks[event] : []);
+    const list = (root[event] = Array.isArray(root[event]) ? root[event] : []);
     const hits = list.filter((e) => inner(e).some(ours(h.file)));
     if (!hits.length) {
       list.push(flat ? { command, ...(matcher ? { matcher } : {}) } : { ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command, ...windows }] });
@@ -155,7 +156,7 @@ export function planHooks(input, { scripts = SCRIPTS, agent = 'claude' } = {}) {
       if (!flat) e.hooks = e.hooks.filter((x) => !ours(h.file)(x));
       steps.push(`remove duplicate ${event} → ${h.file}`);
     }
-    s.hooks[event] = list.filter((e) => (flat ? !extra.includes(e) : (e.hooks || []).length));
+    root[event] = list.filter((e) => (flat ? !extra.includes(e) : (e.hooks || []).length));
   }
   return { settings: s, steps };
 }
@@ -178,7 +179,7 @@ export function planStatusLine(input, { scripts = SCRIPTS } = {}) {
 }
 
 // The plugin as installed: the template with this scripts folder in place.
-export const pluginText = (scripts = SCRIPTS) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents', 'opencode-plugin.js'), 'utf8').replace("'__SCRIPTS__'", JSON.stringify(scripts));
+export const pluginText = (scripts = SCRIPTS, agent = 'opencode') => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents', `${agent}-plugin.js`), 'utf8').replace("'__SCRIPTS__'", JSON.stringify(scripts));
 
 // The Waymark hook commands each agent has registered: { agent, file, commands[] } for every settings file (or the
 // OpenCode plugin) that names one; an entry holds its hooks (Claude Code, Codex, Gemini) or is one (Cursor). → [] when no agent has them.
@@ -188,13 +189,17 @@ export function registered() {
     const file = at();
     let s = null;
     try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    const all = OWN[agent] ? OWN[agent].commands(s || {}).map(([, c]) => c) : Object.values(s?.hooks || {}).flat().flatMap((e) => (e?.hooks || [e]).map((h) => String(h?.command || '')));
+    const all = OWN[agent] ? OWN[agent].commands(s || {}).map(([, c]) => c) : Object.values((hooksOf(agent)?.top ? s : s?.hooks) || {}).flat().flatMap((e) => (e?.hooks || [e]).map((h) => String(h?.command || '')));
     const commands = [...new Set(all.filter((c) => /waymark[\\/]+scripts[\\/]+[\w-]+-hook\.mjs/.test(c)))];
     if (commands.length) out.push({ agent, file, commands });
   }
   try {
-    const file = PLUGIN(), text = fs.readFileSync(file, 'utf8'), scripts = text.match(/const SCRIPTS = "([^"]+)"/)?.[1];
-    if (scripts) out.push({ agent: 'opencode', file, commands: ['session-hook.mjs', 'rule0-hook.mjs', 'tool-hook.mjs', 'stop-hook.mjs'].map((f) => `${hookCommand(scripts, f)} --agent opencode`) });
+    for (const agent of PLUGINS) {
+      let file, text;
+      try { file = PLUGIN(agent); text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+      const scripts = text.match(/const SCRIPTS = "([^"]+)"/)?.[1];
+      if (scripts) out.push({ agent, file, commands: ['session-hook.mjs', 'rule0-hook.mjs', 'tool-hook.mjs', 'stop-hook.mjs'].map((f) => `${hookCommand(scripts, f)} --agent ${agent}`) });
+    }
   } catch {}
   return out;
 }
@@ -220,21 +225,21 @@ function coexistMode() {
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), write = args.includes('--apply');
   const agent = args.includes('--agent') ? args[args.indexOf('--agent') + 1] : 'claude';
-  if (agent === 'opencode') { // a plugin file, not a settings entry
-    const file = PLUGIN(), want = pluginText(), have = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  if (PLUGINS.includes(agent)) { // a plugin file, not a settings entry
+    const label = known(agent).name, file = PLUGIN(agent), want = pluginText(SCRIPTS, agent), have = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
     if (have === want) { console.log(`${file}: the Waymark plugin is installed.`); process.exit(0); }
     console.log(`${file}:\n  - ${have === null ? 'add' : 'update'} the Waymark plugin (its four hooks run ${SCRIPTS})`);
-    if (!write) { console.log('\nPlan only: nothing was written. Ask the user, then re-run with --apply. Takes effect when OpenCode restarts.'); process.exit(0); }
+    if (!write) { console.log('\nPlan only: nothing was written. Ask the user, then re-run with --apply. Takes effect when ' + label + ' restarts.'); process.exit(0); }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (have !== null) fs.copyFileSync(file, file + '.waymark-bak');
     fs.writeFileSync(file, want);
     pinNode();
-    console.log(`installed${have !== null ? ` (backup ${file}.waymark-bak)` : ''}. Restart OpenCode.`);
+    console.log(`installed${have !== null ? ` (backup ${file}.waymark-bak)` : ''}. Restart ${label}.`);
     process.exit(0);
   }
   if (!SETTINGS[agent]) {
     const a = known(agent);
-    console.log(`Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), 'opencode'].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
+    console.log(`Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), ...PLUGINS].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
     process.exit(1);
   }
   const mode = coexistMode();

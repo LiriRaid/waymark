@@ -59,29 +59,29 @@ The total is **33.2 %**, not the ≈63 % the plan estimated. The estimates were 
 
 ## Result at 2.0.18 (point 12, 2026-10-19)
 
-`waymark.mjs scorecard` on the finished work, lock ok, on the author's records. The table of this ADR is the one that counts, and no row was rounded up.
+`waymark.mjs scorecard` on the finished work, lock ok, on the author's records. The table of this ADR is the one that counts, and no row was rounded up. The records-based figures (rows 1, 8 and 11) move with every task recorded after this paragraph was written.
 
 | # | Criterion | Weight | Baseline | Result | Target | Met |
 |---|---|---|---|---|---|---|
-| 1 | Provenance of each task | 8 | 24.5 % | 95.6 % | 98 | no |
+| 1 | Provenance of each task | 8 | 24.5 % | 96.6 % | 98 | no |
 | 2 | Tamper evidence | 8 | 50.0 % | 100 % | 96 | yes |
 | 3 | Authenticity | 8 | 28.5 % | 100 % | 95 | yes |
 | 4 | Independent verification | 5 | 33.3 % | 100 % | 98 | yes |
 | 5 | Enforcement | 8 | 33.3 % | 100 % | 93 | yes |
 | 6 | Inputs and dependencies pinned | 5 | 33.3 % | 100 % | 95 | yes |
-| 7 | Distribution of the records | 3 | 66.6 % | 66.6 % | 95 | no |
-| 8 | Token efficiency | 15 | 12.5 % | 95.4 % | 96 | no |
-| 9 | Agnostic and adaptive | 12 | 45.1 % | 95.1 % | 96 | no |
+| 7 | Distribution of the records | 3 | 66.6 % | 100 % | 95 | yes |
+| 8 | Token efficiency | 15 | 12.5 % | 96.7 % | 96 | yes |
+| 9 | Agnostic and adaptive | 12 | 45.1 % | 98 % | 96 | yes |
 | 10 | Reuse of earlier evidence | 8 | 16.6 % | 100 % | 93 | yes |
-| 11 | No hallucination, good decisions | 8 | 60.0 % | 100 % | 95 | yes |
+| 11 | No hallucination, good decisions | 8 | 60.0 % | 99.8 % | 95 | yes |
 | 12 | Self-generating | 6 | 40.0 % | 100 % | 93 | yes |
 | 13 | Task done completely and as asked | 6 | 20.0 % | 100 % | 93 | yes |
 
-The total went from **33.2 %** to **97.3 %**; the release target was 95. Four criteria end below their own target, and the failing checks say why:
+The total went from **33.2 %** to **98.9 %**; the release target was 95. One criterion ends below its own target, and five checks still fail inside criteria that meet theirs:
 
-- **1.10** (records whose git note can be read: 0.533, needs 0.95). Ten tasks (2026-10-16 T19 to 2026-10-18 T1) have a commit and no record because the end-of-turn hook did not run: the author's Node was left on version 14, which cannot parse it, and nothing said so (ADR 0040, which closes that gap with a launcher). The chain verifies; the detail does not exist and is not rebuilt, because a record made afterwards is not what the hook observed. The share rises with the tasks recorded from now on.
-- **7.1** (14 note commits not pushed). The yes to publishing the notes is per project and belongs to the author, who pushes them by hand when opening the pull request; this stays at 66.6 % until then.
-- **8.6 and 8.7** (routine share 11.5 % of the last 10 L2 tasks against at most 9 %; 7.6 % of the last 5 L1 tasks against at most 6.5 %). Reaching them takes a routine response removed (the department skill, the choice window or the review), which the replay cannot show; the thresholds stay frozen as ADR 0031 set them.
-- **9.1** (8 of 13 known agents have an adapter). Windsurf, Qwen Code, Droid, Amp and Crush run on no machine of the author, so a draft by `adapter-new` could pass the conformance list and still never have run. ADR 0039 rejected drafting them to turn the check green, and rejected redefining the check.
+- **1.10** (records whose git note can be read: 0.633, needs 0.95). Ten tasks (2026-10-16 T19 to 2026-10-18 T1) have a commit and no record because the end-of-turn hook did not run: the author's Node was left on version 14, which cannot parse it, and nothing said so (ADR 0040, which closes that gap with a launcher). The chain verifies; the detail does not exist and is not rebuilt, because a record made afterwards is not what the hook observed. The share rises with the tasks recorded from now on.
+- **8.6 and 8.7** (routine share 10.2 % of the last 10 L2 tasks against at most 9 %; 7.6 % of the last 5 L1 tasks against at most 6.5 %). Reaching them takes a routine response removed (the department skill, the choice window or the review), which the replay cannot show; the thresholds stay frozen as ADR 0031 set them.
+- **9.1** (11 of 13 known agents have an adapter). Qwen Code, Droid and Amp got theirs in this point (ADR 0041), written from their documentation and judged by the conformance list, with none of them run in a live session. Windsurf and Crush have none: Windsurf has no session start and no way to hand the model context, and Crush has one event, before a tool, so neither could carry a record, a Cierre or a card. ADR 0039 rejected redefining the check.
+- **11.2** (cited facts backed by a call: 0.943, needs 0.95). Read from the latest task records; it moves with them.
 
-Because the margin over 95 is small, a criterion above its target does not cover one below it in the report: each is listed in the README as it is. The release steps that need the author's key (the signed manifest, the signed `v2.0.18` tag, `verify --install --require-signature`) are run by the author after the merge, since the guard keeps the agent away from `~/.ssh`; check 3.1 reads the latest release tag, so it holds from the signed tag on.
+Notes were pushed once by the author's yes (criterion 7), and `verify --remote` matched 105 anchors. The release steps that need the author's key (the signed manifest, the signed `v2.0.18` tag, `verify --install --require-signature`) are run by the author after the last commit, since the guard keeps the agent away from `~/.ssh`; check 3.1 reads the latest release tag, so it holds from the signed tag on.

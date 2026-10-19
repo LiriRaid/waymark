@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { settingsFile, PLUGIN, withoutOwn } from './install-hooks.mjs';
+import { settingsFile, PLUGIN, PLUGINS, withoutOwn } from './install-hooks.mjs';
 import { AGENTS, unknownAgents, stripWaymark } from './connect-agents.mjs';
 import { waymarkHome as HOME, slash } from './lib/paths.mjs';
 import { read as readText, readJson } from './lib/fs.mjs';
@@ -46,7 +46,7 @@ export function withoutHooks(settings) {
 // → the steps, each { file, what, write: () => void } (a file to rewrite or remove), or { run: [script, ...args], what }.
 export function planUninstall() {
   const steps = [];
-  for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'copilot']) {
+  for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'copilot', 'qwen']) {
     const file = settingsFile(agent), s = readJson(file);
     if (!s) continue;
     let { next, removed } = withoutHooks(s);
@@ -65,8 +65,15 @@ export function planUninstall() {
     const { next, removed, empty } = withoutOwn(agent, s);
     if (removed) steps.push({ agent, file, what: `remove ${removed} Waymark hook${removed > 1 ? 's' : ''}${empty ? ' (the file was Waymark\'s: removed)' : ''}`, write: () => (empty ? fs.rmSync(file) : fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n')) });
   }
-  const plugin = PLUGIN();
-  if (OURS.test(read(plugin) || '') || /const SCRIPTS = "[^"]*waymark[\\/]+scripts"/.test(read(plugin) || '')) steps.push({ agent: 'opencode', file: plugin, what: 'remove the Waymark plugin', write: () => fs.rmSync(plugin) });
+  { // Droid's hooks.json keeps its events at the top level: the same removal over { hooks: <the file> }
+    const file = settingsFile('droid'), s = readJson(file);
+    const { next, removed } = s ? withoutHooks({ hooks: s }) : { next: null, removed: 0 };
+    if (removed) steps.push({ agent: 'droid', file, what: `remove ${removed} Waymark hook${removed > 1 ? 's' : ''}${Object.keys(next.hooks).length ? '' : ' (the file was Waymark\'s: removed)'}`, write: () => (Object.keys(next.hooks).length ? fs.writeFileSync(file, JSON.stringify(next.hooks, null, 2) + '\n') : fs.rmSync(file)) });
+  }
+  for (const agent of PLUGINS) {
+    const plugin = PLUGIN(agent);
+    if (OURS.test(read(plugin) || '') || /const SCRIPTS = "[^"]*waymark[\\/]+scripts"/.test(read(plugin) || '')) steps.push({ agent, file: plugin, what: 'remove the Waymark plugin', write: () => fs.rmSync(plugin) });
+  }
   const instructions = [['claude', path.join(path.dirname(settingsFile('claude')), 'CLAUDE.md')], ...[...AGENTS(), ...unknownAgents()].filter((a) => a.file).map((a) => [a.key, path.join(a.dir, a.file)])]; // the pointer connect-agents gave an unknown agent too
   for (const [agent, file] of instructions) {
     const text = read(file);

@@ -89,6 +89,9 @@ Generated from `agents/agents.json` and the adapters (`node skills/waymark/scrip
 | Antigravity | yes | yes | yes | yes | yes |
 | Kiro | yes | yes | yes | yes | yes |
 | Copilot CLI | yes | yes | yes | yes | yes |
+| Qwen Code | yes | yes | yes | yes | yes |
+| Droid | yes | yes | yes | yes | yes |
+| Amp | yes | yes | yes | yes | yes |
 
 **What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it. For what the guard protects, *prevent*: a hook before the tool refuses the call; *detect*: nothing refuses it, and the end-of-turn hook reads the transcript of the agent and records what got through in the record of the task, where it cannot be removed. No guarded action is left with neither.
 
@@ -102,8 +105,11 @@ Generated from `agents/agents.json` and the adapters (`node skills/waymark/scrip
 | Antigravity | enforced | enforced | enforced | prevent | detect | detect | advisory |
 | Kiro | enforced | enforced | enforced | prevent | detect | detect | advisory |
 | Copilot CLI | enforced | enforced | enforced | prevent | detect | detect | advisory |
+| Qwen Code | enforced | enforced | enforced | prevent | prevent | detect | enforced |
+| Droid | enforced | enforced | enforced | prevent | prevent | detect | enforced |
+| Amp | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 
-Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Qwen Code, Droid, Amp, Crush.
+Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Crush.
 <!-- agent-matrix:end -->
 
 ## 2. Get the files
@@ -248,6 +254,9 @@ The agent offers each item with the choice window. `node "<skills-dir>/waymark/s
 - **Copilot CLI:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent copilot` shows the plan for `~/.copilot/hooks/waymark.json` (`"version": 1`, flat entries under Claude Code's event names: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop) **[ask]**; then re-run it with `--apply`. User hooks need no trust; a new session picks them up. Copilot drops a command hook's UserPromptSubmit output, so the card and the block carry Rule 0 (`adapters/copilot.md`).
 - **Kiro:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent kiro` shows the plan for `~/.kiro/hooks/waymark.json` (`"version": "v1"`; SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, each with `--event`) **[ask]**; then re-run it with `--apply`. Global hooks are documented for Kiro CLI V3; the IDE documents only the workspace's `.kiro/hooks`. Kiro answers with plain text and exit codes, and no hook carries the reply, so the Cierre and a question asked in the chat are not checked there (`adapters/kiro.md`).
 - **Antigravity:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent antigravity` shows the plan for a hook named `waymark` in `~/.gemini/config/hooks.json` (SessionStart, PreInvocation, PreToolUse, PostToolUse, Stop, each with `--event`; the user's named hooks stay) **[ask]**; then re-run it with `--apply`. No hook carries the prompt or the reply, so the Cierre is not checked there and the choice window is `ask_question` (`adapters/antigravity.md`).
+- **Qwen Code:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent qwen` shows the plan for `~/.qwen/settings.json` (`QWEN_HOME` moves the folder; under `"hooks"`: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, with its tool ids in the matcher) **[ask]**; then re-run it with `--apply`. User hooks need no approval. Written from its documentation and not run in a live session; the Cierre and the choice window are not judged there, since a hook carries only the turn's last message (`adapters/qwen.md`, `docs/adr/0041`).
+- **Droid:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent droid` shows the plan for `~/.factory/hooks.json` (the events are the file's own keys, not under `"hooks"`) **[ask]**; then re-run it with `--apply`; Droid snapshots its hooks at startup. No hook carries the reply, so the Cierre and the choice window are not judged there; written from its documentation and not run in a live session (`adapters/droid.md`).
+- **Amp:** `node "<skills-dir>/waymark/scripts/install-hooks.mjs" --agent amp` shows the plan for the plugin `~/.config/amp/plugins/waymark.js` (`XDG_CONFIG_HOME` moves `plugins/`) **[ask]**; then re-run it with `--apply` and ask Amp to reload its plugins. The plugin runs the four scripts on `session.start`, `agent.start`, `tool.call` / `tool.result` and `agent.end`; the card and the pack of a file arrive with the thread's next prompt. Written from its documentation and not run in a live session (`adapters/amp.md`).
 - **Other agents:** the same scripts with `--agent <name>`, once that agent has a module in `scripts/agents/` (`adapters/generic.md`). Until then only the pointer block applies, with no hooks: say so in the report.
 - `node "<skills-dir>/waymark/scripts/waymark.mjs" check` offers `install-hooks` for every agent found without Waymark's hooks, Claude Code included.
 - Report it under *Archivos modificados* (`settings.json — hook Rule 0 agregado`).

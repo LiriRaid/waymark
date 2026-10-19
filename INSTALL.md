@@ -1,5 +1,7 @@
 # INSTALL — instructions for the agent
 
+Waymark is the supply chain of AI-agent work: provenance, evidence and verification for every change an agent makes to the user's code. It learns on this machine only; nothing it records leaves it unless the user sends it (`docs/adr/0042`).
+
 > **You are a coding agent (Claude Code, Codex, Cursor, Gemini CLI, OpenCode or similar) and the user asked you to install, update or uninstall Waymark.** Follow this document step by step. No installer script is needed: you do the work with your own file and shell tools.
 >
 > Talk to the user in their language. Ask before every step marked **[ask]**, with your choice window if the agent has one (Claude Code: `AskUserQuestion`, options as buttons, recommended first), else in text. Never touch credentials, sessions or files not listed here.

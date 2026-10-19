@@ -1,6 +1,6 @@
 # Waymark
 
-**A supply chain for your coding agent's work.** Every change goes through defined stages: the department that owns it, **your** decision among the optimal options, evidence, gates and review. It comes out with a verifiable record: what it was built with, who decided what and when, what was proven, which commit it produced.
+**The supply chain of AI-agent work.** Provenance, evidence and verification for every change an AI agent makes to your code. Every change goes through defined stages: the department that owns it, **your** decision among the optimal options, evidence, gates and review. It comes out with a verifiable record: what it was built with, who decided what and when, what was proven, which commit it produced.
 
 For Claude Code, Codex, Cursor, Gemini CLI, OpenCode and any agent that reads [Agent Skills](https://agentskills.io) (`SKILL.md`).
 
@@ -69,6 +69,12 @@ How good is it, in numbers: `node "<skills-dir>/waymark/scripts/waymark.mjs" sco
 Where it stands at the close of 2.0.18 (the baseline was 33.2 %): **98.1 %**, above the release target of 95, with two criteria below their own target and every failing check listed here as it is, not averaged away. Provenance 96.6 % (target 98): ten tasks have a commit and no record, because their end-of-turn hook did not run on the Node 14 the author's version manager had active, and said nothing; every hook now goes through a launcher that finds a Node able to run it (`docs/adr/0040`), and those ten stay a documented gap. Token efficiency 91.3 % (target 96): the routine share is 9.2 % of the last 10 L2 tasks (frozen limit 9 %) and 19.7 % of the last 5 L1 tasks (limit 6.5 %), because the short release steps of the last day (a push, a signature, a tag) were mostly the routine the hooks ask for; and the fixed context is 11,036 characters against 11,000, as the session card lists the tasks still open. Inside criteria that meet their targets: two known agents have no adapter (Windsurf and Crush, whose hooks cannot carry the chain, `docs/adr/0041`), and the share of cited facts backed by a call is 0.927 against 0.95. These numbers are read from the author's recorded tasks, almost all of them run on the installed 2.0.16; the tasks run on 2.0.18 from now on are what moves them. The suite passes its three runs on Ubuntu and Windows in CI, and the release (manifest and tag) is signed. The adapters of Qwen Code, Droid and Amp were written from their documentation and have not run in a live session. Not measured, because only time and use can show it: learning over months, several models, several users, an adapter in a live session of its own agent, guest mode against a repository that carries its own orchestrator blocks, and the cost per version beyond the one version with recorded data. Details and the table: `docs/adr/0028`.
 
 What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'s job; this chain covers the work the agent does on your code. Decisions: [`docs/adr/`](docs/adr).
+
+## Share what you learn: the pattern, not the case
+
+Waymark learns on your machine: each task you close teaches your own install, and nothing leaves it unless you send it (`docs/adr/0042`). To know whether it works beyond one machine, it needs **patterns** from people who use it: what happened, with which agent, version and level, and how often, said so that anyone could reuse it without knowing your project. Your **case** (code, prompts, paths, client names) stays with you. Share a pattern with the *Pattern report* issue form; send a change as a pull request against `develop`, which the author reviews and signs. How, with examples of a pattern and a case: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Every task the author has recorded ran on Claude Code; the other adapters are judged by the conformance list, not yet by live use, so a report from Codex, Cursor, Gemini CLI or any other agent is worth the most. Waymark 2.0.19 is the baseline: its numbers come from tasks run on 2.0.18 and later, and each release after it says how much it improved.
 
 ## What each agent enforces
 

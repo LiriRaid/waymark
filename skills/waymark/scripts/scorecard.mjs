@@ -101,9 +101,14 @@ const MEASURES = {
     const r = signatureState(root, tag, { tag: true, allowed: path.join(root, 'skills', 'waymark', 'ALLOWED_SIGNERS') });
     return r.state === 'unchecked' ? null : r.state === 'signed' ? 1 : 0;
   },
+  // Notes wait to be pushed only in a project that said yes (`Notes push:`); with no yes, or never, the records stay on
+  // the machine by design (docs/adr/0042) and nothing waits.
   async 'notes.unpushed'(root) {
     const { unpushedNotes, hasRemote } = await import(pathToFileURL(path.join(HERE, 'notes.mjs')).href);
-    return hasRemote(root) ? unpushedNotes(root) : null;
+    const { pushPref } = await import(pathToFileURL(path.join(HERE, 'notes-remote.mjs')).href);
+    const { projectHome } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
+    if (!hasRemote(root)) return null;
+    return pushPref(projectHome(root).slug) === 'yes' ? unpushedNotes(root) : 0;
   },
   async 'agents.adapterShare'() {
     const a = JSON.parse(fs.readFileSync(path.join(HERE, 'agents', 'agents.json'), 'utf8')).agents;

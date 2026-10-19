@@ -116,3 +116,34 @@ test('0: on this repository the scorecard runs, its lock holds and the plan poin
   const known = new Set(['1.10', '9.1', '7.1']); // ADR 0028: records that lost their note; agents with hooks and no adapter; 7.1 is whether this machine has pushed its notes
   for (const c of failing.filter((x) => x.point === 0 && x.status === 'fail')) assert.ok(known.has(c.id), `${c.id} fails today and is not a recorded finding: ${c.detail}`);
 });
+
+test('7.1 notes.unpushed: a note waits to be pushed only in a project that said yes (Notes push:); with no yes or never the records stay local and nothing waits (ADR 0042)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const N = await import(`file://${REPO}/skills/waymark/scripts/notes.mjs`);
+  const P = await import(`file://${REPO}/skills/waymark/scripts/provenance.mjs`);
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+  const root = fixture(one([{ id: '1.1', what: 'no note waits', point: 0, kind: 'measure', measure: 'notes.unpushed', op: 'le', threshold: 0 }]));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-scorecard-remote-'));
+  temps.push(remote);
+  git(remote, 'init', '-q', '--bare');
+  git(root, 'init', '-q'); git(root, 'remote', 'add', 'origin', remote);
+  git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', 'one');
+  git(root, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  N.addNote(root, git(root, 'rev-parse', 'HEAD').stdout.trim(), '{"id":"a"}');
+  assert.equal(N.pushNotes(root).ok, true);
+  N.notesSetup(root);
+  git(root, 'commit', '-q', '--allow-empty', '-m', 'two');
+  N.addNote(root, git(root, 'rev-parse', 'HEAD').stdout.trim(), '{"id":"b"}');
+  assert.equal(N.unpushedNotes(root), 1, 'one note commit the remote lacks');
+  const prefs = path.join(process.env.WAYMARK_HOME, 'preferences.md'), slug = P.projectHome(root).slug;
+  const detail = async () => (await S.scorecard(root)).criteria[0].checks[0];
+  fs.mkdirSync(path.dirname(prefs), { recursive: true });
+  try {
+    fs.rmSync(prefs, { force: true });
+    assert.equal((await detail()).status, 'pass', 'no yes: the notes are local by design');
+    fs.writeFileSync(prefs, `- Notes push never: ${slug}\n`);
+    assert.equal((await detail()).status, 'pass', 'never: nothing waits');
+    fs.writeFileSync(prefs, `- Notes push: ${slug}\n`);
+    assert.equal((await detail()).status, 'fail', 'yes: the note that did not go up waits');
+  } finally { fs.rmSync(prefs, { force: true }); }
+});

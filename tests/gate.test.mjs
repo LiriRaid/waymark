@@ -38,6 +38,17 @@ test('gate-tests: the summary of the runner is read, and anything but skipped 0,
   assert.match(G.problems(G.summarize('ℹ tests 3')), /no summary/, 'a cut or crashed run has no summary and is not clean');
 });
 
+test('gate-tests: a run that is not clean prints why each test failed, not only its name, without the stack frames', () => {
+  const out = ['✔ fine (1ms)', '✖ uninstall: restores mcp-fit (2ms)', 'ℹ fail 1', '✖ failing tests:', '', 'test at tests/agents.test.mjs:238:1', '✖ uninstall: restores mcp-fit (2ms)',
+    '  AssertionError [ERR_ASSERTION]: only the rules mcp-fit added', '  + actual - expected', '      at TestContext.<anonymous> (file:///x/tests/agents.test.mjs:265:10)', '      at Test.run (node:internal/test_runner/test:1201:25)'].join('\n');
+  const f = G.failures(out);
+  assert.match(f, /uninstall: restores mcp-fit/);
+  assert.match(f, /AssertionError \[ERR_ASSERTION\]: only the rules mcp-fit added/);
+  assert.match(f, /tests\/agents\.test\.mjs:238/);
+  assert.doesNotMatch(f, /node:internal/, 'no stack frames');
+  assert.equal(G.failures('✔ fine\nℹ fail 0'), '', 'a clean run prints nothing');
+});
+
 test('ci: verify.yml runs the gate and verify on push, pull request and tag, in two systems, with every third-party action pinned to a commit', () => {
   const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verify.yml'), 'utf8');
   assert.match(y, /^on:\s*\n(\s+.*\n)*?\s+push:/m);

@@ -123,10 +123,25 @@ function applyFit(f, state) {
 // --restore (uninstall.mjs): every deny rule this script added, out of each project's settings.local.json; the user's own
 // rules stay. The state keys are normalized (lowercase): the project's real folder comes from the known projects, so a
 // case-sensitive filesystem finds it. A project whose settings cannot be read stays in the state. → { changed, left }.
+// The folder a lower-case state key names, spelled as the filesystem has it (each segment matched without case), or
+// null: a project no longer among the known ones is still found on a case-sensitive filesystem.
+export function realFolder(key) {
+  const unc = String(key).startsWith('//'), parts = String(key).split('/').filter(Boolean);
+  let at = unc ? `//${parts.shift()}/${parts.shift()}/` : /^[a-z]:$/i.test(parts[0] || '') ? `${parts.shift().toUpperCase()}/` : '/';
+  for (const seg of parts) {
+    let names;
+    try { names = fs.readdirSync(at); } catch { return null; }
+    const hit = names.find((n) => n === seg) ?? names.find((n) => n.toLowerCase() === seg);
+    if (hit === undefined) return null;
+    at = path.join(at, hit);
+  }
+  return at;
+}
+
 export function restoreFits(state = readJson(STATE) || {}) {
   const changed = [], left = {}, known = knownProjects();
   for (const [key, servers] of Object.entries(state)) {
-    const project = known.find((p) => norm(p) === key) || key, file = settingsFile(project), s = readJson(file);
+    const project = known.find((p) => norm(p) === key) || realFolder(key) || key, file = settingsFile(project), s = readJson(file);
     if (!s) { if (fs.existsSync(file) || !fs.existsSync(project)) left[key] = servers; continue; }
     const drop = new Set(servers.map(ruleOf)), deny = (s.permissions?.deny || []).filter((r) => !drop.has(r));
     if (deny.length === (s.permissions?.deny || []).length) continue;

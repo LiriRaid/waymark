@@ -20,7 +20,7 @@
     { "id": "spec", "label": "Tests", "levels": [1, 2, 3], "when": "specNear", "enforce": "block", "claim": "a spec next to the changed code added or changed" },
     { "id": "red", "label": "Tests", "levels": [2, 3], "when": "specAndCode", "enforce": "block", "claim": "L2+ with a spec and code changed: the spec ran before the code it tests, or in a clean worktree" },
     { "id": "preexisting", "label": "Previos", "levels": [1, 2, 3], "when": "gateFailed", "enforce": "block", "claim": "a failing gate that is not this task's shown failing in a clean copy" },
-    { "id": "notes", "label": "Notas", "levels": [1, 2, 3], "when": "push", "enforce": "block", "claim": "after a push in a project that said yes, its notes on the remote (else `W notes push`)" },
+    { "id": "notes", "label": "Notas", "levels": [1, 2, 3], "when": "push", "enforce": "block", "claim": "after a push, opted-in notes on the remote (else `W notes push`)" },
     { "id": "trailer", "label": "Commit", "levels": [1, 2, 3], "when": "commit", "enforce": "record", "claim": "the task's commits carry Waymark-Task: <task ID>" },
     { "id": "chain", "label": "Cadena", "levels": [1, 2, 3], "enforce": "record", "claim": "the provenance chain intact before this record" }
   ]

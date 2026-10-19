@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell } from './stack.mjs';
 import { read } from './lib/fs.mjs';
+import { real } from './lib/paths.mjs';
 import { git as gitIn } from './lib/git.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
@@ -107,7 +108,7 @@ export function secretSources(files, commits, cwd, memoryFile, since = 0) {
     const root = top(path.dirname(f));
     if (!root) { if (fs.statSync(f).size < 1024 * 1024) out.push({ where: path.basename(f), text: read(f) }); continue; }
     if (!byRoot.has(root)) byRoot.set(root, []);
-    byRoot.get(root).push(path.relative(root, f).replace(/\\/g, '/'));
+    byRoot.get(root).push(path.relative(real(root), real(f)).replace(/\\/g, '/')); // git's root is the long name; f may be an 8.3 short one
   }
   for (const [root, rel] of byRoot) {
     const untracked = new Set(git(root, 'ls-files', '--others', '--exclude-standard', '--', ...rel).stdout?.split('\n').filter(Boolean));

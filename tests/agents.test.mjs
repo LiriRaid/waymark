@@ -235,6 +235,19 @@ test('install-hooks --agent cursor: hooks.json version 1, flat entries for every
   fs.rmSync(process.env.WAYMARK_CURSOR_HOOKS);
 });
 
+test('mcp-fit realFolder: the folder a lower-case state key names, spelled as the filesystem has it, so --restore finds it on Linux and macOS', async () => {
+  const { realFolder } = await import(`file://${SCRIPTS}/mcp-fit.mjs`);
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-fit-')));
+  const dir = path.join(base, 'Shop-API', 'Front');
+  fs.mkdirSync(dir, { recursive: true });
+  const key = path.resolve(dir).replace(/\\/g, '/').toLowerCase();
+  const found = realFolder(key);
+  assert.ok(found, `found ${key}`);
+  assert.deepEqual(path.resolve(found).split(path.sep).slice(-2), ['Shop-API', 'Front'], 'each segment as it is on disk');
+  assert.equal(realFolder(`${key}/missing`), null);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
 test('uninstall: the plan, then --apply removes every agent\'s hooks, the status line (yours back), the OpenCode plugin and the blocks, and restores mcp-fit; backup first', async () => {
   const cmd = (f, a = '') => `node "/x/waymark/scripts/${f}"${a}`;
   const claudeDir = path.dirname(process.env.WAYMARK_CLAUDE_SETTINGS);

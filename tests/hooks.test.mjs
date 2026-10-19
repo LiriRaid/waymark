@@ -60,8 +60,14 @@ test('task IDs: first of the day, next number, follow-up letters', () => {
 test('project slug: the project memory whose Path holds the folder, else the folder name', () => {
   fs.mkdirSync(path.join(home, 'projects'), { recursive: true });
   fs.writeFileSync(path.join(home, 'projects', 'shop-api.md'), '# Project: shop-api\n\nPath: C:/Work/Shop API\n');
-  assert.equal(projectSlug('c:\\work\\shop api\\src'), 'shop-api');
-  assert.equal(projectSlug('/home/me/My App'), 'my-app');
+  // On POSIX a Windows path is relative to the working folder: run from an empty one, so no .waymark/memory.md another
+  // test left in the checkout is found walking up before the memory whose Path holds it.
+  const was = process.cwd(), empty = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slug-'));
+  process.chdir(empty);
+  try {
+    assert.equal(projectSlug('c:\\work\\shop api\\src'), 'shop-api');
+    assert.equal(projectSlug('/home/me/My App'), 'my-app');
+  } finally { process.chdir(was); fs.rmSync(empty, { recursive: true, force: true }); }
 });
 
 test('decisions: chosen and discarded options from the choice window', () => {
@@ -690,7 +696,9 @@ const oldMemory = (slug, root, wip = '- ▶ task A (2026-10-01 · T2): NEXT step
   return file;
 };
 const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'); // where Waymark keeps .waymark/ out of git
-const same = (a, b) => assert.equal(path.resolve(a).toLowerCase(), path.resolve(b).toLowerCase());
+// Two spellings of one path (an 8.3 short name and its long name, a link and its target) compare as the filesystem has them.
+const LP = await import(`file://${SCRIPTS}/lib/paths.mjs`);
+const same = (a, b) => assert.equal(LP.norm(LP.real(a)), LP.norm(LP.real(b)));
 
 test('project home: nearest .waymark/memory.md walking up, else the old memory (bridge), else the git root, else the home layout', () => {
   const repo = tmpRepo('home');

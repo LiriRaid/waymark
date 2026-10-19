@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { waymarkHome as HOME, norm } from '../lib/paths.mjs';
+import { waymarkHome as HOME, norm, real } from '../lib/paths.mjs';
 
 // A hook's own failure never reaches the agent (a hook must not break the turn): it is appended to
 // ~/.waymark/hook-errors.log (the newest 200 lines) and `waymark.mjs check` reports it.
@@ -35,7 +35,16 @@ export function legacyMemory(cwd) {
   return best ? { slug: best.f.slice(0, -3), file: path.join(dir, best.f), root: best.root } : null;
 }
 
-const gitTop = (cwd) => { try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } };
+// The git root, spelled the way cwd is: git reports the long, link-free name (C:/Users/runneradmin/...) while cwd may come
+// as an 8.3 short name (C:\Users\RUNNER~1\...) or through a link, and every caller compares the root with paths spelled
+// like cwd. The root is cwd's own ancestor at the depth git's root lies above it.
+const gitTop = (cwd) => {
+  let top;
+  try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); if (r.status !== 0) return null; top = r.stdout.trim(); } catch { return null; }
+  const here = path.resolve(String(cwd || '.')), rel = path.relative(real(top), real(here)), up = rel.split(path.sep);
+  if (up[0] === '..' || path.isAbsolute(rel)) return top;
+  return (rel ? path.resolve(here, ...up.map(() => '..')) : here).replace(/\\/g, '/'); // forward slashes, as git writes it
+};
 
 // The one resolver of a project's Waymark state (docs/adr/0007). → { root, slug, dir, memory, tasks, log, legacy, legacyFile? }
 // 1. The nearest <dir>/.waymark/memory.md walking up from cwd (the home folder itself is skipped: ~/.waymark is Waymark's).

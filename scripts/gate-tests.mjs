@@ -26,6 +26,14 @@ export function problems(s) {
   return [s.tests === 0 && 'no test ran', s.fail && `${s.fail} failed`, s.cancelled && `${s.cancelled} cancelled`, s.skipped && `${s.skipped} skipped`, s.todo && `${s.todo} todo`].filter(Boolean).join(', ');
 }
 
+// The runner's "failing tests:" section without the stack frames: each failed test with its file and the assertion that
+// failed, so a run on a machine nobody can open (CI) says why. '' when nothing failed.
+export function failures(output) {
+  const lines = String(output).split('\n'), at = lines.findIndex((l) => /^✖ failing tests:/.test(l));
+  if (at < 0) return '';
+  return lines.slice(at).filter((l) => !/^\s+at /.test(l) && l.trim()).slice(0, 200).join('\n');
+}
+
 const testFiles = (root) => fs.readdirSync(path.join(root, 'tests')).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => path.join('tests', f));
 
 function run(root, extra = []) {
@@ -58,7 +66,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const r = go();
     const s = r.summary;
     console.log(`${r.why ? '✘' : '✔'} ${name}: ${s ? `tests ${s.tests}, pass ${s.pass}, skipped ${s.skipped}, todo ${s.todo}, fail ${s.fail}` : 'no summary'}${r.why ? ` — ${r.why}` : ''}`);
-    if (r.why) { bad++; console.log(r.output.split('\n').filter((l) => /^✖|^not ok|failing tests/.test(l)).slice(0, 20).join('\n')); }
+    if (r.why) { bad++; console.log(failures(r.output) || r.output.split('\n').filter((l) => /^✖|^not ok/.test(l)).slice(0, 20).join('\n')); }
   }
   console.log(bad ? `gate-tests: FAILED (${bad} of ${runs.length} runs not clean)` : `gate-tests: clean (skipped 0, todo 0, fail 0 in ${runs.length} run${runs.length > 1 ? 's' : ''})`);
   process.exitCode = bad ? 1 : 0;

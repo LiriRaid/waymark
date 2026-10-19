@@ -41,7 +41,7 @@ import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { learn } from './learn.mjs';
-import { norm, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
+import { norm, real, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 import { commentOnlyEdit } from './lib/comments.mjs';
 
@@ -113,7 +113,8 @@ function gitRuns(tools, cwd, verb) {
 // The repos the turn's commit commands ran in.
 const commitRepos = (tools, cwd) => new Set(gitRuns(tools, cwd, 'commit').map((r) => r.dir));
 const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; };
-const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+// one folder however it is spelled: git's long name, an 8.3 short name or a link (lib/paths real)
+const sameDir = (a, b) => norm(real(a)) === norm(real(b));
 
 // The other repos the task committed in with its ID (its tool calls' `cd <repo> && git commit`, `git -C <repo> commit`).
 // → [{ root, commits }] (commits newest first), the session's repo left out.

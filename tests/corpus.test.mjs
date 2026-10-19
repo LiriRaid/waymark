@@ -1,4 +1,5 @@
-// Waymark 2.0.15 · point 1: regression corpus. Each tests/corpus/*.json is a real (or synthetic) turn, trimmed to what the
+// Waymark 2.0.15 · point 1: regression corpus. Each tests/corpus/*.json is a synthetic turn, or a real one redacted
+// (no other project's code, no real user's paths or addresses: tests/privacy.test.mjs, docs/adr/0042), trimmed to what the
 // testigos read, with what the routine must NOT block on. Run: node --test tests/corpus.test.mjs
 // Case shape: { source, note, synthetic?, lines, expect: { absent: [regex…] } }
 //   absent: no `missing` or `findings` entry of the verdict may match any of these

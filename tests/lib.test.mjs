@@ -18,7 +18,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wm-lib-'));
 
 test('norm: forward slashes, lower case, no trailing slash — one answer for every caller', () => {
   const { norm } = L.paths;
-  assert.equal(norm('C:\\Users\\Gabri\\Proj\\'), 'c:/users/gabri/proj');
+  assert.equal(norm('C:\\Users\\Dev\\Proj\\'), 'c:/users/dev/proj');
   assert.equal(norm('/Home/Me/Proj//'), '/home/me/proj');
   assert.equal(norm(null), '');
   assert.equal(norm(undefined), '');

@@ -2189,7 +2189,36 @@ test('repairNotes: after an amend the task note is copied to the new commit with
   assert.deepEqual(repairNotes(repo, [{ id: 'other', note: { commit: old, sha: 'x' } }]), [], 'no commit of the branch carries that task');
 });
 
-test('stop hook: when the agent pushes the task, its note goes to the same remote', () => {
+// The project's yes to publish its notes (docs/adr/0035, 0042): `Notes push: all` in the preferences, removed after the test.
+const notesYes = (fn) => {
+  const prefs = path.join(home, 'preferences.md');
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(prefs, '- Notes push: all\n');
+  try { return fn(); } finally { fs.rmSync(prefs, { force: true }); }
+};
+
+test('stop hook: a push in a project with no yes publishes no note and never blocks (ADR 0042)', () => {
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-'));
+  temps.push(remote);
+  gitT(remote, 'init', '-q', '--bare');
+  const repo = memRepo('notes-no-yes'), id = `${new Date().toLocaleDateString('sv')} · T1`;
+  gitT(repo, 'remote', 'add', 'origin', remote);
+  commitTask(repo, id);
+  gitT(repo, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  gitT(repo, 'remote', 'set-url', '--push', 'origin', path.join(remote, 'no-access.git')); // a push of the notes would fail and block
+  const lines = [...l2Lines, ...ran('push1', 'git push origin HEAD:main')];
+  const transcript = path.join(home, 't-push-no-yes.jsonl');
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-push-no', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  const out = JSON.parse(r.stdout || '{}');
+  assert.notEqual(out.decision, 'block', JSON.stringify(out));
+  assert.doesNotMatch(out.systemMessage || '', /notas (subidas|sin subir)/);
+  assert.equal(gitT(remote, 'for-each-ref', 'refs/notes').stdout.trim(), '', 'the remote has no notes');
+  assert.ok(readNotes(repo).size > 0, 'the record stays a local note');
+});
+
+test('stop hook: when the agent pushes the task, its note goes to the same remote', () => notesYes(() => {
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-'));
   temps.push(remote);
   gitT(remote, 'init', '-q', '--bare');
@@ -2204,7 +2233,7 @@ test('stop hook: when the agent pushes the task, its note goes to the same remot
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: repo, session_id: 's-push', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.match(JSON.parse(r.stdout).systemMessage, /notas subidas a origin/);
   assert.match(gitT(repo, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/);
-});
+}));
 
 // ---- 2.0.14: git holds what was done, why and what for ----
 const stopRun = (name, lines, input) => {
@@ -2216,7 +2245,7 @@ const stopRun = (name, lines, input) => {
 };
 const bareRemote = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-remote-')); temps.push(d); gitT(d, 'init', '-q', '--bare'); return d; };
 
-test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => {
+test('2.0.14 notes the hook cannot push: the close blocks once naming notes push in the repo; the next stop says they reached the remote', () => notesYes(() => {
   const routine = JSON.parse(fs.readFileSync(path.join(SCRIPTS, '..', 'routine.json'), 'utf8'));
   const t = routine.testigos.find((x) => x.id === 'notes');
   assert.ok(t && t.enforce === 'block' && t.when === 'push', 'a testigo of the catalog that blocks');
@@ -2237,9 +2266,9 @@ test('2.0.14 notes the hook cannot push: the close blocks once naming notes push
   const again = stopRun('notes-fail-2', [say('Subí los notes.'), ...ran('np', 'node waymark.mjs notes push')], { cwd: repo, session_id: 's-nf', stop_hook_active: true, last_assistant_message: 'Subí los notes.' });
   assert.equal(again.decision, undefined, 'blocked once');
   assert.match(again.systemMessage || '', /notas .*en origin/);
-});
+}));
 
-test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => {
+test('2.0.14 a task committed in two repos: its record is a note in each, and the notes go to each repo pushed', () => notesYes(() => {
   const remote = bareRemote(), repo = memRepo('two-fe'), api = tmpRepo('two-api'), id = `${new Date().toLocaleDateString('sv')} · T1`;
   gitT(api, 'remote', 'add', 'origin', remote);
   const fe = commitTask(repo, id), apiSha = commitTask(api, id);
@@ -2251,7 +2280,7 @@ test('2.0.14 a task committed in two repos: its record is a note in each, and th
   const stub = readRecords(path.join(repo, '.waymark', 'provenance.jsonl'))[0];
   assert.deepEqual((stub.repos || []).map((r) => [path.basename(r.root), r.commits[0]]), [[path.basename(api), apiSha]], 'the stub names the other repo');
   assert.match(gitT(api, 'ls-remote', 'origin', 'refs/notes/waymark').stdout, /refs\/notes\/waymark/, 'pushed where the agent pushed');
-});
+}));
 
 test('2.0.14 the remote of a push skips flags and refspecs, and a git error never carries a URL\'s credentials', async () => {
   const { pushedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);

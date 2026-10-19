@@ -34,7 +34,7 @@ import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, options
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
-import { autoPushNotes } from './notes-remote.mjs';
+import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
@@ -1060,13 +1060,14 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a commit this turn may carry an earlier task's trailer (its work committed now): that record becomes its note
       try { if (turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)))) noteLateCommits(home.root, readRecords(home.log)); } catch {}
       try { if (home.dir && !home.legacy) saveLearned(home, rec); } catch (e) { logHookError('stop-hook engram', e); } // the learned layer: engram, written here, never by the agent
-      // the agent pushed (the user asked): in each repo it pushed, the notes the remote lacks go to the same remote, this
-      // task's included; a push the hook's process cannot make blocks once, after the record (testigo "notes")
+      // the agent pushed (the user asked): in each repo it pushed whose project the user said yes for (`Notes push:`,
+      // docs/adr/0035, 0042), the notes the remote lacks go to the same remote, this task's included; with no yes they stay
+      // local. A push the hook's process cannot make blocks once, after the record (testigo "notes")
       let pushed = '';
       const failed = [];
       try {
         for (const { root, remote } of pushedRepos(turn.tools, turn.results, cwd)) {
-          if (!shouldPushNotes(root, remote)) continue;
+          if (pushPref(projectHome(root).slug) !== 'yes' || !shouldPushNotes(root, remote)) continue;
           const r = pushNotes(root, remote), where = sameDir(root, home.root) ? '' : ` (${path.basename(root)})`;
           if (r.ok) pushed += ` · notas subidas a ${remote}${where}`;
           else failed.push({ root, remote, output: gitError(r.output) });

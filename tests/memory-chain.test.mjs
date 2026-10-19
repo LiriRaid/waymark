@@ -133,7 +133,7 @@ test('notes merge: a conflict on one commit keeps the local note (its stub hashe
   assert.deepEqual([n.get(shaB), n.get(sha3), n.has(sha)], ['{"id":"local"}', '{"id":"three"}', true]);
 });
 
-test('notes push: check says how many note commits are not pushed; the hook pushes on any push it sees', () => {
+test('notes push: check says how many note commits are not pushed; shouldPushNotes says when there is something to push (the hook pushes only with the project yes, ADR 0042)', () => {
   const { b } = pair();
   notes.notesSetup(b);
   assert.equal(notes.unpushedNotes(b), 0);

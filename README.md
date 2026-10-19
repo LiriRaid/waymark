@@ -350,6 +350,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0039 · Conformance across adapters, handoff between agents, adapters and stacks that draft themselves, and the reference bench](docs/adr/0039-conformance-handoff-generated-adapters-and-stacks-reference-bench.md)
 - [0040 · Every hook runs through a launcher that finds a Node able to run it, and the update notice is tested](docs/adr/0040-hooks-through-a-launcher-and-the-update-notice-tested.md)
 - [0041 · Qwen Code, Droid and Amp get an adapter, written from their documentation](docs/adr/0041-qwen-code-droid-and-amp-adapters.md)
+- [0042 · The public repository holds no data of the projects Waymark runs on](docs/adr/0042-no-data-of-the-projects-waymark-runs-on.md)
 <!-- adr-index:end -->
 
 ## Contributing back

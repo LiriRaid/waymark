@@ -146,7 +146,7 @@
   "waymark/scripts/lib/guard.mjs": "10be37c6694045b50976937019a640946e5a1cb80ed9032dc4f7f068396a0a05",
   "waymark/scripts/lib/hash.mjs": "33e17ff428fee9ad062bbe3a09a53a15598f5796a46ab572e9dfbe76b686ad96",
   "waymark/scripts/lib/packed.mjs": "0523a43efad5cec4173e0f436c5f9e970613b0ef1c939fc66a483fc484b67782",
-  "waymark/scripts/lib/paths.mjs": "032d6ed6c726931cfb2e38a5881c1d98021a6a3bee4bdd288931271690c22380",
+  "waymark/scripts/lib/paths.mjs": "c97a8fc45f5e9aec72c581c2deecfa37d13015c07ead125dd2ae51d2beba407e",
   "waymark/scripts/lib/risk.mjs": "97dda9d2034d35681e13574be18708b52f2f951e5cd195d99da220003e69b32d",
   "waymark/scripts/manifest.mjs": "99abe23723f89d647237c3fb4a3ed66d103aa9a06501839c5427a9144b7c3ff1",
   "waymark/scripts/matrix.mjs": "57325d7fd4cb91d05a58a8af543702106dbb22046b1c93b97e6ec94c00c82e82",

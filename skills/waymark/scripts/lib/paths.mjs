@@ -41,13 +41,16 @@ export const real = (p) => {
 // spells it (`real`), so a file and a root written through different names of one folder still match.
 let realTmp = null; // the temp folder's real spelling, once per process (keyed by what os.tmpdir() says now)
 const tmpReal = () => { const t = os.tmpdir(); if (realTmp?.t !== t) realTmp = { t, r: norm(real(t)) }; return realTmp.r; };
+// A relative path is read as written: resolving it against the process's own folder would make it scratch whenever
+// that folder is under temp.
+const realOf = (p) => (path.isAbsolute(String(p)) ? norm(real(p)) : norm(p));
 export const exemptPath = (file, root = '') => {
-  const f = norm(file), F = norm(real(file)), home = norm(os.homedir()), tmp = norm(os.tmpdir()), TMP = tmpReal();
+  const f = norm(file), F = realOf(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()), TMP = tmpReal();
   // a directory entry (git lists an untracked folder alone) is matched like the files in it
   if ([`${f}/`, `${F}/`].some((d) => d.startsWith(`${home}/.waymark/`) || d.includes('/.waymark/') || d.includes('/.claude/projects/'))) return true;
   const scratch = (x) => x.includes('/appdata/local/temp/') || x.startsWith('/tmp/') || (tmp && x.startsWith(`${tmp}/`)) || (TMP && x.startsWith(`${TMP}/`)) || x.includes('/scratchpad/');
   if (!scratch(f) && !scratch(F)) return false;
   if (!root) return true;
-  const r = norm(root), R = norm(real(root)), isTmp = (x) => x === tmp || x === TMP || x === '/tmp';
+  const r = norm(root), R = realOf(root), isTmp = (x) => x === tmp || x === TMP || x === '/tmp';
   return !(!isTmp(r) && !isTmp(R) && (f.startsWith(`${r}/`) || F.startsWith(`${R}/`)));
 };

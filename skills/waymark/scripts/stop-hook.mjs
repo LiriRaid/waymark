@@ -30,7 +30,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { changesProject, shellSkeleton, shellRuns, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
+import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
@@ -50,7 +50,7 @@ let projectRoot = ''; // the folder the turn's agent works in (cierreGaps sets i
 const exempt = (file) => exemptPath(file, projectRoot);
 const EDITS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
 const UI = /\.(html|css|scss|sass|less|tsx|jsx|vue|svelte|astro)$|\.component\.ts$/i;
-const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif)$/i;
+const NOT_CODE = /\.(md|mdx|txt|json|ya?ml|toml|ini|env|lock|csv|svg|png|jpe?g|gif|example|sample|dist)$/i; // .env.example, .env.sample, config.dist: placeholders, not code
 // An edit that only touches comments owes no gate, spec or build (lib/comments.mjs): not a code change for those testigos.
 const codeEdit = (t) => EDITS.test(t.name) && !exempt(fileOf(t)) && !NOT_CODE.test(fileOf(t)) && !commentOnlyEdit(t);
 // a test case: it()/test() (it.each, test.only…), RSpec's `it "…"`, Python's def test_, Go's func TestX(
@@ -60,7 +60,7 @@ const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i
 // A command's output that shows a failure, read only when its exit is not the gate's or the test's own (a pipe, a `;`).
 // Only the tools' own summary lines, never a count anywhere (a test titled "reports 2 errors" passes); eslint's
 // "✖ N problems" counts only with errors in it, since warnings alone exit 0.
-const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed/im; // vitest prints "Tests  N failed" (two spaces)
+const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed|Failed to resolve import|ERR_MODULE_NOT_FOUND|Cannot find module '/im; // vitest prints "Tests  N failed" (two spaces); a spec red because its import does not resolve is a red
 const FAIL_LINE = /^\s*(?:FAIL|×)\s+\S/m; // vitest's " FAIL  file > case" and "× case", case-sensitive: a log line "fail to connect" is no test failure
 const failOut = (text) => FAIL_OUT.test(text) || FAIL_LINE.test(text);
 // The part of a chained command whose own tool printed the failure: tsc's "error TS", eslint's "✖ N problems", a test runner's summary. The exit of a
@@ -99,6 +99,32 @@ const cmdOf = (t) => String(t.input.command || '');
 // A gate's command is kept whole: the hook re-runs it and learn.mjs writes it into Quality gates, so a cut one (it once became
 // `tsc -p ts`) failed on every later task. Only one over CMD_MAX is cut, and then marked `cut`: never re-run, never learned.
 const CMD_MAX = 2000;
+// What a test run runs: the files or folders it names, filters (-t, --grep, -k) and flags left out. [] is the whole suite. A later green run that
+// covers the same files clears an earlier red (a folder run covers a filtered single-spec run), whatever the text of either command.
+const VALUE_FLAGS = /^(-t|--testNamePattern|--grep|-g|-k|-m|-c|--config|--reporter|--project|--shard|-r|--outputFile|--root|--dir|--testTimeout|--pool|--environment)$/;
+const TEST_TOOL = /^(vitest|jest|mocha|karma|pytest|rspec|phpunit|ava|tap|test)$|^--test$/;
+export function testTargets(command) {
+  const out = [];
+  for (const p of shellRuns(command)) {
+    if (!p.test) continue;
+    const w = [...String(p.text).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]), at = w.findIndex((x) => TEST_TOOL.test(path.basename(x)));
+    for (let i = at + 1; at >= 0 && i < w.length; i++) {
+      const x = w[i];
+      if (VALUE_FLAGS.test(x)) i++;
+      else if (!x.startsWith('-') && !/^(run|watch|test|--)$/.test(x) && !/[=]/.test(x)) out.push(x.replace(/\\/g, '/').replace(/::.*$/, '').replace(/^\.\//, '').replace(/\/+$/, ''));
+    }
+  }
+  return [...new Set(out)];
+}
+export const testCovers = (later, earlier) => !later.length || (earlier.length > 0 && earlier.every((f) => later.some((r) => f === r || f.startsWith(`${r}/`))));
+// An edit that only re-exports (a barrel: `export * from './x'`): no behavior, so no spec has to fail before it.
+export const isBarrel = (t) => {
+  const s = String(t.input?.content ?? t.input?.new_string ?? '');
+  return s.trim() !== '' && s.split('\n').every((l) => !l.trim() || /^\s*(\/\/.*|\/\*.*\*\/|export\s+(\*(\s+as\s+\w+)?|type\s+\{[^}]*\}|\{[^}]*\})\s+from\s+['"][^'"]+['"];?)\s*$/.test(l));
+};
+// A stylesheet, or a template whose edits touch no binding or logic: no spec can see what it changes (jsdom does not compute layout).
+const BINDING = /\{\{|\*ng\w|@(?:if|for|switch|defer)\b|\(\w+\)\s*=|\[\(?\w[\w.-]*\)?\]\s*=|\bv-(?:if|for|on|bind|model)|\bonclick=|\bhx-/;
+export const styleOnly = (file, tools) => /\.(css|scss|sass|less)$/i.test(file) || (/\.html?$/i.test(file) && !tools.some((t) => EDITS.test(t.name) && norm(fileOf(t)) === norm(file) && BINDING.test(String(t.input?.new_string ?? t.input?.content ?? (t.input?.edits || []).map((e) => e.new_string).join('\n')))));
 export const keepCmd = (c) => { const s = String(c).replace(/\s+/g, ' ').trim(); return s.length > CMD_MAX ? { cmd: s.slice(0, CMD_MAX), cut: true } : { cmd: s }; };
 
 // The commits this turn made with a task's ID, in every repo it committed in: the session's, and the one a commit
@@ -223,7 +249,7 @@ function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
   if (skillCalled(after, /(^|:)code-review$/)) return [];
   const named = after.filter(shell).flatMap((t) => [...expandVars(cmdOf(t)).matchAll(/waymark\.mjs["']?\s+review\s+([^\n;&|]+)/g)]
     .flatMap((m) => m[1].match(/"[^"]*"|'[^']*'|\S+/g) || []).filter((a) => !/^\d*>/.test(a)).map((a) => a.replace(/^["']|["']$/g, '')));
-  const covers = (f) => named.some((a) => { const x = norm(a).replace(/^\.\//, ''); return norm(f) === x || norm(f).endsWith(`/${x}`); });
+  const covers = (f) => (SPEC.test(path.basename(f)) && named.length > 0) || named.some((a) => { const x = norm(a).replace(/^\.\//, ''); return norm(f) === x || norm(f).endsWith(`/${x}`); });
   return codeFiles.filter((f) => !covers(f));
 }
 // The repo that holds a folder on disk (its git top level), or null; cached per close.
@@ -323,7 +349,8 @@ export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').repl
 // The facts an Evidencia cites: `backticks`, and outside them 84/84, exit 0, a commit or blob hash. A chain of three or
 // more numbers (29/86/326/15/1: counts, a date) is not a pass/total.
 export function evidenceFacts(text) {
-  const s = String(text || ''), out = [...s.matchAll(/`([^`\n]{2,160})`/g)].map((m) => m[1].trim());
+  // what the user is told to check for themselves ("(check: …)") is no claim of the agent
+  const s = String(text || '').replace(/\(\s*check:[^)\n]*\)/gi, ' ').replace(/\bcheck:[^\n]*/gi, ' '), out = [...s.matchAll(/`([^`\n]{2,160})`/g)].map((m) => m[1].trim());
   for (const m of s.replace(/`[^`\n]*`/g, ' ').matchAll(/\b(?<!\/)\d+\/\d+\b(?!\/)|\bexit(?: code)? \d+\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi)) out.push(m[0]);
   return [...new Set(out)];
 }
@@ -390,15 +417,17 @@ function observeTurn(S) {
   // after it was written; with code changed before it, that run must fail. A spec that only adjusts setup or mocks (a
   // refactor) only has to pass. A spec the shell wrote (cat > x.spec.ts <<EOF … && npm test) counts as written there.
   // Config, scaffolding made by commands (`ng new`, installs) and the spec itself are not the code it tests.
-  const specEditable = (t) => !denied(t) && codeEdit(t) && !SPEC.test(path.basename(fileOf(t)));
+  const specEditable = (t) => !denied(t) && codeEdit(t) && !SPEC.test(path.basename(fileOf(t))) && !isBarrel(t); // a barrel is no behavior: no spec fails before it
   const cases = (s) => (String(s || '').match(CASES) || []).length;
   const shellSpecs = (t) => (shell(t) ? [...cmdOf(t).matchAll(/(?:>>?|\btee(?:\s+-a)?)\s*["']?([^\s"'<>|;&]+)/g)].map((m) => m[1]).filter((f) => SPEC.test(path.basename(f))) : []);
   const specWrites = new Map(); // spec basename → { at: first write, adds: cases added }
+  let casesRemoved = 0; // cases an edit took out of a spec: a spec that only moved them adds nothing new
   allTools.forEach((t, i) => {
     if (i < base || denied(t)) return;
     const add = (f, n) => { const k = path.basename(f).toLowerCase(), w = specWrites.get(k) || { at: i, adds: 0 }; w.adds += n; specWrites.set(k, w); };
     if (EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))) {
       const inp = t.input || {}; // a new file, or an edit whose text is unknown, counts as adding cases
+      casesRemoved += (inp.edits || [inp]).reduce((n, e) => n + (e.old_string === undefined ? 0 : Math.max(0, cases(e.old_string) - cases(e.new_string))), 0);
       add(fileOf(t), t.name === 'Write' ? cases(inp.content) || 1 : (inp.edits || [inp]).reduce((n, e) => n + (e.new_string === undefined ? 1 : Math.max(0, cases(e.new_string) - cases(e.old_string))), 0));
     } else for (const f of shellSpecs(t)) add(f, cases(cmdOf(t)) || 1);
   });
@@ -407,8 +436,11 @@ function observeTurn(S) {
     return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && (!codeFirst || failedRun(t, 'test')));
   };
   const inWorktree = allTools.some((t, i) => i >= base && testCmd(t) && inCopy(t));
-  const notRed = inWorktree ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
-    .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !w || (w.adds > 0 && !ranRed(w)); });
+  // red-first is for new behavior: not for a spec that only moved its cases, nor for one an earlier turn of the task already changed
+  const earlierSpecs = new Set((ctx.taskTools || []).filter((t) => !turn.tools.some((x) => x.id === t.id) && EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))).map((t) => path.basename(fileOf(t)).toLowerCase()));
+  const movedOnly = casesRemoved > 0 && [...specWrites.values()].reduce((n, w) => n + w.adds, 0) <= casesRemoved;
+  const notRed = inWorktree || movedOnly ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
+    .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !earlierSpecs.has(b.toLowerCase()) && (!w || (w.adds > 0 && !ranRed(w))); });
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
   // A run that never happened: the tool is not installed, or the command was refused (a permission denied, a hook that stopped it).
   const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || ''));
@@ -497,7 +529,10 @@ function observeTurn(S) {
 // Testigo build: a build that passed in the repo of each changed code file, after the last code change in that repo.
 function observeBuild(S) {
   const { apart, code, ctx, exitFor, last, lastCode, lastIdx, output, runsOf, shellChange, turn } = S;
-  const near = code.length ? specsNear(code) : null;
+  // a stylesheet or a template with no binding is no logic: no spec can see it (jsdom does not compute layout), so none is asked for
+  const logic = code.filter((f) => !styleOnly(f, turn.tools)), near = logic.length ? specsNear(logic) : null;
+  // the last change a build has to follow: a spec edited after a passing build needs the spec run and the typecheck, not a new build
+  const lastBuilt = lastIdx((t) => (codeEdit(t) && !SPEC.test(path.basename(fileOf(t)))) || shellChange(t));
   const committed = turn.tools.some((t) => shell(t) && /\bgit\b[^|;&\n]*\scommit\b/.test(bare(t)));
   // Testigo build: a build that passed (exit 0, or no failure in its output when its exit is another part's) in the repo of
   // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
@@ -506,15 +541,15 @@ function observeBuild(S) {
   const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !failOut(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
-  const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && repoAt(path.dirname(fileOf(t))) === r));
-  const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastCode : last) && (!b.repo || !r || b.repo === r)); };
-  const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastCode));
+  const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && !SPEC.test(path.basename(fileOf(t))) && repoAt(path.dirname(fileOf(t))) === r));
+  const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastBuilt : last) && (!b.repo || !r || b.repo === r)); };
+  const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastBuilt));
   return { near, committed, buildAfter };
 }
 
 // Testigo evidence (docs/adr/0025, 0026): an Evidencia "observada" needs a check after the last change, and each fact it cites is looked up in the tool calls.
 function observeEvidence(S) {
-  const { ctx, denied, lastChange, observed, output, reply, result, runsOf, turn } = S;
+  const { changed, ctx, denied, lastChange, observed, output, reply, result, runsOf, turn } = S;
   const hasCierre = CIERRE.test(reply);
   // Testigo evidence (docs/adr/0025): an Evidencia "observada" needs a check after the last change (a read, a search, a
   // run; a commit, a push, a question or a skill load checks nothing), and each fact it cites (`backticks`, 84/84, exit 0,
@@ -561,10 +596,23 @@ function observeEvidence(S) {
   };
   const ratioShown = (f) => {
     const m = f.match(/^(\d+)\/(\d+)$/);
+    if (m && calls.some((c) => new RegExp(`Executed\\s+${m[1]}\\s+of\\s+${m[2]}\\b`, 'i').test(c.out))) return true; // Karma: "Executed 5 of 5 SUCCESS"
+    if (m && m[1] === m[2] && calls.some((c) => new RegExp(`\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out))) return true; // all of them passed: "8 passed" says 8/8
     return !!m && calls.some((c) => new RegExp(`(?:pass(?:ed)?|✓|ok)\\D{0,8}${m[1]}\\b|\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out) && new RegExp(`(?:tests?|total)\\D{0,8}${m[2]}\\b|\\b${m[2]}\\s+(?:tests?|total)`, 'i').test(c.out));
   };
   const stemShown = (f) => { const m = flat(f).match(/^(?:.*\/)?([\w-]{7,})\.\w{1,6}$/); return !!m && hay.includes(m[1]); };
-  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || unquotedHay.includes(unquoted(f)) || lineShown(f) || pathShown(f) || wordsTogether(f) || ratioShown(f) || stemShown(f); };
+  // A command is looked up as a person writes it: W for the waymark script, with or without npx / pnpm exec / pnpm run, or as the package script that holds it
+  // (`ng build` is what `pnpm run build` ran). An identifier (a route, a CSS variable, a host, a file name, a parameter, a permission key) is no command: it is
+  // checked against what the task wrote and the files it changed, not against what a command printed.
+  const COMMANDISH = /^(?:W|node|npx|pnpm|npm|yarn|bun|bunx|git|tsc|eslint|vitest|jest|ng|nest|python3?|pytest|cargo|go|dotnet|mvn|gradle|make|docker|curl|ls|cat|grep|rg|sed|awk|find|echo|cd|rm|cp|mv|mkdir|bash|sh|pwsh|powershell|php|bundle|rake|rails|terraform|kubectl|gh)\b/;
+  const scripts = (() => { try { return JSON.parse(fs.readFileSync(path.join(ctx.root || '', 'package.json'), 'utf8')).scripts || {}; } catch { return {}; } })();
+  const editsText = flat(turn.tools.filter((t) => EDITS.test(t.name)).map((t) => [t.input?.content, t.input?.new_string, ...(t.input?.edits || []).map((e) => e.new_string)].filter(Boolean).join(' ')).join(' '));
+  const names = new Set(changed.map((f) => path.basename(f).toLowerCase()));
+  const viaScript = (f) => Object.entries(scripts).some(([n, body]) => String(body).includes(f) && new RegExp(`(?:run|npm|pnpm|yarn)\\s+${esc(n)}\\b`).test(hay));
+  const variants = (f) => [f.replace(/^W\s+/, 'waymark.mjs '), f.replace(/^(?:pnpm|npm|yarn|bun)\s+(?:exec\s+|run\s+|dlx\s+)?/, ''), f.replace(/^(?:npx|bunx|pnpm exec)\s+/, '')].filter((v) => v !== f);
+  const identifier = (f) => !COMMANDISH.test(f) && !/^(?:\d+\/\d+|exit(?: code)? \d+|[0-9a-f]{7,40})$/i.test(f);
+  const backedId = (f) => editsText.includes(flat(f)) || names.has(path.basename(f).toLowerCase());
+  const backed = (f) => { const e = f.match(/^exit(?: code)? (\d+)$/i); return e ? (e[1] === '0' ? shellRan(false) : shellRan(true) || hay.includes(`exit code ${e[1]}`)) : hay.includes(flat(f)) || unquotedHay.includes(unquoted(f)) || lineShown(f) || pathShown(f) || wordsTogether(f) || ratioShown(f) || stemShown(f) || variants(f).some((v) => hay.includes(flat(v)) || unquotedHay.includes(unquoted(v))) || viaScript(f) || (identifier(f) && backedId(f)); };
   observed.evidence = claim && { claim, checkedAfter: turn.tools.slice(lastChange + 1).some(checks), cited: cited.length, unbacked: cited.filter((f) => !backed(f)).slice(0, 5) };
   return { hasCierre };
 }
@@ -645,7 +693,7 @@ function gateWitness(S) {
     observed.gate = run || null;
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
-    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
+    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && (cmdKey(x) === cmdKey(t) || testCovers(testTargets(cmdOf(x)), testTargets(cmdOf(t)))) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
     // a gate the agent tried and the machine could not run (the tool is not installed): not a failure of the code, and not "nothing ran"
@@ -832,7 +880,20 @@ function omittedOf(S, steps) {
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
 // The turn is observed once (observeTurn); each testigo is a function of what was observed (S) and routine.json says which
 // apply at the level and which block (docs/adr/0026).
+// A shell call that changes files and then runs a gate in the same command is two calls, in order: the change and the check after it (runs.mjs
+// splitAtChange). The second keeps the call's id, so its result and exit are the check's; the first has none.
+export function splitShellCalls(tools) {
+  return (tools || []).flatMap((t) => {
+    const s = shell(t) ? splitAtChange(cmdOf(t)) : null;
+    return s ? [{ ...t, id: `${t.id}#change`, input: { ...t.input, command: s[0] } }, { ...t, input: { ...t.input, command: s[1] } }] : [t];
+  });
+}
+
 export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.prompt], ctx = {}) {
+  const sameTools = allTools === turn.tools;
+  turn = { ...turn, tools: splitShellCalls(turn.tools) };
+  allTools = sameTools ? turn.tools : splitShellCalls(allTools);
+  ctx = { ...ctx, ...(ctx.taskTools ? { taskTools: splitShellCalls(ctx.taskTools) } : {}), ...(ctx.stretchTools ? { stretchTools: splitShellCalls(ctx.stretchTools) } : {}) };
   projectRoot = ctx.cwd || '';
   const byKey = new Map();
   for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);

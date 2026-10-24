@@ -7,7 +7,7 @@ import path from 'node:path';
 // to /dev/null, $null, NUL or a temp/scratch folder.
 // Temp/scratch locations: a whole path segment, so project paths such as src/templates/ are not mistaken for temp.
 const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|%TEMP%|\$T\b|mktemp/i;
-const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
+const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|perl\s+(?:-\w+\s+)*-\w*i\w*(?:\s|$)|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
 // The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
 // in it is an index in the command): a ">" there is code or text, not a redirect (`node -e "…x=>{…}"`).
 // quotes: false keeps the quoted text — `bash -c "npm test"` still runs a test — and blanks only the bodies (a spec
@@ -29,9 +29,25 @@ export function shellSkeleton(command, { quotes = true } = {}) {
   return out.join('');
 }
 
+// A script an interpreter runs from a heredoc or -e/-c (python - <<'EOF', node -e "…") that writes, moves or deletes files: the agent edits through
+// Python or Node as often as through Edit, and neither the memory pack nor the decision gate saw it. Writing to a temp/scratch place is no change.
+const INTERPRETER = /(?:^|[;&|(\s])(?:python3?|py|node|deno|ruby|perl|php)(?:\.exe)?\s+(?:-[A-Za-z]*\s+)*(?:-\s*)?(?:<<|-[ecr]\b|--eval\b|-p\b)/;
+const FILE_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|renameSync|copyFileSync)\s*\(|\.write_text\s*\(|\.write_bytes\s*\(|\bopen\s*\([^)]*,\s*['"][^'"]*[wa+][^'"]*['"]|\bshutil\.(?:copy|copyfile|move|rmtree)\s*\(|\bos\.(?:remove|rename|unlink)\s*\(|\bFile\.(?:write|rename|delete)\s*\(|\bfile_put_contents\s*\(/;
+export const scriptWrites = (command) => INTERPRETER.test(String(command || '')) && FILE_WRITES.test(String(command || '')) && !TEMP.test(String(command || ''));
+// The files such a script names to write: a quoted path in front of the call (open('a.ts', 'w'), writeFileSync('a.ts', …), Path('a.ts').write_text).
+export function scriptWriteTargets(command) {
+  const c = String(command || '');
+  if (!scriptWrites(c)) return [];
+  const out = [];
+  for (const re of [/\b(?:writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|renameSync|copyFileSync)\s*\(\s*(['"`])([^'"`\n]+)\1/g, /\bopen\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*['"][^'"]*[wa+]/g, /\bPath\s*\(\s*(['"])([^'"\n]+)\1\s*\)\s*\.write_(?:text|bytes)/g]) {
+    for (const m of c.matchAll(re)) out.push(m[2]);
+  }
+  return [...new Set(out)];
+}
+
 export function mutatesFiles(command) {
   const c = String(command || '');
-  if (MUTATING.test(c)) return true;
+  if (MUTATING.test(c) || scriptWrites(c)) return true;
   const skeleton = shellSkeleton(c);
   for (const m of skeleton.matchAll(/(?<![0-9&>=-])>{1,2}/g)) { // a redirect outside quotes; its target read from the command
     const t = c.slice(m.index + m[0].length).match(/^\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;]+))/), target = t && (t[1] ?? t[2] ?? t[3]);
@@ -128,20 +144,21 @@ export function shellRuns(command, depth = 0) {
   const out = [];
   let from = 0, cd = null;
   const push = (to, sep) => {
+    const at = from; // where this part starts in the command (a heredoc body is blanked, so the next part starts after it)
     const text = full.slice(from, to).trim().replace(/^[({]\s*/, '').replace(/\s*[)}]$/, ''); // a subshell or group: (cd x && npm test)
     from = to + sep.length;
     if (!text) return;
     const words = tokens(text), dir = /^(cd|pushd|push-location|set-location|sl|chdir)$/i.test(words[0] || '') ? words.slice(1).find((x) => !/^(\/d|-path)$/i.test(x)) : null;
     const back = /^(pop-location|popd)$/i.test(words[0] || '') || (/^cd$/i.test(words[0] || '') && words[1] === '-'); // the folder before the last push
-    if (back) { cd = null; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
-    if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null }); return; }
-    const k = classify(words), at = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
+    if (back) { cd = null; out.push({ text, gate: false, build: false, test: false, sep, cd: null, at }); return; }
+    if (dir) { cd = dir; out.push({ text, gate: false, build: false, test: false, sep, cd: null, at }); return; }
+    const k = classify(words), where = k.dir ? (cd ? `${cd}/${k.dir}` : k.dir) : cd;
     if (k.inner !== undefined && depth < 2) {
       const inner = shellRuns(k.inner, depth + 1);
-      out.push({ text, gate: inner.some((p) => p.gate), build: inner.some((p) => p.build), test: inner.some((p) => p.test), sep, cd });
+      out.push({ text, gate: inner.some((p) => p.gate), build: inner.some((p) => p.build), test: inner.some((p) => p.test), sep, cd, at });
       return;
     }
-    out.push({ text, gate: !!k.gate, build: !!k.build, test: !!k.test, sep, cd: at });
+    out.push({ text, gate: !!k.gate, build: !!k.build, test: !!k.test, sep, cd: where, at });
   };
   for (const m of mask.matchAll(/&&|\|\||[;|\n]/g)) push(m.index, m[0]);
   push(full.length, '');
@@ -200,3 +217,17 @@ export function commandKind(command, copies = []) {
 }
 // A run that is not the task's to answer for: in a clean copy or temp folder, or from a place the hook cannot tell.
 export const apart = (command, copies = []) => ['copy', 'unknown'].includes(commandKind(command, copies));
+
+// A command that changes files and then runs a check (`python - <<'EOF' … EOF && pnpm exec tsc`, `sed -i … && (tsc; build)`) holds two events in order:
+// the change, then the check that follows it. The testigos read calls, one event each, so a check inside the call that made the change counted as
+// before it. → [the change's part, the rest] as two commands, or null when the command is not that shape.
+const INTERP_PART = /^(?:\S*[\/])?(?:python3?|py|node|deno|ruby|perl|php)(?:\.exe)?\b/i;
+export function splitAtChange(command) {
+  const c = String(command || ''), parts = shellRuns(c), script = scriptWrites(c);
+  let m = -1;
+  parts.forEach((p, i) => { if (changesProject(p.text) || (script && INTERP_PART.test(p.text.trim()))) m = i; });
+  if (m < 0) return null;
+  const rest = parts.slice(m + 1);
+  if (!rest.some((p) => p.gate || p.build || p.test)) return null;
+  return [c.slice(0, rest[0].at), c.slice(rest[0].at)];
+}

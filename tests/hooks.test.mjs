@@ -2451,7 +2451,8 @@ test('build: each repo needs a build that passed after the last code change in t
   const built = (l) => judge(l).steps.find((s) => s.id === 'build').pass;
   const both = [...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('api'), build('web')];
   assert.equal(built([...both, call('Write', { file_path: spec }), build('web')]), true, 'the API did not change after its build');
-  assert.equal(built([...both, call('Write', { file_path: spec })]), false, 'the front changed after its build');
+  assert.equal(built([...both, call('Edit', { file_path: web })]), false, 'the front changed after its build');
+  assert.equal(built([...both, call('Write', { file_path: spec })]), true, 'a spec written after the build needs the spec run and the typecheck, not a new build (2.0.19 point 3h)');
   assert.equal(built([...both, call('Edit', { file_path: api }), build('web')]), false, 'the API changed after its build and only the front was rebuilt');
   assert.equal(built([...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('web')]), false, 'the API was never built');
 });

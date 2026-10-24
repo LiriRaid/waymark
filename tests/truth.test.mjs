@@ -235,3 +235,115 @@ test('stdin: an agent that writes the whole call and leaves stdin open is not wa
   assert.equal(r.killed, false, 'the hook ended on its own once the object was complete');
   assert.ok(Date.now() - t < 6000);
 });
+
+// ---- 3e · a change and the check after it, in one command, count in order ----
+const { splitAtChange, changesProject, scriptWrites } = await import(`file://${SCRIPTS}/runs.mjs`);
+const { commandFiles } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+const PY = (file) => `python - <<'EOF'\nfrom pathlib import Path\nPath('${file}').write_text('retry = 3')\nEOF\n`;
+test('3e: logic — a script that rewrites a file and builds in the same command: the build counts as after the change', () => {
+  const lines = (command) => [...opening(2), ...sh(command), ...run('Skill', { skill: 'code-review' })];
+  const more = { ...inRepo, gitChanged: [FILE] };
+  const g = judge(lines(`${PY('src/orders.service.mjs')}pnpm exec tsc --noEmit && pnpm run build`), more);
+  assert.equal(step(g, 'build').pass, true, 'the build ran after the write');
+  assert.equal(g.observed.gates.length, 1, 'the check after the change is a gate of the task');
+  // counter-example: the build came first and the write after it
+  const before = judge(lines(`pnpm run build && sed -i s/a/b/ src/orders.service.mjs`), more);
+  assert.equal(step(before, 'build').pass, false, 'a build before the change proves nothing');
+});
+
+test('3e: CSS/HTML — `sed -i` on a stylesheet followed by the build in one command counts the same', () => {
+  const more = { ...inRepo, gitChanged: [CSS] };
+  const ok = judge([...opening(2), ...sh("sed -i 's/28px/40px/' src/app.css && pnpm run build"), ...run('Skill', { skill: 'code-review' })], more);
+  assert.equal(step(ok, 'build').pass, true);
+  assert.equal(step(judge([...opening(2), ...sh("pnpm run build; sed -i 's/28px/40px/' src/app.css"), ...run('Skill', { skill: 'code-review' })], more), 'build').pass, false, 'counter-example');
+});
+
+test('3e: sed -i, perl -pi and a script that writes are changes for the pack and the decision gate; a script that only prints, or writes to temp, is not', () => {
+  assert.ok(changesProject("sed -i 's/a/b/' src/a.ts"));
+  assert.ok(changesProject("perl -pi -e 's/a/b/' src/a.ts"));
+  assert.ok(changesProject(PY('src/a.ts')));
+  assert.ok(changesProject(`node -e "require('fs').writeFileSync('src/a.js','x')"`));
+  assert.ok(!changesProject("perl -ne 'print' src/a.ts"), 'reading with perl');
+  assert.ok(!changesProject(`node -e "console.log(1)"`));
+  assert.ok(!scriptWrites(`node -e "require('fs').writeFileSync('/tmp/x.js','x')"`), 'a temp file');
+  const repo = tmpRepo({ 'src/a.ts': 'x' });
+  assert.deepEqual(commandFiles(PY('src/a.ts'), repo).map((f) => path.relative(repo, f).replace(/\\/g, '/')), ['src/a.ts'], 'the pack is handed for the file the script writes');
+  assert.equal(splitAtChange('pnpm exec tsc --noEmit'), null);
+  assert.equal(splitAtChange('sed -i s/a/b/ src/a.ts'), null, 'a change with no check after it is one event');
+});
+
+// ---- 3f · reds clear properly ----
+const RED = ' FAIL  src/a.spec.ts > waits\nAssertionError: expected 1 to be 2';
+const redAfterEdit = (file, runs) => judge([...opening(2), ...edit(file), ...sh('node --check src/orders.service.mjs'), ...runs], inRepo).observed.tests.failed;
+test('3f: logic — a folder run that passes clears the red of one spec run filtered by name', () => {
+  const failed = (...tail) => redAfterEdit(FILE, [...sh('pnpm exec vitest run src/a.spec.ts -t "waits"', { error: true, out: RED }), ...tail]);
+  assert.deepEqual(failed(...sh('pnpm exec vitest run src')), [], 'the folder covers the spec');
+  assert.deepEqual(failed(...sh('pnpm exec vitest run')), [], 'the whole suite covers it too');
+  assert.equal(failed().length, 1, 'counter-example: nothing ran after it');
+  assert.equal(failed(...sh('pnpm exec vitest run tests/other.spec.ts')).length, 1, 'counter-example: a green run of other files covers nothing');
+  assert.equal(failed(...sh('pnpm exec vitest run src', { error: true, out: RED })).length, 2, 'counter-example: the folder run is red too');
+});
+test('3f: CSS/HTML — the same after a stylesheet edit; a load timeout is a flake the same green run clears', () => {
+  const failed = (out, ...tail) => redAfterEdit(CSS, [...sh('pnpm exec vitest run src/app.spec.ts', { error: true, out }), ...tail]);
+  assert.deepEqual(failed(RED, ...sh('pnpm exec vitest run src')), []);
+  const TIMEOUT = ' FAIL  src/app.spec.ts\nError: Hook timed out in 10000ms.';
+  assert.deepEqual(failed(TIMEOUT, ...sh('pnpm exec vitest run src/app.spec.ts')), [], 'the same file, green: the timeout was the load');
+  assert.equal(failed(TIMEOUT).length, 1, 'counter-example: without that green run it stays red');
+});
+
+// ---- 3g · red-first only where there is new behavior ----
+const caseText = (n) => Array.from({ length: n }, (_, i) => `it('case ${i}', () => {});`).join('\n');
+const specEdit = (file, oldCases, newCases) => run('Edit', { file_path: file, old_string: caseText(oldCases), new_string: caseText(newCases) });
+const SPEC_A = '/work/proj/src/a.spec.mjs', SPEC_B = '/work/proj/src/b.spec.mjs';
+test('3g: logic — a spec that only moved its cases, a barrel and a red from an unresolved import ask for no clean copy', () => {
+  const red = (lines, more = {}) => judge([...opening(2), ...lines], { ...inRepo, ...more }).observed.tests.red;
+  assert.equal(red([...specEdit(SPEC_A, 2, 0), ...specEdit(SPEC_B, 0, 2)]), true, 'cases left one spec and entered another');
+  assert.equal(red([...specEdit(SPEC_B, 0, 2)]), false, 'counter-example: new cases and no run before the code');
+  const barrel = run('Write', { file_path: '/work/proj/src/index.mjs', content: "export * from './orders.service.mjs';\n" });
+  assert.equal(red([...barrel, ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')]), true, 'a barrel before the spec is no behavior');
+  assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')]), false, 'counter-example: real code first, then a green run');
+  assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs | tail -5', { out: 'Error: Failed to resolve import "./orders.service.mjs"' })]), true, 'its import does not resolve: that is a red');
+  const earlier = { taskTools: [{ name: 'Edit', id: 'earlier-1', input: { file_path: SPEC_B, new_string: caseText(1) } }] };
+  assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')], earlier), true, 'a spec an earlier turn of the task already changed');
+});
+test('3g: CSS/HTML — a stylesheet with a spec beside it needs no spec; a template that touches a binding does', () => {
+  const repo = tmpRepo({ 'src/app.css': 'a {}', 'src/app.html': '<a></a>', 'src/app.spec.ts': '' });
+  const at = (f) => path.join(repo, f);
+  const spec = (lines) => step(judge([...opening(2), ...lines, ...sh('node --check src/orders.service.mjs')], { cwd: repo }), 'spec');
+  assert.ok(!spec(edit(at('src/app.css'))) || spec(edit(at('src/app.css'))).pass !== false, 'a stylesheet');
+  assert.ok(!spec(run('Edit', { file_path: at('src/app.html'), new_string: '<a class="b">x</a>' })) || spec(run('Edit', { file_path: at('src/app.html'), new_string: '<a class="b">x</a>' })).pass !== false, 'markup with no binding');
+  assert.equal(spec(run('Edit', { file_path: at('src/app.html'), new_string: '<a (click)="go()">{{ label }}</a>' })).pass, false, 'counter-example: a binding brings the spec back');
+});
+
+// ---- 3h · a build is not asked again for a spec; Evidencia reads commands, not words ----
+test('3h: a spec edited after a passing build needs no new build; the same after real code does', () => {
+  const lines = (last) => [...opening(2), ...edit(), ...sh('node --check src/orders.service.mjs'), ...run('Skill', { skill: 'code-review' }), ...sh('pnpm run build'), ...last];
+  const specAfter = judge(lines([...specEdit(SPEC_A, 0, 1), ...sh('node --test src/a.spec.mjs')]), inRepo);
+  assert.equal(step(specAfter, 'build').pass, true, 'only a spec changed since the build');
+  assert.equal(step(judge(lines([...edit(), ...sh('node --check src/orders.service.mjs')]), inRepo), 'build').pass, false, 'counter-example: code changed since the build');
+});
+const judgeEv = (lines, evidencia, more = {}) => cierreGaps(currentTurn(lines), `## Cierre · ${P.taskIds(fresh()).next}\nResultado: hecho\nEvidencia: ${evidencia}\nAprendido: x ← y`, undefined, undefined, { ids: P.taskIds(fresh()), decisions: [{ question: '¿Cómo?', chosen: 'Backoff', discarded: ['Cola'] }], ...inRepo, ...more });
+const evid = (lines, evidencia, more) => judgeEv(lines, evidencia, more).observed.evidence;
+test('3h: logic — a command is found as a person writes it (W, npx, a package script, counts); identifiers are checked against the diff, not the output', () => {
+  const root = tmpRepo({ 'package.json': JSON.stringify({ scripts: { build: 'node scripts/create-env.mjs && ng build' } }) });
+  const base = [...opening(2), ...edit('/work/proj/src/orders.service.mjs'), ...sh('node "/s/waymark/scripts/waymark.mjs" review src/orders.service.mjs'), ...sh('pnpm run build', { out: 'Build at: ok' }), ...sh('npx karma start', { out: 'Executed 5 of 5 SUCCESS' }), ...sh('pnpm exec vitest run', { out: ' Tests  8 passed (8)' })];
+  const e = (text, more) => evid(base, text, { root, ...more });
+  assert.deepEqual(e('observada `W review` sin hallazgos').unbacked, [], 'the W alias');
+  assert.deepEqual(e('observada `ng build` pasó').unbacked, [], 'the script that ran is the build');
+  assert.deepEqual(e('observada 5/5 en Karma y 8/8 en vitest').unbacked, [], 'counts as the tools print them');
+  assert.deepEqual(e('observada la ruta `/help/<key>` y `--p-orange-100` en `app.html`', { gitChanged: [] }).unbacked.sort(), ['--p-orange-100', '/help/<key>', 'app.html'], 'counter-example: identifiers nobody wrote or changed are still unbacked');
+  assert.deepEqual(e('observada `pnpm run lint` sin errores').unbacked, ['pnpm run lint'], 'counter-example: a command that never ran');
+  assert.deepEqual(e('inferida de los docs (check: `git stash` y `pnpm run build`)').unbacked, [], 'what the user is told to check is no claim');
+});
+test('3h: CSS/HTML — a class name or variable the task wrote in a stylesheet is backed by the diff', () => {
+  const lines = [...opening(2), ...run('Edit', { file_path: CSS, new_string: '.btn-primary { width: var(--btn-width); }' }), ...sh('pnpm run build')];
+  assert.deepEqual(evid(lines, 'observada `--btn-width` y `.btn-primary` en el CSS').unbacked, []);
+  assert.deepEqual(evid(lines, 'observada `--other-var` en el CSS').unbacked, ['--other-var'], 'counter-example');
+});
+test('3h: .env.example and a popped git stash are not changes', () => {
+  assert.equal(judge([...opening(2), ...sh('git stash -u && pnpm run build; git stash pop')], inRepo), null, 'a stash that came back leaves the tree as it was: nothing to judge');
+  const g = judge([...opening(2), ...edit('/work/proj/.env.example'), ...edit(FILE), ...sh('node --check src/orders.service.mjs')], inRepo);
+  const asked = g.missing.find((m) => /review/i.test(m)) || '';
+  assert.match(asked, /orders\.service\.mjs/, 'counter-example: real code still asks for its review');
+  assert.doesNotMatch(asked, /\.env\.example/, 'a placeholder file is no code to review');
+});

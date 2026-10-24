@@ -16,7 +16,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
-import { changesProject, shellSkeleton, shellRuns } from './runs.mjs';
+import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
 import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
@@ -176,6 +176,8 @@ export function commandFiles(command, cwd = process.cwd()) {
       if (fs.existsSync(path.dirname(abs))) out.add(abs);
     }
   }
+  // the files a script run from a heredoc or -e writes (python, node): their names are in its body, which the parts above blank
+  for (const f of scriptWriteTargets(command)) { const abs = path.resolve(cwd, f); if (fs.existsSync(path.dirname(abs))) out.add(abs); }
   return [...out];
 }
 

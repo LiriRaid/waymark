@@ -45,13 +45,14 @@ test('scratch rule: a project under a scratch folder is a project; the routine\'
   assert.equal(exemptPath(path.join(os.homedir(), 'proyecto', 'a.ts'), path.join(os.homedir(), 'proyecto')), false);
 });
 
-test('first prompt: Waymark\'s own .gitignore lines are written before the snapshot, so the turn sees no change', () => {
+test('first prompt: Waymark\'s own ignore lines are written before the snapshot, so the turn sees no change', () => {
   const repo = fs.mkdtempSync(path.join(os.homedir(), 'first-prompt-'));
   spawnSync('git', ['init', '-q'], { cwd: repo });
   fs.mkdirSync(path.join(repo, '.waymark'));
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n\n## Identity\n- Stack: test\n');
   const session = `s-first-${Math.random()}`;
   spawnSync(process.execPath, [path.join(SCRIPTS, 'rule0-hook.mjs')], { input: JSON.stringify({ cwd: repo, session_id: session, prompt: 'hola' }), env: process.env, encoding: 'utf8' });
-  assert.ok(/\.waymark/.test(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')), 'the ignore lines are there');
+  assert.ok(/\.waymark/.test(fs.readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8')), 'the ignore lines are there');
+  assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'and no .gitignore was written into the repo');
   assert.deepEqual(P.turnChanged(session, repo), [], 'and are not the turn\'s change');
 });

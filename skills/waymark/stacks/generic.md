@@ -34,7 +34,7 @@ Common command shapes, to be verified against the project before use, never assu
 | Java/Kotlin | `./gradlew test` or `mvn test` | `./gradlew check` | `./gradlew build` |
 | .NET | `dotnet test` | `dotnet format --verify-no-changes` | `dotnet build` |
 
-Package manager rule for the owner: Rails projects use Bundler (`bundle`), never pnpm. Respect lockfiles (`Gemfile.lock`, `poetry.lock`, `uv.lock`, `Cargo.lock`, `go.sum`).
+Package manager: Rails projects use Bundler (`bundle`), whatever `package.json` exists for assets. The repo's lockfile wins everywhere: respect lockfiles (`Gemfile.lock`, `poetry.lock`, `uv.lock`, `Cargo.lock`, `go.sum`).
 
 ### Record the commands in project memory
 Once each command has run successfully, write it into the "Quality gates (verified commands)" table of the project memory file so future sessions skip discovery. Project memory is the agent's private layer, so no user approval is needed; ask the user only when a command is ambiguous. Example:

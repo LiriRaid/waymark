@@ -39,6 +39,8 @@ After each L1+ task, collect what was **non-obvious and new**: something you had
 
 Format: `- [YYYY-MM-DD] <lesson> — <why> (source: <project>)`.
 
+**2b. A rule the user states is written by scope, never in the agent's own memory** (`~/.claude/projects/*/memory/` and its equivalents: other agents never read it, and it contradicts "a rule exists only where it is written"). A style or delivery rule valid everywhere → `~/.waymark/preferences.md` → *Learned preferences*. A rule of one project (migrate with its script, who deploys or opens PRs, commits by topic) → that project's `.waymark/memory.md` → *Conventions specific to this project*. Each line carries the date and the user's own phrase. When a newer rule contradicts an older one, mark the older `(expired <date>: <the new rule>)` instead of leaving both. The end-of-turn hook says so in its notice when a turn wrote into an agent's native memory.
+
 **3. Promotion.** A staged learning seen a second time (any project) is promoted to its final destination from the table and removed from staging. A user correction is promoted immediately.
 
 **4. Consolidation (the skills evolve).** When a `## Learned notes` / `## Learned rules` list passes ~10 items, fold them into the body of the skill (the Procedure, Rules or Anti-patterns they refine), keep the meaning, and clear the list. Report it in the closing report.

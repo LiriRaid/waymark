@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
+import { census, fillMemory } from './convention.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins, gateCell } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
@@ -75,7 +76,13 @@ export function digest(cwd, agentName = 'claude') {
     out.push(`Project memory: none for ${cwd}. Create ${where} now with the Minimal bootstrap (waymark/references/project-detection.md) before the first edit${home.dir ? '; the end-of-turn hook keeps .waymark/ out of git' : ''}.`);
     return out.join('\n');
   }
+  // the template's Architecture placeholder becomes what the repo itself shows (docs/adr/0043), never over a line somebody wrote
+  if (!home.legacy && /^- Architecture:\s*<slug/m.test(best.text)) {
+    try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
+  }
   out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; W check offers the move). W = ${W_CMD}.` : `Project memory: ${where} (read; full file there) and tasks.md next to it (where the work stands). W = ${W_CMD}.`);
+  const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);
+  if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.
   const all = readTaskRecords(home), last = all.filter((r) => r.id).pop(); // read once: the last close and the incidents
   if (last) {

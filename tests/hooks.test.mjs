@@ -695,7 +695,7 @@ const oldMemory = (slug, root, wip = '- ▶ task A (2026-10-01 · T2): NEXT step
   fs.writeFileSync(file, `# Project: ${slug}\n\nPath: ${root}\n\n## Work in progress\n${wip}\n\n## Identity\n- Stack: test\n`);
   return file;
 };
-const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'); // where Waymark keeps .waymark/ out of git
+const excludeOf = (repo) => fs.readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8'); // where Waymark keeps .waymark/ out of git: this clone's own ignores, never the versioned .gitignore (docs/adr/0043)
 // Two spellings of one path (an 8.3 short name and its long name, a link and its target) compare as the filesystem has them.
 const LP = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 const same = (a, b) => assert.equal(LP.norm(LP.real(a)), LP.norm(LP.real(b)));
@@ -721,21 +721,44 @@ test('project home: nearest .waymark/memory.md walking up, else the old memory (
   fs.rmSync(old);
 });
 
-test('ensureLocal: .waymark/, .engram/, .agents/ and .claude/skills/ added once to the project\'s .gitignore (created if missing, kept if there), README written', () => {
+test('ensureLocal: .waymark/, .engram/, .agents/ and .claude/skills/ added once to .git/info/exclude, the project\'s .gitignore never created or touched, README written', () => {
   const repo = tmpRepo('exclude');
   const h = projectHome(repo);
   ensureLocal(h); ensureLocal(h);
-  const ignore = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
+  const ignore = excludeOf(repo);
   for (const d of ['\\.waymark/', '\\.engram/', '\\.agents/', '\\.claude/skills/']) assert.equal(ignore.match(new RegExp(`^${d}$`, 'gm')).length, 1, d);
+  assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'Waymark writes nothing versioned into the user\'s repo');
   assert.match(fs.readFileSync(path.join(repo, '.waymark', 'README.md'), 'utf8'), /tasks\.md/);
   fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), 'x');
   for (const d of ['.engram', '.agents/skills/s', '.claude/skills/s']) { fs.mkdirSync(path.join(repo, d), { recursive: true }); fs.writeFileSync(path.join(repo, d, 'f'), 'x'); }
   fs.writeFileSync(path.join(repo, '.claude', 'settings.json'), '{}');
-  assert.deepEqual(spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: repo, encoding: 'utf8' }).stdout.trim().split('\n').sort(), ['?? .claude/settings.json', '?? .gitignore'], 'git never sees the agents\' local folders; the rest of .claude/ stays the project\'s');
+  assert.deepEqual(spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: repo, encoding: 'utf8' }).stdout.trim().split('\n').sort(), ['?? .claude/settings.json'], 'git never sees the agents\' local folders; the rest of .claude/ stays the project\'s');
   const other = tmpRepo('exclude-own');
-  fs.writeFileSync(path.join(other, '.gitignore'), 'node_modules/\n/.engram\n');
+  const own = 'node_modules/\n/.engram'; // the project\'s own, committed, with no final newline
+  fs.writeFileSync(path.join(other, '.gitignore'), own);
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.gitignore'], { cwd: other });
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'ignore'], { cwd: other });
   ensureLocal(projectHome(other));
-  assert.equal(fs.readFileSync(path.join(other, '.gitignore'), 'utf8'), "node_modules/\n/.engram\n# Waymark: project memory, local only\n.waymark/\n# project skills, every agent, local only\n.agents/\n# Claude Code's links to .agents/skills, local only\n.claude/skills/\n", 'appended after the user\'s lines; a line already there is kept');
+  assert.equal(fs.readFileSync(path.join(other, '.gitignore'), 'utf8'), own, 'the versioned .gitignore stays byte for byte as it was');
+  assert.equal(spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: other, encoding: 'utf8' }).stdout.trim(), '', 'nothing of Waymark\'s is a change of the repo');
+  assert.deepEqual(['# Waymark: project memory, local only', '.waymark/'].map((l) => excludeOf(other).includes(l)), [true, true]);
+  assert.doesNotMatch(excludeOf(other), /^\.engram\/$/m, 'a line the project\'s own .gitignore already has is not repeated');
+});
+
+test('ensureLocal: a CSS/HTML task in a repo with a versioned .gitignore changes only the task\'s files; outside git nothing is written', () => {
+  const repo = tmpRepo('exclude-css');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'dist/\n');
+  fs.mkdirSync(path.join(repo, 'src')); fs.writeFileSync(path.join(repo, 'src', 'a.css'), 'a { width: 28px }'); fs.writeFileSync(path.join(repo, 'src', 'a.html'), '<a></a>');
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+  g('add', '-A'); g('commit', '-q', '-m', 'base');
+  ensureLocal(projectHome(repo));
+  fs.writeFileSync(path.join(repo, 'src', 'a.css'), 'a { width: 40px }');
+  assert.equal(g('status', '--porcelain', '-uall').stdout.trim(), 'M src/a.css', 'git sees the task\'s CSS and nothing of Waymark\'s');
+  const nogit = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-nogit-'));
+  try {
+    assert.equal(ensureLocal({ dir: path.join(nogit, '.waymark'), root: nogit }), false, 'no git, no ignore to write yet');
+    assert.deepEqual(fs.readdirSync(nogit).sort(), ['.waymark'], 'and no .gitignore created in the user\'s folder');
+  } finally { fs.rmSync(nogit, { recursive: true, force: true }); }
 });
 
 test('quota: a model with no pairs of its own gets an uncalibrated estimate from a calibrated model of its family, and the % is still asked', async () => {
@@ -874,7 +897,7 @@ test('stop hook: with memory in the project, the record and tasks.md go to <proj
   const r2 = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd: bare, session_id: 's-step2b', last_assistant_message: cierre(id) }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.ok(r2.stdout);
   assert.equal(readRecords(path.join(bare, '.waymark', 'provenance.jsonl')).length, 1);
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: bare, encoding: 'utf8' }).stdout.trim(), '?? .gitignore', 'git does not see .waymark/, only the .gitignore that keeps it out');
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: bare, encoding: 'utf8' }).stdout.trim(), '', 'git does not see .waymark/: .git/info/exclude keeps it out and nothing versioned is written');
   const logOnly = tmpRepo('mig-log');
   fs.mkdirSync(path.join(logOnly, '.waymark'));
   fs.writeFileSync(path.join(logOnly, '.waymark', 'provenance.jsonl'), '{}\n');

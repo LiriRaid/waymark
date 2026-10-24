@@ -943,6 +943,12 @@ export function questionRecord(turn, meta = {}) {
     ...(skills.length ? { skills } : {}), ...(answer ? { answer } : {}), ...(learned ? { learned } : {}) };
 }
 
+// The files a turn wrote inside an agent's own memory folder (~/.claude/projects/<project>/memory/): a rule of the user kept there is
+// invisible to every other agent, so the notice says where it belongs (docs/adr/0043).
+const NATIVE_MEMORY = /[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]/;
+export const nativeMemoryWrites = (tools) => [...new Set(tools.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(t.name)).map((t) => String(t.input?.file_path || '')).filter((p) => NATIVE_MEMORY.test(p)))];
+export const nativeMemoryNote = (files) => files.length ? ` · ⚠ escribió en la memoria nativa del agente (${files.length} archivo${files.length > 1 ? 's' : ''}): una regla tuya va a ~/.waymark/preferences.md (vale en todo proyecto) o a .waymark/memory.md → Conventions (del proyecto), con fecha y tu frase` : '';
+
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
 // A measured % is never asked. Otherwise, while the model has fewer than 3 calibration pairs (no fit yet), it asks the
 // user for the real %. Past NEW_SESSION
@@ -1093,7 +1099,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools))));
     } catch (e) { logHookError('stop-hook', e); }
   };
   process.stdin.on('data', (d) => { input += d; });

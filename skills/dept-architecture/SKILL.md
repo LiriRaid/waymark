@@ -36,6 +36,7 @@ In `procedures.md` (same folder), one section per task:
 
 - Identify the architecture (always first)
 - Place new code (L1/L2)
+- Structural change (always L3; own window)
 - Refactor (L2/L3)
 - Migration, new module or new project (L3)
 - Review for conformance
@@ -44,7 +45,8 @@ In `procedures.md` (same folder), one section per task:
 ## Rules
 
 ### Architecture conformance
-- Identify the architecture before placing or moving code.
+- Identify the architecture before placing or moving code, from the repo itself (`W convention`): a profile is a reference, never the project's rule.
+- A structural change that contradicts the project's convention is never recommended; it is asked in its own window.
 - Follow the dependency rules of the architecture profile; a violation is a bug, not a style choice.
 - Depend on another module only through its public contract (index/export file, interface, port, event).
 - Never import between sibling modules/features directly; move the contract to the shared layer or communicate via events/ports.

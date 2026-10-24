@@ -9,7 +9,7 @@ Read first at Recall. **One line per task, written by the end-of-turn hook from 
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)
-- Architecture: <slug from architectures/> — <how it maps here, e.g. features/<f>/{components,services,entities,routes}>
+- Architecture: <slug from architectures/> — <how it maps here, e.g. features/<f>/{components,services,entities,routes}> — evidence: <where the pieces live, first structure commit, docs> (to confirm | confirmed <date> | profile default)
 - Package manager / build tool: <pnpm | bundle | uv | gradle | …>
 - Related projects: <e.g. backend API at ../api>
 

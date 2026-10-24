@@ -19,6 +19,8 @@
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
 //   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
+//   node waymark.mjs localize [--apply]     move Waymark's lines out of the project's versioned .gitignore into .git/info/exclude (docs/adr/0043); the plan without --apply
+//   node waymark.mjs convention [<path>] [--move <from> <to>]  where each kind of piece lives in the repo, the commit that set it, and the verdict of a proposed move (docs/adr/0043)
 //   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
@@ -33,7 +35,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
@@ -58,7 +60,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -255,6 +257,36 @@ function session(cwd, agent) {
   return `session: the latest session here holds ~${Math.round(st.context / 1000)}k tokens of context${idle >= CACHE_MINUTES ? ` and was idle ${idle} min: resuming it re-writes all of it (the prompt cache expired)` : ': each response re-reads all of it'}. A new task is cheaper in a new session (project memory carries over).`;
 }
 
+// Waymark's own ignore lines in the project's versioned .gitignore: before 2.0.19 it wrote them there (docs/adr/0043 moves them to
+// .git/info/exclude, which is never part of the repo). → { home, file, text, found } or null.
+const ignoreBlock = ([dir, what]) => new RegExp(`^# ${what.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, local only\\r?\\n${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?`, 'm');
+export function ignoreLines(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return null;
+  const file = path.join(home.root, '.gitignore'), text = read(file);
+  const found = LOCAL_DIRS.filter((d) => ignoreBlock(d).test(text));
+  return found.length ? { home, file, text, found } : null;
+}
+// What Waymark wrote in the user's repo that the user did not ask for. → the line, or ''.
+export function footprint(cwd) {
+  const at = ignoreLines(cwd);
+  if (!at) return '';
+  const spec = hasFetchSpec(at.home.root) ? ' Also in .git/config: the notes fetch refspec (local to this clone, never versioned).' : '';
+  return `repo: Waymark wrote ${at.found.length} ignore block${at.found.length > 1 ? 's' : ''} (${at.found.map(([d]) => d).join(' ')}) into this project's versioned .gitignore, so they show as a change of the project's own files. Offer, with the choice window: ${W} localize shows the plan and --apply moves them to .git/info/exclude (this clone only); the .gitignore change that leaves is the user's to commit or discard.${spec}`;
+}
+// Moves those blocks out of the versioned .gitignore into .git/info/exclude. A .gitignore Waymark created and nothing else holds is removed.
+export function localize(cwd, { apply = false } = {}) {
+  const at = ignoreLines(cwd);
+  if (!at) return { moved: [] };
+  if (!apply) return { moved: at.found.map(([d]) => d), plan: true };
+  let text = at.text;
+  for (const d of at.found) text = text.replace(ignoreBlock(d), '');
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '.gitignore'], { cwd: at.home.root, encoding: 'utf8' }).status === 0;
+  if (!text.trim() && !tracked) fs.rmSync(at.file, { force: true }); else fs.writeFileSync(at.file, text);
+  ensureLocal(at.home); // after the lines left .gitignore, or they would count as already ignored there
+  return { moved: at.found.map(([d]) => d) };
+}
+
 // → the pending items, one line each ([] when nothing is pending). Records the time of the check.
 export async function check(cwd = process.cwd(), agent = agentFrom()) {
   const items = [];
@@ -279,6 +311,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => hookErrors());
   await add(() => mergeMethods(cwd));
   await add(() => notesState(cwd));
+  await add(() => footprint(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -494,6 +527,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
     process.exitCode = r.error ? 1 : 0;
+  } else if (sub === 'localize') {
+    const r = localize(process.cwd(), { apply: rest.includes('--apply') });
+    console.log(!r.moved.length ? 'localize: nothing of Waymark\'s in this project\'s .gitignore' : r.plan ? `localize (plan, nothing written): moves ${r.moved.join(' ')} from the versioned .gitignore to .git/info/exclude. Ask the user, then re-run with --apply.` : `localize: ${r.moved.join(' ')} now ignored through .git/info/exclude; the .gitignore change is the user's to commit or discard`);
   } else if (sub === 'notes' && rest[0] === 'setup') {
     const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
     console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
@@ -516,7 +552,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

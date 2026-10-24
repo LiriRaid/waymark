@@ -10,6 +10,7 @@
 // A git commit whose "Waymark-Task" trailer the end-of-turn hook would record under another ID is denied with the right one.
 // Remove the hook from the agent's settings to disable it.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -78,7 +79,7 @@ export function checkTrailer(command, cwd = process.cwd()) {
   const ids = taskIds(cwd);
   if (ids.known.has(id)) return null;
   const home = projectHome(cwd);
-  const staged = spawnSync('git', ['diff', '--cached', '--name-only'], { cwd: home.root, encoding: 'utf8', timeout: 3000 });
+  const staged = spawnSync('git', ['diff', '--cached', '--name-only'], { cwd: home.root, encoding: 'utf8', timeout: 5000 });
   const files = staged.status === 0 ? staged.stdout.split('\n').filter(Boolean).map((f) => norm(path.resolve(home.root, f))) : [];
   if (!files.length) return null;
   const parent = id.replace(/[a-z]$/, '');
@@ -131,7 +132,12 @@ export function checkSensitive(c, cwd, session = 'unknown') {
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
-  const sensitive = checkSensitive(c, cwd, hook.session_id);
+  // The guard that cannot judge a command denies it: failing open there let a command with a bracket in it read what the guard exists to stop.
+  let sensitive;
+  try { sensitive = checkSensitive(c, cwd, hook.session_id); } catch (e) {
+    logHookError('tool-hook guard', e);
+    sensitive = `Waymark: the sensitive-path guard could not read this call (${String(e?.message || e).slice(0, 100)}), so it was not run. Rephrase it (one command, no pattern text in brackets) and run it again; the cause is in ~/.waymark/hook-errors.log.`;
+  }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
   // read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
@@ -176,7 +182,7 @@ export function commandFiles(command, cwd = process.cwd()) {
 // Other repos a shell command works in: a `cd <dir>` before a part, or `git -C <dir>`; only folders inside a git repo
 // other than the session's. → their folders.
 export function commandRepos(command, cwd = process.cwd()) {
-  const top = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? norm(r.stdout.trim()) : null; };
+  const top = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); return r.status === 0 ? norm(r.stdout.trim()) : null; };
   const own = top(cwd), dirs = new Set();
   for (const p of shellRuns(command)) {
     if (p.cd) dirs.add(path.resolve(cwd, String(p.cd).replace(/^["']|["']$/g, '').replace(/^\/([a-z])\//i, '$1:/')));
@@ -266,8 +272,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (agent.out.pass) answer(agent, agent.out.pass(hook.hook_event_name));
     } catch (e) { logHookError('tool-hook', e); }
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', run);
-  process.stdin.resume();
-  setTimeout(run, 1000).unref();
+  readStdin((text) => { input = text; run(); });
 }

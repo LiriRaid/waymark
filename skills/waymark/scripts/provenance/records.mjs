@@ -36,11 +36,11 @@ const forgotten = (root) => {
 // read the records several times a turn). → records
 const trailerCache = new Map();
 function trailerRecords(root, known) {
-  const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 1500 });
+  const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 5000 });
   if (head.status !== 0) return [];
   const key = `${root}|${head.stdout.trim()}`;
   if (!trailerCache.has(key)) {
-    const log = spawnSync('git', ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, maxBuffer: 16 * 1024 * 1024 });
+    const log = spawnSync('git', ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 16 * 1024 * 1024 });
     const byTask = new Map();
     for (const entry of log.status === 0 ? log.stdout.split('\x1e') : []) {
       const [commit, at, body = ''] = entry.trim().split('\x00');

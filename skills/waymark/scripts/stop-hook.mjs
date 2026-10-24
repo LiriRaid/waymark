@@ -20,6 +20,7 @@
 //   A turn that launched an agent or skill in the background is recorded when its notification ends it.
 // It never blocks twice in a row (stop_hook_active). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -59,7 +60,18 @@ const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i
 // A command's output that shows a failure, read only when its exit is not the gate's or the test's own (a pipe, a `;`).
 // Only the tools' own summary lines, never a count anywhere (a test titled "reports 2 errors" passes); eslint's
 // "✖ N problems" counts only with errors in it, since warnings alone exit 0.
-const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed/im;
+const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed/im; // vitest prints "Tests  N failed" (two spaces)
+const FAIL_LINE = /^\s*(?:FAIL|×)\s+\S/m; // vitest's " FAIL  file > case" and "× case", case-sensitive: a log line "fail to connect" is no test failure
+const failOut = (text) => FAIL_OUT.test(text) || FAIL_LINE.test(text);
+// The part of a chained command whose own tool printed the failure: tsc's "error TS", eslint's "✖ N problems", a test runner's summary. The exit of a
+// line such as `prisma status | tail; eslint x.ts | tail` is no part's, and blaming the whole line sent the agent to the wrong command.
+const SIGNATURES = [[/error TS\d+|Found [1-9]\d* errors?\b/, /\b(tsc|vue-tsc|svelte-check|ng|nest)\b/], [/✖ [1-9]\d* problems?/, /\b(eslint|biome|oxlint|stylelint)\b/], [/error\[E\d+\]/, /\bcargo\b/],
+  [/^\s*(?:Tests?:?\s+[1-9]\d* failed|Test Files\s+[1-9]|FAIL\s|×\s|[1-9]\d* failing)/m, /\b(vitest|jest|mocha|karma|pytest|rspec|phpunit|ava|tap|test)\b/], [/ℹ fail [1-9]/, /--test\b/]];
+export function failingPart(command, out) {
+  const parts = shellRuns(command).filter((p) => p.gate || p.test || p.build);
+  for (const [seen, prog] of SIGNATURES) if (seen.test(String(out || ''))) { const p = parts.find((x) => prog.test(x.text)); if (p) return p.text; }
+  return null;
+}
 // The catalog of testigos: what blocks and what is recorded and scored (waymark/routine.json, docs/adr/0006, 0012).
 // A missing or invalid catalog never disables the hook: a minimal one keeps the chain (decision, gate, Cierre) and
 // the record says the catalog could not be read.
@@ -84,6 +96,10 @@ export function cdPaths(command) {
   return out.length ? ` ${out.join(' ')}` : '';
 }
 const cmdOf = (t) => String(t.input.command || '');
+// A gate's command is kept whole: the hook re-runs it and learn.mjs writes it into Quality gates, so a cut one (it once became
+// `tsc -p ts`) failed on every later task. Only one over CMD_MAX is cut, and then marked `cut`: never re-run, never learned.
+const CMD_MAX = 2000;
+export const keepCmd = (c) => { const s = String(c).replace(/\s+/g, ' ').trim(); return s.length > CMD_MAX ? { cmd: s.slice(0, CMD_MAX), cut: true } : { cmd: s }; };
 
 // The commits this turn made with a task's ID, in every repo it committed in: the session's, and the one a commit
 // command entered (`cd <repo> && git commit`, `git -C <repo> commit`). The ID may be the Cierre's, or an earlier
@@ -112,7 +128,7 @@ function gitRuns(tools, cwd, verb) {
 }
 // The repos the turn's commit commands ran in.
 const commitRepos = (tools, cwd) => new Set(gitRuns(tools, cwd, 'commit').map((r) => r.dir));
-const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); return r.status === 0 ? r.stdout.trim() : null; };
+const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); return r.status === 0 ? r.stdout.trim() : null; };
 // one folder however it is spelled: git's long name, an 8.3 short name or a link (lib/paths real)
 const sameDir = (a, b) => norm(real(a)) === norm(real(b));
 
@@ -168,8 +184,8 @@ export function notesChecked(session) {
 function commitsSince(dirs, since, mine = false) {
   const out = [];
   for (const dir of dirs) {
-    const me = mine && spawnSync('git', ['config', 'user.email'], { cwd: dir, encoding: 'utf8', timeout: 1500 }).stdout?.trim().toLowerCase();
-    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%ce%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 1500 });
+    const me = mine && spawnSync('git', ['config', 'user.email'], { cwd: dir, encoding: 'utf8', timeout: 5000 }).stdout?.trim().toLowerCase();
+    const r = spawnSync('git', ['log', '-30', `--since=@${Math.floor((since - 60000) / 1000)}`, '--format=%H%x1f%ce%x1f%B%x1e'], { cwd: dir, encoding: 'utf8', timeout: 5000 });
     if (r.status !== 0) continue;
     for (const [h, ce, msg] of r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))) if (h && (!me || String(ce).toLowerCase() === me)) out.push({ h, dir, msg: msg || '' });
   }
@@ -214,7 +230,7 @@ function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
 const repos = new Map();
 function repoOf(dir) {
   if (!dir || !fs.existsSync(dir)) return null;
-  if (!repos.has(norm(dir))) { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 1500 }); repos.set(norm(dir), r.status === 0 ? norm(r.stdout.trim()) : null); }
+  if (!repos.has(norm(dir))) { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); repos.set(norm(dir), r.status === 0 ? norm(r.stdout.trim()) : null); }
   return repos.get(norm(dir));
 }
 // A Git Bash path (/c/Users/…) as Windows reads it; others unchanged.
@@ -362,7 +378,7 @@ function observeTurn(S) {
     if (i < 0) return null;
     return result(t)?.error || t.error ? (i === all.length - 1 ? false : null) : all.slice(i, -1).every((p) => p.sep === '&&') ? true : null;
   };
-  const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && FAIL_OUT.test(output(t))); };
+  const failedRun = (t, kind) => { const own = exitFor(t, kind); return own === false || (own === null && failOut(output(t))); };
   // The clean copies (git worktree) the task made, and the calls that run in one (runs.mjs): a run there shows a failure is
   // not this task's, or a spec red first; it is never the task's gate.
   const copies = copyPaths(allTools.filter(shell).map(cmdOf));
@@ -449,7 +465,7 @@ function observeTurn(S) {
       indexed: turn.tools.some((t) => /mem_(save|update)$/.test(t.name) && /^waymark\/tasks\//.test(String(t.input.topic_key || ''))),
     },
     procedure: { owner: dept.declared, read: [...new Set(procReads.map((t) => (where(t).match(/[\w.-]+[\\/]procedures\.md/) || ['procedures.md'])[0].replace(/\\/g, '/')).concat(procHanded ? [`${dept.declared}/procedures.md`] : []))], readBeforeChange: procBeforeChange, ...(procHanded ? { handed: true } : {}) },
-    gates: gatesAfter.map((t) => ({ cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}), ...(apart(t) ? { apart: true } : {}) })),
+    gates: gatesAfter.map((t) => ({ ...keepCmd(cmdOf(t)), s: secs(t) === null ? null : Math.round(secs(t)), error: !!result(t)?.error, ...(envFail(t) ? { env: true } : {}), ...(apart(t) ? { apart: true } : {}) })),
     tests: {
       specsChanged: changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)), ranAfterLastSpec: lastSpec < 0 ? null : turn.tools.slice(lastSpec + 1).some(testCmd),
       // red: every spec that adds cases ran before the code after it, or a run in a clean copy (git worktree add … && … test)
@@ -469,7 +485,7 @@ function observeTurn(S) {
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
-    retried: retried.map((r) => r.cmd.slice(0, 140)), // commands that failed twice (the docs testigo)
+    retried: retried.map((r) => keepCmd(r.cmd).cmd), // commands that failed twice (the docs testigo)
     worktree: turn.tools.some(inCopy),
     branches: ctx.branches || {},
     evidence: null, // the Evidencia testigo: { claim, checkedAfter, cited, unbacked }
@@ -487,7 +503,7 @@ function observeBuild(S) {
   // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
   // an unknown one matches any build; a code change by shell names no repo and counts for every repo.
   const repoAt = ctx.repoOf || repoOf;
-  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !FAIL_OUT.test(output(t))))
+  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !failOut(output(t))))
     .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
   const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && repoAt(path.dirname(fileOf(t))) === r));
@@ -622,14 +638,14 @@ function gateWitness(S) {
     // on a clean build and "tsc; echo done" exits 0 on a red one. Otherwise a failure in its output decides, then the
     // hook's own typecheck (none: not held against it).
     const own = mine ? exitFor(mine, 'gate') : null;
-    const agentRun = mine && { by: 'agent', cmd: cmdOf(mine).replace(/\s+/g, ' ').slice(0, 140), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
+    const agentRun = mine && { by: 'agent', ...keepCmd(cmdOf(mine)), ok: own ?? true, s: secs(mine) === null ? null : Math.round(secs(mine)) };
     // a repo with no typecheck the hook can run (Rails, plain JS): a test that passed after the last code change is its gate
-    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !apart(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, cmd: cmdOf(t).replace(/\s+/g, ' ').slice(0, 140), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
-    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : FAIL_OUT.test(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
+    const greenTest = () => { const t = turn.tools.slice(lastCode + 1).filter((x) => testCmd(x) && !envFail(x) && !apart(x)).pop(); return t && !failedRun(t, 'test') ? { by: 'agent', test: true, ...keepCmd(cmdOf(t)), ok: true, s: secs(t) === null ? null : Math.round(secs(t)) } : null; };
+    const run = !mine ? rerun() || greenTest() : own !== null ? agentRun : failOut(output(mine)) ? { ...agentRun, ok: false } : rerun() || { ...agentRun, exitNotTheGate: true };
     observed.gate = run || null;
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
-    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(cmdKey(t).slice(0, 140));
+    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && cmdKey(x) === cmdKey(t) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
     // a gate the agent tried and the machine could not run (the tool is not installed): not a failure of the code, and not "nothing ran"
@@ -642,9 +658,9 @@ function gateWitness(S) {
     else if (!run) gate.push(`${none}${ctx.rerun ? ' and the repo has no typecheck the hook can run (memory.md Quality gates, package.json, tsconfig)' : ''}: run the project's gate once now (the full one at the end, per repo)`);
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
     else if (!run.ok && noComp) excepted.gate = noComp;
-    else if (!run.ok) gate.push(`the gate after the last code change failed (${run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    else if (!run.ok) gate.push(`the gate after the last code change failed (${(run.by === 'agent' && failingPart(run.cmd, output(mine))) || run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
     if (redTests.length && noComp) excepted.gate = noComp;
-    else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 160)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
+    else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 700)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
   }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
   return { gate, redTests };
@@ -943,6 +959,9 @@ export function questionRecord(turn, meta = {}) {
     ...(skills.length ? { skills } : {}), ...(answer ? { answer } : {}), ...(learned ? { learned } : {}) };
 }
 
+// The record of a turn the hook crashed on: no task ID (it is no task, like a Q), the cause, nothing judged.
+export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cause: `unevaluated:${String(err?.message || err).replace(/\s+/g, ' ').slice(0, 160)}`, agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd });
+
 // The files a turn wrote inside an agent's own memory folder (~/.claude/projects/<project>/memory/): a rule of the user kept there is
 // invisible to every other agent, so the notice says where it belongs (docs/adr/0043).
 const NATIVE_MEMORY = /[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]/;
@@ -973,9 +992,11 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const run = () => {
     if (done) return;
     done = true;
+    let parsed = null;
     try {
       const h = parseHook(input, agent);
       if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+      parsed = h;
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       // a session with no status line (the desktop app): what it spent, so the quota's rises are split with it too
       try { if (agent.name === 'claude') recordSpend(h.session_id, h.transcript_path); } catch (e) { logHookError('stop-hook spend', e); }
@@ -1100,10 +1121,15 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
       answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools))));
-    } catch (e) { logHookError('stop-hook', e); }
+    } catch (e) {
+      logHookError('stop-hook', e);
+      // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence
+      try {
+        const cwd = parsed?.cwd || process.cwd();
+        if (parsed && fs.existsSync(projectHome(cwd).memory)) appendRecord(cwd, unevaluatedRecord(e, { agent: agent.name, session: parsed.session_id, cwd }));
+        if (parsed) answer(agent, agent.out.notice(`Waymark: este turno no se evaluó (${String(e?.message || e).slice(0, 80)}); la causa está en ~/.waymark/hook-errors.log`));
+      } catch (e2) { logHookError('stop-hook unevaluated', e2); }
+    }
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', run);
-  process.stdin.resume();
-  setTimeout(run, 1000).unref();
+  readStdin((text) => { input = text; run(); });
 }

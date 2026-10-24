@@ -40,7 +40,7 @@ export function legacyMemory(cwd) {
 // like cwd. The root is cwd's own ancestor at the depth git's root lies above it.
 const gitTop = (cwd) => {
   let top;
-  try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); if (r.status !== 0) return null; top = r.stdout.trim(); } catch { return null; }
+  try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5000 }); if (r.status !== 0) return null; top = r.stdout.trim(); } catch { return null; }
   const here = path.resolve(String(cwd || '.')), rel = path.relative(real(top), real(here)), up = rel.split(path.sep);
   if (up[0] === '..' || path.isAbsolute(rel)) return top;
   return (rel ? path.resolve(here, ...up.map(() => '..')) : here).replace(/\\/g, '/'); // forward slashes, as git writes it
@@ -102,7 +102,7 @@ export const LOCAL_DIRS = [
 // The file git reads this clone's own ignores from (a worktree shares its repository's): `git rev-parse --git-path`, or null outside git.
 function excludeFile(root) {
   try {
-    const r = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: root, encoding: 'utf8', timeout: 1500 });
+    const r = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: root, encoding: 'utf8', timeout: 5000 });
     return r.status === 0 && r.stdout.trim() ? path.resolve(root, r.stdout.trim()) : null;
   } catch { return null; }
 }

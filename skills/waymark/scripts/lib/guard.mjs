@@ -46,12 +46,19 @@ function globMatches(abs) {
     const c = base[i];
     if (c === '*') re += '[^/\\\\]*';
     else if (c === '?') re += '[^/\\\\]';
-    else if (c === '[' && base.indexOf(']', i + 1) > i + 1) { const j = base.indexOf(']', i + 1); re += `[${base.slice(i + 1, j).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; i = j; }
+    else if (c === '[' && base.indexOf(']', i + 1) > i + 1) {
+      // a bracket is a class only when it is a valid one: `L[i-1]` or `['br-1']` in a command is text, not a range (`i-1` is out of order)
+      const j = base.indexOf(']', i + 1), cls = base.slice(i + 1, j).replace(/^!/, '^').replace(/\\/g, '\\\\');
+      let valid = true;
+      try { new RegExp(`[${cls}]`); } catch { valid = false; }
+      if (valid) { re += `[${cls}]`; i = j; } else re += '\\[';
+    }
     else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   }
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return []; }
-  const rx = new RegExp(`^${re}$`, process.platform === 'win32' ? 'i' : '');
+  let rx;
+  try { rx = new RegExp(`^${re}$`, process.platform === 'win32' ? 'i' : ''); } catch { return names.filter((n) => n === base).map((n) => path.join(dir, n)); } // never throws: the name itself
   return names.filter((n) => (base.startsWith('.') || !n.startsWith('.')) && rx.test(n)).map((n) => path.join(dir, n));
 }
 

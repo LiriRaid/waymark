@@ -45,7 +45,7 @@ test('every agent has a driver, and every case applies to at least one agent', (
   for (const a of agents) assert.ok(cases.filter((c) => c.needs.every((n) => applies(a.caps, n))).length >= 20, `${a.key}: the cases that apply`);
 });
 
-describe('conformance', { concurrency: true }, () => {
+describe('conformance', { concurrency: 4 }, () => {
   for (const agent of agents) {
     test(`${agent.name}: the cases that apply pass`, async (t) => {
       for (const c of cases.filter((x) => x.needs.every((n) => applies(agent.caps, n)))) {

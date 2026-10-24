@@ -60,6 +60,14 @@ function classify(words) {
     while (w.length && /^[A-Za-z_]\w*=/.test(w[0])) w = w.slice(1); // FOO=1 cmd, env FOO=1 cmd
     const head = String(w[0] || '').toLowerCase();
     if (RUNNER[head]) { w = w.slice(1); while (w.length && /^-/.test(w[0])) w = w.slice(/^(-p|--package)$/.test(w[0]) ? 2 : 1); continue; }
+    // wrappers that run what follows them: `timeout 600 pnpm run build`, `nice -n 10 vitest`, `nohup`, `stdbuf -oL`, `ionice`; their flags and a timeout's duration are no part of the command
+    if (head === 'timeout') { w = w.slice(1); while (w.length && /^-/.test(w[0])) w = w.slice(/^(-k|-s|--kill-after|--signal)$/.test(w[0]) ? 2 : 1); if (/^\d+(\.\d+)?[smhd]?$/.test(String(w[0] || ''))) w = w.slice(1); continue; }
+    if (/^(nice|nohup|stdbuf|ionice|command)$/.test(head)) {
+      if (head === 'command' && /^-[vV]$/.test(String(w[1] || ''))) return { gate: false, build: false, test: false }; // `command -v tsc` looks a program up, it runs nothing
+      w = w.slice(1);
+      while (w.length && /^-/.test(w[0])) w = w.slice(/^(-n|--adjustment|-c|-p)$/.test(w[0]) ? 2 : 1);
+      continue;
+    }
     if (RUNNER2.test(`${head} ${String(w[1] || '').toLowerCase()}`)) { w = w.slice(2); continue; }
     break;
   }
@@ -95,12 +103,17 @@ function classify(words) {
   } else if (prog === 'node' || prog === 'deno') {
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;
-  } else if (/^(ng|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|cmake|ctest|rails|rake|artisan|php|terraform|tofu|composer|flutter|dart|mix|swift)$/.test(prog)) {
+  } else if (/^(ng|nest|react-scripts|vue-cli-service|turbo|nx|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|cmake|ctest|rails|rake|artisan|php|terraform|tofu|composer|flutter|dart|mix|swift)$/.test(prog)) {
     // The verb is the first word that is no flag: `mvn -q test`, `cargo +nightly test`, `dotnet --nologo build`, `make -j8 test`, `terraform -chdir=x validate`
     // (docs/adr/0039: the reference bench found `mvn -q test` taken for no test at all). The value of make's -C and -f is no verb.
     const bare = subs.filter((x, i) => !/^[-+]/.test(x) && !(prog === 'make' && /^-[cfi]$/.test(subs[i - 1] || '')));
-    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : /^(php|ng|vite|next|nuxt|astro|ctest|rails|rake|artisan|cmake)$/.test(prog) ? sub : bare[0] || '';
-    if (/^(test|spec)$/.test(verb) || prog === 'ctest' || (/^(gradle|gradlew)$/.test(prog) && /^test/i.test(verb))) out.test = true;
+    // the monorepo task runners name the task after `run` (turbo run build), as `app:build` (nx run app:build) or with -t/--target (nx run-many -t build)
+    const task = (x) => String(x || '').split(':').pop();
+    const targetAt = subs.findIndex((x) => /^(-t|--target|--targets)(=|$)/.test(x)), targetOf = targetAt < 0 ? '' : subs[targetAt].includes('=') ? subs[targetAt].split('=')[1] : subs[targetAt + 1];
+    const verb = prog === 'php' ? String(a[1] || '').toLowerCase() : prog === 'turbo' ? (bare[0] === 'run' ? bare[1] : bare[0]) || ''
+      : prog === 'nx' ? (bare[0] === 'run' ? task(bare[1]) : /^(run-many|affected)$/.test(bare[0] || '') ? task(targetOf) : bare[0]) || ''
+      : /^(php|ng|nest|react-scripts|vue-cli-service|vite|next|nuxt|astro|ctest|rails|rake|artisan|cmake)$/.test(prog) ? sub : bare[0] || '';
+    if (/^(test|spec)$/.test(verb) || (/^(react-scripts|vue-cli-service|nx|turbo)$/.test(prog) && /^test:/.test(verb)) || prog === 'ctest' || (/^(gradle|gradlew)$/.test(prog) && /^test/i.test(verb))) out.test = true;
     else if (/^(build|package|verify)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^assemble/i.test(verb)) || (prog === 'cmake' && subs.includes('--build')) || (prog === 'make' && (!verb || /^(all|build)$/.test(verb)))) out.gate = out.build = true;
     else if (/^(lint|vet|check|clippy|compile|analy[sz]e)$/.test(verb) || (/^(gradle|gradlew)$/.test(prog) && /^(lint|compile)/i.test(verb))) out.gate = true;
     // formatting only in check mode (plain format rewrites files): dotnet format --verify-no-changes, mix format --check-formatted

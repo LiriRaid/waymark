@@ -19,6 +19,7 @@
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
 //   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
+//   node waymark.mjs gates [--apply]        empty the Quality gates rows that cannot be right (a cut command); the plan without --apply
 //   node waymark.mjs localize [--apply]     move Waymark's lines out of the project's versioned .gitignore into .git/info/exclude (docs/adr/0043); the plan without --apply
 //   node waymark.mjs convention [<path>] [--move <from> <to>]  where each kind of piece lives in the repo, the commit that set it, and the verdict of a proposed move (docs/adr/0043)
 //   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
@@ -41,7 +42,7 @@ import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
 import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes } from './notes.mjs';
 import { pushPref, savePushPref } from './notes-remote.mjs';
-import { stackOf } from './stack.mjs';
+import { stackOf, rowProblem } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
@@ -156,7 +157,7 @@ export function hooksHealth(list = registered()) {
       if (!/^\s*node\s/.test(c)) continue;
       // the launcher and the hook script it runs are both quoted paths: everything after `node` is the argument list
       const args = [...c.replace(/^\s*node\s+/, '').matchAll(/"([^"]*)"|(\S+)/g)].map((t) => t[1] ?? t[2]);
-      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
+      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 50000 });
       if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(args.find((t) => /-hook\.mjs$/.test(t)) || args[0])}`);
     }
   }
@@ -287,6 +288,28 @@ export function localize(cwd, { apply = false } = {}) {
   return { moved: at.found.map(([d]) => d) };
 }
 
+// The Quality gates rows that cannot be right in this repo (stack.mjs rowProblem: a cut command such as `tsc -p ts`). → [{ gate, cmd, why }]
+export function brokenGates(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return [];
+  return section('\n' + read(home.memory), 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).map(([gate, cmd]) => ({ gate, cmd, why: rowProblem(cmd, home.root) })).filter((r) => r.why);
+}
+export function gatesLine(cwd) {
+  const bad = brokenGates(cwd);
+  return bad.length ? `gates: ${bad.length} Quality gates row${bad.length > 1 ? 's' : ''} in memory.md cannot be right (${bad.map((r) => `${r.gate}: \`${r.cmd}\` ${r.why}`).join('; ')}). The hook ignores them already. Offer, with the choice window: ${W} gates shows the plan and --apply empties each cell, so the next gate that passes fills it.` : '';
+}
+// Empties the Command and Verified cells of those rows (the learning step fills an empty row with the gate that passes next).
+export function repairGates(cwd, { apply = false } = {}) {
+  const bad = brokenGates(cwd);
+  if (!bad.length || !apply) return { rows: bad, applied: false };
+  const home = projectHome(cwd);
+  let text = read(home.memory);
+  for (const r of bad) text = text.replace(new RegExp(`^\\|\\s*${r.gate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\|[^\\n]*$`, 'm'), (row) => (row.split('|')[2]?.replace(/`/g, '').trim() === r.cmd ? `| ${r.gate} | | |` : row));
+  fs.writeFileSync(home.memory, text);
+  return { rows: bad, applied: true };
+}
+
 // → the pending items, one line each ([] when nothing is pending). Records the time of the check.
 export async function check(cwd = process.cwd(), agent = agentFrom()) {
   const items = [];
@@ -312,6 +335,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => mergeMethods(cwd));
   await add(() => notesState(cwd));
   await add(() => footprint(cwd));
+  await add(() => gatesLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -527,6 +551,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
     process.exitCode = r.error ? 1 : 0;
+  } else if (sub === 'gates') {
+    const r = repairGates(process.cwd(), { apply: rest.includes('--apply') });
+    console.log(!r.rows.length ? 'gates: every Quality gates row can be right here' : r.applied ? `gates: emptied ${r.rows.map((x) => x.gate).join(', ')}; the next gate that passes fills them` : `gates (plan, nothing written): empties ${r.rows.map((x) => `${x.gate} (\`${x.cmd}\`: ${x.why})`).join('; ')}. Ask the user, then re-run with --apply.`);
   } else if (sub === 'localize') {
     const r = localize(process.cwd(), { apply: rest.includes('--apply') });
     console.log(!r.moved.length ? 'localize: nothing of Waymark\'s in this project\'s .gitignore' : r.plan ? `localize (plan, nothing written): moves ${r.moved.join(' ')} from the versioned .gitignore to .git/info/exclude. Ask the user, then re-run with --apply.` : `localize: ${r.moved.join(' ')} now ignored through .git/info/exclude; the .gitignore change is the user's to commit or discard`);
@@ -552,7 +579,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | gates [--apply] |${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

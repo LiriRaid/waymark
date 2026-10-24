@@ -21,6 +21,7 @@
 // A status line the user had before is chained: install-hooks.mjs keeps its command in ~/.waymark/statusline.json
 // ({ "next": "<command>" }) and it runs after this one, with the same stdin.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -308,8 +309,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     } catch {}
     process.stdout.write(lines.filter(Boolean).join('\n'));
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', run);
-  process.stdin.resume();
-  setTimeout(run, 1000).unref();
+  readStdin((text) => { input = text; run(); });
 }

@@ -3069,6 +3069,7 @@ test('2.0.14 a lint with warnings only passes; a run inside the clean copy is ne
 
 test('2.0.14 a note in a gate\'s Command cell is not run: "(not verified)" is dropped; a subshell stays', async () => {
   const repo = tmpRepo('gate-cell'), mem = path.join(repo, 'memory.md');
+  fs.writeFileSync(path.join(repo, 'tsconfig.app.json'), '{}'); // a row that names a file the repo lacks is read as empty (stack.mjs rowProblem)
   const table = (cmd) => fs.writeFileSync(mem, `# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | ${cmd} | |\n`);
   table('pnpm exec tsc -p tsconfig.app.json --noEmit (not verified)');
   assert.equal(gateCommand(repo, mem).cmd, 'pnpm exec tsc -p tsconfig.app.json --noEmit');

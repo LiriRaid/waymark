@@ -10,6 +10,7 @@
 // update check are `waymark.mjs check` (docs/adr/0008): this hook only adds one line pointing to it when the last
 // check is older than a week (at most once a week). It never blocks. Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,7 @@ import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec
 import { learnedLines } from './engram.mjs';
 import { census, fillMemory } from './convention.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins, gateCell } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell, rowProblem } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -102,7 +103,7 @@ export function digest(cwd, agentName = 'claude') {
   const line = stackLine(home.root, { direct });
   if (line) out.push(`Repo (read now): ${line}`);
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
-    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c && !rowProblem(c, home.root)).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
   try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
@@ -233,8 +234,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}
     if (text) answer(agent, agent.out.context('SessionStart', text));
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', emit);
-  process.stdin.resume();
-  setTimeout(emit, 1500).unref();
+  readStdin((text) => { input = text; emit(); }, { idle: 1500 });
 }

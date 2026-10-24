@@ -11,6 +11,7 @@
 // starts from (statusline.mjs), so the end-of-turn hook measures its %. Update checks, session size and offers live in
 // `waymark.mjs check` (docs/adr/0008). Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +38,7 @@ const full = 'Waymark Rule 0: routing line, dept-*, choice window before changes
 const short = 'Waymark Rule 0 as in your last reply.';
 // The repo's state now, so the agent does not spend a response on `git status` (docs/adr/0015, C2). → '' outside git.
 export function gitLine(root, max = 2) {
-  const r = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', timeout: 2000 });
+  const r = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) return '';
   const [head, ...files] = r.stdout.split('\n').filter(Boolean);
   const branch = head.replace(/^##\s*/, '').replace(/\.\.\.\S+/, '').trim();
@@ -148,8 +149,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
     try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) answer(agent, out); } catch (e) { logHookError('rule0-hook', e); }
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', run);
-  process.stdin.resume();
-  setTimeout(run, 1000).unref();
+  readStdin((text) => { input = text; run(); });
 }

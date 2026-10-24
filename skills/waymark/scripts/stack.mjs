@@ -82,6 +82,34 @@ export const copyInstall = (stack) => COPY_INSTALL[stack?.pm] || null;
 // reason of a `none (<why>)` row, which runs nothing.
 export const gateCell = (cmd) => (/^\s*none\b/i.test(String(cmd || '')) ? String(cmd).trim() : String(cmd || '').replace(/(?<![&|;(]\s*)\s+\([\p{L} ]+\)\s*$/u, '').trim());
 
+// Why a Quality gates command cannot be right in this repo, or '': a -p/--project file that does not exist, a package script that is not in
+// package.json, a test runner's filter that names no path (a command cut short once became `tsc -p ts` and `vitest run s`, and failed on every
+// later task). A placeholder (<file>) or a glob is never judged. A row with a problem is read as if it were empty: the hook falls back to the
+// repo's own scripts, and `waymark.mjs check` lists it.
+const TESTER = /^(vitest|jest|mocha|karma|pytest|rspec|phpunit|ava|tap)$/;
+export function rowProblem(cmd, root) {
+  const c = gateCell(cmd);
+  if (!c || /^none\b/i.test(c) || /[<>]/.test(c)) return '';
+  const w = [...c.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const there = (p) => fs.existsSync(path.resolve(root, p));
+  for (let i = 0; i < w.length; i++) {
+    if (/^(-p|--project)$/.test(w[i]) && w[i + 1] && !/[*<>]/.test(w[i + 1]) && !there(w[i + 1])) return `${w[i]} ${w[i + 1]} names a file that does not exist`;
+    if (/^--project=/.test(w[i]) && !there(w[i].slice(10))) return `${w[i]} names a file that does not exist`;
+  }
+  const pm = w.findIndex((x) => /^(npm|pnpm|yarn|bun)$/.test(x));
+  if (pm >= 0) {
+    const script = /^(run|run-script)$/.test(w[pm + 1] || '') ? w[pm + 2] : null, scripts = json(path.join(root, 'package.json'))?.scripts;
+    if (script && scripts && !scripts[script]) return `script "${script}" is not in package.json`;
+  }
+  const tester = w.findIndex((x) => TESTER.test(path.basename(x)));
+  if (tester >= 0) {
+    const rest = w.slice(tester + 1), flag = rest.findIndex((x) => x.startsWith('-')); // after a flag a word may be its value (-k expr, -t name)
+    const filter = (flag < 0 ? rest : rest.slice(0, flag)).find((x) => !/^(run|watch|test)$/.test(x) && !/[:=]/.test(x));
+    if (filter && !/[*<>]/.test(filter) && !there(filter)) return `"${filter}" is a filter that names no file or folder here`;
+  }
+  return '';
+}
+
 // Codex's Windows sandbox does not resolve the .CMD launchers in node_modules/.bin, so `pnpm exec` / `npx` fail there
 // ("not recognized") while `pnpm run` works: for that agent a package binary runs with node.
 export const directBins = (agent, platform = process.platform) => agent === 'codex' && platform === 'win32';

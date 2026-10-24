@@ -47,7 +47,7 @@ export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir()
 // in the last paragraph, so git does not read it as a trailer.
 export function commitsFor(cwd, id) {
   if (!id) return [];
-  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%B%x1e'], { cwd, encoding: 'utf8', timeout: 1500 });
+  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%B%x1e'], { cwd, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) return [];
   return r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))
     .filter(([h, msg]) => h && String(msg || '').split(/\r?\n/).some((l) => l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1] === id)).map(([h]) => h);
@@ -58,7 +58,7 @@ export function commitsFor(cwd, id) {
 // files the turn really changed, whatever tool changed them (`git checkout`, a script, a formatter), not only the
 // files written with Edit/Write.
 export function gitSnapshot(cwd) {
-  const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 1500, maxBuffer: 8 * 1024 * 1024 });
+  const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
   const top = git('rev-parse', '--show-toplevel');
   if (top.status !== 0) return null;
   const root = top.stdout.trim(), head = git('rev-parse', 'HEAD').stdout.trim() || null;

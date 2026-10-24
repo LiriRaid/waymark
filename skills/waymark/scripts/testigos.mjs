@@ -10,7 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
-import { stackOf, translate, gateCell } from './stack.mjs';
+import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
 import { git as gitIn } from './lib/git.mjs';
@@ -43,7 +43,7 @@ export function gateCommand(root, memoryFile) {
   const stack = stackOf(root);
   for (const [gate, cmd] of gateRows(memoryFile)) {
     // the cell as it runs: a closing note such as "(not verified)" dropped (gateCell)
-    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd: translate(gateCell(cmd), stack), from: 'memory.md' };
+    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd) && !rowProblem(cmd, root)) return { cmd: translate(gateCell(cmd), stack), from: 'memory.md' };
   }
   let pkg = null;
   try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}

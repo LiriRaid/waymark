@@ -31,7 +31,14 @@ function editSection(text, title, fn) {
 // A command that can stand in the table: no shell variables, substitutions or loops.
 const plain = (s) => !/[$`]|^(for|do|done|while|if|then|fi|else)\b/.test(s);
 // No file named (a glob is general: tests/*.test.mjs): a command for this file only is no project gate.
-const general = (s) => words(s).slice(1).every((w) => w.startsWith('-') || w.includes('*') || !/[\\/]|\.\w{1,5}$/.test(w));
+// A test runner's filter (`vitest run s`) is a file or a name too: a command that names one is for that run only.
+const general = (s) => {
+  const w = words(s);
+  if (!w.slice(1).every((x) => x.startsWith('-') || x.includes('*') || !/[\\/]|\.\w{1,5}$/.test(x))) return false;
+  const at = w.findIndex((x) => /^(vitest|jest|mocha|karma|pytest|rspec|phpunit|ava|tap)$/.test(path.basename(x)));
+  const rest = at < 0 ? [] : w.slice(at + 1), flag = rest.findIndex((x) => x.startsWith('-'));
+  return !(flag < 0 ? rest : rest.slice(0, flag)).some((x) => !/^(run|watch|test)$/.test(x));
+};
 const kindOf = (p) => (p.build ? 'build' : p.test ? (general(p.text) ? 'test (full)' : 'test (related)')
   : /\b(tsc|vue-tsc|svelte-check|typecheck|type-check|mypy|pyright)\b/.test(p.text) ? 'typecheck' : 'lint (changed files)');
 // A row's command with <placeholders> as a pattern: `node --check <file>` matches node --check src/a.mjs.
@@ -42,7 +49,8 @@ const rowMatches = (cmd, text) => new RegExp(`^${cmd.replace(/[.*+?^${}()|[\]\\]
 export function learnGates(text, rec, date) {
   if (rec?.evaluation?.steps?.Verificar !== true) return text;
   const o = rec.observed || {};
-  const cmds = [...(o.gate?.ok ? [o.gate.cmd] : []), ...(o.gates || []).filter((g) => !g.error && !g.env).map((g) => g.cmd)];
+  // a command the record had to cut is never learned: a row of half a command fails on every later task
+  const cmds = [...(o.gate?.ok && !o.gate.cut ? [o.gate.cmd] : []), ...(o.gates || []).filter((g) => !g.error && !g.env && !g.cut).map((g) => g.cmd)];
   const parts = [...new Map(cmds.flatMap((c) => shellRuns(c)).filter((p) => (p.gate || p.test || p.build) && plain(p.text))
     .map((p) => [p.text.replace(/\s+/g, ' '), { ...p, text: p.text.replace(/\s+/g, ' ') }])).values()];
   if (!parts.length) return text;

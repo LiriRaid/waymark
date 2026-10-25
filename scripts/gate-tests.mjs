@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Waymark 2.0.18 · point 1: the gate of the suite. It runs every tests/*.test.mjs three ways and fails unless each run reads
 // "skipped 0, todo 0, fail 0": a test that is skipped, marked todo or cancelled is not a pass, so it cannot hide in a green run.
-//   1. the default run
+//   1. the default run, at most CONCURRENCY files at once
 //   2. --test-concurrency=1      (no test depends on running beside another)
 //   3. from a copy of the working tree under the OS temp folder (no test depends on where the repository lives)
 //   node scripts/gate-tests.mjs [--once]      --once runs only the first, for the loop of a change
@@ -12,6 +12,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The files run at once: every test spawns hooks, git and node, and node's own default (one per core) saturated a busy machine and made the
+// suite fail differently on each run, by timeouts. Four is what a runner with four cores carries, and a bigger machine has no reason to exceed it.
+export const CONCURRENCY = 4;
 
 // The counters of node's test runner summary ("ℹ tests 419", "ℹ skipped 1", …) → { tests, pass, fail, cancelled, skipped, todo }, or null.
 export function summarize(output) {
@@ -60,7 +63,7 @@ function copyOfTree(root) {
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const once = process.argv.includes('--once');
-  const runs = [['default', () => run(ROOT)], ...(once ? [] : [['--test-concurrency=1', () => run(ROOT, ['--test-concurrency=1'])], ['a copy under the temp folder', () => { const d = copyOfTree(ROOT); try { return run(d); } finally { fs.rmSync(d, { recursive: true, force: true }); } }]])];
+  const runs = [[`default (concurrency ${CONCURRENCY})`, () => run(ROOT, [`--test-concurrency=${CONCURRENCY}`])], ...(once ? [] : [['--test-concurrency=1', () => run(ROOT, ['--test-concurrency=1'])], ['a copy under the temp folder', () => { const d = copyOfTree(ROOT); try { return run(d, [`--test-concurrency=${CONCURRENCY}`]); } finally { fs.rmSync(d, { recursive: true, force: true }); } }]])];
   let bad = 0;
   for (const [name, go] of runs) {
     const r = go();

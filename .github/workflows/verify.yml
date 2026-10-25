@@ -4,7 +4,7 @@ name: verify
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
   pull_request:
 
@@ -34,8 +34,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # A branch is checked by its pull request (push only runs on main and on tags), and Windows runs one pass there: the three passes take about
+      # three times as long, and the release tag, where Windows matters most, still runs all three on both systems.
       - name: the suite, three runs, nothing skipped, todo or failing
+        if: runner.os == 'Linux' || startsWith(github.ref, 'refs/tags/v')
         run: node scripts/gate-tests.mjs
+      - name: the suite, one run (Windows, branch or pull request)
+        if: runner.os != 'Linux' && !startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/gate-tests.mjs --once
       - name: the chain of the records
         run: node skills/waymark/scripts/waymark.mjs verify
       - name: the files against the manifest

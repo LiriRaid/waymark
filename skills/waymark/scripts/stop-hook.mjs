@@ -359,6 +359,11 @@ export function effectiveReply(texts = [], last = '') {
   return rest.trim() ? `${cierre.trimEnd()}\n\n${rest.trim()}` : cierre;
 }
 
+// A message that asks for nothing, and a call that acts (a shell command that is not the routine's own or a plain read, or a connector).
+const COURTESY = /^\s*(?:gracias|muchas gracias|thanks|thank you|ok|vale|perfecto|genial|listo|excelente|buen[oa]s?(?: d[ií]as| tardes| noches)?|hola|entendido|de acuerdo)\b[^\n?]{0,40}$/i;
+const READ_ONLY = /^\s*(?:node\s+\S*waymark\.mjs|git\s+(?:status|log|diff|show|branch|rev-parse)\b|ls|cat|pwd|echo|dir|type|which|grep|rg|find|head|tail|wc)\b/;
+const acting = (t) => (shell(t) && String(cmdOf(t)).split(/&&|\|\||;|\|/).some((p) => p.trim() && !READ_ONLY.test(p))) || (/^mcp__/.test(t.name) && !/^mcp__(?:engram|context7|ccd_[a-z]+)__/.test(t.name));
+
 // The same ask as the last task's: the prompt of a turn that a notification resumed is the original one.
 const askKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 200);
 export const sameAsk = (a, b) => !!askKey(a) && askKey(a) === askKey(b);
@@ -824,8 +829,10 @@ const WITNESS = {
     return observed.memory.searched || observed.memory.late ? [] : [`the project memory was not searched before the first change: run ${WAYMARK_CMD} pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram`];
   },
   review: (S) => {
-    const { observed, reviewLeft, skip } = S;
-    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})`];
+    const { ctx, observed, reviewLeft, skip } = S;
+    // a batch that only applies the findings of a review the user asked to fix needs one review of what that batch changed, not another whole round
+    const delta = (ctx.decisions || []).some((d) => d.source === 'prompt') ? ' — one delta review of only the files this batch changed: the findings were already reviewed' : '';
+    return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})${delta}`];
   },
   build: (S) => {
     const { buildAfter, buildNo, excepted } = S;
@@ -947,7 +954,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
   // A turn no prompt of its own started (a notification after the close), an empty one, or one that repeats the last
   // task's prompt, and changed nothing, is no task: its Cierre would be a ghost row (T<n>b of the same ask).
-  if (!changed.length && (ctx.resumed || ctx.repeat || !String(turn.prompt || '').trim())) return null;
+  // A courtesy ("gracias", "ok") or a turn that only wrote the routine's own files (memory, notes) with no command that acts, is none either.
+  if (!changed.length && (ctx.resumed || ctx.repeat || !String(turn.prompt || '').trim() || COURTESY.test(String(turn.prompt)) || (turn.tools.some((t) => EDITS.test(t.name)) && !turn.tools.some(acting)))) return null;
   if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
   const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
   // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")

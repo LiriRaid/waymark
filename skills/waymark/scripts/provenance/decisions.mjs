@@ -11,6 +11,7 @@ export function decisionsIn(lines) {
   const out = [], asks = new Map();
   let rejected = null;
   for (const d of lines) {
+    if (!rejected && fixesFindings(d)) { out.push({ question: '(apply the review findings)', chosen: answerText(promptText(d).trim()), discarded: [], source: 'prompt' }); continue; }
     if (d.type === 'assistant' && !d.isSidechain) for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_use' && c.name === 'AskUserQuestion') asks.set(c.id, c.input?.questions || []);
     const r = d.toolUseResult;
     if (rejected && isPrompt(d)) {
@@ -61,4 +62,8 @@ export function recordedDecisions(decisions = []) {
   });
 }
 
-export const askedChoice = (lines) => lines.some((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some?.((c) => c.type === 'tool_use' && c.name === 'AskUserQuestion'));
+// "Apply the findings" is the user's own decision: a review already said what is wrong and they ask for exactly that fix, so the
+// window has nothing left to ask (asking again was the loop that ran four review rounds). Their words are the decision.
+const FIX_FINDINGS = /\b(?:aplica|aplicar|corrige|corregir|arregla|arreglar|soluciona|resuelve|apply|fix|address)\b[^.\n]{0,40}\b(?:hallazgos|findings|observaciones|issues? del review|comentarios del review)\b/i;
+const fixesFindings = (d) => isPrompt(d) && FIX_FINDINGS.test(promptText(d));
+export const askedChoice = (lines) => lines.some((d) => (d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some?.((c) => c.type === 'tool_use' && c.name === 'AskUserQuestion')) || fixesFindings(d));

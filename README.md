@@ -358,6 +358,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0041 · Qwen Code, Droid and Amp get an adapter, written from their documentation](docs/adr/0041-qwen-code-droid-and-amp-adapters.md)
 - [0042 · The public repository holds no data of the projects Waymark runs on](docs/adr/0042-no-data-of-the-projects-waymark-runs-on.md)
 - [0043 · A profile is a reference, never the project's rule](docs/adr/0043-a-profile-is-a-reference-never-the-projects-rule.md)
+- [0044 · A record for the work, none for what is not work, and one task closed by the person who asked for it](docs/adr/0044-a-record-for-the-work-none-for-what-is-not-work.md)
 - [0045 · A permission the user gives works, only the user can give it, and nothing read is saved](docs/adr/0045-a-permission-the-user-gives-works-and-nothing-read-is-saved.md)
 <!-- adr-index:end -->
 

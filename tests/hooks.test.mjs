@@ -2720,7 +2720,7 @@ test('context brake: a message to a session at 300k is stopped before the model 
   assert.match(brake(hook('s4'), { out: {} }, { context: 300000 }, state).line, /~300k tokens[\s\S]*a new session is cheaper/, 'an agent that cannot stop a prompt gets one line');
 });
 
-test('context brake waits for the task: never mid-task (open, cut by the quota, parcial or bloqueado), only once it closes hecho', async () => {
+test('context brake: a task in progress is never held (past 500k the agent is told to offer a new session); once it closes, even parcial or bloqueado, it brakes', async () => {
   const { brake } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const { markTaskStart, clearTaskStart, appendRecord } = await import(`file://${SCRIPTS}/provenance.mjs`);
   const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
@@ -2728,21 +2728,24 @@ test('context brake waits for the task: never mid-task (open, cut by the quota, 
   const hook = (session, prompt = 'sigue') => ({ cwd: repo, session_id: session, prompt });
   const t0 = Date.parse('2026-10-15T10:00:00Z'), H = 3600000;
   const close = (id, result) => appendRecord(repo, { id, session: 'big', at: new Date().toISOString(), cierre: `## Cierre · ${id}\nResultado: ${result}\nEvidencia: observada x\nAprendido: y` });
-  // a task in progress (its start marked by the first prompt, no Cierre yet): neither brake stops it, at any size
+  // a task in progress (its start marked by the first prompt, no Cierre yet): no message is held, at any size
   markTaskStart('big');
-  assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'a task in progress at 650k continues');
-  assert.equal(brake(hook('big'), claude, { context: 820000, lastAt: t0 }, state, t0 + 5 * H), null, 'resumed after the quota ran out (5 h idle, 820k): it continues');
-  assert.equal(brake(hook('big'), { out: {} }, { context: 650000 }, state), null, 'no line either for an agent that cannot stop a prompt');
-  // closed but not done: parcial or bloqueado keeps it going
+  assert.equal(brake(hook('big'), claude, { context: 450000 }, state), null, 'under 500k a task in progress continues untouched');
+  const told = brake(hook('big'), claude, { context: 650000 }, state);
+  assert.ok(!told.block && /Offer the user, in your choice window, to close this task/.test(told.line), 'past 500k it is told to offer a new session, never held');
+  assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'once per step');
+  assert.ok(!brake(hook('big'), claude, { context: 820000, lastAt: t0 }, state, t0 + 5 * H).block, 'resumed after the quota ran out (5 h idle, 820k): it continues');
+  assert.ok(brake(hook('big'), { out: {} }, { context: 920000 }, state).line, 'the same line for an agent that cannot stop a prompt');
+  // closed but not done: parcial or bloqueado no longer shields the session (one reached 879k that way)
   clearTaskStart('big');
   close('2026-10-15 · T1', 'parcial (falta el deploy)');
-  assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'Resultado parcial: the task is not done');
+  assert.equal(brake(hook('big'), claude, { context: 650000 }, state).block.decision, 'block', 'Resultado parcial: the task closed, the size brake fires');
   close('2026-10-15 · T1a', 'bloqueado (espera el merge)');
-  assert.equal(brake(hook('big'), claude, { context: 700000, lastAt: t0 }, state, t0 + 2 * H), null, 'Resultado bloqueado: the task is not done');
+  assert.equal(brake(hook('big', 'otro mensaje'), claude, { context: 700000, lastAt: t0 }, state, t0 + 2 * H).block.decision, 'block', 'Resultado bloqueado: the same');
   // closed hecho: the next message brakes once, as before
   close('2026-10-15 · T1b', 'hecho');
-  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 700000 }, state).block.decision, 'block', 'the task closed hecho: the size brake fires');
-  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 700000 }, state), null, 'resent: it continues');
+  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 800000 }, state).block.decision, 'block', 'the task closed hecho: the size brake fires');
+  assert.equal(brake(hook('big', 'otra tarea'), claude, { context: 800000 }, state), null, 'resent: it continues');
   // another session's open task does not shield this one
   markTaskStart('other');
   assert.equal(brake(hook('fresh'), claude, { context: 300000 }, state).block.decision, 'block', 'only this session\'s task counts');

@@ -4,7 +4,6 @@ import path from 'node:path';
 import { isPrompt } from '../transcript.mjs';
 import { waymarkHome as HOME } from '../lib/paths.mjs';
 import { ID, base, localDay } from './ids.mjs';
-import { readLog } from './chain.mjs';
 import { knownRecords } from './records.mjs';
 import { projectHome } from './project.mjs';
 
@@ -108,10 +107,9 @@ export function clearTaskStart(session) {
   writeStarts(all);
 }
 
-// A task of this session is not done: it started and has no Cierre yet (a turn the quota cut, a reply waiting on the
-// user), or its last Cierre says Resultado parcial or bloqueado. The context brakes wait for it (docs/adr/0016).
+// A task of this session is not done: it started and has no Cierre yet (a turn the quota cut, a reply waiting on the user). The
+// size brake only advises while it lasts (rule0-hook.mjs). A Cierre that says parcial or bloqueado no longer holds the brake: a
+// task that closed is between tasks, and a session that reached 879k held by one went on with no warning (docs/adr/0016, 0044).
 export function taskInProgress(cwd, session) {
-  if (taskStartMark(session)) return true;
-  const last = readLog(cwd).filter((r) => r.session === (session || 'unknown') && r.cierre).pop();
-  return !!last && /^[ \t]*Resultado:\s*\**\s*(parcial|bloqueado)/im.test(last.cierre);
+  return !!taskStartMark(session);
 }

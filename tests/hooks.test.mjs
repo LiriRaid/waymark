@@ -2736,7 +2736,7 @@ test('context brake: a task in progress is never held (past 500k the agent is to
   assert.equal(brake(hook('big'), claude, { context: 650000 }, state), null, 'once per step');
   assert.ok(!brake(hook('big'), claude, { context: 820000, lastAt: t0 }, state, t0 + 5 * H).block, 'resumed after the quota ran out (5 h idle, 820k): it continues');
   assert.ok(brake(hook('big'), { out: {} }, { context: 920000 }, state).line, 'the same line for an agent that cannot stop a prompt');
-  // closed but not done: parcial or bloqueado no longer shields the session (one reached 879k that way)
+  // closed but not done: parcial or bloqueado does not shield the session
   clearTaskStart('big');
   close('2026-10-15 · T1', 'parcial (falta el deploy)');
   assert.equal(brake(hook('big'), claude, { context: 650000 }, state).block.decision, 'block', 'Resultado parcial: the task closed, the size brake fires');

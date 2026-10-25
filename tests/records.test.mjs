@@ -19,7 +19,7 @@ process.env.WAYMARK_AGENTS_HOME = home;
 const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
-const { cierreGaps, sameAsk, touchedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+const { cierreGaps, touchedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { currentTurn, pendingBackground, BACKGROUND_WAIT_MS } = await import(`file://${SCRIPTS}/transcript.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -100,26 +100,21 @@ test('2c: an open turn older than the day limit is not carried over', () => {
   assert.equal(P.openTurn(dir, 's-new').prompt, 'algo reciente');
 });
 
-// ---- 2d · no record without work: a turn no prompt started, an empty one or a repeat that changed nothing ----
+// ---- 2d · no record without work: a turn no prompt started, or an empty one, that changed nothing ----
 const outsideTask = (promptText, more = {}) => {
   const lines = [prompt(promptText), say('Waymark → L2 · dept-devops'), ...call('Bash', { command: 'git push' })];
   return cierreGaps(currentTurn(lines), CIERRE(), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [], outside: true, ...more });
 };
 test('2d: logic — a notification turn after the close, with no change, writes no ghost task; a real outside task still does', () => {
   assert.equal(outsideTask('sube el cambio', { resumed: true }), null, 'resumed by a notification');
-  assert.equal(outsideTask('sube el cambio', { repeat: true }), null, 'the last task\'s own prompt again');
+  assert.ok(outsideTask('sube el cambio', { repeat: true }), 'counter-example: the same words asked again are a new task, not a ghost');
   assert.equal(outsideTask('   '), null, 'an empty prompt');
   assert.ok(outsideTask('sube el cambio'), 'counter-example: a task with a Cierre whose changes are all outside the project is recorded');
 });
 test('2d: CSS/HTML — the same turn after a styles task: with a file changed it is still a task', () => {
   const lines = [prompt('ajusta el margen del botón'), say('Waymark → L1 · dept-frontend'), ...call('Edit', { file_path: '/work/proj/src/app.css' })];
-  assert.ok(cierreGaps(currentTurn(lines), CIERRE(), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [], resumed: true, repeat: true }), 'counter-example: a changed stylesheet is work, whatever the prompt');
+  assert.ok(cierreGaps(currentTurn(lines), CIERRE(), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [], resumed: true }), 'counter-example: a changed stylesheet is work, whatever the prompt');
   assert.equal(outsideTask('ajusta el margen del botón', { resumed: true }), null);
-});
-test('2d: the same ask is told by its words, not its spacing', () => {
-  assert.ok(sameAsk('  sube   el cambio\n', 'sube el cambio'));
-  assert.ok(!sameAsk('sube el cambio', 'baja el cambio'));
-  assert.ok(!sameAsk('', ''), 'two empty prompts are no ask to repeat');
 });
 
 // ---- 2d · one short record in every other project a task changed files in ----
@@ -136,6 +131,29 @@ for (const [kind, file] of [['logic', 'src/b.service.mjs'], ['CSS/HTML', 'src/b.
     assert.equal(P.taskIds(b).next, before, 'no ID taken there');
     assert.match(P.tasksMarkdown(P.projectHome(b)), new RegExp(`Touched from another project[\\s\\S]*2026-10-25 · T1 from a[\\s\\S]*${path.basename(file)}`));
     assert.deepEqual(touchedRepos([path.join(b, file)], a, { ...rec, repos: [{ root: b, commits: ['x'] }] }, 'a'), [], 'counter-example: a project the task committed in already holds it as a note');
+  });
+}
+
+// the same, end to end: the end-of-turn hook of the project the session ran in writes the record in the sibling too
+for (const [kind, file] of [['logic', 'src/b.service.mjs'], ['CSS/HTML', 'src/b.css']]) {
+  test(`2d: ${kind} — the end-of-turn hook leaves the "touched" record in the sibling project`, async () => {
+    // the sibling sits inside the project's folder only so the temp folder's exemption does not hide its files; it is its own repo with its own memory
+    const a = tmpRepo({ 'src/a.mjs': 'a\n' }), b = path.join(a, 'sib');
+    fs.mkdirSync(path.join(b, '.waymark'), { recursive: true });
+    fs.mkdirSync(path.join(b, path.dirname(file)), { recursive: true });
+    gitT(b, 'init', '-q');
+    fs.writeFileSync(path.join(b, '.waymark', 'memory.md'), '# S\n\n## Work in progress\n');
+    fs.writeFileSync(path.join(b, file), 'a\n');
+    const transcript = path.join(a, 't.jsonl');
+    const lines = [prompt('ajusta el estilo del hermano'), say('Waymark → L1 · dept-frontend'), ...call('Edit', { file_path: path.join(b, file) })];
+    fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const id = P.taskIds(a).next;
+    await hookRun('stop-hook.mjs', { transcript_path: transcript, cwd: a, session_id: `s-sib-${kind}`, stop_hook_active: true, last_assistant_message: `## Cierre · ${id}\nResultado: hecho\nEvidencia: inferida de la lectura (check: ver el archivo)\nAprendido: el estilo vive en el hermano ← lo dijo el pedido` });
+    const touched = P.readRecords(P.projectHome(b).log).filter((r) => r.kind === 'touched');
+    assert.equal(touched.length, 1, 'the sibling holds one');
+    assert.equal(touched[0].task, id);
+    assert.deepEqual(touched[0].files, [file]);
+    assert.ok(!P.readRecords(P.projectHome(a).log).some((r) => r.kind === 'touched'), 'counter-example: the project the task ran in holds the task itself, not a pointer');
   });
 }
 

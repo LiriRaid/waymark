@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -45,10 +45,10 @@ export function gitLine(root, max = 2) {
   const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${path.basename(l.slice(3).replace(/\/$/, '')) || l.slice(3)}`).join(', ');
   return ` Git: ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
 }
-// The last thing this session recorded in the project (a task, a question or a confirmation), from every record git holds.
+// The last thing this session recorded in the project (a task, a question or a confirmation): the log's own lines, which carry the outcome.
 function lastOfSession(cwd, session) {
   const home = projectHome(cwd);
-  return !home.dir || home.legacy || !fs.existsSync(home.memory) ? null : readTaskRecords(home).filter((r) => r.session === session).pop() || null;
+  return !home.dir || home.legacy || !fs.existsSync(home.memory) ? null : readRecords(home.log).filter((r) => r.session === session).pop() || null;
 }
 // The user says the ask continues: a verb for it, or the last task's own number.
 export const CONTINUES = /^\s*(?:sigue|contin[uú]a|continua|retoma|seguimos|reanuda|dale|continue|resume|go on)\b/i;
@@ -63,7 +63,8 @@ export function taskLine(cwd, now = new Date(), { session = null, prompt = '' } 
 }
 // A bare "sí" after a task that said hecho confirms it: the hook runs `done`, so the model never reads it (0 tokens). Not when the
 // last reply ended asking something else (the "sí" answers that), nor when the task is not the session's last thing.
-export const YES = /^\s*(?:s[ií]|sip|ok|okay|vale|listo|dale|perfecto|correcto|completo|confirmo|yes|yep)\s*[.!¡]*\s*$/i;
+export const YES = /^\s*(?:s[ií]|yes|confirmo|confirmado|correcto|completo)\s*[.!¡]*\s*$/i; // go-ahead words (dale, ok, vale) are no confirmation: they answer an offer
+const OFFER = /\b(?:si quieres|si prefieres|quieres que|puedo|te parece|want me|shall i|should i|would you|let me know)\b|[¿?]/i;
 export function confirmation(hook, agent, cwd) {
   if (!YES.test(String(hook.prompt || ''))) return null;
   const session = hook.session_id || 'unknown';
@@ -72,7 +73,7 @@ export function confirmation(hook, agent, cwd) {
   if (!last?.id || last.kind || last.outcome?.result !== 'hecho') return null;
   const lines = agent.read(hook), reply = [...lines].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
   const text = (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-  if (closingQuestions(text).length) return null;
+  if (closingQuestions(text).length || OFFER.test(text.split('\n').slice(-4).join('\n'))) return null; // the reply ended offering or asking: the yes answers that
   const home = projectHome(cwd);
   if (!confirmTasks(home, [last.id], { note: hook.prompt, agent: agent.name, session, always: true }).length) return null;
   refreshTasks(home, true);
@@ -85,12 +86,12 @@ export function softCap(memory) {
   const m = String(memory || '').match(/^[ \t]*[-*]?[ \t]*Soft cap:[ \t]*(\d+)\s*min\w*\s*\/\s*(\d+)\s*(?:calls|llamadas)\s*\/\s*(\d+)\s*(?:files|archivos)/im);
   return m ? { minutes: Number(m[1]), calls: Number(m[2]), files: Number(m[3]) } : SOFT_CAP;
 }
-export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json')) {
+export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null) {
   if (!mark) return ''; // no task in progress: nothing to measure
   const home = projectHome(cwd), cap = softCap((() => { try { return fs.readFileSync(home.memory, 'utf8'); } catch { return ''; } })());
   const files = new Set();
   let calls = 0;
-  for (const d of agent.read(hook)) {
+  for (const d of lines || agent.read(hook)) {
     if (d.type !== 'assistant' || d.isSidechain || (Date.parse(d.timestamp || '') || 0) < mark) continue;
     for (const c of d.message?.content || []) if (c.type === 'tool_use') { calls++; if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(c.name) && c.input?.file_path) files.add(String(c.input.file_path)); }
   }
@@ -187,7 +188,8 @@ export function reminder(hook, agent) {
   try { yes = confirmation(hook, agent, cwd); } catch (e) { logHookError('rule0-hook confirmation', e); }
   if (yes) return agent.out.blockPrompt ? agent.out.blockPrompt(`Waymark: ${yes.id} confirmada como hecha (tu «sí»); no queda nada por hacer en ella.`) : agent.out.context('UserPromptSubmit', `Waymark: the user's "sí" confirmed ${yes.id} as done and the hook closed it. Answer in one line: no routing line, no Cierre.${agent.note(SKILLS_DIR)}`);
   let st = { openedWithWaymark: false };
-  try { st = sessionState(agent.read(hook)); } catch {}
+  let lines = null;
+  try { lines = agent.read(hook); st = sessionState(lines); } catch {}
   let held = null;
   try { held = brake(hook, agent, st); } catch {}
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
@@ -195,7 +197,10 @@ export function reminder(hook, agent) {
   let ids = '', other = '', unclosed = false;
   try { ids = taskLine(cwd, new Date(), { session, prompt: hook.prompt }); } catch {}
   try { other = otherSessionLine(cwd, session); } catch {}
-  try { unclosed = !!openTurn(cwd, session); } catch {} // this session's last turn never closed (interrupted, or a background agent still running)
+  try { // this session's last turn never closed (interrupted, or a background agent still running): its open entry is newer than anything the session recorded
+    const open = openTurn(cwd, session), home = projectHome(cwd), last = open && !home.legacy ? readRecords(home.log).filter((r) => r.session === session).pop() : null;
+    unclosed = !!open && !(last && Date.parse(last.at || 0) > Date.parse(open.at || 0));
+  } catch {}
   try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change
   try { saveSnapshot(hook.session_id, cwd, { keep: unclosed }); } catch {} // the end-of-turn hook diffs against it; an unclosed turn's changes stay in it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
@@ -215,7 +220,7 @@ export function reminder(hook, agent) {
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   let cap = '';
-  try { cap = softCapLine(hook, agent, cwd, taskStartMark(hook.session_id)); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
+  try { cap = softCapLine(hook, agent, cwd, taskStartMark(hook.session_id), Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
   const text = (st.openedWithWaymark ? short : full) + ids + other + repo + (held?.line || '') + cap + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);

@@ -152,3 +152,10 @@ test('2h: a batch that only applies the findings is asked for one delta review, 
   const g2 = cierreGaps(currentTurn(plain), CIERRE, undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [{ question: '¿Cómo?', chosen: 'A', discarded: [] }], cwd: '/work/proj' });
   assert.ok(!/delta review/.test(g2.steps.find((s) => s.id === 'review').why.join(' ')), 'counter-example: an ordinary task is asked for its review as before');
 });
+
+test('2h: an order that adds more work than the fix still goes through the window', () => {
+  for (const text of ['aplica los hallazgos del review y además migra la tabla de pedidos', 'fix the findings and also rename the service', `aplica los hallazgos ${'x'.repeat(200)}`]) {
+    assert.equal(P.askedChoice([prompt(text), say('Waymark → L2 · dept-backend')]), false, text.slice(0, 50));
+  }
+  assert.equal(P.askedChoice([prompt('aplica los hallazgos del review'), say('Waymark → L2')]), true, 'counter-example: the plain order is the decision');
+});

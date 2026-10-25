@@ -364,9 +364,6 @@ const COURTESY = /^\s*(?:gracias|muchas gracias|thanks|thank you|ok|vale|perfect
 const READ_ONLY = /^\s*(?:node\s+\S*waymark\.mjs|git\s+(?:status|log|diff|show|branch|rev-parse)\b|ls|cat|pwd|echo|dir|type|which|grep|rg|find|head|tail|wc)\b/;
 const acting = (t) => (shell(t) && String(cmdOf(t)).split(/&&|\|\||;|\|/).some((p) => p.trim() && !READ_ONLY.test(p))) || (/^mcp__/.test(t.name) && !/^mcp__(?:engram|context7|ccd_[a-z]+)__/.test(t.name));
 
-// The same ask as the last task's: the prompt of a turn that a notification resumed is the original one.
-const askKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-export const sameAsk = (a, b) => !!askKey(a) && askKey(a) === askKey(b);
 
 // The other projects a task changed files in: one short record each (kind "touched", no ID of its own: it is no task
 // there, so that project's counter never moves), so its tasks.md says who changed its files and under which task. A repo
@@ -952,10 +949,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn.
   const lastText = String(last || '').replace(/\*\*|__/g, '');
   const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
-  // A turn no prompt of its own started (a notification after the close), an empty one, or one that repeats the last
-  // task's prompt, and changed nothing, is no task: its Cierre would be a ghost row (T<n>b of the same ask).
+  // A turn no prompt of its own started (a notification after the close) or an empty one, and changed nothing, is no task:
+  // its Cierre would be a ghost row (the notification's turn carries the original prompt).
   // A courtesy ("gracias", "ok") or a turn that only wrote the routine's own files (memory, notes) with no command that acts, is none either.
-  if (!changed.length && (ctx.resumed || ctx.repeat || !String(turn.prompt || '').trim() || COURTESY.test(String(turn.prompt)) || (turn.tools.some((t) => EDITS.test(t.name)) && !turn.tools.some(acting)))) return null;
+  if (!changed.length && (ctx.resumed || !String(turn.prompt || '').trim() || COURTESY.test(String(turn.prompt)) || (turn.tools.some((t) => EDITS.test(t.name)) && !turn.tools.some(acting)))) return null;
   if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
   const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
   // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
@@ -1027,10 +1024,11 @@ export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as
 // project's Conventions say it is the user's, the result is hecho with the step named (`userOwned`). A parcial for a cause
 // outside the work (the quota, a provider) carries `cause: 'external'`: the next ask is a new task unless the user says it continues.
 const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i };
-const EXTERNAL = /usage limit|l[ií]mite de uso|cuota|quota|rate.?limit|sin conexi[oó]n|connection (?:lost|refused)|proveedor|servicio (?:externo|ca[ií]do)/i;
+const EXTERNAL = /usage limit|l[ií]mite de uso|se agot[oó] la cuota|cuota (?:agotada|del plan|de uso)|quota (?:exceeded|reached)|rate.?limit|sin conexi[oó]n|connection (?:lost|refused)|proveedor (?:ca[ií]do|no responde)|servicio (?:externo|ca[ií]do)/i;
+const STEP_KEY = /^(?:the )?(?:deploys?|despliegues?|releases?|prs?|pull requests?|merges?|push(?:es)?)$/i;
 export function ownedSteps(text) {
   const owned = new Set();
-  for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1])) owned.add(step);
+  for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1]) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
   return owned;
 }
 export function outcome(reply, items, answers, level, owned = new Set()) {
@@ -1157,7 +1155,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), resumed: since > 0 && turn.startedAt <= since, repeat: sameAsk(turn.prompt, records.filter((r) => r.session === h.session_id && r.id).pop()?.prompt), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), resumed: since > 0 && turn.startedAt <= since, decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook

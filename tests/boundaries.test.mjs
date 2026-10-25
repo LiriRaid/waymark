@@ -19,7 +19,7 @@ const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { outcome, ownedSteps, confirmAsk } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
-const { taskLine } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+const { taskLine, YES } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
 const tmpRepo = () => {
@@ -80,9 +80,9 @@ test('2e: a task with a line left in Work in progress loses it when the user con
   const dir = tmpRepo();
   fs.writeFileSync(path.join(dir, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n- ▶ [2026-10-25 · T1] falta revisar el ancho\n');
   closed(dir, 's-line');
-  await ask(dir, 's-line', 'listo');
+  await ask(dir, 's-line', 'confirmo');
   assert.ok(!/T1/.test(fs.readFileSync(path.join(dir, '.waymark', 'memory.md'), 'utf8').split('## Work in progress')[1] || ''), 'the line left');
-  assert.equal(P.readRecords(P.projectHome(dir).log).filter((x) => x.kind === 'confirm')[0].said, 'listo');
+  assert.equal(P.readRecords(P.projectHome(dir).log).filter((x) => x.kind === 'confirm')[0].said, 'confirmo');
 });
 
 // ---- 2e · a step the user owns never leaves a task parcial ----
@@ -133,3 +133,17 @@ for (const [kind, file] of [['logic', 'src/orders.service.mjs'], ['CSS/HTML', 's
     assert.match(taskLine(own, new Date(), { session: 's-own', prompt: 'cambia el color' }), /follow-up 2026-10-25 · T1b/, 'counter-example: a parcial of the work still offers its follow-up');
   });
 }
+
+// ---- the review of point 2: what the first build got too wide ----
+test('2e: go-ahead words and an offer are no confirmation; "Push notifications: the user" is no rule; "cuota" alone is no external cause', async () => {
+  for (const w of ['dale', 'ok', 'vale', 'listo', 'perfecto']) assert.ok(!YES.test(w), w);
+  for (const w of ['sí', 'Si.', 'yes', 'confirmo', 'completo']) assert.ok(YES.test(w), w);
+  const dir = tmpRepo();
+  closed(dir, 's-offer');
+  const offered = await ask(dir, 's-offer', 'sí', 'Hecho el cambio.\n\nSi quieres, sigo con el punto 5.');
+  assert.ok(!/confirmada como hecha/.test(offered.out), 'the yes answers the offer, so the prompt reaches the model');
+  assert.deepEqual([...ownedSteps('- Push notifications: the user receives them\n- Release notes: el usuario las escribe\n')], [], 'the key names the step and nothing else');
+  assert.deepEqual([...ownedSteps('- Push: the user\n- Merge a main: el usuario\n')], ['push'], 'a key with more words is not a step');
+  assert.equal(outcome('Resultado: parcial (falta calcular la cuota del préstamo)', [], [], 2).cause, undefined);
+  assert.equal(outcome('Resultado: parcial (falta el endpoint del proveedor de pagos)', [], [], 2).cause, undefined);
+});

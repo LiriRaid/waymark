@@ -44,8 +44,8 @@ export function appendRecord(cwd, record) {
   const commit = record.id && record.commits?.[0];
   const text = JSON.stringify(record);
   if (commit && addNote(cwd, commit, text)) {
-    const { id, kind, agent, at, session, cwd: where, files, commits, repos, department } = record; // department: what the session loaded (docs/adr/0015)
-    line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, repos, department }).filter(([, v]) => v !== undefined));
+    const { id, kind, agent, at, session, cwd: where, files, commits, repos, department, outcome } = record; // department: what the session loaded (docs/adr/0015); outcome: what the per-prompt hook reads without the notes (docs/adr/0044)
+    line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, repos, department, outcome }).filter(([, v]) => v !== undefined));
     line.note = { commit, sha: noteSha(text) };
   }
   if (record.id) for (const r of record.repos || []) { try { if (r.commits?.[0]) addNote(r.root, r.commits[0], text); } catch (e) { logHookError('note in another repo', e); } }

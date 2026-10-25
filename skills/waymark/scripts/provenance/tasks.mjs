@@ -107,9 +107,8 @@ export function clearTaskStart(session) {
   writeStarts(all);
 }
 
-// A task of this session is not done: it started and has no Cierre yet (a turn the quota cut, a reply waiting on the user). The
-// size brake only advises while it lasts (rule0-hook.mjs). A Cierre that says parcial or bloqueado no longer holds the brake: a
-// task that closed is between tasks, and a session that reached 879k held by one went on with no warning (docs/adr/0016, 0044).
+// A task of this session is in progress from its first prompt until its close: the size brake only advises while it lasts
+// (rule0-hook.mjs). A task closed parcial or bloqueado is closed: the brake holds between tasks (docs/adr/0016, 0044).
 export function taskInProgress(cwd, session) {
   return !!taskStartMark(session);
 }

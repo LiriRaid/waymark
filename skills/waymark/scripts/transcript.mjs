@@ -71,7 +71,7 @@ const turnStart = (lines, since = 0) => {
 // waits for it and closes in the notification's turn, so a task is never judged while its code-review runs.
 // Background shell commands are not waited for: a dev server never notifies.
 // The notification names the agent by its <task-id> (the launch's agentId) and, sometimes, the launch's <tool-use-id>:
-// either releases it (a notification with no tool-use-id left a turn waiting for good). A launch older than
+// either releases it (a notification may carry no tool-use-id). A launch older than
 // BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
 export const BACKGROUND_WAIT_MS = 30 * 60000;
 export function pendingBackground(lines, since = 0, now = Date.now()) {

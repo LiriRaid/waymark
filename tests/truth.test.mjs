@@ -347,3 +347,102 @@ test('3h: .env.example and a popped git stash are not changes', () => {
   assert.match(asked, /orders\.service\.mjs/, 'counter-example: real code still asks for its review');
   assert.doesNotMatch(asked, /\.env\.example/, 'a placeholder file is no code to review');
 });
+
+// ---- 3i · routing is not rewritten ----
+const { routedLevel, routedDept } = await import(`file://${SCRIPTS}/transcript.mjs`);
+const { effectiveReply } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+test('3i: logic — a Q line after an L1-L3 route does not lower the level or change the department; a lone Q is still a Q; a later real route still wins', () => {
+  assert.equal(routedLevel(['Waymark → L2 · dept-backend · skills: code-review', 'revisé el diff\nWaymark → Q · dept-qa'], []), 2);
+  assert.equal(routedDept(['Waymark → L2 · dept-backend', 'Waymark → Q · dept-qa'], []), 'dept-backend');
+  assert.equal(routedLevel(['Waymark → Q · dept-qa'], []), 'Q', 'counter-example: a question stays one');
+  assert.equal(routedLevel(['Waymark → Q · dept-qa', 'Waymark → L2 · dept-backend'], []), 2, 'a question that turns into a change');
+  assert.equal(routedLevel(['Waymark → L2 · dept-backend', 'Waymark → L1 · dept-backend'], []), 1, 'a real re-route still wins');
+});
+test('3i: CSS/HTML — the same for a styles task answered with a Q line after its edit', () => {
+  const g = judge([...opening(2), ...edit(CSS), ...sh('pnpm run build'), say('Waymark → Q · dept-qa'), ...run('Skill', { skill: 'code-review' })], inRepo);
+  assert.ok(step(g, 'build'), 'the task is still judged as an L2 with a build, not lowered to a question');
+  assert.equal(routedDept(['Waymark → L2 · dept-frontend', 'Waymark → Q · dept-qa'], []), 'dept-frontend');
+});
+test('3i: a background notification gets a short note, not the full reminder and not a new task; an ordinary prompt still gets the reminder', async () => {
+  const dir = tmpRepo();
+  const note = await hookRun('rule0-hook.mjs', { hook_event_name: 'UserPromptSubmit', prompt: '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>', cwd: dir, session_id: 's-note' });
+  assert.match(note.out, /background task's result, not a new request/);
+  assert.ok(!/Repo:/.test(note.out), 'no stack or git line: nothing of a new task');
+  const normal = await hookRun('rule0-hook.mjs', { hook_event_name: 'UserPromptSubmit', prompt: 'agrega reintentos', cwd: dir, session_id: 's-note-2' });
+  assert.ok(!/background task's result/.test(normal.out) && /Waymark/.test(normal.out), 'counter-example');
+});
+test('3i: a question that prints a Cierre with an ID is sent back once; a plain answer, and the retry, are not', async () => {
+  const dir = tmpRepo();
+  const file = path.join(dir, 't.jsonl');
+  const line = (o) => JSON.stringify(o);
+  const reply = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] }, timestamp: new Date().toISOString() });
+  const write = (text) => fs.writeFileSync(file, [line({ type: 'user', message: { role: 'user', content: '¿qué hace el guard?' }, uuid: 'p1', timestamp: new Date().toISOString() }), line(reply(text))].join('\n') + '\n');
+  const stop = (text, more = {}) => { write(text); return hookRun('stop-hook.mjs', { transcript_path: file, cwd: dir, session_id: 's-q', last_assistant_message: text, ...more }); };
+  const withCierre = 'Waymark → Q · dept-qa\nEl guard lee cada comando.\n\n## Cierre · 2026-10-24 · T6\nResultado: hecho';
+  assert.match((await stop(withCierre)).out, /routed as a question \(Q\)/, 'blocked once');
+  assert.ok(!/routed as a question/.test((await stop(withCierre, { stop_hook_active: true })).out), 'counter-example: the retry is not blocked again');
+  assert.ok(!/routed as a question/.test((await stop('Waymark → Q · dept-qa\nEl guard lee cada comando.')).out), 'counter-example: a plain answer');
+});
+test('3i: a corrected heading inherits the fields of the Cierre it corrects', () => {
+  const full = '## Cierre · 2026-10-21 · T6c\nResultado: hecho\nEvidencia: observada el build\nAprendido: x ← y';
+  const heading = '## Cierre · 2026-10-21 · T6';
+  const merged = effectiveReply([full, heading], heading);
+  assert.match(merged, /Cierre · 2026-10-21 · T6\n/);
+  assert.ok(!/T6c/.test(merged));
+  assert.match(merged, /Resultado: hecho[\s\S]*Evidencia: observada el build[\s\S]*Aprendido: x ← y/);
+  assert.equal(effectiveReply([heading], heading), heading, 'counter-example: nothing earlier to inherit from');
+  const own = '## Cierre · 2026-10-21 · T6\nResultado: parcial (x)';
+  assert.equal(effectiveReply([full, own], own), own, 'counter-example: a heading with its own fields is taken as written');
+});
+
+// ---- 3j · smaller items ----
+const { maskSecrets } = P;
+const { optionsLint, taskTypeOf } = P;
+const { costByCall, currentTurn: turnOf } = await import(`file://${SCRIPTS}/transcript.mjs`);
+const { questionRecord, trailerIds } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+test('3j: the masker redacts what is shaped like a secret, not the prose around the word', () => {
+  assert.equal(maskSecrets('the token expires in an hour'), 'the token expires in an hour');
+  assert.equal(maskSecrets('la clave es larga y la contraseña cambia'), 'la clave es larga y la contraseña cambia');
+  assert.equal(maskSecrets('password=hunter2'), 'password=[redactado]');
+  assert.equal(maskSecrets('contraseña: Abc123!xyz'), 'contraseña: [redactado]');
+  assert.match(maskSecrets('Authorization: Bearer ' + 'ey' + 'J'.repeat(1) + 'hbGciOiJIUzI1NiJ9abc1234567890'), /\[redactado\]/);
+  assert.ok(!maskSecrets('api key is sk-' + 'a1B2c3D4'.repeat(4)).includes('a1B2c3D4'), 'counter-example: a strong format is masked wherever it is');
+});
+test('3j: the options attributes are asked of the recommended option only', () => {
+  const win = (rec, alt) => [{ callId: 'c1', question: '¿Cómo?', optionList: [{ label: 'A (Recomendada)', description: rec }, { label: 'B', description: alt }] }];
+  assert.deepEqual(optionsLint(win('riesgo bajo; 3 archivos', 'la otra manera'), 2).missing, [], 'a plain alternative is fine');
+  assert.equal(optionsLint(win('hace lo que se pide', 'riesgo bajo; 3 archivos'), 2).missing.length, 1, 'counter-example: the recommended one says nothing');
+});
+test('3j: the cache a model change re-writes is not a routine call\'s cost; with the same model every call keeps its share', () => {
+  const at = '2026-10-24T10:00:00.000Z';
+  const msg = (id, model, cache, tool, name) => ({ type: 'assistant', timestamp: at, message: { id, model, usage: { input_tokens: 10, cache_creation_input_tokens: cache, cache_read_input_tokens: 0, output_tokens: 5 }, content: [{ type: 'tool_use', id: `t${id}`, name: tool, input: { command: name } }] } });
+  const lines = (second) => [{ type: 'user', message: { role: 'user', content: 'haz algo' }, uuid: 'p1', timestamp: at }, msg('m1', 'model-a', 100, 'Bash', 'ls'), msg('m2', second, 90000, 'Bash', 'node waymark.mjs check')];
+  assert.equal(costByCall(lines('model-b'))[1][3], 0, 'the rewrite after /model is not attributed');
+  assert.equal(costByCall(lines('model-a'))[1][3], 90000, 'counter-example: the same model keeps what it cost');
+});
+test('3j: minutes of work cap an idle gap and leave out the choice window', () => {
+  const now = Date.now(), iso = (ms) => new Date(now - ms).toISOString();
+  const ev = (name, startMs, endMs, id) => [{ type: 'assistant', timestamp: iso(startMs), message: { content: [{ type: 'tool_use', id, name, input: name === 'Bash' ? { command: 'ls' } : {} }] } }, { type: 'user', timestamp: iso(endMs), message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }];
+  const turn = (since, ...evs) => [{ type: 'user', message: { role: 'user', content: 'agrega reintentos' }, uuid: 'p', timestamp: iso(since * 60000) }, say('Waymark → L1 · dept-backend'), ...evs.flat()];
+  const minutes = (lines) => judge([...lines, ...edit()], inRepo).observed.time.minutes;
+  assert.ok(minutes(turn(180, ev('Bash', 179 * 60000, 178 * 60000, 'a1'), ev('Bash', 2 * 60000, 1 * 60000, 'a2'))) < 25, 'three idle hours are not three hours of work');
+  assert.ok(minutes(turn(4, ev('Bash', 3 * 60000, 2 * 60000, 'b1'), ev('Bash', 1 * 60000, 30000, 'b2'))) < 8, 'counter-example: a short run is counted as it was');
+});
+test('3j: a question\'s record keeps the answer the hook was given when the transcript lags; ops is a kind of task', () => {
+  const lines = [{ type: 'user', message: { role: 'user', content: '¿qué hace el guard?' }, uuid: 'p', timestamp: new Date().toISOString() }, say('Waymark → Q · dept-qa\nVoy a leerlo.')];
+  const rec = questionRecord(turnOf(lines), { agent: 'claude', last: 'Waymark → Q · dept-qa\nEl guard lee cada comando y deniega el que nombra un archivo sensible.' });
+  assert.match(rec.answer, /deniega el que nombra un archivo sensible/);
+  assert.match(questionRecord(turnOf(lines), { agent: 'claude' }).answer, /Voy a leerlo/, 'counter-example: with no message given, the transcript\'s');
+  assert.equal(taskTypeOf({ prompt: 'haz commit y push de los cambios', files: ['src/a.ts'] }), 'ops');
+  assert.equal(taskTypeOf({ prompt: 'despliega a staging y migra la base', files: ['src/a.ts'] }), 'ops');
+  assert.equal(taskTypeOf({ prompt: 'muestra el total en la tarjeta', files: ['src/card.css', 'src/card.ts'] }), 'feature');
+  assert.equal(taskTypeOf({ prompt: 'arregla el commit que rompe el build', files: ['src/a.ts'] }), 'fix', 'counter-example: the first verb decides');
+});
+test('3j: the Waymark-Task trailer is read as git reads it, from the last paragraph', () => {
+  const body = 'fix retries\n\nlonger body';
+  assert.deepEqual(trailerIds(`${body}\n\nWaymark-Task: 2026-10-24 · T7\n\nCo-Authored-By: A <a@b>`), [], 'in the middle of the message git sees no trailer');
+  assert.deepEqual(trailerIds(`${body}\n\nWaymark-Task: 2026-10-24 · T7\nCo-Authored-By: A <a@b>\n`), ['2026-10-24 · T7']);
+  assert.deepEqual(trailerIds(`${body}\r\n\r\nWaymark-Task: 2026-10-24 · T7\r\n`), ['2026-10-24 · T7'], 'CRLF');
+  assert.deepEqual(trailerIds('Waymark-Task: 2026-10-24 · T7'), ['2026-10-24 · T7'], 'a message that is only the trailer');
+  assert.deepEqual(trailerIds(body), []);
+});

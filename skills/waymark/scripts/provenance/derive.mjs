@@ -12,7 +12,7 @@ import { base } from './ids.mjs';
 export const RECORD_V1 = 'waymark.record/v1';
 export const RECORD_V2 = 'waymark.record/v2';
 export const RECORD_SCHEMAS = [RECORD_V1, RECORD_V2];
-export const TASK_TYPES = ['fix', 'feature', 'refactor', 'docs', 'test', 'config', 'question'];
+export const TASK_TYPES = ['fix', 'feature', 'refactor', 'docs', 'test', 'config', 'question', 'ops'];
 const REWORK_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 const slash = (f) => String(f || '').replace(/\\/g, '/');
@@ -27,7 +27,9 @@ const strip = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀
 const VERBS = [
   ['fix', /\b(arregl\w*|corrig\w*|repar\w*|fix\w*|soluciona\w*|bug|errores?|falla\w*|no funciona|esta roto|rota)\b/],
   ['refactor', /\b(refactor\w*|reorganiz\w*|simplific\w*|limpi\w*|renombr\w*|extrae\w*|mueve|mover|restructur\w*|rename|clean ?up)\b/],
-  ['feature', /\b(agrega\w*|anad\w*|crea\w*|implementa\w*|construye\w*|nuevo|nueva|soporte|add|create|implement\w*|build|feature)\b/],
+  ['feature', /\b(agrega\w*|anad\w*|crea\w*|implementa\w*|construye\w*|nuevo|nueva|soporte|permite|habilita\w*|integra\w*|conecta\w*|muestra|mostrar|expone\w*|add|create|implement\w*|build|feature|enable|support|integrate|expose|show)\b/],
+  // work on the repository and its environment, not on its code: commits, pushes, merges, deploys, migrations, deletions, releases
+  ['ops', /\b(commit\w*|push|merge\w*|rebase|cherry-?pick|revert\w*|despleg\w*|deploy\w*|migra\w*|migrate|borra\w*|elimina\w*|delete|publica\w*|publish|release|tag|backup)\b/],
 ];
 
 // → one of TASK_TYPES, or null when nothing decides it (a label that is a guess would feed a dataset).
@@ -109,7 +111,9 @@ export function optionsLint(decisions, level) {
   const missing = [];
   for (const d of window) {
     const q = String(d.question || '').slice(0, 30);
-    for (const o of d.optionList) {
+    // the attributes are asked of the option the agent recommends: a window is a decision, and an alternative that says what it is needs no risk, files and cost
+    const marked1 = d.optionList.filter((o) => REC.test(String(o.label || '')));
+    for (const o of marked1.length === 1 ? marked1 : d.optionList) {
       const text = String(o.description || ''), lacks = [!RISK.test(text) && 'risk', !(FILES.test(text) || COST.test(text)) && 'files or cost'].filter(Boolean);
       if (lacks.length) missing.push(`${q} / ${String(o.label || '').slice(0, 30)}: ${lacks.join(', ')}`);
     }

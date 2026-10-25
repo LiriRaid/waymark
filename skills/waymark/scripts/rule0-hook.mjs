@@ -103,8 +103,14 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   return { block: agent.out.blockPrompt(`Waymark: ${why} Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
 }
 
+// A background agent's result reaches the session as a user message (<task-notification>). It is no request: answering it with the full reminder made the
+// agent route it as a question and write a second Cierre (it did, in every task that ran a review in the background). It continues the task in progress.
+export const NOTIFICATION = /^\s*<task-notification>/;
+export const NOTIFICATION_NOTE = 'Waymark: this message is a background task\'s result, not a new request: it continues the task in progress. Do not write a routing line (no "Waymark → Q") and no new Cierre for it; use the result in that task, and apply what it finds as part of it.';
+
 export function reminder(hook, agent) {
   if (silent) return null;
+  if (NOTIFICATION.test(String(hook.prompt || ''))) return agent.out.context('UserPromptSubmit', NOTIFICATION_NOTE + agent.note(SKILLS_DIR)); // no snapshot, no open turn, no new task start
   const cwd = hook.cwd || process.cwd();
   let st = { openedWithWaymark: false };
   try { st = sessionState(agent.read(hook)); } catch {}

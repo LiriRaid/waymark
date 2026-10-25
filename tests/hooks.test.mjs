@@ -1403,8 +1403,8 @@ test('T2l turn start: a prompt after the last close starts the turn even when th
 test('T2m: the choice window waiting for the user is userWait, not the agent\'s minutes', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next, ctx = ctxFor(cwd);
-  const at = (min) => new Date(Date.UTC(2026, 9, 4, 6, min)).toISOString();
-  const lines = [{ ...prompt('x'), timestamp: new Date(Date.now() - 62 * 60000).toISOString() }, say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
+  const t0 = Date.now(), at = (min) => new Date(t0 - (62 - min) * 60000).toISOString(); // the turn began 62 minutes ago; the answer took the hour between
+  const lines = [{ ...prompt('x'), timestamp: new Date(t0 - 62 * 60000).toISOString() }, say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
     { type: 'assistant', timestamp: at(0), message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'q1', input: {} }] } },
     { type: 'user', timestamp: at(60), message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'answered' }] }, toolUseResult: { questions: [{ question: '¿Cómo?', options: [{ label: 'Backoff' }, { label: 'Cola' }] }], answers: { '¿Cómo?': 'Backoff' } } },
     { type: 'assistant', timestamp: at(60), message: { content: [{ type: 'tool_use', name: 'Bash', id: 'b1', input: { command: 'npm run build' } }] } },
@@ -3020,7 +3020,8 @@ test('commit trailer: a commit made in another repo with an earlier task\'s ID c
   spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--amend', '--no-edit', '-q'], { cwd: api, env: { ...process.env, GIT_COMMITTER_DATE: '2020-01-01T00:00:00' } });
   const since = Date.now() - 1000;
   fs.writeFileSync(path.join(api, 'a.ts'), '1\n'); gitT(api, 'add', '.');
-  gitT(api, 'commit', '-q', '-m', 'feat: deep link', '-m', `Waymark-Task: ${day} · T1`, '-m', 'Co-Authored-By: Claude <noreply@anthropic.com>');
+  gitT(api, 'commit', '-q', '-m', 'feat: deep link', '-m', `Waymark-Task: ${day} · T1
+Co-Authored-By: Claude <noreply@anthropic.com>`); // both trailers in the last paragraph, where git reads them (2.0.19 point 3j)
   const sha = gitT(api, 'rev-parse', 'HEAD').stdout.trim();
   const tools = [{ name: 'Bash', input: { command: `cd ${api.replace(/\\/g, '/')} && git add a.ts && git commit -q -F - <<'EOF'\nfeat: deep link\nEOF` } }];
   const ids = taskIds(session);

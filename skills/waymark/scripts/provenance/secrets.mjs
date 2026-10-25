@@ -23,9 +23,13 @@ const maskStrong = (text) => SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, 
 export const deepMask = (v) => (typeof v === 'string' ? maskStrong(v) : Array.isArray(v) ? v.map(deepMask) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepMask(x)])) : v);
 
 // Passwords, tokens, keys and URL credentials masked in text the log keeps (prompt, commands, Cierre).
+// Only a value that is shaped like a secret is masked: "the token expires" and "la clave es larga" are prose, and masking them made a record say
+// "the token [redactado]". Shaped: a digit or a symbol or mixed case in it, 6+ characters after `=`, `:`, "es" or "is" (10+ with a digit or mixed case after a bare space: `Bearer eyJhbGciOi…`).
+const shaped = (v, bare) => v.length >= (bare ? 10 : 6) && (/\d/.test(v) || (!bare && /[^A-Za-z0-9ñÑáéíóúÁÉÍÓÚ]/.test(v)) || (/[a-z]/.test(v) && /[A-Z]/.test(v)));
 export function maskSecrets(text) {
   return maskStrong(text)
-    .replace(/\b(contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|bearer)(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)[^\s"'`,;]+\3/gi, '$1$2[redactado]')
+    .replace(/\b(contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|bearer)(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)([^\s"'`,;]+)\3/gi,
+      (all, key, sep, quote, value) => ((/^bearer$/i.test(key) && value.length >= 8) || shaped(value, !/(?:es|is|=|:)/i.test(sep)) ? `${key}${sep}[redactado]` : all))
     .replace(/(\/\/[^\s:/@]+:)[^\s@/]+@/g, '$1[redactado]@')
     .replace(/(\s-u\s+[^\s:]+:)\S+/g, '$1[redactado]');
 }

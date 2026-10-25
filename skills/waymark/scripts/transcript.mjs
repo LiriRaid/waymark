@@ -201,10 +201,14 @@ export function turnLinks(lines, since = 0) {
 export function costByCall(lines, since = 0) {
   const { from } = turnStart(lines, since);
   const byId = new Map();
+  let model = null;
   for (const d of lines.slice(from)) {
     const u = d.type === 'assistant' && !d.isSidechain ? d.message?.usage : null;
     if (!u) continue;
-    const e = byId.get(d.message.id) || { u, calls: [] };
+    // the first response after a model change re-writes the whole cache: that is the change's cost, not the cost of the call it carries
+    const changed = model && d.message?.model && d.message.model !== '<synthetic>' && d.message.model !== model && !byId.has(d.message.id);
+    if (d.message?.model && d.message.model !== '<synthetic>') model = d.message.model;
+    const e = byId.get(d.message.id) || { u: changed ? { ...u, cache_creation_input_tokens: 0 } : u, calls: [] };
     for (const c of d.message.content || []) if (c.type === 'tool_use') e.calls.push(c);
     byId.set(d.message.id, e);
   }
@@ -254,6 +258,7 @@ export function sessionState(lines) {
 // The department may come without its prefix ("· frontend"): only the ten department names count as one.
 const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*(?:\||or)\s*Q)?|Q)\b(?:\s*·\s*((?:dept-)?(?:architecture|backend|data|devex|devops|frontend|product|qa|security|ux-ui))\b(?!-))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
+const isQ = (m) => m[1] === 'Q' || /^L0\s*(?:\||or)\s*Q$/.test(m[1]);
 const reroute = (tools = []) => {
   const r = tools.map((t) => ({ ...t, input: toolInput(t) })).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
   return r.length ? { level: Number(String(r[r.length - 1].input.args).trim()[1]), dept: String(r[r.length - 1].input.skill) } : null;
@@ -262,7 +267,10 @@ export function routedLevel(texts, tools) {
   const t = reroute(tools);
   if (t) return t.level;
   const all = routes(texts), m = all[all.length - 1];
-  return !m ? 0 : m[1] === 'Q' || /^L0\s*(?:\||or)\s*Q$/.test(m[1]) ? 'Q' : Number(m[2]);
+  // a Q line after an L1-L3 route of the same turn is a note, not a re-route: it never lowers the level
+  const numeric = all.filter((r) => !isQ(r));
+  if (m && isQ(m) && numeric.length) return Number(numeric[numeric.length - 1][2]);
+  return !m ? 0 : isQ(m) ? 'Q' : Number(m[2]);
 }
 
 // The Cierre heading: "## Cierre" at the start of a line. A mention inside a sentence ("until it writes its `## Cierre`")
@@ -294,8 +302,8 @@ export function inheritedRoute(lines, prompts = 2) {
 export function routedDept(texts, tools) {
   const t = reroute(tools);
   if (t) return t.dept;
-  const all = routes(texts);
-  const dept = all.length ? all[all.length - 1][3] : null;
+  const all = routes(texts), real = all.filter((r) => !isQ(r)), pool = real.length ? real : all; // a Q line does not change the department of the route before it
+  const dept = pool.length ? pool[pool.length - 1][3] : null;
   return dept ? (dept.startsWith('dept-') ? dept : `dept-${dept}`) : null;
 }
 

@@ -134,7 +134,13 @@ export const keepCmd = (c) => { const s = String(c).replace(/\s+/g, ' ').trim();
 export function turnCommits(tools, cwd, claimed, ids, since = 0) {
   const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
   return [...new Set(commitsSince(new Set([path.resolve(cwd), ...commitRepos(tools, cwd)]), since)
-    .filter((c) => String(c.msg).split(/\r?\n/).some((l) => ok(l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1]))).map((c) => c.h))];
+    .filter((c) => trailerIds(c.msg).some(ok)).map((c) => c.h))];
+}
+// The Waymark-Task trailer as git reads it: a line of the message's last paragraph (git does not call a line in the middle of the message a trailer,
+// so `git log --format=%(trailers)` and every tool that follows it never saw one written there). → the IDs it names.
+export function trailerIds(message) {
+  const paragraphs = String(message || '').replace(/\r\n/g, '\n').trimEnd().split(/\n[ \t]*\n/);
+  return [...(paragraphs[paragraphs.length - 1] || '').matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)].map((m) => m[1]);
 }
 // The git commands `verb` (commit, push) of the tools and the folder each ran in: the session's, a `cd <repo> &&` before
 // it, or `git -C <repo>`. → [{ dir, part, t }] (part: the command's own piece of the line)
@@ -330,7 +336,15 @@ const CIERRE_HEAD = /^[ \t]*##\s*Cierre\s*·/m;
 const FIELDS = ['Resultado', 'Evidencia', 'Aprendido'];
 export function effectiveReply(texts = [], last = '') {
   const plain = (s) => String(s || '').replace(/\*\*|__/g, '');
-  if (CIERRE_HEAD.test(plain(last))) return last;
+  const fieldLine = (s, f) => s.match(new RegExp(`^[ \\t]*${f}:[^\\n]*`, 'm'))?.[0];
+  if (CIERRE_HEAD.test(plain(last))) {
+    // a corrected heading ("## Cierre · <the right ID>" and nothing else, as the hook's own message asks) inherits the fields of the Cierre it corrects
+    if (FIELDS.some((f) => fieldLine(plain(last), f))) return last;
+    const corrected = [...texts].reverse().find((t) => t !== last && CIERRE_HEAD.test(plain(t)) && FIELDS.every((f) => fieldLine(plain(t), f)));
+    if (!corrected) return last;
+    const heading = plain(last).match(/^[ \t]*##\s*Cierre\s*·[^\n]*/m)[0];
+    return plain(corrected).replace(/^[ \t]*##\s*Cierre\s*·[^\n]*/m, heading.trim());
+  }
   const earlier = [...texts].reverse().find((t) => CIERRE_HEAD.test(plain(t)));
   if (!earlier) return last;
   let cierre = plain(earlier), rest = plain(last);
@@ -482,6 +496,15 @@ function observeTurn(S) {
   const timed = turn.tools.filter((t) => secs(t) !== null && !ASK(t));
   const userWait = turn.tools.filter((t) => ASK(t) && secs(t) !== null).reduce((a, t) => a + secs(t), 0);
   const slowest = [...timed].sort((a, b) => secs(b) - secs(a))[0];
+  // Minutes of work: the gaps between the turn's events, each capped (a session left idle for hours is not hours of work), without the choice window's.
+  const IDLE_GAP = 10 * 60000;
+  const workMs = !turn.startedAt ? null : (() => {
+    const asks = turn.tools.filter((t) => ASK(t) && secs(t) !== null).map((t) => [t.at, result(t).at]);
+    const stamps = [turn.startedAt, ...turn.tools.flatMap((t) => [t.at, result(t)?.at]).filter(Boolean), Date.now()].sort((a, b) => a - b);
+    let ms = 0;
+    for (let i = 1; i < stamps.length; i++) if (!asks.some(([x, y]) => x <= stamps[i - 1] && y >= stamps[i])) ms += Math.min(stamps[i] - stamps[i - 1], IDLE_GAP);
+    return ms;
+  })();
   const observed = {
     memory: {
       // Waymark's own memory (pack, memory, tasks, or reading .waymark/memory.md) or engram's search, if the user has it
@@ -521,7 +544,7 @@ function observeTurn(S) {
     worktree: turn.tools.some(inCopy),
     branches: ctx.branches || {},
     evidence: null, // the Evidencia testigo: { claim, checkedAfter, cited, unbacked }
-    time: { minutes: turn.startedAt ? Math.round(Math.max(0, Date.now() - turn.startedAt - userWait * 1000) / 6000) / 10 : null, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
+    time: { minutes: workMs === null ? null : Math.round(workMs / 6000) / 10, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
   };
   return { shellChange, dept, procRe, lastIdx, lastCode, lastSpec, lastChange, result, firstRealChange, secs, runsOf, gateCmd, testCmd, output, exitFor, failedRun, apart, envFail, cmdKey, retried, ui, code, reviewLeft, noBuild, ASK, observed };
 }
@@ -1007,12 +1030,14 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
 // department.
 export function questionRecord(turn, meta = {}) {
   if (!turn.found || routedLevel(turn.texts, turn.tools) !== 'Q') return null;
-  const tail = String(turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
+  // the agent's last message as the hook was given it: the transcript can lag the reply by a moment, and the answer is what the record keeps
+  const texts = meta.last && turn.texts[turn.texts.length - 1] !== meta.last ? [...turn.texts, meta.last] : turn.texts;
+  const tail = String(texts[texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
   const learned = /^\s*Aprendido:/im.test(tail) ? maskSecrets(aprendidoOf(tail)).slice(0, 600) : '';
   const oneLine = (t) => String(t).split('\n').filter((l) => !/^\s*Waymark\s*→/.test(l))
     .map((l) => l.replace(/\*\*|__|`/g, '').replace(/^\s*(?:#{1,6}|[-*+]|\d+\.)\s+/, '').trim()).filter(Boolean).join(' · ');
   // the last block with substance: a closing line of its own ("¿Con cuál seguimos?") is not the answer
-  const blocks = [...turn.texts].reverse().map(oneLine).filter(Boolean);
+  const blocks = [...texts].reverse().map(oneLine).filter(Boolean);
   const final = blocks.find((b) => b.length >= 60) || blocks[0] || '';
   const answer = maskSecrets(learned || final).slice(0, 300);
   const skills = [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')).filter((s) => s && !/^dept-/.test(s)))];
@@ -1110,8 +1135,14 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         gaps = cierreGaps(turn, h.last_assistant_message, all, prompts, ctx);
       }
       const meta = { agent: agent.name, session: h.session_id, cwd };
+      // a question opens no task and takes no ID: a "## Cierre · <ID>" in its answer names a task that is not recorded, and the next turn then guesses
+      // another ID for it. Sent back once, to answer without it.
+      if (!gaps && claimed && !h.stop_hook_active && routedLevel(turn.texts, turn.tools) === 'Q') {
+        answer(agent, agent.out.block(`Waymark: this turn was routed as a question (Q): it opens no task and has no ID, so "Cierre · ${claimed}" names a task that is not recorded. Answer again without the Cierre block (an "Aprendido:" line at the end is saved).`));
+        return;
+      }
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
-        const q = fs.existsSync(home.memory) ? questionRecord(turn, meta) : null;
+        const q = fs.existsSync(home.memory) ? questionRecord(turn, { ...meta, last: h.last_assistant_message }) : null;
         // the next task counts from its own prompt: a question, an L0 or an unrouted turn ended with no task (a routed task
         // that stopped before its first change keeps its start)
         const lvl = routedLevel(turn.texts, turn.tools) || ctx.inherited?.level;

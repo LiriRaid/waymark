@@ -22,6 +22,7 @@ const T = await import(`file://${SCRIPTS}/tool-hook.mjs`);
 const { cierreGaps, outcome, reposNotNamed, namedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { currentTurn } = await import(`file://${SCRIPTS}/transcript.mjs`);
 const V = await import(`file://${SCRIPTS}/verify.mjs`);
+const { repoOf } = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
 const mk = (files = {}, memory = '# P\n\n## Work in progress\n') => {
@@ -56,6 +57,14 @@ test('11: logic — switching or logging into a gh account is denied always; a p
   for (const c of ['gh auth status', 'gh pr view 12', 'gh pr list', 'git commit -m "gh pr create is the user\'s"', "git commit -F - <<'EOF'\ngh auth switch is denied\nEOF"])
     assert.equal(T.checkGh(c, 'agrega reintentos'), null, `counter-example: ${c}`);
 });
+test('11: the gh guard sees past a prefix and a negation, and "merge" alone opens nothing', () => {
+  for (const c of ['GH_TOKEN=x gh pr create --fill', 'command gh auth switch -u x', '& gh pr create', 'gh.exe auth switch', 'sudo gh auth login', 'cd api && gh.exe pr create'])
+    assert.ok(T.checkGh(c, 'agrega reintentos'), c);
+  assert.ok(T.checkGh('gh pr create --fill', 'no abras el PR todavía, solo deja el cambio'), 'a denied PR is not asked for');
+  assert.ok(T.checkGh('gh pr create --fill', 'resuelve el conflicto de merge'), '"merge" alone does not open one');
+  assert.equal(T.checkGh('gh pr merge 4', 'mergea el PR 4'), null, 'counter-example: merging one that was asked to merge');
+  assert.equal(T.checkGh('gh pr create --fill', 'ajusta el botón y abre el PR'), null, 'counter-example: asked');
+});
 test('11: CSS/HTML — the same for a styles task: its PR is not opened unasked, a `gh pr view` of it is read freely', async () => {
   const d = mk({ 'src/app.css': 'a{}\n' });
   const run = (command, text) => {
@@ -81,6 +90,21 @@ test('11: logic — a change in a repo the Pedido does not name is denied once, 
   assert.equal(T.checkRepo('/work/api', '/work/web', lines(say('Pedido: 1) uno · 2) dos\nRepos: web, api')), 's3', stateFile()), null, 'named in the Pedido');
   assert.equal(T.checkRepo('/work/api', '/work/web', lines(answered('¿Toco también api?', ['Sí, api', 'No'], 'Sí, api')), 's4', stateFile()), null, 'the user named it in the window');
   assert.ok(T.checkRepo('/work/api', '/work/web', lines(say('Repos: api-gateway')), 's5', stateFile()), 'a longer name is not this name');
+});
+test('11: the repo question is asked once per task, Waymark\'s own copies and a submodule are no other repository', () => {
+  const lines = [prompt('ajusta el servicio'), say('Waymark → L2 · dept-backend')];
+  const f = stateFile();
+  assert.ok(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '1000'));
+  assert.equal(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '1000'), null, 'the same task: once');
+  assert.ok(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '2000'), 'a later task of the session asks again');
+  const C = path.join(process.env.WAYMARK_HOME, 'tmp', '1');
+  assert.equal(T.checkRepo(C, '/work/web', lines, 's9', stateFile(), '1'), null, 'a clean copy Waymark made is not the user\'s repository');
+  const a = mk({ 'src/a.mjs': 'a\n' }), sub = path.join(a, 'vendor', 'lib');
+  fs.mkdirSync(path.join(a, '.git', 'modules', 'lib'), { recursive: true }); fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, '.git'), `gitdir: ${path.join(a, '.git', 'modules', 'lib')}\n`);
+  assert.equal(repoOf(path.join(sub, 'x.mjs')).toLowerCase(), a.toLowerCase(), 'a submodule belongs to the project');
+  const sib = path.join(a, 'sibling'); fs.mkdirSync(sib); gitT(sib, 'init', '-q');
+  assert.equal(repoOf(path.join(sib, 'x.mjs')).toLowerCase(), sib.toLowerCase(), 'counter-example: a nested repository of its own is another');
 });
 test('11: CSS/HTML — through the hook: an edit of a stylesheet in a sibling repo asks first; the same edit in the own repo does not', async () => {
   const a = mk({ 'src/a.css': 'a{}\n' }), b = path.join(a, 'sibling');
@@ -138,6 +162,13 @@ test('11: logic — a chosen option the Cierre does not name, or marks ✘, keep
   assert.equal(outcome('Resultado: parcial (falta)', [], [], 2, new Set(), missing).result, 'parcial');
   assert.deepEqual(P.windowCheck(DEC('Otra cosa', 'Sí'), 'sin nada').unanswered, [], 'counter-example: "otra cosa" and an item with no word to look for are not judged');
   assert.deepEqual(P.windowCheck(DEC('Backoff (Recommended)', 'Cola (Recomendado)'), 'Aprendido: backoff y cola').unanswered, [], 'the window\'s own marker is not part of the choice');
+});
+test('11: a multi-select answer is one item per option picked', () => {
+  const d = [{ question: '¿Qué?', chosen: 'Tests unitarios, Documentación del límite', discarded: [] }];
+  Object.defineProperty(d[0], 'labels', { value: ['Tests unitarios', 'Documentación del límite', 'Otra cosa'], enumerable: false });
+  const w = P.windowCheck(d, '## Cierre · x\nResultado: hecho\nAprendido: tests unitarios del servicio ← pedido');
+  assert.deepEqual(w.items, ['Tests unitarios', 'Documentación del límite']);
+  assert.deepEqual(w.unanswered, ['Documentación del límite'], 'only the option the Cierre left out');
 });
 test('11: CSS/HTML — the same through the end-of-turn judgment: the finding is recorded, the task is not blocked for it', () => {
   const lines = [prompt('ajusta el botón'), say('Waymark → L2 · dept-frontend'), ...call('Skill', { skill: 'dept-frontend' }), ...call('Read', { file_path: '/skills/dept-frontend/procedures.md' }), ...call('Bash', { command: 'node "/s/waymark/scripts/waymark.mjs" pack src/app.css' }),

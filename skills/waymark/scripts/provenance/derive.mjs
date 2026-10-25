@@ -110,8 +110,10 @@ export function windowCheck(decisions, reply) {
   const out = { items: [], unanswered: [], failed: [], twoActions: [] };
   const text = plain(String(reply || '').split(/##\s*Cierre/).pop() || '');
   const lines = String(reply || '').split('\n');
-  for (const d of decisions || []) {
-    const item = String(d.chosen ?? '').trim().replace(/\s*\((?:recommended|recomendad[ao])\)\s*$/i, ''); // the marker is the window's, not the user's choice
+  // a multi-select answer joins its labels with commas: each label picked is its own item
+  const chosen = (decisions || []).flatMap((d) => { const parts = String(d.chosen ?? '').split(/,\s+/); return parts.length > 1 && (d.labels || []).some((l) => parts.includes(l)) ? parts : [String(d.chosen ?? '')]; });
+  for (const raw of chosen) {
+    const item = raw.trim().replace(/\s*\((?:recommended|recomendad[ao])\)\s*$/i, ''); // the marker is the window's, not the user's choice
     if (!item || /^(?:otra cosa|other)$/i.test(item) || out.items.includes(item)) continue;
     out.items.push(item);
     if (TWO_ACTIONS.test(item)) out.twoActions.push(item);

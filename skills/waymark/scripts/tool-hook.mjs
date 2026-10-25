@@ -21,6 +21,7 @@ import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projec
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
+import { inRoot } from './copy.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
@@ -149,12 +150,17 @@ export function checkLink(command) {
 // The user's accounts and pull requests are the user's (docs/adr/0046): switching the gh account is denied always; opening or merging a pull
 // request only when the task's own words ask for one. Waymark reads `git config user.email` and `gh auth status` when it needs to know
 // whose they are, and never writes either anywhere.
-const GH_AUTH = /(?:^|[;&|(]\s*|\n\s*)gh\s+auth\s+(?:switch|login|logout|refresh|setup-git)\b/;
-const GH_PR = /(?:^|[;&|(]\s*|\n\s*)gh\s+pr\s+(?:create|merge|ready)\b/;
+const GH_START = String.raw`(?:^|[;&|(]\s*|\n\s*)(?:(?:[A-Za-z_]\w*=\S*|&|command|sudo|env|exec)\s+)*gh(?:\.exe)?\s+`; // after an env assignment, `command`, `sudo`, PowerShell's `&`, or the .exe
+const GH_AUTH = new RegExp(`${GH_START}auth\\s+(?:switch|login|logout|refresh|setup-git)\\b`);
+const GH_PR = new RegExp(`${GH_START}pr\\s+(create|merge|ready)\\b`);
+// What the request says about a pull request, with what it denies left out ("no abras el PR").
+const asking = (text, words) => new RegExp(String.raw`\b(?:${words})\b`, 'i').test(String(text).replace(/\b(?:no|sin|nunca|don't|do not|never)\b[^.\n]{0,30}\b(?:pull requests?|PRs?|merge)\b/gi, ' '));
 export function checkGh(command, asked = '') {
   const sk = shellSkeleton(command, { quotes: false });
   if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
-  if (GH_PR.test(sk) && !/\b(?:pull requests?|PRs?|merge|mergea\w*|fusiona\w*)\b/i.test(asked)) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
+  const pr = sk.match(GH_PR)?.[1];
+  // opening one needs the words "pull request" or "PR"; merging one also takes "merge" ("resuelve el conflicto de merge" opens nothing)
+  if (pr && !asking(asked, pr === 'merge' ? 'pull requests?|PRs?|merge|mergea\\w*|fusiona\\w*' : 'pull requests?|PRs?')) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
   return null;
 }
 
@@ -170,12 +176,12 @@ export function namedRepos(lines) {
   }
   return text.join('\n').toLowerCase();
 }
-export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
-  if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2) return null;
+export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json'), task = '') {
+  if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
   if (nameIn(path.basename(root), namedRepos(lines))) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-  const key = `${session}:${norm(root)}`;
+  const key = `${session}:${task}:${norm(root)}`; // once per task and repo
   if (seen[key]) return null; // asked once; the same repo again goes through
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
@@ -210,6 +216,7 @@ export function gate(hook, agent) {
   }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
+  const taskKey = () => { try { return String(taskStart(readRecords(projectHome(cwd).log), hook.session_id)); } catch { return ''; } }; // the task's start: the repo question is asked once per task
   // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
     const link = checkLink(c.command);
@@ -219,7 +226,7 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     if (!changesProject(c.command)) return null;
     const lines = turns(), own = projectHome(cwd).root;
-    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id); if (deny) return withNote(deny); }
+    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, taskKey()); if (deny) return withNote(deny); }
     return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, cwd));
   }
   const files = (c.files || []).filter((f) => !exempt(f, cwd));
@@ -229,7 +236,7 @@ export function gate(hook, agent) {
   let memory = '';
   try { memory = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
   for (const f of files) {
-    const deny = checkRepo(repoOf(f), own, lines, hook.session_id) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, cwd);
+    const deny = checkRepo(repoOf(f), own, lines, hook.session_id, undefined, taskKey()) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, cwd);
     if (deny) return withNote(deny);
   }
   return null;

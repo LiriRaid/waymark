@@ -23,12 +23,14 @@ export function makeCopy(cwd, ref = 'HEAD', { install = null } = {}) {
   const top = gitRoot(cwd);
   if (!top) return { error: 'not inside a git repository' };
   fs.mkdirSync(copyRoot(), { recursive: true });
-  let n = 1;
-  while (fs.existsSync(path.join(copyRoot(), String(n)))) n++;
-  const dest = path.join(copyRoot(), String(n));
-  const r = git(top, 'worktree', 'add', '--detach', dest, ref);
-  if (r.status !== 0) return { error: `git worktree add failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}` };
-  return { path: dest, install };
+  let n = 1, r = null, dest = '';
+  for (let tries = 0; tries < 5; tries++) { // another session may take the same number in the same instant: the next free one
+    while (fs.existsSync(path.join(copyRoot(), String(n)))) n++;
+    dest = path.join(copyRoot(), String(n));
+    r = git(top, 'worktree', 'add', '--detach', dest, ref);
+    if (r.status === 0) return { path: dest, install };
+  }
+  return { error: `git worktree add failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}` };
 }
 
 // Removes a copy of the root: its worktree entry, then the folder, retrying (an antivirus or an editor holds a file for a moment on Windows;
@@ -44,7 +46,9 @@ export function removeCopy(p, { cwd = process.cwd() } = {}) {
 
 // The folders left behind: every copy in the root, and the temp folders of Waymark's tests and of an agent's own improvised copies
 // (yawt-*, wm-*, waymark-*, tmp.*) in the OS temp folder and at the top of the disk, older than `maxAgeMs` (a running task's is not one).
-const ORPHAN = /^(?:yawt-|wm-|waymark-|tmp\.)/;
+const ORPHAN = /^(?:yawt-|wm-|waymark-)/;
+// `tmp.*` is what other programs name their scratch folders too: it is a leftover of ours only when it holds a repository copy or its modules.
+const ours = (p, name) => ORPHAN.test(name) || (/^tmp\./.test(name) && ['.git', 'node_modules'].some((e) => fs.existsSync(path.join(p, e))));
 export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [copyRoot(), os.tmpdir(), path.parse(os.tmpdir()).root] } = {}) {
   const out = [];
   for (const dir of [...new Set(places)]) {
@@ -52,7 +56,8 @@ export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [co
     try { names = fs.readdirSync(dir); } catch { continue; }
     for (const name of names) {
       const p = path.join(dir, name);
-      if (dir !== copyRoot() && !ORPHAN.test(name)) continue;
+      if (dir !== copyRoot() && !ours(p, name)) continue;
+      if (dir === path.parse(os.tmpdir()).root && !ORPHAN.test(name)) continue; // the top of the disk: only the names an improvised copy took
       if (dir === copyRoot() && name.startsWith('.')) continue;
       try { const st = fs.statSync(p); if (st.isDirectory() && now - st.mtimeMs > maxAgeMs) out.push({ path: p, ageH: Math.round((now - st.mtimeMs) / 3600000) }); } catch {}
     }
@@ -76,9 +81,11 @@ export function closeCopies(since, cwd = process.cwd()) {
   const removed = [], left = [];
   let names = [];
   try { names = fs.readdirSync(copyRoot()); } catch { return { removed, left }; }
+  // only the copies of this repository's own worktree list: another session's copy of another repo is not this task's to remove
+  const top = gitRoot(cwd), mine = new Set(top ? git(top, 'worktree', 'list', '--porcelain').stdout.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => path.resolve(l.slice(9)).toLowerCase()) : []);
   for (const name of names) {
     const p = path.join(copyRoot(), name);
-    try { if (!fs.statSync(p).isDirectory() || name.startsWith('.') || fs.statSync(p).birthtimeMs < since) continue; } catch { continue; }
+    try { if (!fs.statSync(p).isDirectory() || name.startsWith('.') || fs.statSync(p).birthtimeMs < since || !mine.has(path.resolve(p).toLowerCase())) continue; } catch { continue; }
     (removeCopy(p, { cwd }).left ? left : removed).push(p);
   }
   return { removed, left };

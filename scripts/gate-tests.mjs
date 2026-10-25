@@ -72,7 +72,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   for (const [name, go] of runs) {
     const before = tempFolders();
     const r = go();
-    const left = tempFolders() - before;
+    let left = tempFolders() - before;
+    if (left > 0) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000); left = tempFolders() - before; } // another process's folder (a suite of another session) is gone a moment later; ours stay
     if (left > 0) r.why = [r.why, `the run left ${left} temp folder${left > 1 ? 's' : ''} behind (wm-* or waymark-*)`].filter(Boolean).join('; ');
     const s = r.summary;
     console.log(`${r.why ? '✘' : '✔'} ${name}: ${s ? `tests ${s.tests}, pass ${s.pass}, skipped ${s.skipped}, todo ${s.todo}, fail ${s.fail}` : 'no summary'}${r.why ? ` — ${r.why}` : ''}`);

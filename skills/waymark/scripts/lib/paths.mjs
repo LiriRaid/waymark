@@ -61,7 +61,11 @@ export function repoOf(p) {
   let dir = path.resolve(String(p));
   try { if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir); } catch { dir = path.dirname(dir); }
   for (let i = 0; i < 64; i++) {
-    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const git = path.join(dir, '.git');
+    // a submodule's `.git` file points into the parent's modules folder: it is part of the project the session runs in, so the search goes on
+    let submodule = false;
+    try { submodule = fs.statSync(git).isFile() && /^gitdir:.*[\\/]modules[\\/]/m.test(fs.readFileSync(git, 'utf8')); } catch {}
+    if (fs.existsSync(git) && !submodule) return dir;
     const up = path.dirname(dir);
     if (up === dir) return null;
     dir = up;

@@ -95,11 +95,26 @@ for (const [kind, file] of [['logic', 'src/a.mjs'], ['CSS/HTML', 'src/app.css']]
   });
 }
 
+// ---- the close removes this repository's copies, and only those ----
+test('5: a close removes the copies of its own repository made since the task began, not another repository\'s', () => {
+  const a = repo(), b = repo();
+  const since = Date.now() - 1000;
+  const mine = C.makeCopy(a, 'HEAD'), theirs = C.makeCopy(b, 'HEAD');
+  const r = C.closeCopies(since, a);
+  assert.deepEqual(r.removed.map((p) => path.resolve(p)), [path.resolve(mine.path)]);
+  assert.ok(!fs.existsSync(mine.path) && fs.existsSync(theirs.path), 'counter-example: another repository\'s copy, made after the start, is another session\'s to remove');
+  C.removeCopy(theirs.path, { cwd: b });
+  const one = C.makeCopy(a, 'HEAD'), two = C.makeCopy(a, 'HEAD');
+  assert.notEqual(one.path, two.path, 'two copies in a row take two numbers');
+  C.removeCopy(one.path, { cwd: a }); C.removeCopy(two.path, { cwd: a });
+});
+
 // ---- the folders nobody removed are listed, and removed with the user's yes ----
 test('5: logic — improvised and test folders older than a task are orphans; a recent one, or any other name, is not; clean removes them', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-places-')); temps.push(dir);
   const old = new Date(Date.now() - 24 * 3600000);
-  for (const n of ['yawt-api', 'wm-old', 'waymark-x', 'tmp.abc']) { fs.mkdirSync(path.join(dir, n)); fs.utimesSync(path.join(dir, n), old, old); }
+  for (const n of ['yawt-api', 'wm-old', 'waymark-x', 'tmp.abc', 'tmp.other']) { fs.mkdirSync(path.join(dir, n)); fs.utimesSync(path.join(dir, n), old, old); }
+  fs.mkdirSync(path.join(dir, 'tmp.abc', '.git')); fs.utimesSync(path.join(dir, 'tmp.abc'), old, old); // a tmp.* that holds a repository copy is ours; another program's scratch is not
   fs.mkdirSync(path.join(dir, 'wm-fresh'));
   fs.mkdirSync(path.join(dir, 'projects'));
   fs.utimesSync(path.join(dir, 'projects'), old, old);
@@ -108,7 +123,7 @@ test('5: logic — improvised and test folders older than a task are orphans; a 
   assert.match(W.copiesLine(found), /copies: 4 folders left behind .*copy --clean shows them and --apply removes them/);
   const r = C.cleanOrphans(found);
   assert.equal(r.removed, 4);
-  assert.ok(fs.existsSync(path.join(dir, 'wm-fresh')) && fs.existsSync(path.join(dir, 'projects')), 'counter-example: a fresh folder and another name stay');
+  assert.ok(fs.existsSync(path.join(dir, 'wm-fresh')) && fs.existsSync(path.join(dir, 'projects')) && fs.existsSync(path.join(dir, 'tmp.other')), 'counter-example: a fresh folder, another name and another program\'s tmp.* stay');
   assert.equal(W.copiesLine([]), '');
 });
 test('5: CSS/HTML — the CLI: copy makes it, copy --remove removes it, copy --clean only plans until --apply', () => {

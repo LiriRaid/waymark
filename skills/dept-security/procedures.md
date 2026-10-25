@@ -21,6 +21,8 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 1. Read secrets from environment variables or the stack's encrypted secret store (stack profile).
 2. Secret files (`.env`, key files, local config) in `.gitignore`; commit only an example file with placeholders.
 3. If a secret was committed or logged: rotate it first, then purge history. Tell the user immediately.
+4. A sensitive file is read only with the user's permission, given in the choice window the guard's block asks you to open (this task, this session or always), never from your own text or a chat message. What you read is never written down: not in memory, a note, an Aprendido or a mem_save (the hook masks the values of the project's `.env*` files and reports one that reaches a diff or a commit).
+5. Before you hand the user a command to run with `!`, check their shell (the Environment line: PowerShell or bash) and write it in that syntax; a command in the wrong shell fails and sends the user to fix it.
 
 ### Dependency audit
 1. Run the stack's audit command (stack profile → *Commands*).

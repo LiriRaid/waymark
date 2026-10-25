@@ -114,7 +114,7 @@ const STALE_DAYS = 14; // an open (▶) line whose task ID is older leaves Work 
 export function writeTaskLine(home, rec, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || !fs.existsSync(home.memory)) return false;
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
-  const learned = aprendidoOf(cierre);
+  const learned = maskSecrets(aprendidoOf(cierre)); // the memory line is written here: masked here too (docs/adr/0045)
   if (!learned || /^ninguno/i.test(learned)) return false;
   // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
   // unresolved, keeps its line

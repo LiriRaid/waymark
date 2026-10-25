@@ -99,3 +99,68 @@ test('10b: the scoped lines are read as written; an old or foreign one does not 
   assert.deepEqual(G.activeAllow(text, { session: 's-1', now }), ['a.pem', 'b.pem', 'c.env', 's.env']);
   assert.deepEqual(G.activeAllow(text, { session: 's-2', now }), ['a.pem', 'b.pem', 'c.env'], 'another session');
 });
+
+// ---- 10e · nothing read from a sensitive file is saved ----
+const K = await import(`file://${SCRIPTS}/lib/known.mjs`);
+const P = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { findSecrets } = P;
+const VALUE = 'Zq7!notAFormatXyz', URLCRED = 'postgres://app:p4ssw0rd9@db.internal/x';
+const envProject = (more = {}) => proj({ '.env.local': `DB_PASS=${VALUE}\nDB_URL="${URLCRED}"\nPORT=3000\nDEBUG=true\nAPI_URL=http://localhost:3000\nSITE=https://app.example.com/path\nEMPTY=\n`, '.env.example': 'DB_PASS=placeholder-value', 'src/app.css': 'a {}', 'src/a.ts': 'x', ...more });
+const withMemory = (d) => { fs.mkdirSync(path.join(d, '.waymark'), { recursive: true }); fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n\n## Identity\n- Stack: test\n'); return d; };
+
+test('10e: the values of the project\'s .env files are known, with no trivial one, no public address and no placeholder', () => {
+  const d = envProject();
+  assert.deepEqual(K.valuesOf(d).sort(), [URLCRED, VALUE].sort());
+  K.loadKnownValues(d);
+  assert.equal(K.maskKnown(`got ${VALUE} and ${URLCRED}, on port 3000 at http://localhost:3000, debug true`), 'got [redactado] and [redactado], on port 3000 at http://localhost:3000, debug true', 'counter-example: what is no secret stays');
+  assert.deepEqual(findSecrets(`a\nthe key is ${VALUE}`), [{ kind: 'valor de un archivo sensible', line: 2 }]);
+  K.clearKnownValues();
+  assert.deepEqual(findSecrets(`the key is ${VALUE}`), [], 'nothing is known outside the hook that loaded it');
+});
+
+test('10e: logic — a value that ends up in a record, its Aprendido or the memory line is masked; the record holds none of it', () => {
+  const d = withMemory(envProject()), id = taskIds(d).next;
+  K.loadKnownValues(d);
+  P.appendRecord(d, { id, prompt: `usa DB_PASS=${VALUE} para migrar`, files: [path.join(d, 'src', 'a.ts')], commits: [], cierre: `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada ${URLCRED}\nAprendido: la base usa ${VALUE} ← .env.local` });
+  const h = P.projectHome(d);
+  const log = fs.readFileSync(h.log, 'utf8');
+  assert.ok(!log.includes(VALUE) && !log.includes('p4ssw0rd9'), 'not in the chained log');
+  assert.match(log, /\[redactado\]/);
+  P.writeTaskLine(h, { id, cierre: `## Cierre · ${id}\nAprendido: la base usa ${VALUE}`, prompt: 'x', evaluation: { steps: {} } });
+  assert.ok(!fs.readFileSync(h.memory, 'utf8').includes(VALUE), 'not in memory.md');
+  K.clearKnownValues();
+});
+
+test('10e: CSS/HTML — the same for a styles task, and a stylesheet value that merely looks like a setting is untouched', () => {
+  const d = withMemory(envProject()), id = taskIds(d).next;
+  K.loadKnownValues(d);
+  P.appendRecord(d, { id, prompt: 'cambia el color', files: [path.join(d, 'src', 'app.css')], commits: [], cierre: `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada el ancho 40px y ${VALUE}\nAprendido: el botón mide 40px` });
+  const log = fs.readFileSync(P.projectHome(d).log, 'utf8');
+  assert.ok(!log.includes(VALUE));
+  assert.match(log, /40px/, 'counter-example: a measure is not a secret');
+  K.clearKnownValues();
+});
+
+test('10e: end to end — the end-of-turn hook loads the values: the answer of a question that quotes one is recorded without it', async () => {
+  const d = withMemory(envProject());
+  const file = path.join(d, 't.jsonl'), at = new Date().toISOString();
+  fs.writeFileSync(file, [{ type: 'user', message: { role: 'user', content: '¿qué contraseña usa la base?' }, uuid: 'p1', timestamp: at }, { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: `Waymark → Q · dept-data\nLa base usa ${VALUE} según el archivo.\nAprendido: la base usa ${VALUE} ← .env.local` }] } }].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: file, cwd: d, session_id: 's-e2e', last_assistant_message: `Waymark → Q · dept-data\nLa base usa ${VALUE}.\nAprendido: la base usa ${VALUE} ← .env.local` }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const h = P.projectHome(d), log = fs.existsSync(h.log) ? fs.readFileSync(h.log, 'utf8') : '';
+  assert.match(log, /"kind":"Q"/, 'the question was recorded');
+  assert.ok(!log.includes(VALUE), 'with no value in it');
+  const learned = fs.existsSync(path.join(d, '.engram')) ? spawnSync('git', ['grep', '-l', VALUE], { cwd: d, encoding: 'utf8' }).stdout : '';
+  assert.equal(learned.trim(), '', 'nor in what the project keeps for engram');
+});
+
+test('10e: the secrets testigo reports a value read from a .env that reaches a mem_save, a diff or a commit; with nothing loaded it reports none', async () => {
+  const { secretHits } = await import(`file://${SCRIPTS}/testigos.mjs`);
+  const d = envProject();
+  K.loadKnownValues(d);
+  const hits = secretHits([{ where: 'mem_save', text: `la base usa ${VALUE}` }, { where: 'diff', text: 'color: red;' }]);
+  assert.deepEqual(hits.map((h) => h.where), ['mem_save'], 'where and which kind, never the value');
+  assert.ok(!JSON.stringify(hits).includes(VALUE));
+  K.clearKnownValues();
+  assert.deepEqual(secretHits([{ where: 'mem_save', text: `la base usa ${VALUE}` }]), [], 'counter-example: a hook that loaded nothing knows nothing');
+});

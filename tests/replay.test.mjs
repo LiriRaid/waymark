@@ -2,6 +2,7 @@
 //   (a) the frozen character caps: what Waymark injects stays under them, and the replay shows the same tasks cheaper than under 2.0.17's sizes
 //   (b) lazy loading: a turn that changes nothing pays only the fixed context and the reminder; procedures and pack arrive at a task's first change
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+process.env.WAYMARK_SIZE_PINNED = '1'; // the reminder is measured with a typical task and git line, not this working tree's (size.mjs)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

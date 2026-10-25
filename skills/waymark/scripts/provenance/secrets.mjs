@@ -1,5 +1,6 @@
 // Secrets masked before a record is written or an agent is told something (the testigo "sin secretos", docs/adr/0012).
 
+import { knownIn, maskKnown } from '../lib/known.mjs';
 
 // Secret formats that are unambiguous wherever they appear: the testigo "sin secretos"
 // looks for these in the memory, mem_save and the task's diff; "password=…" is only masked in what Waymark writes.
@@ -13,12 +14,14 @@ const SECRET_FORMATS = [
   ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/g],
 ];
 // → [{ kind, line }] for every strong-format secret in the text; never the value.
+// A value read from the project's own `.env*` files (lib/known.mjs) is a secret wherever it appears, whatever its format.
 export function findSecrets(text) {
   const s = String(text ?? ''), out = [];
   for (const [kind, re] of SECRET_FORMATS) for (const m of s.matchAll(re)) out.push({ kind, line: s.slice(0, m.index).split('\n').length });
+  for (const line of knownIn(s)) out.push({ kind: 'valor de un archivo sensible', line });
   return out;
 }
-const maskStrong = (text) => SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, '[redactado]'), String(text ?? ''));
+const maskStrong = (text) => maskKnown(SECRET_FORMATS.reduce((s, [, re]) => s.replace(re, '[redactado]'), String(text ?? '')));
 // Every string of a record with the strong formats masked (the chained log cannot be edited later).
 export const deepMask = (v) => (typeof v === 'string' ? maskStrong(v) : Array.isArray(v) ? v.map(deepMask) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepMask(x)])) : v);
 

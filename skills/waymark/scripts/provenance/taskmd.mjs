@@ -8,14 +8,11 @@ import { maskSecrets } from './secrets.mjs';
 import { ensureLocal, projectHome } from './project.mjs';
 import { appendRecord, gitNote } from './chain.mjs';
 import { readTaskRecords } from './records.mjs';
-import { taskIds } from './tasks.mjs';
+import { taskIds, openFile, readOpen } from './tasks.mjs';
 import { followUps } from './derive.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
-// entry per session, written by the per-prompt hook and removed when the turn ends.
-const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
-const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
-
+// entry per session (read by tasks.mjs), written by the per-prompt hook and removed when the turn ends.
 export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
   const home = projectHome(cwd), file = openFile(home);
   if (!file || !fs.existsSync(home.memory)) return false; // tasks.md exists only with memory in the project
@@ -229,6 +226,8 @@ export function tasksMarkdown(home, now = new Date()) {
   const today = now.toLocaleDateString('sv');
   const when = (at) => { const t = new Date(at).toLocaleString('sv'); return t.slice(0, 10) === today ? t.slice(11, 16) : t.slice(5, 16); };
   const qRows = asked.slice(-QUESTIONS_SHOWN).map((r) => clip(`- ${[when(r.at), r.department, r.skills?.join(', ')].filter(Boolean).map(cell).join(' · ')} · "${clip(cell(r.prompt), 80)}"${r.answer ? ` → ${cell(r.answer)}` : ''}`, TASK_CHARS));
+  // changes another project's task made in this one (kind "touched"): who, under which task, and which files
+  const touched = all.filter((r) => r.kind === 'touched').slice(-3).reverse().map((r) => clip(`- ${cell(r.task)} from ${cell(r.from)} · ${new Date(r.at).toLocaleString('sv').slice(0, 16)} · ${(r.files || []).slice(0, 3).map((f) => path.basename(f)).join(', ')}${(r.files || []).length > 3 ? ` (+${r.files.length - 3})` : ''}${r.learned ? ` · ${cell(r.learned)}` : ''}`, 160));
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
   const source = (r) => (gitNote(r) || r.fromNote ? `git notes --ref=waymark show ${String(r.note?.commit || r.fromNote).slice(0, 8)}` : r.fromCommit ? `git show ${r.fromCommit.slice(0, 8)} (no record: its commit only)` : 'last line of provenance.jsonl');
   // The last closed task with what another agent needs to continue: ~220 ch per field.
@@ -256,6 +255,7 @@ export function tasksMarkdown(home, now = new Date()) {
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
     ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash)', ...started, ''] : []),
     ...(questions ? [`## Preguntas (Q) desde el último cierre: ${questions} (${qRows.length < questions ? `las últimas ${qRows.length}; ` : ''}provenance.jsonl, kind "Q")`, ...qRows, ''] : []),
+    ...(touched.length ? ['## Touched from another project (its task is recorded there; kind "touched")', ...touched, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,
     '| Task | Result | Routine | Backed | Request |', '|---|---|---|---|---|', ...rows, '',
@@ -263,7 +263,8 @@ export function tasksMarkdown(home, now = new Date()) {
   // Over budget: the oldest done rows go first down to DONE_MIN, then the in-progress lines with the oldest task IDs
   // (counted as "+n more"), then the remaining done rows.
   let out = render();
-  while (out.length > TASKS_CHARS && redone.length) { redone.pop(); out = render(); } // the rework lines first: they only point at rows
+  while (out.length > TASKS_CHARS && touched.length) { touched.pop(); out = render(); } // the touched lines first: they point at another project
+  while (out.length > TASKS_CHARS && redone.length) { redone.pop(); out = render(); } // the rework lines next: they only point at rows
   while (out.length > TASKS_CHARS && rows.length > DONE_MIN) { rows.pop(); out = render(); }
   while (out.length > TASKS_CHARS && qRows.length > 1) { qRows.shift(); out = render(); } // the oldest questions
   const order = withId.length ? withId.map((l) => idOrder(headId(l))) : tasks.map((_, i) => String(i).padStart(6, '0'));

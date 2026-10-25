@@ -70,16 +70,21 @@ const turnStart = (lines, since = 0) => {
 // naming the tool-use id). The turn is not over: the agent
 // waits for it and closes in the notification's turn, so a task is never judged while its code-review runs.
 // Background shell commands are not waited for: a dev server never notifies.
-export function pendingBackground(lines, since = 0) {
+// The notification names the agent by its <task-id> (the launch's agentId) and, sometimes, the launch's <tool-use-id>:
+// either releases it (a notification with no tool-use-id left a turn waiting for good). A launch older than
+// BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
+export const BACKGROUND_WAIT_MS = 30 * 60000;
+export function pendingBackground(lines, since = 0, now = Date.now()) {
   const { from } = turnStart(lines, since);
   const launched = [];
   for (const d of lines.slice(from)) {
     if (d.type !== 'user' || d.isSidechain || !(d.toolUseResult?.background || d.toolUseResult?.isAsync)) continue;
-    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push(c.tool_use_id);
+    const at = Date.parse(d.timestamp || '') || 0;
+    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
   }
   if (!launched.length) return [];
   const notified = lines.filter((d) => d.type === 'user' && /<task-notification>/.test(promptText(d))).map(promptText).join('\n');
-  return launched.filter((id) => !notified.includes(`<tool-use-id>${id}</tool-use-id>`));
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > BACKGROUND_WAIT_MS)).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own

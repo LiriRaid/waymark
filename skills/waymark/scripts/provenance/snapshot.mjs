@@ -97,9 +97,12 @@ const writeSnaps = (all) => {
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(snapFile(), JSON.stringify(all));
 };
-export function saveSnapshot(session, cwd) {
+// `keep`: the session's last turn never closed (the user interrupted it, a background agent was still running): its
+// snapshot stays, so the files it changed are judged with the turn that follows, not lost with the prompt.
+export function saveSnapshot(session, cwd, { keep = false } = {}) {
   const all = readSnaps(), id = session || 'unknown';
   if (all[id]?.paused) { all[id].paused = false; writeSnaps(all); return all[id].snap; }
+  if (keep && all[id]?.snap) return all[id].snap;
   const snap = gitSnapshot(cwd);
   all[id] = { at: Date.now(), cwd, snap };
   writeSnaps(all);

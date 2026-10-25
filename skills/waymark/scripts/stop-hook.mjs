@@ -359,6 +359,24 @@ export function effectiveReply(texts = [], last = '') {
   return rest.trim() ? `${cierre.trimEnd()}\n\n${rest.trim()}` : cierre;
 }
 
+// The same ask as the last task's: the prompt of a turn that a notification resumed is the original one.
+const askKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+export const sameAsk = (a, b) => !!askKey(a) && askKey(a) === askKey(b);
+
+// The other projects a task changed files in: one short record each (kind "touched", no ID of its own: it is no task
+// there, so that project's counter never moves), so its tasks.md says who changed its files and under which task. A repo
+// the task committed in (rec.repos) already has the task as a git note.
+export function touchedRepos(files, root, rec, slug) {
+  const out = [];
+  for (const dir of [...new Set(files.map((f) => path.dirname(f)))]) {
+    const top = fs.existsSync(dir) && gitRoot(dir);
+    if (!top || sameDir(top, root) || out.some((r) => sameDir(r.root, top)) || (rec.repos || []).some((r) => sameDir(r.root, top)) || !fs.existsSync(projectHome(top).memory)) continue;
+    const mine = files.filter((f) => !path.relative(top, f).startsWith('..') && !path.isAbsolute(path.relative(top, f))).map((f) => path.relative(top, f).replace(/\\/g, '/'));
+    out.push({ root: top, record: { kind: 'touched', task: rec.id, from: slug, agent: rec.agent || null, at: rec.at, session: rec.session, cwd: top, files: mine.slice(0, 30), ...(aprendidoOf(rec.cierre || '') ? { learned: aprendidoOf(rec.cierre).slice(0, 300) } : {}) } });
+  }
+  return out;
+}
+
 // A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
 export const pausedReply = (reply) => !CIERRE_HEAD.test(String(reply || '').replace(/\*\*|__/g, '')) && closingQuestions(reply).length > 0;
 
@@ -927,6 +945,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn.
   const lastText = String(last || '').replace(/\*\*|__/g, '');
   const earlyLevel = routedLevel([...turn.texts, lastText], turn.tools) || ctx.inherited?.level || 0;
+  // A turn no prompt of its own started (a notification after the close), an empty one, or one that repeats the last
+  // task's prompt, and changed nothing, is no task: its Cierre would be a ghost row (T<n>b of the same ask).
+  if (!changed.length && (ctx.resumed || ctx.repeat || !String(turn.prompt || '').trim())) return null;
   if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
   const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
   // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
@@ -1097,15 +1118,16 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
       // A skill or agent still running in the background: the turn is not over (no block, no record); it closes in the
-      // notification's turn.
-      if (pendingBackground(lines, since).length) return;
+      // notification's turn, which reads the whole stretch from the task's prompt. A reply that already carries its
+      // Cierre is the end of the task: judged now.
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
+      if (pendingBackground(lines, since).length && !CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''))) return;
       h.last_assistant_message = effectiveReply(currentTurn(lines, since).texts, h.last_assistant_message); // one Cierre per task
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), resumed: since > 0 && turn.startedAt <= since, repeat: sameAsk(turn.prompt, records.filter((r) => r.session === h.session_id && r.id).pop()?.prompt), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
@@ -1176,6 +1198,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
+      try { for (const { root, record } of touchedRepos(gaps.changed, home.root, rec, home.slug)) { appendRecord(root, record); refreshTasks(projectHome(root), true); } } catch (e) { logHookError('stop-hook touched', e); } // each other project it changed files in hears of it
       try { expireGrants(rec.id); } catch (e) { logHookError('stop-hook grants', e); } // a permission given for this task ends with it (docs/adr/0045)
       try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
         const u = evaluation.usage;

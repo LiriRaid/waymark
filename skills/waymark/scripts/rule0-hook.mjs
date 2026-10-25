@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -48,6 +48,12 @@ export function gitLine(root, max = 2) {
 export function taskLine(cwd, now = new Date()) {
   const ids = taskIds(cwd, now);
   return ` ID: new ${ids.next}${ids.followUp ? `; follow-up ${ids.followUp}` : ''}.`;
+}
+// Another session of this project has a turn open: two sessions on one repo edit the same files without knowing. The line
+// names it so the agent tells the user before editing what the other may be changing.
+export function otherSessionLine(cwd, session, now = new Date()) {
+  const o = otherOpen(cwd, session, now)[0];
+  return o ? ` Another session${o.agent ? ` (${o.agent})` : ''} has a turn open in this project since ${new Date(o.at).toLocaleString('sv').slice(11, 16)} ("${o.prompt}"): if it is still running, tell the user before changing files it may be changing.` : '';
 }
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
@@ -117,10 +123,13 @@ export function reminder(hook, agent) {
   let held = null;
   try { held = brake(hook, agent, st); } catch {}
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
-  let ids = '';
+  const session = hook.session_id || 'unknown';
+  let ids = '', other = '', unclosed = false;
   try { ids = taskLine(cwd); } catch {}
+  try { other = otherSessionLine(cwd, session); } catch {}
+  try { unclosed = !!openTurn(cwd, session); } catch {} // this session's last turn never closed (interrupted, or a background agent still running)
   try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change
-  try { saveSnapshot(hook.session_id, cwd); } catch {} // the end-of-turn hook diffs against it
+  try { saveSnapshot(hook.session_id, cwd, { keep: unclosed }); } catch {} // the end-of-turn hook diffs against it; an unclosed turn's changes stay in it
   try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
   try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
   // the earlier task that resembles the ask, handed over once, at the task's first prompt (docs/adr/0033); null clears a stale one
@@ -137,7 +146,7 @@ export function reminder(hook, agent) {
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
-  const text = (st.openedWithWaymark ? short : full) + ids + repo + (held?.line || '') + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  const text = (st.openedWithWaymark ? short : full) + ids + other + repo + (held?.line || '') + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }

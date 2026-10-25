@@ -360,6 +360,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0043 · A profile is a reference, never the project's rule](docs/adr/0043-a-profile-is-a-reference-never-the-projects-rule.md)
 - [0044 · A record for the work, none for what is not work, and one task closed by the person who asked for it](docs/adr/0044-a-record-for-the-work-none-for-what-is-not-work.md)
 - [0045 · A permission the user gives works, only the user can give it, and nothing read is saved](docs/adr/0045-a-permission-the-user-gives-works-and-nothing-read-is-saved.md)
+- [0046 · Clean copies in a folder Waymark owns, and the safety of the user's environment](docs/adr/0046-clean-copies-in-a-folder-waymark-owns-and-the-users-environment.md)
 <!-- adr-index:end -->
 
 ## Contributing back

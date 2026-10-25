@@ -7,11 +7,11 @@ Every request. Only L0 skips it (a color, a text, a typo or one value the user n
 **First text of the turn:** `Waymark → L<n> or Q · dept-<owner> · skills: <only skills you will invoke>`; then, if that department is not loaded yet in this session, its `dept-*` skill as your first tool call (once per session; later tasks route with the line). The hook takes the owner from the department loaded and the level from the files you change. A Q that turns into a change → invoke the owner `dept-*` skill with args `L<n>`. Q: read-only, grounded in `file:line` or docs, no Cierre.
 **Before the first change** (for you, not checked):
 ```
-Pedido: <the ask in one line> · Captura: <what each image shows + the element it points to | sin captura> [· Copia: <only what was named from X>] [· Capa: <layer the user set>] [· Cambia: <behavior not asked to change> → ask first]
+Pedido: <the ask, one line> · Captura: <what each image shows + the element it points to | sin captura> [· Copia: <only what was named from X>] [· Capa: <layer the user set>] [· Cambia: <behavior not asked to change> → ask first] [· Repos: <other repos it touches>]
 Reutiliza: <piece + path from Project map → Reusables | ninguno → patrón de <file>>
 ```
-Two readings that change the result → one question first. A layer the user named, evidence pointing elsewhere → ask before leaving it.
-**The user decides, never you.** First the owner's `procedures.md` section (the hook hands you the git status); then one choice-window call: the approach with its optimal options (files, risk, cost; recommended marked) and every decision that shapes the work you can foresee. One real way, or the user already chose → confirm it there. Later questions only confirm; a new work decision is asked before applying it. The branch is the user's, never a decision. A user rule exists only where it is written (their message, memory.md, preferences.md): cite it; none → ask. Never offer or run browser verification unless the user asks.
+Two readings that change the result → ask once first. A layer the user named, evidence pointing elsewhere → ask before leaving it.
+**The user decides, never you.** First the owner's `procedures.md` section (the hook hands you the git status); then one choice-window call: the approach with its optimal options (files, risk, cost; recommended marked) and every decision that shapes the work you can foresee. One real way or already chosen → confirm it there. Later questions only confirm; a new work decision is asked before applying it. The branch is the user's, never a decision. A user rule exists only where it is written (their message, memory.md, preferences.md): cite it; none → ask. Never offer or run browser verification unless the user asks.
 **Close every change with** (task ID from the per-prompt hook):
 ```
 ## Cierre · <YYYY-MM-DD · T<n>[a-z]>

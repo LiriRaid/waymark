@@ -14,6 +14,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 2. Rebase or merge the latest default branch; resolve conflicts preserving both intents.
 3. Title in Conventional Commits. Body: what, why, how verified, risks, rollback.
 4. Small and single-purpose; split diffs that mix refactor and behavior change.
+5. The account is the user's: never `gh auth switch|login|logout|refresh|setup-git` (the hook denies them), and never open or merge a PR the request does not ask for. Read the active account with `git config user.email` and `gh auth status` when you need to know whose it is; never write an account or an address in the project, its memory or Waymark.
 
 ### Git: destructive operations
 1. `reset --hard`, `clean -f`, `push --force`, branch deletion, history rewrite: confirm with the user and state what will be lost.

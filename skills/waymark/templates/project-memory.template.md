@@ -52,6 +52,7 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 ## Conventions specific to this project
 - …
 <!-- A step that is yours, in your words and dated: "- Deploys: the user (2026-10-25: «yo despliego»)", "- PRs: the user". A task whose only missing step is one of those closes hecho. -->
+<!-- A project that migrates with its own script: "- Migrations: bin/migrate new <name>". A migration file written by hand is asked about first. -->
 
 
 ## Repeated procedures

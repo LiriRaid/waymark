@@ -14,13 +14,13 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools } from './transcript.mjs';
+import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
 import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm, exemptPath } from './lib/paths.mjs';
+import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
@@ -146,6 +146,58 @@ export function checkLink(command) {
     : null;
 }
 
+// The user's accounts and pull requests are the user's (docs/adr/0046): switching the gh account is denied always; opening or merging a pull
+// request only when the task's own words ask for one. Waymark reads `git config user.email` and `gh auth status` when it needs to know
+// whose they are, and never writes either anywhere.
+const GH_AUTH = /(?:^|[;&|(]\s*|\n\s*)gh\s+auth\s+(?:switch|login|logout|refresh|setup-git)\b/;
+const GH_PR = /(?:^|[;&|(]\s*|\n\s*)gh\s+pr\s+(?:create|merge|ready)\b/;
+export function checkGh(command, asked = '') {
+  const sk = shellSkeleton(command, { quotes: false });
+  if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
+  if (GH_PR.test(sk) && !/\b(?:pull requests?|PRs?|merge|mergea\w*|fusiona\w*)\b/i.test(asked)) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
+  return null;
+}
+
+// A repository the task's request does not name (docs/adr/0046): the Pedido line lists the repos it touches (`Repos: a, b`), and the user\'s answer in the
+// choice window that names one counts too. Editing another is denied once per task and repo, asking the user first.
+export function namedRepos(lines) {
+  const text = [];
+  for (const d of lines || []) {
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (c.type === 'text') for (const m of String(c.text).replace(/\*\*|__/g, '').matchAll(/(?:^|·)[ \t]*(?:[-*]\s*)?Repos?:[ \t]*([^\n·]+)/gim)) text.push(m[1]);
+    const r = d.toolUseResult;
+    if (d.type === 'user' && r && Array.isArray(r.questions) && r.answers) text.push(...Object.values(r.answers).map(String));
+    if (d.type === 'user' && !d.isSidechain && typeof d.message?.content === 'string') text.push(d.message.content);
+  }
+  return text.join('\n').toLowerCase();
+}
+export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
+  if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2) return null;
+  if (nameIn(path.basename(root), namedRepos(lines))) return null;
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+  const key = `${session}:${norm(root)}`;
+  if (seen[key]) return null; // asked once; the same repo again goes through
+  for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
+  seen[key] = Date.now();
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  return `Waymark: this change is in ${path.basename(root)}, a repository the task's request does not name (the session works in ${path.basename(cwdRoot)}). Ask the user in your choice window whether to change it, then name it in the Pedido line ("Repos: <each repo this task touches>"). Sent again after that, it goes through.`;
+}
+
+// A project that migrates with its own script (its Conventions: "Migrations: <command>") has the migration made and run by it: a migration file
+// written by hand under a migrations folder is denied once per file, naming the script.
+const MIGRATION_DIR = /(?:^|[\\/])(?:db[\\/]migrate|migrations?|prisma[\\/]migrations|alembic[\\/]versions|database[\\/]migrations)[\\/]/i;
+export function checkMigration(file, memory, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.migration-gate.json')) {
+  const script = String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*Migrations?:[ \t]*(.+)$/im)?.[1]?.trim();
+  if (!script || !MIGRATION_DIR.test(String(file)) || fs.existsSync(file)) return null; // a new file only; an edit of one is not the case
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+  const key = `${session}:${norm(file)}`;
+  if (seen[key]) return null;
+  seen[key] = Date.now();
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  return `Waymark: this project migrates with its own script (Conventions: "Migrations: ${script.slice(0, 120)}"), and this writes a migration file by hand. Use the script to make it and to run it; if it cannot do what the task needs, say so in your choice window and write it by hand only if the user chooses that.`;
+}
+
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
@@ -162,14 +214,24 @@ export function gate(hook, agent) {
   if (c.command !== undefined) {
     const link = checkLink(c.command);
     if (link) return link;
+    if (/\bgh\s+(?:auth|pr)\b/.test(c.command)) { const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n')); if (gh) return gh; } // the user's account and pull requests
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
-    return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;
+    if (!changesProject(c.command)) return null;
+    const lines = turns(), own = projectHome(cwd).root;
+    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id); if (deny) return withNote(deny); }
+    return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, cwd));
   }
   const files = (c.files || []).filter((f) => !exempt(f, cwd));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
-  for (const f of files) { const deny = checkDecision(f, lines, hook.session_id, undefined, cwd); if (deny) return withNote(deny); }
+  const own = projectHome(cwd).root;
+  let memory = '';
+  try { memory = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
+  for (const f of files) {
+    const deny = checkRepo(repoOf(f), own, lines, hook.session_id) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, cwd);
+    if (deny) return withNote(deny);
+  }
   return null;
 }
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

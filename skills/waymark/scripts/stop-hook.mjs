@@ -31,7 +31,7 @@ import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -45,7 +45,7 @@ import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { expireGrants } from './lib/grants.mjs';
 import { loadKnownValues } from './lib/known.mjs';
 import { learn } from './learn.mjs';
-import { norm, real, exemptPath, waymarkHome, WAYMARK_CMD } from './lib/paths.mjs';
+import { norm, real, exemptPath, repoOf as nearestRepo, nameIn, waymarkHome, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 import { commentOnlyEdit } from './lib/comments.mjs';
 
@@ -378,6 +378,20 @@ export function touchedRepos(files, root, rec, slug) {
     out.push({ root: top, record: { kind: 'touched', task: rec.id, from: slug, agent: rec.agent || null, at: rec.at, session: rec.session, cwd: top, files: mine.slice(0, 30), ...(aprendidoOf(rec.cierre || '') ? { learned: aprendidoOf(rec.cierre).slice(0, 300) } : {}) } });
   }
   return out;
+}
+
+// The repos the Pedido names ("Repos: a, b"), lower-cased, from the turn's texts; and the repos a task changed that neither it nor the user's
+// answers in the window name (docs/adr/0046). Files inside the session's own repo are never judged.
+export const namedRepos = (texts) => [...String(texts.join('\n')).replace(/\*\*|__/g, '').matchAll(/(?:^|·)[ \t]*(?:[-*]\s*)?Repos?:[ \t]*([^\n·]+)/gim)].flatMap((m) => m[1].split(/[,;]|\sy\s|\sand\s/)).map((s) => s.trim().toLowerCase()).filter(Boolean);
+export function reposNotNamed(changed, root, named, answers = '') {
+  const out = new Set();
+  for (const f of changed || []) {
+    const top = nearestRepo(f);
+    if (!top || (root && sameDir(top, root))) continue;
+    const name = path.basename(top);
+    if (!nameIn(name, named.join('\n')) && !nameIn(name, answers)) out.add(name);
+  }
+  return [...out];
 }
 
 // A reply that pauses the task: no Cierre, and it ends asking the user with options (transcript.mjs closingQuestions).
@@ -872,7 +886,7 @@ function failsOf(S) {
 
 // The steps of the routine contract (waymark/routine.json): does each apply, did it pass, why not.
 function composeSteps(S) {
-  const { changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, renamed, reply, retried, risk, when } = S;
+  const { askedRepos, changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, outsideRepos, renamed, reply, retried, risk, when, win } = S;
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
@@ -910,13 +924,17 @@ function composeSteps(S) {
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
+  if (win?.unanswered.length) findings.push(`the Cierre does not answer what the user chose in the window (recorded, not blocked): ${win.unanswered.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
+  if (win?.failed.length) findings.push(`the Cierre marks ✘ what the user chose in the window: ${win.failed.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
+  if (win?.twoActions.length) findings.push(`a label the user chose holds two actions (apply and run, delete and deploy…): the Cierre must say which of them was done: ${win.twoActions.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
+  if (outsideRepos.length) findings.push(`changed a repository the Pedido does not name (Repos:): ${outsideRepos.slice(0, 3).join(', ')}`);
   if (observed.options?.missing.length) findings.push(`the first choice window's options lack their attributes (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
   if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   const omitted = omittedOf(S, steps);
-  return { level, changed, reply, missing, findings, steps, dept, observed, renamed, ...(omitted ? { omitted } : {}) };
+  return { level, changed, reply, missing, findings, steps, dept, observed, renamed, win, askedRepos, ...(omitted ? { omitted } : {}) };
 }
 
 // The review a small, plain change skips is recorded with its reason, so the record says why nothing blocked.
@@ -970,7 +988,10 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const declared = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
   const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
   if (!level) return null;
-  const S = { turn, last, allTools, prompts, ctx, byKey, changed, lastText, earlyLevel, full, reply, routed, denied, agentFiles, byFiles, explicitL0, declared, level };
+  // what the user chose in the window is an item the Cierre answers (recorded, never blocked), and the repos the Pedido names against the ones changed (docs/adr/0046)
+  const win = Number(level) >= 2 ? windowCheck(ctx.decisions, reply) : null;
+  const askedRepos = namedRepos(turn.texts), outsideRepos = reposNotNamed(changed, ctx.root, askedRepos, (ctx.decisions || []).map((d) => d.chosen).join(' '));
+  const S = { turn, last, allTools, prompts, ctx, byKey, changed, lastText, earlyLevel, full, reply, routed, denied, agentFiles, byFiles, explicitL0, declared, level, win, askedRepos, outsideRepos };
   Object.assign(S, observeTurn(S));
   Object.assign(S, observeBuild(S));
   Object.assign(S, observeEvidence(S));
@@ -1032,10 +1053,11 @@ export function ownedSteps(text) {
   for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1]) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
   return owned;
 }
-export function outcome(reply, items, answers, level, owned = new Set()) {
+export function outcome(reply, items, answers, level, owned = new Set(), win = null) {
   const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
   const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
   if (said === 'hecho' && gaps.length) return { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' };
+  if (said === 'hecho' && (win?.unanswered.length || win?.failed.length)) return { result: 'parcial', said, why: 'a choice of the window is not answered in the Cierre or is marked ✘' };
   if (said === 'parcial') {
     const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
     const mine = [...owned].filter((s) => STEP_WORDS[s].test(line));
@@ -1065,7 +1087,9 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
-    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned), // hecho | parcial | bloqueado, as a label
+    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned, gaps.win), // hecho | parcial | bloqueado, as a label
+    ...(gaps.win && (gaps.win.unanswered.length || gaps.win.failed.length || gaps.win.twoActions.length) ? { window: gaps.win } : {}), // what the user chose in the window and the Cierre left out (docs/adr/0046)
+    ...(gaps.askedRepos?.length ? { askedRepos: gaps.askedRepos.slice(0, 6) } : {}),
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   });

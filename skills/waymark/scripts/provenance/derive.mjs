@@ -99,6 +99,32 @@ export function askedGaps(items, answers, resultado = '') {
   return gaps;
 }
 
+// What the user chose in the choice window (an option, a free-text answer) is an item of the ask too (docs/adr/0046): the Cierre owes it a
+// word, and a "hecho" cannot stand over one it left out or marked ✘. Recorded, never blocked: a Cierre names a choice in its own words, so
+// an item counts as answered when most of its significant words appear in the Cierre. A chosen label that holds two actions ("apply and run
+// it") is flagged: one label that says two things left a migration unrun under a task marked hecho.
+// → { items, unanswered, failed, twoActions } (arrays; empty when all is as it should be).
+const plain = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const TWO_ACTIONS = /\s(?:y|and|&|\+)\s+(?:ejecuta\w*|aplica\w*|corre\w*|correr|borra\w*|elimina\w*|despliega\w*|desplegar|migra\w*|run|apply|delete|deploy|migrate)\b/i;
+export function windowCheck(decisions, reply) {
+  const out = { items: [], unanswered: [], failed: [], twoActions: [] };
+  const text = plain(String(reply || '').split(/##\s*Cierre/).pop() || '');
+  const lines = String(reply || '').split('\n');
+  for (const d of decisions || []) {
+    const item = String(d.chosen ?? '').trim().replace(/\s*\((?:recommended|recomendad[ao])\)\s*$/i, ''); // the marker is the window's, not the user's choice
+    if (!item || /^(?:otra cosa|other)$/i.test(item) || out.items.includes(item)) continue;
+    out.items.push(item);
+    if (TWO_ACTIONS.test(item)) out.twoActions.push(item);
+    const words = [...new Set(plain(item).split(' ').filter((w) => w.length >= 4))].slice(0, 8);
+    if (!words.length) continue; // nothing to look for: not judged
+    const named = (t) => words.filter((w) => t.includes(w)).length >= Math.ceil(words.length * 0.6);
+    if (!named(text)) { out.unanswered.push(item); continue; }
+    const line = lines.find((l) => named(plain(l)) && /[✔✓✘✗✕]/.test(l));
+    if (line && /[✘✗✕]/.test(line) && !/[✔✓]/.test(line)) out.failed.push(item);
+  }
+  return out;
+}
+
 // The first choice window of an L2+ task judged on what it says of each option: its risk, its files or its cost, and exactly one option marked
 // (Recommended). `decisions` are the task's answered questions (decisionsIn: each carries its options). A window of one option, or a question
 // whose options are not known (asked in the chat), is not judged. → { options, missing: [...] } or null.

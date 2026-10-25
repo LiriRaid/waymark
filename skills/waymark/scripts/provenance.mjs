@@ -35,6 +35,7 @@ export {
   reworkOf,
   taskTypeOf,
   v2Fields,
+  windowCheck,
 } from './provenance/derive.mjs';
 export {
   INTERRUPTED_AFTER,

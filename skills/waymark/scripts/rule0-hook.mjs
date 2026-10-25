@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -129,7 +129,8 @@ export function siblingsLine(cwd, session, { now = Date.now(), stateFile = path.
   for (const h of workspaceSiblings(projectHome(cwd).root)) {
     if (!h.dir || h.legacy) continue;
     const name = path.basename(h.root), said = [];
-    for (const r of readTaskRecords(h).filter((x) => x.id && !x.kind && Date.parse(x.at || 0) > since).slice(-2)) {
+    if (!readRecords(h.log).some((x) => x.id && !x.kind && Date.parse(x.at || 0) > since)) said.push(...[]); // the log alone says nothing closed: no git read (notes) for the Aprendido
+    else for (const r of readTaskRecords(h).filter((x) => x.id && !x.kind && Date.parse(x.at || 0) > since).slice(-2)) {
       const learned = aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')).replace(/\s+/g, ' ').trim();
       said.push(`${r.id.match(/T\d+[a-z]?$/)?.[0] || r.id}${r.agent ? ` (${r.agent})` : ''} closed${learned ? `: ${learned.length > SIBLING_LEARNED ? learned.slice(0, SIBLING_LEARNED - 1) + '…' : learned}` : ''}`);
     }
@@ -198,7 +199,10 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   if (!agent.out.blockPrompt) return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
   const home = projectHome(hook.cwd || process.cwd());
   let kept = '';
-  try { if (home.dir && !home.legacy) { fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date(now).toISOString()} · held by the context brake (~${k}${idle ? ', idle' : ''}) · session ${session} -->\n${String(hook.prompt).trim()}\n`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
+  try { if (home.dir && !home.legacy) { // a handoff already in the file follows the held message (the card takes the message, then leaves the handoff)
+    let handoff = '';
+    try { const t = fs.readFileSync(path.join(home.dir, NEXT_PROMPT), 'utf8'); if (t.startsWith(RELAY_MARK)) handoff = t; } catch {}
+    fs.writeFileSync(path.join(home.dir, NEXT_PROMPT), `<!-- ${new Date(now).toISOString()} · held by the context brake (~${k}${idle ? ', idle' : ''}) · session ${session} -->\n${String(hook.prompt).trim()}\n${handoff}`); kept = ` Your message is kept in .waymark/${NEXT_PROMPT}: the new session's card brings it.`; } } catch {}
   return { block: agent.out.blockPrompt(`Waymark: ${why} Open a new session (the card, tasks.md and engram carry the work over).${kept} Send it again here to continue in this session.`) };
 }
 

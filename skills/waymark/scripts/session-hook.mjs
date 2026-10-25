@@ -14,7 +14,7 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, readRelay, RELAY_MARK, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes, defaultRemote } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { census, fillMemory } from './convention.mjs';
@@ -100,6 +100,8 @@ export function digest(cwd, agentName = 'claude') {
   const open = openIds(wipAll);
   // listed, not asked: `W check` asks which already work, so the first reply of a session is the user's task
   if (open.length) out.push(`Open tasks (▶): ${open.join(', ')} (W check asks the user which already work).`);
+  const relay = home.legacy ? '' : readRelay(home); // what the last task left for whoever starts next (.waymark/next-prompt.md), any agent
+  if (relay) out.push(`Handoff (the steps the last task left; the user's request comes first): ${relay.replace(/\n+/g, ' · ')}`);
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
   const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
   if (notes.length) out.push('Notes:\n' + notes.join('\n'));
@@ -134,7 +136,13 @@ export function digest(cwd, agentName = 'claude') {
 export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
   let text = '';
-  try { if (now - fs.statSync(file).mtimeMs < 86400000) text = fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '').trim(); fs.rmSync(file, { force: true }); } catch {}
+  try {
+    const content = fs.readFileSync(file, 'utf8');
+    if (content.startsWith(RELAY_MARK)) return ''; // a handoff is no held message: the card shows it and it stays
+    const cut = content.indexOf('\n' + RELAY_MARK), whole = cut < 0 ? content : content.slice(0, cut + 1); // a handoff after the message stays
+    if (now - fs.statSync(file).mtimeMs < 86400000) text = whole.replace(/^<!--[^\n]*-->\n/, '').trim();
+    if (cut < 0) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, content.slice(cut + 1));
+  } catch {}
   if (text.length <= HELD_MAX) return text;
   // the user's words are never lost to the cap: the whole message stays in a file the agent reads on demand
   try { fs.writeFileSync(path.join(home.dir, 'held-full.md'), text + '\n'); } catch {}

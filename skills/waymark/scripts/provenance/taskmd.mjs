@@ -51,6 +51,40 @@ export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED
   return gone.map(([, o]) => o);
 }
 
+// The handoff: .waymark/next-prompt.md carries what a task left for whoever starts next (the ✔/▶ steps of its Aprendido, what a parcial is missing), so any
+// agent or account finds it in the card, in place of a long note in one agent's own memory. The context brake keeps the user's held message in the same file:
+// that one is never overwritten. A close with nothing to hand over takes a stale handoff away. → 'written' | 'removed' | 'kept' | ''.
+const RELAY_FILE = 'next-prompt.md', RELAY_CHARS = 600, RELAY_DAYS = 7;
+export const RELAY_MARK = '<!-- handoff ';
+const STEPS = /[✔▶]\s*\d/;
+export function writeRelay(home, rec) {
+  if (!home?.dir || home.legacy || !rec?.id) return '';
+  const file = path.join(home.dir, RELAY_FILE);
+  let current = '';
+  try { current = fs.readFileSync(file, 'utf8'); } catch {}
+  if (current && !current.startsWith(RELAY_MARK)) return 'kept'; // the user's own words, held by the brake
+  const cierre = String(rec.cierre || '').replace(/\*\*|__/g, ''), learned = aprendidoOf(cierre);
+  const result = cierre.match(/Resultado:[ \t]*([^\n]*)/i)?.[1]?.trim() || rec.outcome?.result || '';
+  if (!(/^(?:parcial|bloqueado)/i.test(result) || STEPS.test(learned))) {
+    // only the close of the task the handoff is about takes it away: another task's (or another session's) clean close leaves the steps for whoever starts next
+    if (!current || base(current.match(/^<!-- handoff · (\d{4}-\d\d-\d\d · T\d+[a-z]?) ·/)?.[1] || '') !== base(rec.id)) return '';
+    fs.rmSync(file, { force: true });
+    return 'removed';
+  }
+  const body = clip(`Relevo de ${rec.id} · ${clip(result, 160)}\nAprendido: ${learned}`, RELAY_CHARS);
+  fs.writeFileSync(file, `${RELAY_MARK}· ${rec.id} · ${rec.at || new Date().toISOString()} -->\n${body}\n`);
+  return 'written';
+}
+// The handoff text, or '' when there is none or it is over RELAY_DAYS old; reading it removes nothing (the next session, whichever agent, finds it too).
+export function readRelay(home, now = Date.now()) {
+  if (!home?.dir || home.legacy) return '';
+  try {
+    const file = path.join(home.dir, RELAY_FILE), text = fs.readFileSync(file, 'utf8');
+    if (!text.startsWith(RELAY_MARK) || now - fs.statSync(file).mtimeMs > RELAY_DAYS * 86400000) return '';
+    return text.replace(/^<!--[^\n]*-->\n/, '').trim();
+  } catch { return ''; }
+}
+
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
 // Cited facts a call backs (observed.evidence): below BACKED_MIN a task is marked ⚠ (the threshold frozen in docs/adr/0038, scorecard check 11.2).
 const BACKED_MIN = 0.95;

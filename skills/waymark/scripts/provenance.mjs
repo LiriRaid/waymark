@@ -15,9 +15,7 @@
 // - `note` on a log line is always the git-note pointer { commit, sha } (gitNote() reads it); other text uses other fields.
 // Where: <project>/.waymark/ (docs/adr/0007), resolved once by projectHome() for every hook.
 // The code lives in provenance/*.mjs, one module per concern; this file is the one place the hooks import it from.
-export {
-  ID,
-} from './provenance/ids.mjs';
+export { ID } from './provenance/ids.mjs';
 export {
   RECORD_SCHEMAS,
   RECORD_V1,
@@ -39,16 +37,19 @@ export {
 } from './provenance/derive.mjs';
 export {
   INTERRUPTED_AFTER,
+  RELAY_MARK,
   aprendidoOf,
   closeOpen,
   confirmTasks,
   expireOpen,
   markOpen,
   rebuildFromGit,
+  readRelay,
   refreshTasks,
   taskSummary,
   tasksMarkdown,
   tidyWip,
+  writeRelay,
   writeTaskLine,
 } from './provenance/taskmd.mjs';
 export {
@@ -111,9 +112,7 @@ export {
   findSecrets,
   maskSecrets,
 } from './provenance/secrets.mjs';
-export {
-  readTaskRecords,
-} from './provenance/records.mjs';
+export { readTaskRecords } from './provenance/records.mjs';
 
 // The shell parsing (shellSkeleton, shellRuns, mutatesFiles, changesProject) lives in runs.mjs; re-exported for its importers.
 export { shellSkeleton, mutatesFiles, shellRuns, changesProject } from './runs.mjs';

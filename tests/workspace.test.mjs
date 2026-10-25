@@ -113,3 +113,84 @@ test('7: the per-prompt hook carries the line in what it hands the model, and a 
   fs.writeFileSync(path.join(home, '.siblings.json'), '{not json');
   assert.doesNotMatch(await run(web, 'tercer prompt'), /Error|undefined/, 'a broken state file never breaks the prompt');
 });
+
+// ---- 7 · the handoff file: .waymark/next-prompt.md carries the ✔/▶ steps for whoever starts next, any agent or account ----
+const { writeRelay, readRelay } = P;
+const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+const rec = (id, result, aprendido, extra = {}) => ({ id, agent: 'claude', at: iso(Date.now()), outcome: { result }, cierre: `## Cierre · ${id}\nResultado: ${result}\nEvidencia: inferida\nAprendido: ${aprendido}`, ...extra });
+const card = (cwd) => JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
+const relayFile = (repo) => path.join(P.projectHome(repo).dir, 'next-prompt.md');
+
+test('7: logic — an L3 close with steps leaves a handoff the next session\'s card shows, and reading it does not consume it', () => {
+  const { api } = workspace(), h = P.projectHome(api);
+  assert.equal(writeRelay(h, rec('2026-10-25 · T4', 'hecho', 'el servicio ya no consulta dos veces ← pasos ✔1 · ▶2 · 3 (falta el controlador y su spec)')), 'written');
+  assert.match(fs.readFileSync(relayFile(api), 'utf8'), /^<!-- handoff /, 'the file says what it is');
+  const text = readRelay(h);
+  assert.match(text, /T4/);
+  assert.match(text, /▶2/);
+  assert.ok(text.length <= 600, 'a handoff, not a record');
+  assert.match(card(api), /Handoff[^\n]*T4[^\n]*▶2/, 'the card brings it');
+  assert.equal(heldPrompt(h), '', 'the brake\'s reader does not take a handoff for the user\'s held message');
+  assert.ok(fs.existsSync(relayFile(api)), 'it stays for the next session, whichever agent opens it');
+});
+
+test('7: CSS/HTML — a parcial style-only task leaves what is missing', () => {
+  const { web } = workspace(), h = P.projectHome(web);
+  assert.equal(writeRelay(h, rec('2026-10-25 · T2', 'parcial (falta el estado hover en el .html)', 'el botón móvil ya mide 390 ← falta el hover', { files: ['button.component.css', 'button.component.html'] })), 'written');
+  assert.match(readRelay(h), /falta el estado hover/);
+});
+
+test('7: counter-examples — a clean close writes none and clears a stale one; a held message is never overwritten; an old handoff is not shown', () => {
+  const { api } = workspace(), h = P.projectHome(api);
+  assert.equal(writeRelay(h, rec('2026-10-25 · T1', 'hecho', 'un cambio de una línea ← sin pasos')), '', 'nothing to hand over');
+  assert.ok(!fs.existsSync(relayFile(api)));
+  writeRelay(h, rec('2026-10-25 · T2', 'parcial (falta el spec)', 'avance ← ▶2'));
+  assert.equal(writeRelay(h, rec('2026-10-25 · T3', 'hecho', 'otra tarea ← sin pasos')), '', 'another task\'s clean close leaves the steps for whoever starts next');
+  assert.ok(fs.existsSync(relayFile(api)));
+  assert.equal(writeRelay(h, rec('2026-10-25 · T2b', 'hecho', 'terminado ← todo ✔')), 'removed', 'the close of the task it is about takes it away');
+  assert.ok(!fs.existsSync(relayFile(api)));
+  fs.writeFileSync(relayFile(api), '<!-- 2026-10-25T10:00:00Z · held by the context brake (~320k) · session s1 -->\nagrega un buscador al FAQ\n');
+  assert.equal(writeRelay(h, rec('2026-10-25 · T4', 'parcial (falta)', 'a ← ▶1')), 'kept', 'the user\'s own words win');
+  assert.match(fs.readFileSync(relayFile(api), 'utf8'), /buscador al FAQ/);
+  fs.rmSync(relayFile(api));
+  writeRelay(h, rec('2026-10-25 · T5', 'parcial (falta)', 'a ← ▶1'));
+  assert.equal(readRelay(h, Date.now() + 8 * 86400000), '', 'a week-old handoff is another cycle\'s');
+});
+
+// the whole path: the end-of-turn hook of a real close writes the handoff, the next session's card shows it
+let calls = 0;
+for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'src/shared/button.css']]) {
+  test(`7: ${kind} — the end-of-turn hook leaves the handoff of a task that closes with steps, and the next card shows it`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-relay-')); temps.push(dir); gitT(dir, 'init', '-q');
+    fs.mkdirSync(path.join(dir, '.waymark')); fs.writeFileSync(path.join(dir, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n');
+    fs.mkdirSync(path.join(dir, path.dirname(file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), 'a\n');
+    gitT(dir, 'add', '-A'); gitT(dir, 'commit', '-qm', 'base'); fs.writeFileSync(path.join(dir, file), 'b\n');
+    const at = new Date().toISOString(), id = P.taskIds(dir).next, transcript = path.join(dir, 't.jsonl');
+    const tool = { type: 'tool_use', id: `u${++calls}`, name: 'Edit', input: { file_path: path.join(dir, file) } };
+    fs.writeFileSync(transcript, [
+      { type: 'user', uuid: 'p1', timestamp: at, message: { role: 'user', content: 'ajusta el archivo' } },
+      { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: 'Waymark → L1 · dept-frontend' }] } },
+      { type: 'assistant', timestamp: at, message: { content: [tool] } },
+      { type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: tool.id, content: 'ok' }] } },
+    ].map((l) => JSON.stringify(l)).join('\n') + '\n');
+    await new Promise((resolve) => {
+      const c = spawn(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { env: { ...process.env, WAYMARK_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
+      c.on('close', resolve);
+      c.stdin.end(JSON.stringify({ transcript_path: transcript, cwd: dir, session_id: `s-relay-${kind}`, stop_hook_active: true, last_assistant_message: `## Cierre · ${id}\nResultado: parcial (falta el spec)\nEvidencia: inferida de la lectura (check: ver el archivo)\nAprendido: el ajuste está hecho ← pasos ✔1 · ▶2 · 3` }));
+    });
+    assert.match(fs.readFileSync(relayFile(dir), 'utf8'), /Relevo de [\s\S]*▶2/, 'the close wrote it');
+    assert.match(card(dir), /Handoff[^\n]*▶2/, 'and the next session\'s card carries it');
+  });
+}
+
+test('7: the context brake keeps a handoff behind the held message, and the card takes the message and leaves the handoff', async () => {
+  const { brake } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const { api } = workspace(), h = P.projectHome(api);
+  writeRelay(h, rec('2026-10-25 · T2', 'parcial (falta el spec)', 'avance ← ✔1 · ▶2'));
+  const agent = { out: { blockPrompt: (m) => ({ block: m }) } };
+  const held = brake({ session_id: 's-brake', cwd: api, prompt: 'agrega un buscador al FAQ' }, agent, { context: 400000, lastAt: Date.now() }, path.join(home, 'brake-ws.json'));
+  assert.ok(held?.block, 'the message is held');
+  assert.equal(heldPrompt(h), 'agrega un buscador al FAQ', 'the card brings the user\'s message');
+  assert.match(readRelay(h), /▶2/, 'and the handoff survived it');
+  assert.equal(heldPrompt(h), '', 'nothing else is held');
+});

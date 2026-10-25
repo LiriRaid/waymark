@@ -150,3 +150,47 @@ test('6: the row that declares a broken baseline is read from Quality gates, and
   assert.equal(testsBroken(mem('| test (full) | `pnpm run test` | |')), null, 'counter-example: a real command');
 });
 const awaitedTestigos = await import(`file://${SCRIPTS}/testigos.mjs`);
+
+// ---- git does not assume `origin`, and Windows paths are long ----
+const N = await import(`file://${SCRIPTS}/notes.mjs`);
+const W = await import(`file://${SCRIPTS}/waymark.mjs`);
+const g = (d, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: d, encoding: 'utf8' });
+const committed = (files) => { const d = repo(ng(10), files); g(d, 'add', '-A'); g(d, 'commit', '-q', '-m', 'base'); return d; };
+const bare = () => { const b = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-bare-')); temps.push(b); g(b, 'init', '-q', '--bare'); return b; };
+for (const [kind, file] of [['logic', 'src/a.ts'], ['CSS/HTML', 'src/styles.css']]) {
+  test(`6: ${kind} — a repo whose only remote is not called origin takes its notes to it`, () => {
+    const d = committed({ [file]: 'x\n' }), up = bare();
+    assert.equal(N.defaultRemote(d), 'origin', 'counter-example: no remote at all keeps the old name');
+    g(d, 'remote', 'add', 'upstream', up);
+    assert.equal(N.defaultRemote(d), 'upstream', 'the only remote there is');
+    assert.equal(N.hasRemote(d), true);
+    g(d, 'notes', '--ref=waymark', 'add', '-m', '{}', 'HEAD');
+    const r = N.pushNotes(d);
+    assert.equal(r.ok, true, r.output);
+    assert.match(g(up, 'for-each-ref', 'refs/notes').stdout, /refs\/notes\/waymark/, 'the notes reached the remote that exists');
+    const other = bare();
+    g(d, 'remote', 'add', 'origin', other);
+    assert.equal(N.defaultRemote(d), 'origin', 'counter-example: with an origin, origin as before');
+    g(d, 'config', `branch.${g(d, 'symbolic-ref', '--short', 'HEAD').stdout.trim()}.remote`, 'upstream');
+    assert.equal(N.defaultRemote(d), 'upstream', 'the remote the branch tracks comes first');
+  });
+}
+test('6: logic — Windows is told once to turn core.longpaths on where paths go long; elsewhere, or once on, nothing', () => {
+  const node = committed({ 'src/a.ts': 'x\n' });
+  assert.match(W.longpathsLine(node, { platform: 'win32' }), /core\.longpaths is not on in this repo and this is Windows \(a Node repo's node_modules.*git config core\.longpaths true.*after the user's yes/);
+  assert.equal(W.longpathsLine(node, { platform: 'linux' }), '', 'counter-example: not Windows');
+  g(node, 'config', 'core.longpaths', 'true');
+  assert.equal(W.longpathsLine(node, { platform: 'win32' }), '', 'counter-example: already on');
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-plain-')); temps.push(plain); g(plain, 'init', '-q');
+  fs.mkdirSync(path.join(plain, '.waymark')); fs.writeFileSync(path.join(plain, '.waymark', 'memory.md'), '# P\n');
+  fs.writeFileSync(path.join(plain, 'a.txt'), 'x'); g(plain, 'add', '-A'); g(plain, 'commit', '-q', '-m', 'base');
+  assert.equal(W.longpathsLine(plain, { platform: 'win32' }), '', 'counter-example: short paths and no Node repo');
+});
+test('6: CSS/HTML — a tracked stylesheet buried under a long path asks for it on any stack', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-deep-')); temps.push(d); g(d, 'init', '-q');
+  fs.mkdirSync(path.join(d, '.waymark')); fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), '# P\n');
+  const deep = path.join('src', 'a'.repeat(70), 'b'.repeat(70));
+  fs.mkdirSync(path.join(d, deep), { recursive: true }); fs.writeFileSync(path.join(d, deep, 'theme.css'), 'a{}\n');
+  g(d, 'add', '-A'); g(d, 'commit', '-q', '-m', 'base');
+  assert.match(W.longpathsLine(d, { platform: 'win32' }), /a tracked path is over 200 characters/);
+});

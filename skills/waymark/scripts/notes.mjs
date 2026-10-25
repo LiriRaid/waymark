@@ -150,10 +150,20 @@ export function noteLateCommits(cwd, records) {
   return added;
 }
 
-// Pushes the notes refs to a remote (default origin) and moves the tracking refs to what was pushed (git does it only
+// The remote the notes go to when none is named: the one the current branch tracks, else origin, else the only remote the repository has, else origin
+// (a clone made with `git clone -o upstream`, or a fork whose own remote is not called origin, has no `origin`).
+export function defaultRemote(cwd) {
+  const g = (args) => git(cwd, args, { encoding: 'utf8' }).stdout?.trim() || '';
+  const branch = g(['symbolic-ref', '--short', '-q', 'HEAD']), tracked = branch ? g(['config', '--get', `branch.${branch}.remote`]) : '';
+  if (tracked && tracked !== '.') return tracked;
+  const all = g(['remote']).split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+  return all.includes('origin') || all.length !== 1 ? 'origin' : all[0];
+}
+
+// Pushes the notes refs to a remote (default: defaultRemote) and moves the tracking refs to what was pushed (git does it only
 // with the fetch refspec), so unpushedNotes knows without network that the remote has them. → { ok, output }
 // quiet: no credential prompt and a shorter wait, for the push the hook makes at a close (notes-remote.mjs).
-export function pushNotes(cwd, remote = 'origin', { timeout = 60000, quiet = false } = {}) {
+export function pushNotes(cwd, remote = defaultRemote(cwd), { timeout = 60000, quiet = false } = {}) {
   const refs = REFS.map((ref) => [ref, refSha(cwd, ref)]).filter(([, sha]) => sha);
   if (!refs.length) return { ok: true, output: 'no notes' };
   const env = quiet ? { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } : process.env;
@@ -164,7 +174,7 @@ export function pushNotes(cwd, remote = 'origin', { timeout = 60000, quiet = fal
 
 // Fetches the notes refs into the tracking refs with a time limit and no prompt (a credential prompt would wait for
 // nobody). A remote with no notes yet answers "couldn't find remote ref": that is no failure. → { ok, output }
-export function fetchNotes(cwd, remote = 'origin', timeout = 60000) {
+export function fetchNotes(cwd, remote = defaultRemote(cwd), timeout = 60000) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
   const f = git(cwd, ['fetch', remote, fetchSpec(remote)], { encoding: 'utf8', timeout, env });
   const output = `${f.stdout || ''}${f.stderr || ''}`.trim() || (f.error ? `${f.error.code || f.error.message}` : '');
@@ -177,14 +187,14 @@ const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
 const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
 const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
 export const hasNotes = (cwd) => REFS.some((ref) => !!refSha(cwd, ref));
-export const hasRemote = (cwd, remote = 'origin') => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
-export const hasFetchSpec = (cwd, remote = 'origin') => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;
+export const hasRemote = (cwd, remote = defaultRemote(cwd)) => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
+export const hasFetchSpec = (cwd, remote = defaultRemote(cwd)) => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;
 
 // Joins the remote's notes (the tracking ref) into the local ref when the remote has note commits the local lacks.
 // A note both sides wrote on the same commit keeps the local one (strategy ours: its stub in the log hashes it).
 // → true when merged.
 // The anchors and the log lines merge line by line (cat_sort_uniq): both sides' lines on one commit are kept.
-export function mergeNotes(cwd, remote = 'origin') {
+export function mergeNotes(cwd, remote = defaultRemote(cwd)) {
   let merged = false;
   for (const [ref, strategy] of [[NOTES_REF, 'ours'], [ANCHOR_REF, 'cat_sort_uniq'], [LOG_REF, 'cat_sort_uniq']]) {
     const theirs = refSha(cwd, trackRef(remote, ref));
@@ -201,7 +211,7 @@ export function mergeNotes(cwd, remote = 'origin') {
 
 // Note commits of the local refs (task notes, anchors and log lines) the remote lacks (against the tracking refs, no network). → a
 // count, 0 with no local notes, or null when it cannot be known (no tracking ref yet).
-export function unpushedNotes(cwd, remote = 'origin') {
+export function unpushedNotes(cwd, remote = defaultRemote(cwd)) {
   let total = 0;
   for (const ref of REFS) {
     if (!refSha(cwd, ref)) continue;
@@ -213,17 +223,17 @@ export function unpushedNotes(cwd, remote = 'origin') {
   return total;
 }
 // The hook pushes the notes after a push it saw when the remote may lack some (unknown counts as lacking).
-export const shouldPushNotes = (cwd, remote = 'origin') => { const n = unpushedNotes(cwd, remote); return n === null || n > 0; };
+export const shouldPushNotes = (cwd, remote = defaultRemote(cwd)) => { const n = unpushedNotes(cwd, remote); return n === null || n > 0; };
 
 // The fetch refspec, added once to .git/config (no network); an exact one from 2.0.3 is replaced. → true when added.
-export function ensureFetchSpec(cwd, remote = 'origin') {
+export function ensureFetchSpec(cwd, remote = defaultRemote(cwd)) {
   if (!hasRemote(cwd, remote) || hasFetchSpec(cwd, remote)) return false;
   git(cwd, ['config', '--fixed-value', '--unset-all', `remote.${remote}.fetch`, exactSpec(remote)]);
   return git(cwd, ['config', '--add', `remote.${remote}.fetch`, fetchSpec(remote)]).status === 0;
 }
 
 // `waymark.mjs notes setup`: the fetch refspec (ensureFetchSpec), a fetch of the notes and the merge. → { ok, added, merged, output }
-export function notesSetup(cwd, remote = 'origin') {
+export function notesSetup(cwd, remote = defaultRemote(cwd)) {
   if (!hasRemote(cwd, remote)) return { ok: false, added: false, merged: false, output: `no remote ${remote}` };
   const added = ensureFetchSpec(cwd, remote);
   if (!hasFetchSpec(cwd, remote)) return { ok: false, added: false, merged: false, output: 'git config failed' };

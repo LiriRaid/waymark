@@ -41,7 +41,7 @@ import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
-import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes } from './notes.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes, defaultRemote } from './notes.mjs';
 import { pushPref, savePushPref } from './notes-remote.mjs';
 import { stackOf, rowProblem } from './stack.mjs';
 import { found } from './connect-agents.mjs';
@@ -172,7 +172,7 @@ export function mergeMethods(cwd) {
   if (process.env.WAYMARK_NO_GH) return '';
   const root = projectHome(cwd).root;
   if (spawnSync('git', ['show-ref', '--verify', '--quiet', 'refs/notes/waymark'], { cwd: root, timeout: 3000 }).status !== 0) return '';
-  const url = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '';
+  const url = spawnSync('git', ['remote', 'get-url', defaultRemote(root)], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '';
   const repo = url.trim().match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1];
   if (!repo) return '';
   const r = spawnSync('gh', ['api', `repos/${repo}`, '--jq', '[.allow_squash_merge, .allow_rebase_merge] | @json'], { encoding: 'utf8', timeout: 8000 });
@@ -297,6 +297,18 @@ export function brokenGates(cwd) {
   return section('\n' + read(home.memory), 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
     .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).map(([gate, cmd]) => ({ gate, cmd, why: rowProblem(cmd, home.root) })).filter((r) => r.why);
 }
+// Windows stops a path at 260 characters unless git is told otherwise: a deep node_modules or a long worktree fails with "Filename too long". The setting is the repo's own config, so it
+// is offered, never written: git config core.longpaths true, after the user's yes. → the line, or '' (not Windows, already set, not a git repo, or nothing that deep).
+export function longpathsLine(cwd, { platform = process.platform } = {}) {
+  if (platform !== 'win32') return '';
+  const home = projectHome(cwd), root = home.root;
+  if (!root || spawnSync('git', ['rev-parse', '--git-dir'], { cwd: root, timeout: 3000 }).status !== 0) return '';
+  if (String(spawnSync('git', ['config', '--get', 'core.longpaths'], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '').trim() === 'true') return '';
+  const files = String(spawnSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 32 * 1024 * 1024 }).stdout || '').split('\n');
+  const deep = files.some((f) => root.length + 1 + f.length > 200);
+  if (!deep && !stackOf(root)?.pm) return ''; // a Node repo grows a deep node_modules; another stack with short paths needs nothing
+  return `git: core.longpaths is not on in this repo and this is Windows${deep ? ' (a tracked path is over 200 characters)' : ' (a Node repo\'s node_modules and a clean copy go past 260)'}: a path that long fails with "Filename too long". Offer, with the choice window: git config core.longpaths true (this repo's config only), and run it after the user's yes.`;
+}
 // Folders nobody removed: copies in Waymark's root and the improvised or test ones in the temp folder and at the top of the disk (docs/adr/0046).
 export function copiesLine(list = orphans()) {
   if (!list.length) return '';
@@ -345,6 +357,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => footprint(cwd));
   await add(() => gatesLine(cwd));
   await add(() => copiesLine());
+  await add(() => longpathsLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -589,11 +602,11 @@ A clean copy of ${rest[0] || 'HEAD'} (a short folder Waymark owns).${r.install ?
     const r = localize(process.cwd(), { apply: rest.includes('--apply') });
     console.log(!r.moved.length ? 'localize: nothing of Waymark\'s in this project\'s .gitignore' : r.plan ? `localize (plan, nothing written): moves ${r.moved.join(' ')} from the versioned .gitignore to .git/info/exclude. Ask the user, then re-run with --apply.` : `localize: ${r.moved.join(' ')} now ignored through .git/info/exclude; the .gitignore change is the user's to commit or discard`);
   } else if (sub === 'notes' && rest[0] === 'setup') {
-    const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
+    const r = notesSetup(projectHome(process.cwd()).root, rest[1]);
     console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
     process.exitCode = r.ok ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
-    const flag = rest.find((a) => a === '--always' || a === '--never'), slug = projectHome(process.cwd()).slug, remote = rest.slice(1).find((a) => !a.startsWith('--')) || 'origin';
+    const flag = rest.find((a) => a === '--always' || a === '--never'), slug = projectHome(process.cwd()).slug, remote = rest.slice(1).find((a) => !a.startsWith('--')) || defaultRemote(process.cwd());
     if (flag === '--never') { savePushPref(slug, 'never'); console.log(`notes: ${slug} will not be offered the push again (Notes push never: in ~/.waymark/preferences.md)`); }
     else {
       const r = pushNotes(process.cwd(), remote);

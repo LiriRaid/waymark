@@ -36,7 +36,7 @@ import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
 import { legacyStack } from './runtime.mjs';
-import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
+import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes, defaultRemote } from './notes.mjs';
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { packedFiles, procDelivered } from './lib/packed.mjs';
@@ -190,7 +190,7 @@ export function pushedRepos(tools, results, cwd) {
     const top = fs.existsSync(dir) && gitRoot(dir);
     // the first word after `push` that is no flag (`--tags`, `-u`), when it names a remote and not a refspec
     const word = part.slice(part.search(/\bpush\b/) + 4).trim().split(/\s+/).find((w) => w && !w.startsWith('-'));
-    const remote = word && /^[\w.-]+$/.test(word) ? word : 'origin';
+    const remote = word && /^[\w.-]+$/.test(word) ? word : top ? defaultRemote(top) : 'origin'; // a push with no remote named goes to the branch's own
     if (top && !out.some((r) => sameDir(r.root, top) && r.remote === remote)) out.push({ root: top, remote });
   }
   return out;

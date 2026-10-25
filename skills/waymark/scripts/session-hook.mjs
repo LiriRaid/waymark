@@ -15,7 +15,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, logHookError, gitError, PROBE_OK } from './provenance.mjs';
-import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
+import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes, defaultRemote } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { census, fillMemory } from './convention.mjs';
 import { fillRuntime } from './runtime.mjs';
@@ -191,7 +191,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const bare = !!home.dir && !home.legacy && !fs.existsSync(home.dir);
       if (bare && hasRemote(root)) {
         added = ensureFetchSpec(root);
-        if ((added || fetchDue(root)) && hasFetchSpec(root)) { const f = fetchNotes(root, 'origin', FETCH_MS); if (!f.ok) failed = gitError(f.output); }
+        if ((added || fetchDue(root)) && hasFetchSpec(root)) { const f = fetchNotes(root, defaultRemote(root), FETCH_MS); if (!f.ok) failed = gitError(f.output); }
       } else added = !!home.dir && !home.legacy && fs.existsSync(home.dir) && ensureFetchSpec(root);
       joined = hasFetchSpec(root) && mergeNotes(root);
       if (bare) rebuilt = rebuildFromGit(home);

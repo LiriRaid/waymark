@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { projectHome, readRecords, readTaskRecords, readNotes, anchorsFor, verifyChain, gitNote, logId, logFile, RECORD_SCHEMAS } from './provenance.mjs';
 import { anchorStates, fileSignature, trust, say, NS_ATTEST } from './sign.mjs';
 import { remoteAnchors } from './notes-remote.mjs';
-import { hasRemote } from './notes.mjs';
+import { hasRemote, defaultRemote } from './notes.mjs';
 import { SKILLS, checkManifest, checkGenerated, manifestSignature, checkSkillsLock } from './manifest.mjs';
 import { checkAttestation } from './attest.mjs';
 
@@ -69,7 +69,7 @@ export function anchorReport(cwd) {
 // The remote's copy of this log's anchors against the local records: { state, lines[], differs }. state: 'none' (no remote) |
 // 'unreachable' | 'empty' | 'ok'. The remote anchors go through verifyChain like the local ones: since the last rewrite anchor, each must
 // still name the line it anchored. Local anchors the remote lacks are not a failure: they were not pushed yet.
-export function remoteReport(cwd, remote = 'origin') {
+export function remoteReport(cwd, remote = defaultRemote(cwd)) {
   const r = remoteAnchors(cwd, remote);
   if (r.state === 'none') return { state: 'none', lines: [`remote: no remote copy of the records (this repository has no remote ${remote}): a rewrite of the repository, its notes and the log together could not be detected`], differs: false };
   if (r.state === 'unreachable') return { state: r.state, lines: [`remote ${remote}: not checked (could not reach it: ${String(r.output || '').split('\n')[0].slice(0, 120)})`], differs: false };
@@ -162,11 +162,11 @@ export function verify(cwd, args = [], { skillsDir = SKILLS } = {}) { // skillsD
   if (Object.keys(shapes.counts).length) lines.push(`record shapes: ${Object.entries(shapes.counts).map(([k, n]) => `${k.replace('waymark.record/', '')} ×${n}`).join(' · ')}${shapes.unknown.length ? ` · warning: unknown shape ${shapes.unknown.join(', ')} (written by a newer Waymark; the chain does not depend on it)` : ''}`);
   const at = args.indexOf('--remote');
   if (at >= 0) {
-    const named = args[at + 1] && !args[at + 1].startsWith('--') && !/^d{4}-/.test(args[at + 1]) ? args[at + 1] : 'origin';
+    const named = args[at + 1] && !args[at + 1].startsWith('--') && !/^d{4}-/.test(args[at + 1]) ? args[at + 1] : defaultRemote(cwd);
     const rr = remoteReport(cwd, named);
     lines.push(...rr.lines.map((l) => (rr.differs ? `✘ ${l}` : rr.state === 'ok' ? l : `⚠ ${l}`)));
     if (rr.differs) code = 1;
-  } else if (!hasRemote(cwd)) lines.push('⚠ remote: no remote copy of the records (this repository has no remote origin): a rewrite of the repository, its notes and the log together could not be detected');
+  } else if (!hasRemote(cwd)) lines.push('⚠ remote: no remote copy of the records (this repository has no remote): a rewrite of the repository, its notes and the log together could not be detected');
   const strict = args.includes('--require-signature') || args.includes('--require-signed'); // --require-signed: only the anchors and the attestation, not the release
   const sigs = anchorReport(cwd);
   if (sigs.rows.length) {

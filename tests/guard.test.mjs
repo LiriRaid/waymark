@@ -110,7 +110,8 @@ test('guard: a glob, an attached redirect, a flag value, a revision and another 
   hit('head cfg/id_*', /id_rsa$/);
   hit('cat<.env', /\.env$/);
   hit('cat < .env', /\.env$/);
-  hit('docker run --env-file=.env app', /\.env$/);
+  hit('docker run -v .env:/x --label=.env app', /\.env$/); // a path as a flag's value is still a path (--env-file is the exception: the program loads it, 2.0.19 point 10)
+  assert.equal(commandSensitive('docker run --env-file=.env app', proj, cfg), null, 'the program loads it; the agent does not read it');
   hit('Get-Content -Path:.env', /\.env$/);
   hit('git show HEAD:.env', /\.env$/);
   hit('git show HEAD:cfg/id_rsa', /id_rsa$/);

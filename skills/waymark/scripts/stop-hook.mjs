@@ -41,6 +41,7 @@ import { packedFiles, procDelivered } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { detectGuarded, guardedLine } from './lib/guard.mjs';
+import { expireGrants } from './lib/grants.mjs';
 import { learn } from './learn.mjs';
 import { norm, real, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
@@ -534,7 +535,7 @@ function observeTurn(S) {
     // what reached the agent although no hook stopped it (docs/adr/0037): a sensitive path read, edited or named by a command, a secret in a result
     // the first choice window of an L2+ task judged on its options' attributes: risk, files or cost, one marked (docs/adr/0038)
     options: optionsLint(ctx.decisions, S.level),
-    guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root), outputOf: output, denied }),
+    guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root, { session: ctx.session }), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
@@ -1102,7 +1103,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
@@ -1173,6 +1174,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
+      try { expireGrants(rec.id); } catch (e) { logHookError('stop-hook grants', e); } // a permission given for this task ends with it (docs/adr/0045)
       try { // a clean measure calibrates the estimate (Codex, OpenCode, a session without the status line)
         const u = evaluation.usage;
         if (measured && !measured.shared && measured.pct > 0 && evaluation.tokens) appendPair({ task: rec.id, project: home.slug, model: evaluation.model, agent: ctx.inputs?.agent || null, pct: measured.pct, total: evaluation.tokens, ...(u ? { fresh: (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0), cacheRead: u.cacheRead } : {}), by: 'measured' });

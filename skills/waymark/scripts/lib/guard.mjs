@@ -62,6 +62,20 @@ function globMatches(abs) {
   return names.filter((n) => (base.startsWith('.') || !n.startsWith('.')) && rx.test(n)).map((n) => path.join(dir, n));
 }
 
+// A command that names a file and prints only its name, its metadata or a count: ls, stat, test -f, file, wc, git check-ignore | ls-files | status,
+// grep -c | -l | -q. It exposes no content, so the guard lets it through (a redirect target is still checked: that is a write). cat, grep with no
+// count, sed, head, Get-Content stay denied.
+const NO_CONTENT = new Set(['ls', 'dir', 'stat', 'test', '[', '[[', 'file', 'wc', 'realpath', 'readlink', 'basename', 'dirname', 'test-path', 'get-childitem', 'gci', 'get-item', 'gi']);
+export function exposesNothing(words) {
+  const prog = path.basename(String(words[0] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.(exe|cmd)$/, ''), rest = words.slice(1);
+  if (NO_CONTENT.has(prog)) return true;
+  if (prog === 'git') return /^(check-ignore|ls-files|status|ls-tree|rev-parse|rev-list)$/.test(rest.find((w) => !w.startsWith('-')) || '');
+  if (/^(grep|egrep|fgrep|rg|ag)$/.test(prog)) return rest.some((f) => /^(-[a-zA-Z]*[clLq][a-zA-Z]*|--count|--files-with-matches|--files-without-match|--quiet|--silent)$/.test(f));
+  return false;
+}
+// The file a program is told to load itself (node --env-file=.env, docker run --env-file .env): the program reads it, the agent does not.
+const envFileOf = (words, i) => (i > 0 && /^--env-file(-if-exists)?$/.test(words[i - 1])) || /^--env-file(-if-exists)?[=:]/.test(words[i]);
+
 // The secret-bearing path an existing file or a redirect target of the command names, or null. Any command naming one counts (cat, type,
 // Get-Content, head, tail, less, cp, git…): the guard judges the argument, never the program. A shell run through another shell
 // (bash -c "cat .env") is read inside. It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`), nor a script
@@ -75,9 +89,11 @@ export function commandSensitive(command, cwd, cfg, depth = 0) {
       for (const w of words.slice(1)) if (/\s/.test(w)) { const inner = commandSensitive(w, dir, cfg, depth + 1); if (inner) return inner; }
     }
     const patternOf = (i) => (i > 0 && PATTERN_FLAG.test(words[i - 1])) || PATTERN_FLAG.test(String(words[i]).replace(/[=:].*$/, ''));
-    const candidates = [...words.flatMap((w, i) => pathsIn(w, i === 0).map((c) => [c, false, patternOf(i)])), ...targets.map((t) => [t, true, false])];
+    const quiet = exposesNothing(words);
+    const candidates = [...words.flatMap((w, i) => (envFileOf(words, i) ? [] : pathsIn(w, i === 0).map((c) => [c, false, patternOf(i)]))), ...targets.map((t) => [t, true, false])];
     for (const [w, isTarget, pattern] of candidates) {
       if (!w || /^-|^[<>&|]/.test(w)) continue;
+      if (quiet && !isTarget) continue; // names, counts and metadata only
       const abs = path.resolve(dir, expandHome(w)), glob = GLOB.test(w);
       if (glob && pattern) continue;
       for (const f of glob ? globMatches(abs) : [abs]) {

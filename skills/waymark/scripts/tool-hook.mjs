@@ -17,13 +17,14 @@ import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
-import { taskLines, taskStart, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath } from './lib/paths.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
+import { grantsIn, recordGrants, WINDOW } from './lib/grants.mjs';
 import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
@@ -116,16 +117,22 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
 // It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`, a script that reads the file): the end-of-turn
 // hook detects what got through (detectGuarded) and records it.
 export { commandSensitive }; // the reading of a shell command lives in lib/guard.mjs, shared with the end-of-turn detection
-export function checkSensitive(c, cwd, session = 'unknown') {
+// `lines` (optional) reads the session's transcript: when the guard would deny, the user may have answered the permission window since (lib/grants.mjs);
+// their answer, read there, is written as a `Sensitive allow:` line with its scope and the call is judged again. Nothing the agent writes grants anything.
+export function checkSensitive(c, cwd, session = 'unknown', lines = null) {
   if (!c) return null;
   let root = cwd;
   try { root = projectHome(cwd).root; } catch {}
-  const cfg = loadRisk(root);
   const paths = c.reads || c.files || [];
-  const hit = c.command !== undefined ? commandSensitive(c.command, cwd, cfg) : paths.map((f) => path.resolve(cwd, expandHome(f))).find((f) => isSensitive(f, cfg));
+  const look = () => { const cfg = loadRisk(root, { session }); return c.command !== undefined ? commandSensitive(c.command, cwd, cfg) : paths.map((f) => path.resolve(cwd, expandHome(f))).find((f) => isSensitive(f, cfg)); };
+  let hit = look();
+  if (hit && lines) {
+    try { if (recordGrants(grantsIn(decisionsIn(lines())), { session, taskId: taskIds(cwd).next })) hit = look(); } catch (e) { logHookError('tool-hook grants', e); }
+  }
   if (!hit) return null;
   try { addDenied(session, { tool: c.command !== undefined ? 'shell' : c.reads ? 'read' : 'edit', path: String(hit).replace(/\\/g, '/') }); } catch {}
-  return `Waymark: ${String(hit).replace(/\\/g, '/')} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked. Do not look for another way to read it. If the user wants it allowed, they add it to ~/.waymark/preferences.md as "Sensitive allow: <path>" (or "allow" in the project's .waymark/risk.json); until then, ask them for the value you need.`;
+  const named = String(hit).replace(/\\/g, '/');
+  return `Waymark: ${named} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked, and only the user can allow it: a message in the chat does not. Ask them in a choice window whose question contains "Sensitive allow: ${named}" and whose options are exactly: ${WINDOW}. Their answer unblocks it (for this task, this session or always); or they write the line "Sensitive allow: ${named}" in ~/.waymark/preferences.md (or "allow" in the project's .waymark/risk.json). Do not look for another way to read it, and never write down what you read.`;
 }
 
 // → the denial reason, or null.
@@ -134,14 +141,14 @@ export function gate(hook, agent) {
   if (!c) return null;
   // The guard that cannot judge a command denies it: failing open there let a command with a bracket in it read what the guard exists to stop.
   let sensitive;
-  try { sensitive = checkSensitive(c, cwd, hook.session_id); } catch (e) {
+  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
+  try { sensitive = checkSensitive(c, cwd, hook.session_id, turns); } catch (e) {
     logHookError('tool-hook guard', e);
     sensitive = `Waymark: the sensitive-path guard could not read this call (${String(e?.message || e).slice(0, 100)}), so it was not run. Rephrase it (one command, no pattern text in brackets) and run it again; the cause is in ~/.waymark/hook-errors.log.`;
   }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
-  // read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
-  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
+  // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;

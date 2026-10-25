@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { slash, waymarkHome } from './paths.mjs';
+import { activeAllow } from './grants.mjs';
 
 const ROUTINE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'routine.json');
 const FALLBACK = { review: { mode: 'always' }, sensitive: [], critical: [], allow: [] };
@@ -13,12 +14,12 @@ const read = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8'));
 
 // The effective config: routine.json's `risk` block, then the project's override. A missing block keeps the old rule
 // (review always, as before 2.0.16), so a broken file never lowers the bar.
-export function loadRisk(root = null) {
+export function loadRisk(root = null, ctx = {}) {
   const base = read(ROUTINE_FILE)?.risk;
   const cfg = base && typeof base === 'object' ? { ...FALLBACK, ...base, review: { ...FALLBACK.review, ...base.review } } : { ...FALLBACK };
   const mode = process.env.WAYMARK_REVIEW_MODE; // always | proportional, over the file's (tests pin it; a user can force the old rule)
   if (mode === 'always' || mode === 'proportional') cfg.review = { ...cfg.review, mode };
-  cfg.allow = [...cfg.allow, ...userAllow()];
+  cfg.allow = [...cfg.allow, ...userAllow(ctx)];
   const own = root ? read(path.join(root, '.waymark', 'risk.json')) : null;
   if (!own || typeof own !== 'object') return cfg;
   return {
@@ -31,12 +32,12 @@ export function loadRisk(root = null) {
 }
 
 // The user's own allowed paths: a line `Sensitive allow: <path>, <path>` in ~/.waymark/preferences.md (each entry matches as a
-// fragment of the path, case-insensitive). Read at call time, because the user edits the file between tasks.
-export function userAllow() {
+// fragment of the path, case-insensitive), with the scope the choice window gave it (lib/grants.mjs: always, this task, this session).
+// Read at call time, because the user edits the file between tasks and the hook writes it when they answer.
+export function userAllow(ctx = {}) {
   try {
     const text = fs.readFileSync(path.join(waymarkHome(), 'preferences.md'), 'utf8');
-    return [...text.matchAll(/^[ \t]*(?:[-*][ \t]*)?Sensitive allow:[ \t]*(.+)$/gim)].flatMap((m) => m[1].split(',')).map((s) => s.trim().replace(/^[`"']|[`"']$/g, '')).filter(Boolean)
-      .map((s) => slash(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    return activeAllow(text, ctx).map((s) => slash(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   } catch { return []; }
 }
 

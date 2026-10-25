@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
+import { runtimePrefix } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
 import { git as gitIn } from './lib/git.mjs';
@@ -39,7 +40,7 @@ export function buildNone(memoryFile) {
 // "Quality gates" table (project root only) → package.json's typecheck script → `tsc --noEmit` when TypeScript is
 // installed, each run with the repo's own package manager (stack.mjs: a memory row written for npm runs with pnpm in a
 // pnpm repo). → { cmd, from } or null. Never the full build.
-export function gateCommand(root, memoryFile) {
+function rawGateCommand(root, memoryFile) {
   const stack = stackOf(root);
   for (const [gate, cmd] of gateRows(memoryFile)) {
     // the cell as it runs: a closing note such as "(not verified)" dropped (gateCell)
@@ -55,6 +56,13 @@ export function gateCommand(root, memoryFile) {
   const project = ['tsconfig.app.json', 'tsconfig.json'].find((f) => fs.existsSync(path.join(root, f))); // a solution tsconfig.json checks nothing
   const exec = !stack?.pm || stack.pm === 'npm' ? 'npx --no-install' : stack.exec;
   return tsc && project ? { cmd: `${exec} tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
+}
+
+// The gate as it runs on this machine: a repo that needs another Node than the machine's (memory.md → Quality gates, the `runtime` row) has its command
+// started through the manager that runs it (`volta run --node 14 …`), so the hook's own re-run fails for the code and not for the runtime.
+export function gateCommand(root, memoryFile) {
+  const gate = rawGateCommand(root, memoryFile), prefix = memoryFile ? runtimePrefix(read(memoryFile)) : null;
+  return gate && prefix ? { ...gate, cmd: `${prefix} ${gate.cmd}`, runtime: prefix } : gate;
 }
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills

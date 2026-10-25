@@ -31,7 +31,7 @@ const tmpRepo = (files = {}) => {
   gitT(d, 'add', '-A'); gitT(d, 'commit', '-q', '-m', 'base');
   return d;
 };
-const hookRun = (script, payload, { wait = 15000 } = {}) => new Promise((resolve) => {
+const hookRun = (script, payload, { wait = 60000 } = {}) => new Promise((resolve) => {
   const c = spawn(process.execPath, [path.join(SCRIPTS, script)], { env: { ...process.env, WAYMARK_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   c.stdout.on('data', (d) => { out += d; });

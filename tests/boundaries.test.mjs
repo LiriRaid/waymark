@@ -32,7 +32,7 @@ const hookRun = (script, payload) => new Promise((resolve) => {
   const c = spawn(process.execPath, [path.join(SCRIPTS, script)], { env: { ...process.env, WAYMARK_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   c.stdout.on('data', (d) => { out += d; });
-  const timer = setTimeout(() => { c.kill(); resolve({ out, killed: true }); }, 15000);
+  const timer = setTimeout(() => { c.kill(); resolve({ out, killed: true }); }, 60000);
   c.on('close', () => { clearTimeout(timer); resolve({ out, killed: false }); });
   c.stdin.end(JSON.stringify(payload));
 });

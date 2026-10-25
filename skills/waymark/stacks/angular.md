@@ -27,6 +27,13 @@ Project memory example (Quality gates, verified commands):
 
 With `@analogjs/vitest-angular`, use `pnpm exec vitest run`; with Angular's builder, `pnpm exec ng test --no-watch`.
 
+## Legacy repos (Angular before 14)
+The repo's own versions, scripts and lockfile win over everything above, which assumes v17 and later.
+- **Runtime.** Angular 10–13 run on Node 14, 14–15 on Node 16, 16–17 on Node 18: when this machine's Node is not one of them the session hook writes a `runtime` row in memory.md → Quality gates (`volta run --node 14`, or `fnm exec --using=14`), and the hook's own re-run of a gate uses it. Start every gate with that prefix. `engines`, `volta.node` and `.nvmrc` of the repo's `package.json` come before the table.
+- **Karma, one spec.** `<pm> exec ng test --watch=false --browsers=ChromeHeadless --include=<spec file>` with `CHROME_BIN` set to the machine's Chrome; the whole suite once at the end. `ng test` without `--watch=false` never ends.
+- **A slow build.** `node --max_old_space_size=4096 node_modules/@angular/cli/bin/ng build` (or `NODE_OPTIONS=--max_old_space_size=4096` before `<pm> exec ng build`) when the default heap runs out.
+- **Conventions are the repo's.** `NgModule`, `*ngIf`/`*ngFor` and Zone-based code are how it is written: follow them; the Frontend rules below are for v17 and later.
+
 ## Conventions by department
 Only what is specific to Angular. General rules live in the `dept-*` department skills (`dept-frontend`, `dept-ux-ui`, `dept-qa`, `dept-security`, `dept-data`).
 

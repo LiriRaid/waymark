@@ -18,6 +18,7 @@ import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblin
 import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { census, fillMemory } from './convention.mjs';
+import { fillRuntime } from './runtime.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins, gateCell, rowProblem } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
@@ -82,6 +83,10 @@ export function digest(cwd, agentName = 'claude') {
     try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
   }
   out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; W check offers the move). W = ${W_CMD}.` : `Project memory: ${where} (read; full file there) and tasks.md next to it (where the work stands). W = ${W_CMD}.`);
+  // the Node the stack needs, when this machine's is not it (a legacy Angular on Node 24): a `runtime` row in Quality gates the first time, never over a line somebody wrote
+  if (!home.legacy) { try { if (fillRuntime(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook runtime', e); } }
+  const runtime = best.text.match(/^\|\s*runtime\s*\|\s*([^|]+)\|/im)?.[1]?.trim().replace(/`/g, '');
+  if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);
   const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);
   if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.

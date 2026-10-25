@@ -615,7 +615,8 @@ function observeBuild(S) {
   };
   const builds = lastCode < 0 ? [] : turn.tools.flatMap((t, i) => {
     if (apart(t) || !runsOf(t).some((p) => p.build)) return [];
-    const at = t.input?.run_in_background ? finished(t, i) : (exitFor(t, 'build') ?? !failOut(output(t))) ? i : -1;
+    // ordered by its launch: what it built is the code as it stood then; the later read only says it succeeded
+    const at = t.input?.run_in_background ? (finished(t, i) >= 0 ? i : -1) : (exitFor(t, 'build') ?? !failOut(output(t))) ? i : -1;
     if (at < 0) return [];
     const cd = runsOf(t).filter((p) => p.build).pop()?.cd;
     return [{ i: at, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }];

@@ -49,13 +49,19 @@ export function legacyStack(root) {
 }
 
 const onPath = (program) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
+// The Node the shell finds first on the PATH, which is the one a gate runs on: the hook itself may run under another one a launcher pinned.
+const shellNode = () => {
+  const v = spawnSync('node', ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true, shell: process.platform === 'win32' });
+  return Number(String(v.stdout || '').trim().match(/^v?(\d+)/)?.[1] || process.versions.node.split('.')[0]);
+};
 const MANAGERS = [['volta', (n) => `volta run --node ${n}`], ['fnm', (n) => `fnm exec --using=${n}`]];
 
 // → null when this machine's Node satisfies the repo (nothing to prefix), else { use, from, machine, via, prefix }: `prefix` is the command that runs another Node
 // (null when no manager that can is installed: the row then says which Node is needed).
-export function runtimeOf(root, { machine = Number(process.versions.node.split('.')[0]), has = onPath } = {}) {
+export function runtimeOf(root, { machine = null, has = onPath } = {}) {
   const need = neededNode(root);
   if (!need) return null;
+  machine ??= shellNode();
   if (need.range ? satisfiesMajor(need.range, machine) : need.ok.includes(machine)) return null;
   const found = MANAGERS.find(([bin]) => has(bin));
   return { use: need.use, from: need.from, machine, via: found?.[0] || null, prefix: found ? found[1](need.use) : null };

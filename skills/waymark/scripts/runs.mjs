@@ -182,7 +182,8 @@ export function ephemeral(command) {
   }
   return new Set([...made].filter((n) => n && gone.has(n)));
 }
-const onlyEphemeral = (text, eph) => eph.size > 0 && [...eph].some((n) => String(text).replace(/\\/g, '/').toLowerCase().includes(n));
+// A part names an ephemeral file when one of its words is that name (or a path ending in it): a whole word, never a substring ("a" is in every path).
+const onlyEphemeral = (text, eph) => eph.size > 0 && [...String(text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].some((m) => { const w = bareName(String(m[1] ?? m[2] ?? m[3]).replace(/^>{1,2}/, '')); return eph.has(w) || [...eph].some((n) => w.endsWith(`/${n}`)); });
 
 // A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory, nor about a file it makes and removes itself.
 // `eph` (ephemeral) is the whole command's set when the part of a chained command is judged alone (splitAtChange).

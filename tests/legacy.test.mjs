@@ -122,6 +122,15 @@ test('6: logic — a build in the background counts when its output shows succes
   assert.equal(step(bg(...call('BashOutput', { bash_id: 'bg7' }, 'ERROR in src/a.ts(3,1): error TS2322')), 'build').pass, false, 'counter-example: its output shows a failure');
   assert.equal(step(bg(...call('BashOutput', { bash_id: 'other' }, 'Build at: now')), 'build').pass, false, 'counter-example: the output of another command');
 });
+test('6: a build launched before an edit does not vouch for it, whenever its output is read', () => {
+  const lines = [...head('/work/proj/src/a.ts'), ...call('Bash', { command: 'pnpm run build', run_in_background: true }, LAUNCH), ...call('Edit', { file_path: '/work/proj/src/a.ts' }), ...call('BashOutput', { bash_id: 'bg7' }, 'Build at: 2026-10-25\n<exit_code>0</exit_code>')];
+  assert.equal(step(judge(lines), 'build').pass, false, 'it built the code as it stood at the launch');
+});
+test('6: logic — a short made-and-removed name is no excuse for a real change that has its letter in it', () => {
+  assert.equal(Runs.changesProject('touch a && rm a && sed -i s/x/y/ src/a.ts'), true);
+  assert.equal(Runs.changesProject('touch a && npx ng test && rm a'), false, 'counter-example: it only makes and removes that one');
+  assert.equal(Runs.changesProject("echo '{}' >tsconfig.tmp.json && npx ng test && rm ./tsconfig.tmp.json"), false, 'a redirect with no space, a removal with ./');
+});
 test('6: CSS/HTML — a styles-only change in a legacy stack owes no full build; a modern one, or one that touches logic, still does', () => {
   const css = (ctx) => judge(head('/work/proj/src/app.component.css'), ctx);
   const legacy = step(css({ legacy: true }), 'build');

@@ -36,6 +36,16 @@ export function buildNone(memoryFile) {
   return null;
 }
 
+// A project whose tests were already failing when Waymark arrived declares it in the same table: `| test (full) | broken at HEAD (<why>) | <date> |`. → the why,
+// or null. The Previos testigo then takes a failing test run as the baseline's, not the task's, with no clean copy to prove it.
+export function testsBroken(memoryFile) {
+  for (const [gate, cmd] of gateRows(memoryFile)) {
+    const why = /^test/i.test(gate || '') && String(cmd || '').match(/^broken(?:\s+at\s+HEAD)?\s*\(([^<>]{3,})\)\s*$/i)?.[1].trim();
+    if (why) return why;
+  }
+  return null;
+}
+
 // The repo's typecheck, in this order: the verified typecheck/syntax row of memory.md's
 // "Quality gates" table (project root only) → package.json's typecheck script → `tsc --noEmit` when TypeScript is
 // installed, each run with the repo's own package manager (stack.mjs: a memory row written for npm runs with pnpm in a

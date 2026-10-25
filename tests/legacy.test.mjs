@@ -81,3 +81,72 @@ test('6: CSS/HTML — the session card carries the row for a styles fixture as f
   const modern = repo(ng(21), { 'src/styles.css': 'a{}\n' });
   assert.ok(!/Runtime:/.test(digest(modern)), 'counter-example: a modern repo gets no runtime line');
 });
+
+// ---- a temp config file a command makes and removes is no change ----
+const Runs = await import(`file://${SCRIPTS}/runs.mjs`);
+const { cierreGaps } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+const { currentTurn } = await import(`file://${SCRIPTS}/transcript.mjs`);
+const P = await import(`file://${SCRIPTS}/provenance.mjs`);
+test('6: logic — a tsconfig made for one Karma spec and removed in the same command changes nothing; a real change in it, or a removal of what it did not make, does', () => {
+  const run = "echo '{}' > tsconfig.spec.tmp.json && npx ng test --watch=false --include=src/a.spec.ts && rm tsconfig.spec.tmp.json";
+  assert.deepEqual([...Runs.ephemeral(run)], ['tsconfig.spec.tmp.json']);
+  assert.equal(Runs.changesProject(run), false, 'the project is as it was');
+  assert.equal(Runs.splitAtChange(run), null, 'no change in it: the test run counts as after the last real change');
+  assert.equal(Runs.changesProject(`${run} && sed -i s/a/b/ src/a.ts`), true, 'counter-example: the same command that also edits a source file');
+  assert.equal(Runs.changesProject('rm tsconfig.spec.tmp.json'), true, 'counter-example: removing a file the command did not make');
+  assert.equal(Runs.changesProject('echo x > src/new.ts'), true, 'counter-example: a file it makes and keeps');
+});
+test('6: CSS/HTML — the same for a styles run: a temp stylesheet made and removed is no change', () => {
+  const run = "printf 'a{}' > styles.tmp.css && npx stylelint styles.tmp.css; rm -f ./styles.tmp.css";
+  assert.deepEqual([...Runs.ephemeral(run)], ['styles.tmp.css']);
+  assert.equal(Runs.changesProject(run), false);
+  assert.equal(Runs.changesProject(`${run}; cp base.css src/app.css`), true, 'counter-example: it also copies over a real stylesheet');
+});
+
+// ---- the judgment of a legacy task ----
+let ids = 0;
+const at = () => new Date().toISOString();
+const prompt = (text) => ({ type: 'user', uuid: `p${Math.random()}`, timestamp: at(), message: { role: 'user', content: text } });
+const say = (text) => ({ type: 'assistant', timestamp: at(), message: { content: [{ type: 'text', text }] } });
+const call = (name, input, out = 'ok', error = false) => { const id = `u${++ids}`; return [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: at(), message: { content: [{ type: 'tool_result', tool_use_id: id, content: out, is_error: error }] } }]; };
+const head = (file) => [prompt('ajusta el componente'), say('Waymark → L2 · dept-frontend'), ...call('Skill', { skill: 'dept-frontend' }), ...call('Edit', { file_path: file })];
+const CIERRE = '## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: observada la salida\nAprendido: x ← y';
+const judge = (lines, ctx = {}, reply = CIERRE) => cierreGaps(currentTurn(lines), reply, undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [{ question: '¿Cómo?', chosen: 'A', discarded: [] }], cwd: '/work/proj', procDelivered: ['dept-frontend'], ...ctx });
+const step = (g, id) => g.steps.find((s) => s.id === id);
+const LAUNCH = 'Command running in background with ID: bg7. Output is being written to: /tmp/bg7.output';
+test('6: logic — a build in the background counts when its output shows success before the close; a launch nobody saw finish, or one that failed, does not', () => {
+  const bg = (...after) => judge([...head('/work/proj/src/a.ts'), ...call('Bash', { command: 'pnpm run build', run_in_background: true }, LAUNCH), ...after]);
+  assert.equal(step(bg(), 'build').pass, false, 'launched and never seen finish');
+  assert.equal(step(bg(...call('BashOutput', { bash_id: 'bg7' }, 'Build at: 2026-10-25 - Time: 91000ms\n<exit_code>0</exit_code>')), 'build').pass, true, 'its output shows success');
+  assert.equal(step(bg(...call('Read', { file_path: '/tmp/bg7.output' }, 'Compiled successfully.')), 'build').pass, true, 'read from its output file');
+  assert.equal(step(bg(...call('BashOutput', { bash_id: 'bg7' }, 'ERROR in src/a.ts(3,1): error TS2322')), 'build').pass, false, 'counter-example: its output shows a failure');
+  assert.equal(step(bg(...call('BashOutput', { bash_id: 'other' }, 'Build at: now')), 'build').pass, false, 'counter-example: the output of another command');
+});
+test('6: CSS/HTML — a styles-only change in a legacy stack owes no full build; a modern one, or one that touches logic, still does', () => {
+  const css = (ctx) => judge(head('/work/proj/src/app.component.css'), ctx);
+  const legacy = step(css({ legacy: true }), 'build');
+  assert.equal(legacy.pass, true);
+  assert.match(legacy.exception || '', /legacy stack: a styles-only change needs no full build/);
+  assert.equal(step(css({ legacy: false }), 'build').pass, false, 'counter-example: a modern stack');
+  assert.equal(step(judge(head('/work/proj/src/app.component.ts'), { legacy: true }), 'build').pass, false, 'counter-example: logic changed');
+});
+test('6: a slow build declared with its time reason, and tests declared broken at HEAD, are accepted; undeclared, they are not', () => {
+  const slow = judge([...head('/work/proj/src/a.ts')], { blocked: true }, `${CIERRE}\nBuild: no (el build de Angular 10 tarda 12 minutos en esta máquina)`);
+  assert.equal(step(slow, 'build').pass, true);
+  assert.match(step(slow, 'build').exception, /Build: no \(el build de Angular 10/);
+  const red = [...head('/work/proj/src/a.ts'), ...call('Bash', { command: 'npx vitest run src/a.spec.ts' }, ' FAIL  src/a.spec.ts\n      Tests  2 failed | 3 passed (5)', true)];
+  assert.ok(judge(red).missing.some((m) => /a test after the last code change failed/.test(m)), 'undeclared: the failure is the task\'s to fix');
+  const declared = judge(red, { testsBroken: 'karma no arranca en esta máquina' });
+  assert.ok(!declared.missing.some((m) => /a test after the last code change failed|clean copy/.test(m)), 'declared in Quality gates: the baseline\'s failure, not the task\'s');
+  assert.match(step(declared, 'gate').exception || step(declared, 'preexisting').exception || '', /baseline: tests broken at HEAD \(karma no arranca/);
+});
+test('6: the row that declares a broken baseline is read from Quality gates, and only a test row with a reason counts', () => {
+  const { testsBroken } = awaitedTestigos;
+  const mem = (row) => { const d = repo(ng(10), {}, MEMORY.replace('| build | | |', `| build | | |\n${row}`)); return path.join(d, '.waymark', 'memory.md'); };
+  assert.equal(testsBroken(mem('| test (full) | broken at HEAD (karma no arranca en Windows) | 2026-10-25 |')), 'karma no arranca en Windows');
+  assert.equal(testsBroken(mem('| tests | broken (la suite cuelga) | |')), 'la suite cuelga');
+  assert.equal(testsBroken(mem('| test (full) | broken at HEAD | |')), null, 'counter-example: no reason');
+  assert.equal(testsBroken(mem('| build | broken at HEAD (tarda mucho) | |')), null, 'counter-example: not a test row');
+  assert.equal(testsBroken(mem('| test (full) | `pnpm run test` | |')), null, 'counter-example: a real command');
+});
+const awaitedTestigos = await import(`file://${SCRIPTS}/testigos.mjs`);

@@ -32,9 +32,10 @@ import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
-import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
+import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
+import { legacyStack } from './runtime.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
@@ -598,13 +599,32 @@ function observeBuild(S) {
   // each changed code file, after the last code change in that repo. Repos are known only for files and folders on disk:
   // an unknown one matches any build; a code change by shell names no repo and counts for every repo.
   const repoAt = ctx.repoOf || repoOf;
-  const builds = lastCode < 0 ? [] : turn.tools.map((t, i) => [t, i]).filter(([t]) => !apart(t) && runsOf(t).some((p) => p.build) && (exitFor(t, 'build') ?? !failOut(output(t))))
-    .map(([t, i]) => { const cd = runsOf(t).filter((p) => p.build).pop()?.cd; return { i, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }; });
+  // A build the shell ran in the background (a slow legacy build that outlives its call) is a pass only when what it printed shows success, read by a later call of
+  // the turn (its output tool, or its output file): it counts from that read, and a launch nobody saw finish counts for nothing.
+  const BG_OK = /<exit_code>\s*0\b|exit code:?\s*0\b|Build at:|[Cc]ompiled successfully|[Bb]uild succeeded|Application bundle generation complete|\bbuilt in \d/;
+  const BG_BAD = /\bERROR in\b|Build failed|Failed to compile|<exit_code>\s*[1-9]/;
+  const finished = (t, i) => {
+    const launch = String(S.result(t)?.text || ''), id = launch.match(/\bID:\s*([\w-]+)/)?.[1], file = launch.match(/written to:?\s*(\S+)/i)?.[1];
+    for (let j = i + 1; j < turn.tools.length; j++) {
+      const u = turn.tools[j], said = `${u.input?.command || ''} ${u.input?.file_path || ''}`;
+      if (!((id && (u.input?.bash_id === id || u.input?.task_id === id)) || (file && said.includes(file)))) continue;
+      const out = output(u);
+      if (BG_OK.test(out) && !BG_BAD.test(out) && !failOut(out)) return j;
+    }
+    return -1;
+  };
+  const builds = lastCode < 0 ? [] : turn.tools.flatMap((t, i) => {
+    if (apart(t) || !runsOf(t).some((p) => p.build)) return [];
+    const at = t.input?.run_in_background ? finished(t, i) : (exitFor(t, 'build') ?? !failOut(output(t))) ? i : -1;
+    if (at < 0) return [];
+    const cd = runsOf(t).filter((p) => p.build).pop()?.cd;
+    return [{ i: at, repo: repoAt(cd && ctx.cwd ? path.resolve(ctx.cwd, winPath(cd)) : ctx.cwd) }];
+  });
   const codeRepos = [...new Set(code.map((f) => repoAt(path.dirname(f))))];
   const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && !SPEC.test(path.basename(fileOf(t))) && repoAt(path.dirname(fileOf(t))) === r));
   const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastBuilt : last) && (!b.repo || !r || b.repo === r)); };
   const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastBuilt));
-  return { near, committed, buildAfter };
+  return { near, committed, buildAfter, styleOnlyChange: code.length > 0 && !logic.length };
 }
 
 // Testigo evidence (docs/adr/0025, 0026): an Evidencia "observada" needs a check after the last change, and each fact it cites is looked up in the tool calls.
@@ -767,7 +787,7 @@ function gateWitness(S) {
     else if (run.timedOut) gate.push(`${none} and the repo typecheck (${run.cmd}) took over 40 s: run the project's gate yourself once now`);
     else if (!run.ok && noComp) excepted.gate = noComp;
     else if (!run.ok) gate.push(`the gate after the last code change failed (${(run.by === 'agent' && failingPart(run.cmd, output(mine))) || run.cmd}${run.by === 'testigo' ? ', re-run by the hook' : ''}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
-    if (redTests.length && noComp) excepted.gate = noComp;
+    if (redTests.length && (noComp || ctx.testsBroken)) excepted.gate = noComp || `baseline: tests broken at HEAD (${ctx.testsBroken})`; // a project that declares its tests already broken: not this task's failure
     else if (redTests.length) gate.push(`a test after the last code change failed (${redTests.join(' | ').slice(0, 700)}): fix it and run it again, or write "no comprobado (<why>)" if the failure is not this task's`);
   }
   if (lastSpec >= 0 && !observed.tests.ranAfterLastSpec) gate.push('a spec changed after the last test run: run that spec again');
@@ -847,8 +867,9 @@ const WITNESS = {
     return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})${delta}`];
   },
   build: (S) => {
-    const { buildAfter, buildNo, excepted } = S;
-    return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'];
+    const { buildAfter, buildNo, ctx, excepted, styleOnlyChange } = S;
+    // a legacy stack's build takes minutes and a stylesheet or a template with no binding is what it would only re-compile: a styles-only change owes none there
+    return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ctx.legacy && styleOnlyChange ? (excepted.build = 'legacy stack: a styles-only change needs no full build', []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'];
   },
   docs: (S) => {
     const { retried } = S;
@@ -864,8 +885,9 @@ const WITNESS = {
     return observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (${WAYMARK_CMD} copy HEAD${copyStep} → copy the changed spec there → run it; it must fail → ${WAYMARK_CMD} copy --remove <path>), or write "Tests: no (<why it cannot fail first>)"`];
   },
   preexisting: (S) => {
-    const { copyStep, excepted, noComp, observed } = S;
-    return observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (${WAYMARK_CMD} copy HEAD${copyStep} → rerun the failing command there → ${WAYMARK_CMD} copy --remove <path>), or write "no comprobado (<why>)"`];
+    const { copyStep, ctx, excepted, noComp, observed, redTests } = S;
+    const baseline = ctx.testsBroken && redTests?.length && observed.gate?.ok !== false ? `baseline: tests broken at HEAD (${ctx.testsBroken})` : null; // only tests failed, and the project says they already do
+    return observed.worktree ? [] : noComp || baseline ? (excepted.preexisting = noComp || baseline, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (${WAYMARK_CMD} copy HEAD${copyStep} → rerun the failing command there → ${WAYMARK_CMD} copy --remove <path>), or write "no comprobado (<why>)"`];
   },
   trailer: (S) => {
     const { ctx } = S;
@@ -1200,6 +1222,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let rerun = null;
       ctx.rerun = (files) => (rerun ??= rerunGate(files, home)); // once per close, even when the turn is judged twice
       ctx.noBuild = buildNone(home.memory);
+      ctx.testsBroken = testsBroken(home.memory);
+      try { ctx.legacy = legacyStack(home.root); } catch {}
       try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.root = home.root;

@@ -42,6 +42,12 @@ export function neededNode(root) {
   return row ? { use: row.use, ok: row.ok, from: `angular ${angular}` } : null;
 }
 
+// A legacy stack: an Angular before 14 (its builds take minutes and its Node is another). → true / false
+export function legacyStack(root) {
+  const angular = Number((stackOf(root)?.deps || []).find(([n]) => n === '@angular/core')?.[1]?.match(/^(\d+)/)?.[1]);
+  return Number.isFinite(angular) && angular < 14;
+}
+
 const onPath = (program) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
 const MANAGERS = [['volta', (n) => `volta run --node ${n}`], ['fnm', (n) => `fnm exec --using=${n}`]];
 

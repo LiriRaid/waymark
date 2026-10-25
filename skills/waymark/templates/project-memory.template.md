@@ -37,6 +37,7 @@ Filled by the minimal project scan (waymark `references/project-detection.md`); 
 | test (related) | | |
 | test (full) | | |
 | build | | |
+<!-- Tests that were already failing when Waymark arrived: `| test (full) | broken at HEAD (<why>) | <date> |`; a failing test run is then the baseline's, not the task's. A repo that needs another Node than the machine's gets a `runtime` row (`volta run --node 14`) from the session hook; start every gate with it. -->
 <!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. The end-of-turn hook dates a row whose command passed after the last change, and fills an empty row with the gate that passed; it never replaces a command. -->
 
 ## Design system

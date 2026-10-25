@@ -165,8 +165,35 @@ export function shellRuns(command, depth = 0) {
   return out;
 }
 
-// A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory.
-export const changesProject = (command) => mutatesFiles(command) && !TEMP.test(String(command || '')) && !/(\.waymark[\\/]|\.claude[\\/]projects)/i.test(String(command || ''));
+// A file a command makes and removes again (the temp tsconfig a legacy Karma project needs for one spec run) leaves the project as it was: its creation and its
+// removal are no change, so the gate that ran between them counts as after the last real change. → the names (lower-cased, `./` and quotes dropped) made and
+// removed in the same command; the part-by-part reading is by the first word, the operands read as words.
+const bareName = (w) => String(w || '').replace(/^["']|["']$/g, '').replace(/^\.[\\/]/, '').replace(/\\/g, '/').toLowerCase();
+export function ephemeral(command) {
+  const made = new Set(), gone = new Set();
+  for (const p of shellRuns(command)) {
+    const words = [...String(p.text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    const head = String(words[0] || '').toLowerCase().replace(/\.(exe|cmd)$/, '');
+    const operands = words.slice(1).filter((w) => !/^-/.test(w) && !/^[<>&|]/.test(w) && !/^\/[a-z]$/i.test(w)).map(bareName);
+    if (/^(rm|del|erase|unlink|remove-item|ri)$/.test(head)) operands.forEach((n) => gone.add(n));
+    if (/^(touch|tee|new-item|set-content|out-file|add-content)$/.test(head)) operands.forEach((n) => made.add(n));
+    if (/^(cp|copy|copy-item)$/.test(head) && operands.length > 1) made.add(operands[operands.length - 1]);
+    for (const m of String(p.text).matchAll(/(?<![0-9&>=-])>{1,2}\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;<>]+))/g)) made.add(bareName(m[1] ?? m[2] ?? m[3]));
+  }
+  return new Set([...made].filter((n) => n && gone.has(n)));
+}
+const onlyEphemeral = (text, eph) => eph.size > 0 && [...eph].some((n) => String(text).replace(/\\/g, '/').toLowerCase().includes(n));
+
+// A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory, nor about a file it makes and removes itself.
+// `eph` (ephemeral) is the whole command's set when the part of a chained command is judged alone (splitAtChange).
+export function changesProject(command, eph = ephemeral(command)) {
+  const c = String(command || '');
+  if (!mutatesFiles(c) || TEMP.test(c) || /(\.waymark[\\/]|\.claude[\\/]projects)/i.test(c)) return false;
+  if (!onlyEphemeral(c, eph)) return true;
+  // it names a file it makes and removes: a change only when one of its parts mutates something else
+  const parts = shellRuns(c);
+  return parts.length > 1 && parts.some((p) => mutatesFiles(p.text) && !onlyEphemeral(p.text, eph) && !TEMP.test(p.text));
+}
 
 // The clean copies (git worktree) a task made: the path each `git worktree add` names (its first word after the flags, or
 // the value of the variable it names, assigned in the same command). A run there shows a failure is not the task's, or a
@@ -225,9 +252,9 @@ export const apart = (command, copies = []) => ['copy', 'unknown'].includes(comm
 // before it. → [the change's part, the rest] as two commands, or null when the command is not that shape.
 const INTERP_PART = /^(?:\S*[\/])?(?:python3?|py|node|deno|ruby|perl|php)(?:\.exe)?\b/i;
 export function splitAtChange(command) {
-  const c = String(command || ''), parts = shellRuns(c), script = scriptWrites(c);
+  const c = String(command || ''), parts = shellRuns(c), script = scriptWrites(c), eph = ephemeral(c);
   let m = -1;
-  parts.forEach((p, i) => { if (changesProject(p.text) || (script && INTERP_PART.test(p.text.trim()))) m = i; });
+  parts.forEach((p, i) => { if (changesProject(p.text, eph) || (script && INTERP_PART.test(p.text.trim()))) m = i; });
   if (m < 0) return null;
   const rest = parts.slice(m + 1);
   if (!rest.some((p) => p.gate || p.build || p.test)) return null;

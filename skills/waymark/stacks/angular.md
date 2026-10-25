@@ -33,6 +33,7 @@ The repo's own versions, scripts and lockfile win over everything above, which a
 - **Karma, one spec.** `<pm> exec ng test --watch=false --browsers=ChromeHeadless --include=<spec file>` with `CHROME_BIN` set to the machine's Chrome; the whole suite once at the end. `ng test` without `--watch=false` never ends.
 - **A slow build.** `node --max_old_space_size=4096 node_modules/@angular/cli/bin/ng build` (or `NODE_OPTIONS=--max_old_space_size=4096` before `<pm> exec ng build`) when the default heap runs out.
 - **Conventions are the repo's.** `NgModule`, `*ngIf`/`*ngFor` and Zone-based code are how it is written: follow them; the Frontend rules below are for v17 and later.
+- **What the testigos accept here.** A temp config a command makes and removes (`tsconfig.spec.tmp.json`) is no change. A build run in the background counts once its output shows success (read it before closing); a build that takes minutes may instead be declared `Build: no (<time>)`, and `Tests: no (<why>)` likewise. A styles-only change owes no full build. When the tests were already failing, write `| test (full) | broken at HEAD (<why>) | <date> |` in Quality gates: a failing test run is then the baseline's, with no clean copy to prove it.
 
 ## Conventions by department
 Only what is specific to Angular. General rules live in the `dept-*` department skills (`dept-frontend`, `dept-ux-ui`, `dept-qa`, `dept-security`, `dept-data`).

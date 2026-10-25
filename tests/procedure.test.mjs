@@ -54,6 +54,11 @@ for (const [kind, file, now, before] of [['logic', 'src/orders.service.mjs', 'de
     assert.deepEqual(handed(lagging), [before], 'until the line shows, the last department invoked');
   });
 }
+test('4: a later prompt of the task that writes no line keeps the route of the one before; the session\'s last department only stands in when the task has none', async () => {
+  const d = repo({ 'src/a.mjs': 'a\n' }), state = path.join(d, 'packed.json');
+  const lines = [prompt('primera tarea'), say('Waymark → L2 · dept-frontend'), ...call('Skill', { skill: 'dept-frontend' }), prompt('segunda tarea'), say('Waymark → L2 · dept-backend'), prompt('y agrega el filtro'), say('Agrego el filtro.')];
+  assert.deepEqual(handed(await edit(d, 'src/a.mjs', 's-inherit', lines, state)), ['dept-backend'], 'the route of the prompt before, not the loaded department');
+});
 test('4: a department change in the middle of a task hands the new section too, once each', async () => {
   const d = repo({ 'src/a.mjs': 'a\n', 'src/b.css': 'b\n' }), state = path.join(d, 'packed.json');
   const base = [prompt('arregla el servicio y el estilo'), say('Waymark → L2 · dept-backend')];

@@ -186,7 +186,7 @@
   "waymark/scripts/stop-hook.mjs": "a34114804e35cd4c4dbbef50458dc764f17fbee66ba45427884674ef0f4dba21",
   "waymark/scripts/sync.mjs": "8e0b765a6428fcad7bd5c8ed6e4d516835c6a0a56bd8a75af17ed735c8e9d81b",
   "waymark/scripts/testigos.mjs": "32f047c897c19f970002c0ed1b40cfd92618950d45a2c66c1e60fdc94492ec83",
-  "waymark/scripts/tool-hook.mjs": "aa83da1461a8b8b27def986d1cea3f269e147b143e0dcc86ddd8638231908456",
+  "waymark/scripts/tool-hook.mjs": "84991ba2c8a6a09e140386c1b75edc454c410cd78c6340a20dd3ea722362be0e",
   "waymark/scripts/transcript.mjs": "9d56dd7713d58c7f0b567ad877a16efe384ffdfaf83dbf50ee14b603b2de9ec9",
   "waymark/scripts/uninstall.mjs": "82fab4697182a207a8a8f444bff025b8297de37e9a3ac17a0a30b936f2ed9592",
   "waymark/scripts/verify.mjs": "c17cf014b069c5d400027bc0d5cf0a0f43b9e01d8cea17838e90999c3984749e",

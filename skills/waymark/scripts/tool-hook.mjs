@@ -292,7 +292,7 @@ function ownerDept(hook, agent) {
   if (!hook.transcript_path) return null;
   try {
     const lines = agent.read(hook, 512 * 1024), turn = currentTurn(lines);
-    const routed = routedDept(turn.texts, turn.tools);
+    const routed = routedDept(turn.texts, turn.tools) || inheritedRoute(lines)?.dept; // a later prompt of the task keeps the route of the one before
     if (routed) return routed;
     const calls = sessionTools(lines).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
     return calls.length ? String(calls.at(-1).input.skill) : null;

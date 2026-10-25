@@ -14,7 +14,7 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
+import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
 import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
@@ -285,10 +285,16 @@ export function commandRepos(command, cwd = process.cwd()) {
 // The owner department of the task: the last dept-* skill invoked in the session (null: no transcript, or none invoked). The calls are read
 // through the agent's own adapter (its rollout, chat or journal as the core's lines): a transcript that is not Claude Code's .jsonl holds no
 // Skill call of its own, so reading it raw would find no department and the procedures would never be handed over there.
+// The department the task is routed to comes first: the line "Waymark → L<n> · dept-X" of the turn, or a re-route by Skill call with args. A session
+// that loaded dept-frontend and now routes a backend task by the line alone owns a backend task, not a frontend one. The line is not in the transcript
+// for a second or two after it is written, so until it shows the last department the session invoked stands in (the next edit hands the right one).
 function ownerDept(hook, agent) {
   if (!hook.transcript_path) return null;
   try {
-    const calls = sessionTools(agent.read(hook, 512 * 1024)).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
+    const lines = agent.read(hook, 512 * 1024), turn = currentTurn(lines);
+    const routed = routedDept(turn.texts, turn.tools);
+    if (routed) return routed;
+    const calls = sessionTools(lines).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
     return calls.length ? String(calls.at(-1).input.skill) : null;
   } catch { return null; }
 }

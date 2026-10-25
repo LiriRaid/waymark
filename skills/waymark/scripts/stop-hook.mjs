@@ -892,7 +892,7 @@ function composeSteps(S) {
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
     // decision, so the choice window does not apply, and with no first edit there is no pack to hand over (docs/adr/0017);
     // the pre-tool gate still stops file changes first
-    const ordered = (s.id === 'decision' || s.id === 'memory') && !changed.length;
+    const ordered = (s.id === 'decision' || s.id === 'memory' || s.id === 'procedure') && !changed.length; // nothing was changed: the procedure guides no change, so none is owed (a task with no file never got one handed)
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked && !ordered;
     const why = applies ? fails[s.id] || [] : [];
     return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(applies && !why.length && excepted[s.id] ? { exception: excepted[s.id] } : {}), ...(lacked ? { na: ctx.agent || 'agent' } : {}) };

@@ -115,31 +115,36 @@ export function writeTaskLine(home, rec, now = new Date()) {
   if (!learned || /^ninguno/i.test(learned)) return false;
   // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
   // unresolved, keeps its line
-  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') && !rec.unresolved?.length;
+  const done = (/^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') || !!rec.outcome?.userOwned) && !rec.unresolved?.length; // a step the user owns is not left undone
   return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
 // The user confirmed that these tasks work (`waymark.mjs done <ID…>`): their lines leave Work in progress (a task done
 // lives in its record), and a short chained record {kind: "confirm"} keeps the IDs and the note. → the IDs that had a
 // line (others are ignored).
-export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null } = {}) {
+// `always`: the user's "sí" at a close (the per-prompt hook): a task that said hecho has no line to remove, and its
+// confirmation is still recorded.
+export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null, always = false } = {}) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return [];
   const text = fs.readFileSync(home.memory, 'utf8'), m = ('\n' + text).match(WIP);
-  if (!m) return [];
+  if (!m && !always) return [];
   const wanted = new Map((ids || []).map((id) => [base(id), id]).filter(([b]) => b));
   const done = [];
   const say = maskSecrets(String(note || '').replace(/\s+/g, ' ').trim());
-  const body = m[2].split('\n').map((l) => {
+  const body = (m ? m[2].split('\n') : []).map((l) => {
     const hid = /^\s*-/.test(l) ? headId(l) : null;
     if (!hid || !wanted.has(base(hid))) return l;
     done.push(hid);
     return null;
   }).filter((l) => l !== null);
-  if (!done.length) return [];
-  fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
-  rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
-  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed: done, ...(say ? { said: say.slice(0, 300) } : {}) });
-  return done;
+  const confirmed = always ? [...new Set([...done, ...(ids || [])])] : done;
+  if (!confirmed.length) return [];
+  if (done.length) {
+    fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
+    rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
+  }
+  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed, ...(say ? { said: say.slice(0, 300) } : {}) });
+  return confirmed;
 }
 
 // Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). → true when it changed.
@@ -216,7 +221,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
   const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
-  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
+  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : r.outcome?.userOwned ? `hecho (${r.outcome.userOwned.join(', ')}: tuyo)` : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown

@@ -44,7 +44,7 @@ import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { expireGrants } from './lib/grants.mjs';
 import { loadKnownValues } from './lib/known.mjs';
 import { learn } from './learn.mjs';
-import { norm, real, exemptPath, WAYMARK_CMD } from './lib/paths.mjs';
+import { norm, real, exemptPath, waymarkHome, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 import { commentOnlyEdit } from './lib/comments.mjs';
 
@@ -1015,10 +1015,28 @@ export function branchesOf(files) {
 export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as they are (docs/adr/0030)
 // The Resultado as a label. An L2+ task whose Cierre left an item of the ask unanswered or marked ✘ never reads "hecho" (docs/adr/0038): the
 // record says "parcial" and keeps what the Cierre said and why.
-function outcome(reply, items, answers, level) {
+// A step the user owns (their deploy, their PR) never leaves a task parcial: when the Cierre's only gap is that step, and the
+// project's Conventions say it is the user's, the result is hecho with the step named (`userOwned`). A parcial for a cause
+// outside the work (the quota, a provider) carries `cause: 'external'`: the next ask is a new task unless the user says it continues.
+const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i };
+const EXTERNAL = /usage limit|l[ií]mite de uso|cuota|quota|rate.?limit|sin conexi[oó]n|connection (?:lost|refused)|proveedor|servicio (?:externo|ca[ií]do)/i;
+export function ownedSteps(text) {
+  const owned = new Set();
+  for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1])) owned.add(step);
+  return owned;
+}
+export function outcome(reply, items, answers, level, owned = new Set()) {
   const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
   const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
-  return said === 'hecho' && gaps.length ? { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' } : { result: said };
+  if (said === 'hecho' && gaps.length) return { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' };
+  if (said === 'parcial') {
+    const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
+    const mine = [...owned].filter((s) => STEP_WORDS[s].test(line));
+    const undone = (answers || []).filter((a) => !a.ok && ![...owned].some((s) => STEP_WORDS[s].test(a.note || ''))); // an item ✘ for another reason keeps it parcial
+    if (mine.length && !gaps.length && !undone.length) return { result: 'hecho', said, userOwned: mine, why: `the only step left is the user's (${mine.join(', ')})` };
+    if (EXTERNAL.test(line)) return { result: said, cause: 'external' };
+  }
+  return { result: said };
 }
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const answers = Number(gaps.level) >= 2 && ctx.pedido?.length >= 2 ? pedidoAnswers(gaps.reply).filter((a) => a.n >= 1 && a.n <= ctx.pedido.length).slice(0, 12) : [];
@@ -1040,7 +1058,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
-    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level), // hecho | parcial | bloqueado, as a label
+    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned), // hecho | parcial | bloqueado, as a label
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),
   });
@@ -1076,6 +1094,10 @@ export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cau
 const NATIVE_MEMORY = /[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]/;
 export const nativeMemoryWrites = (tools) => [...new Set(tools.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(t.name)).map((t) => String(t.input?.file_path || '')).filter((p) => NATIVE_MEMORY.test(p)))];
 export const nativeMemoryNote = (files) => files.length ? ` · ⚠ escribió en la memoria nativa del agente (${files.length} archivo${files.length > 1 ? 's' : ''}): una regla tuya va a ~/.waymark/preferences.md (vale en todo proyecto) o a .waymark/memory.md → Conventions (del proyecto), con fecha y tu frase` : '';
+
+// The question at the end of a task that said hecho: a bare "sí" closes it for good (the per-prompt hook runs `done`); any other
+// message continues it. Shown to the user, never added to the model's context.
+export const confirmAsk = (rec) => (rec?.outcome?.result === 'hecho' ? ' · ¿Se completó lo que pediste? Responde «sí» y la tarea queda confirmada; otra cosa la continúa como seguimiento' : '');
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
 // A measured % is never asked. Otherwise, while the model has fewer than 3 calibration pairs (no fit yet), it asks the
@@ -1147,6 +1169,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let rerun = null;
       ctx.rerun = (files) => (rerun ??= rerunGate(files, home)); // once per close, even when the turn is judged twice
       ctx.noBuild = buildNone(home.memory);
+      try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.root = home.root;
       // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
@@ -1239,7 +1262,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools))));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + confirmAsk(rec)));
     } catch (e) {
       logHookError('stop-hook', e);
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence

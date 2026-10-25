@@ -16,8 +16,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { sessionState } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { sessionState, closingQuestions } from './transcript.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -45,9 +45,38 @@ export function gitLine(root, max = 2) {
   const shown = files.slice(0, max).map((l) => `${l.slice(0, 2).trim()} ${path.basename(l.slice(3).replace(/\/$/, '')) || l.slice(3)}`).join(', ');
   return ` Git: ${branch} · ${files.length ? `${files.length} changed: ${shown}${files.length > max ? ', …' : ''}` : 'clean'}.`;
 }
-export function taskLine(cwd, now = new Date()) {
+// The last thing this session recorded in the project (a task, a question or a confirmation), from every record git holds.
+function lastOfSession(cwd, session) {
+  const home = projectHome(cwd);
+  return !home.dir || home.legacy || !fs.existsSync(home.memory) ? null : readTaskRecords(home).filter((r) => r.session === session).pop() || null;
+}
+// The user says the ask continues: a verb for it, or the last task's own number.
+export const CONTINUES = /^\s*(?:sigue|contin[uú]a|continua|retoma|seguimos|reanuda|dale|continue|resume|go on)\b/i;
+export function taskLine(cwd, now = new Date(), { session = null, prompt = '' } = {}) {
   const ids = taskIds(cwd, now);
-  return ` ID: new ${ids.next}${ids.followUp ? `; follow-up ${ids.followUp}` : ''}.`;
+  let follow = ids.followUp, why = '';
+  try { // a parcial for a cause outside the work (the quota, a provider) does not chain: the next ask is new unless the user says it continues
+    const last = follow && session ? lastOfSession(cwd, session) : null;
+    if (last?.id && last.outcome?.cause === 'external' && !CONTINUES.test(String(prompt)) && !new RegExp(`\\b${String(last.id).match(/T\d+/)?.[0]}[a-z]?\\b`).test(String(prompt))) { follow = null; why = ` The last task (${last.id}) is parcial for a cause outside the work: this ask is a new task unless the user says it continues.`; }
+  } catch {}
+  return ` ID: new ${ids.next}${follow ? `; follow-up ${follow}` : ''}.${why}`;
+}
+// A bare "sí" after a task that said hecho confirms it: the hook runs `done`, so the model never reads it (0 tokens). Not when the
+// last reply ended asking something else (the "sí" answers that), nor when the task is not the session's last thing.
+export const YES = /^\s*(?:s[ií]|sip|ok|okay|vale|listo|dale|perfecto|correcto|completo|confirmo|yes|yep)\s*[.!¡]*\s*$/i;
+export function confirmation(hook, agent, cwd) {
+  if (!YES.test(String(hook.prompt || ''))) return null;
+  const session = hook.session_id || 'unknown';
+  if (openTurn(cwd, session)) return null;
+  const last = lastOfSession(cwd, session);
+  if (!last?.id || last.kind || last.outcome?.result !== 'hecho') return null;
+  const lines = agent.read(hook), reply = [...lines].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
+  const text = (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+  if (closingQuestions(text).length) return null;
+  const home = projectHome(cwd);
+  if (!confirmTasks(home, [last.id], { note: hook.prompt, agent: agent.name, session, always: true }).length) return null;
+  refreshTasks(home, true);
+  return { id: last.id };
 }
 // Another session of this project has a turn open: two sessions on one repo edit the same files without knowing. The line
 // names it so the agent tells the user before editing what the other may be changing.
@@ -118,6 +147,9 @@ export function reminder(hook, agent) {
   if (silent) return null;
   if (NOTIFICATION.test(String(hook.prompt || ''))) return agent.out.context('UserPromptSubmit', NOTIFICATION_NOTE + agent.note(SKILLS_DIR)); // no snapshot, no open turn, no new task start
   const cwd = hook.cwd || process.cwd();
+  let yes = null;
+  try { yes = confirmation(hook, agent, cwd); } catch (e) { logHookError('rule0-hook confirmation', e); }
+  if (yes) return agent.out.blockPrompt ? agent.out.blockPrompt(`Waymark: ${yes.id} confirmada como hecha (tu «sí»); no queda nada por hacer en ella.`) : agent.out.context('UserPromptSubmit', `Waymark: the user's "sí" confirmed ${yes.id} as done and the hook closed it. Answer in one line: no routing line, no Cierre.${agent.note(SKILLS_DIR)}`);
   let st = { openedWithWaymark: false };
   try { st = sessionState(agent.read(hook)); } catch {}
   let held = null;
@@ -125,7 +157,7 @@ export function reminder(hook, agent) {
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
   const session = hook.session_id || 'unknown';
   let ids = '', other = '', unclosed = false;
-  try { ids = taskLine(cwd); } catch {}
+  try { ids = taskLine(cwd, new Date(), { session, prompt: hook.prompt }); } catch {}
   try { other = otherSessionLine(cwd, session); } catch {}
   try { unclosed = !!openTurn(cwd, session); } catch {} // this session's last turn never closed (interrupted, or a background agent still running)
   try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change

@@ -51,6 +51,8 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 
 ## Conventions specific to this project
 - …
+<!-- A step that is yours, in your words and dated: "- Deploys: the user (2026-10-25: «yo despliego»)", "- PRs: the user". A task whose only missing step is one of those closes hecho. -->
+
 
 ## Repeated procedures
 The end-of-turn hook counts the same run of 3 to 5 action commands across tasks (docs/adr/0023). At 2 → the session card proposes a project skill; write its name in *Project skill* once it exists.

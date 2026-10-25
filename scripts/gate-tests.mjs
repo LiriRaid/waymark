@@ -37,6 +37,10 @@ export function failures(output) {
   return lines.slice(at).filter((l) => !/^\s+at /.test(l) && l.trim()).slice(0, 200).join('\n');
 }
 
+// The folders Waymark's tests name in the OS temp folder (wm-*, waymark-*): a run that leaves more than it found left its own behind. Every test
+// process makes one root (tests/helpers/isolate.mjs) and removes it when it ends, so the count after a run is the count before it.
+export const tempFolders = (dir = os.tmpdir()) => { try { return fs.readdirSync(dir).filter((n) => /^(?:wm-|waymark-)/.test(n)).length; } catch { return 0; } };
+
 const testFiles = (root) => fs.readdirSync(path.join(root, 'tests')).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => path.join('tests', f));
 
 function run(root, extra = []) {
@@ -66,7 +70,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const runs = [[`default (concurrency ${CONCURRENCY})`, () => run(ROOT, [`--test-concurrency=${CONCURRENCY}`])], ...(once ? [] : [['--test-concurrency=1', () => run(ROOT, ['--test-concurrency=1'])], ['a copy under the temp folder', () => { const d = copyOfTree(ROOT); try { return run(d, [`--test-concurrency=${CONCURRENCY}`]); } finally { fs.rmSync(d, { recursive: true, force: true }); } }]])];
   let bad = 0;
   for (const [name, go] of runs) {
+    const before = tempFolders();
     const r = go();
+    const left = tempFolders() - before;
+    if (left > 0) r.why = [r.why, `the run left ${left} temp folder${left > 1 ? 's' : ''} behind (wm-* or waymark-*)`].filter(Boolean).join('; ');
     const s = r.summary;
     console.log(`${r.why ? '✘' : '✔'} ${name}: ${s ? `tests ${s.tests}, pass ${s.pass}, skipped ${s.skipped}, todo ${s.todo}, fail ${s.fail}` : 'no summary'}${r.why ? ` — ${r.why}` : ''}`);
     if (r.why) { bad++; console.log(failures(r.output) || r.output.split('\n').filter((l) => /^✖|^not ok/.test(l)).slice(0, 20).join('\n')); }

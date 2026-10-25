@@ -20,6 +20,7 @@
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
 //   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
 //   node waymark.mjs gates [--apply]        empty the Quality gates rows that cannot be right (a cut command); the plan without --apply
+//   node waymark.mjs copy [<ref>] | --remove <path> | --clean [--apply]  a clean copy of the repo in a short folder Waymark owns (~/.waymark/tmp), its removal, and the folders nobody removed (docs/adr/0046)
 //   node waymark.mjs localize [--apply]     move Waymark's lines out of the project's versioned .gitignore into .git/info/exclude (docs/adr/0043); the plan without --apply
 //   node waymark.mjs convention [<path>] [--move <from> <to>]  where each kind of piece lives in the repo, the commit that set it, and the verdict of a proposed move (docs/adr/0043)
 //   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
@@ -51,6 +52,7 @@ import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
+import { makeCopy, removeCopy, orphans, cleanOrphans, copyRoot } from './copy.mjs';
 import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -295,6 +297,12 @@ export function brokenGates(cwd) {
   return section('\n' + read(home.memory), 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
     .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).map(([gate, cmd]) => ({ gate, cmd, why: rowProblem(cmd, home.root) })).filter((r) => r.why);
 }
+// Folders nobody removed: copies in Waymark's root and the improvised or test ones in the temp folder and at the top of the disk (docs/adr/0046).
+export function copiesLine(list = orphans()) {
+  if (!list.length) return '';
+  const own = list.filter((o) => path.resolve(o.path).startsWith(path.resolve(copyRoot()))).length;
+  return `copies: ${list.length} folder${list.length > 1 ? 's' : ''} left behind (${own} in Waymark's copy root, ${list.length - own} improvised or from a test run: ${list.slice(0, 3).map((o) => path.basename(o.path)).join(', ')}${list.length > 3 ? '…' : ''}). Offer, with the choice window: ${W} copy --clean shows them and --apply removes them (they hold no learning: the result went to the task's record).`;
+}
 export function gatesLine(cwd) {
   const bad = brokenGates(cwd);
   return bad.length ? `gates: ${bad.length} Quality gates row${bad.length > 1 ? 's' : ''} in memory.md cannot be right (${bad.map((r) => `${r.gate}: \`${r.cmd}\` ${r.why}`).join('; ')}). The hook ignores them already. Offer, with the choice window: ${W} gates shows the plan and --apply empties each cell, so the next gate that passes fills it.` : '';
@@ -336,6 +344,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => notesState(cwd));
   await add(() => footprint(cwd));
   await add(() => gatesLine(cwd));
+  await add(() => copiesLine());
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -554,6 +563,28 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   } else if (sub === 'gates') {
     const r = repairGates(process.cwd(), { apply: rest.includes('--apply') });
     console.log(!r.rows.length ? 'gates: every Quality gates row can be right here' : r.applied ? `gates: emptied ${r.rows.map((x) => x.gate).join(', ')}; the next gate that passes fills them` : `gates (plan, nothing written): empties ${r.rows.map((x) => `${x.gate} (\`${x.cmd}\`: ${x.why})`).join('; ')}. Ask the user, then re-run with --apply.`);
+  } else if (sub === 'copy') {
+    if (rest[0] === '--remove') {
+      const r = rest[1] ? removeCopy(rest[1]) : { error: 'name the copy to remove' };
+      console.log(r.error ? `copy: ${r.error}
+Usage: ${W} copy --remove <path of the copy>` : r.removed ? `copy: removed ${rest[1]}` : `copy: ${rest[1]} could not be removed (something holds a file there); ${W} copy --clean lists it`);
+      process.exitCode = r.removed ? 0 : 1;
+    } else if (rest[0] === '--clean') {
+      const list = orphans();
+      if (!list.length) console.log('copy: no folder left behind');
+      else if (!rest.includes('--apply')) console.log(`copy --clean (plan, nothing removed): ${list.length} folder${list.length > 1 ? 's' : ''}, among them ${list.slice(0, 8).map((o) => `${o.path} (${o.ageH} h)`).join('; ')}${list.length > 8 ? `; +${list.length - 8} more` : ''}. Ask the user, then re-run with --apply.`);
+      else { const r = cleanOrphans(list); console.log(`copy: removed ${r.removed}${r.left.length ? `; could not remove ${r.left.join(', ')} (in use)` : ''}`); }
+    } else {
+      const { copyInstall } = await import('./stack.mjs');
+      const home = projectHome(process.cwd());
+      let install = null;
+      try { install = copyInstall(stackOf(home.root)); } catch {}
+      const r = makeCopy(process.cwd(), rest[0] || 'HEAD', { install });
+      console.log(r.error ? `copy: ${r.error}
+Usage: ${W} copy [<ref>] | copy --remove <path> | copy --clean [--apply]` : `${r.path}
+A clean copy of ${rest[0] || 'HEAD'} (a short folder Waymark owns).${r.install ? ` In it: ${r.install}, with CI=true in its environment (from the store, no network; never a junction to the repo's node_modules).` : ''} Run what must show its result there, then remove it: ${W} copy --remove "${r.path}" (the task's close removes it too).`);
+      process.exitCode = r.error ? 1 : 0;
+    }
   } else if (sub === 'localize') {
     const r = localize(process.cwd(), { apply: rest.includes('--apply') });
     console.log(!r.moved.length ? 'localize: nothing of Waymark\'s in this project\'s .gitignore' : r.plan ? `localize (plan, nothing written): moves ${r.moved.join(' ')} from the versioned .gitignore to .git/info/exclude. Ask the user, then re-run with --apply.` : `localize: ${r.moved.join(' ')} now ignored through .git/info/exclude; the .gitignore change is the user's to commit or discard`);
@@ -579,7 +610,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | gates [--apply] |${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | gates [--apply] | copy [<ref>] [--remove <path> | --clean [--apply]] |${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

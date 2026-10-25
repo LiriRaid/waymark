@@ -326,7 +326,7 @@ test('pre-existing and docs by action: a failing gate asks for a clean copy; the
   // pre-existing: from the gate's exit, never from "ya fallaba"
   const failing = [...head, ...ran('g1', 'npx tsc --noEmit', true)];
   assert.deepEqual([pre(judge(failing)).applies, pre(judge(failing)).pass], [true, false]);
-  assert.ok(judge(failing).missing.some((m) => /show the same failure in a clean copy now \(git worktree add <tmp> HEAD/.test(m)));
+  assert.ok(judge(failing).missing.some((m) => /show the same failure in a clean copy now \(.*waymark\.mjs.* copy HEAD/.test(m)));
   assert.equal(pre(judge([...failing, ...ran('w1', 'git worktree add ../clean HEAD && cd ../clean && npx tsc --noEmit', true)])).pass, true);
   assert.equal(pre(judge(failing, `${cierre(id)}\nno comprobado (sin permiso para correr la suite)`, { blocked: true })).pass, true, 'or not checked, in the reply after the block');
   assert.equal(pre(judge([...head, ...ran('g2', 'npx tsc --noEmit')], `${cierre(id)}\nNota: contact-center.spec.ts ya fallaba antes`)).applies, false, 'a passing gate: the words trigger nothing');

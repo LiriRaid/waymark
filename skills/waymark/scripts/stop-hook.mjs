@@ -34,6 +34,7 @@ import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inC
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
+import { closeCopies } from './copy.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes } from './notes.mjs';
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
@@ -808,7 +809,7 @@ function procedureWitness(S) {
   else if (!dept.invoked.includes(dept.declared)) procedure.push(`${dept.declared} owns the open task but was never invoked`);
   else if (!observed.procedure.read.some((p) => procRe.test(p))) procedure.push(`${dept.declared}/procedures.md never read (a search with no match does not count)`);
   // a Node repo's clean copy installs its own modules from the store (copyInstall, stack.mjs), never through a link
-  const copyStep = ctx.copyInstall ? ` → in <tmp>: ${ctx.copyInstall}, with CI=true in its environment (from the store, no network, no prompt; never a junction to the repo's node_modules: the package manager can purge it through the link)` : '';
+  const copyStep = ctx.copyInstall ? ` → in the copy: ${ctx.copyInstall}, with CI=true in its environment (from the store, no network, no prompt; never a junction to the repo's node_modules: the package manager can purge it through the link)` : '';
   return { procedure, copyStep };
 }
 
@@ -846,11 +847,11 @@ const WITNESS = {
   },
   red: (S) => {
     const { copyStep, excepted, observed, testsNo } = S;
-    return observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (git worktree add <tmp> HEAD${copyStep} → copy the changed spec there → run it; it must fail), or write "Tests: no (<why it cannot fail first>)"`];
+    return observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (${WAYMARK_CMD} copy HEAD${copyStep} → copy the changed spec there → run it; it must fail → ${WAYMARK_CMD} copy --remove <path>), or write "Tests: no (<why it cannot fail first>)"`];
   },
   preexisting: (S) => {
     const { copyStep, excepted, noComp, observed } = S;
-    return observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (git worktree add <tmp> HEAD${copyStep} → rerun the failing command there → git worktree remove <tmp>), or write "no comprobado (<why>)"`];
+    return observed.worktree ? [] : noComp ? (excepted.preexisting = noComp, []) : [`the gate after the last change failed: if it is not this task's, show the same failure in a clean copy now (${WAYMARK_CMD} copy HEAD${copyStep} → rerun the failing command there → ${WAYMARK_CMD} copy --remove <path>), or write "no comprobado (<why>)"`];
   },
   trailer: (S) => {
     const { ctx } = S;
@@ -1226,6 +1227,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { if (ctx.commits?.length) rec.signatures = commitSignatures(home.root, ctx.commits.slice(0, 10)); } catch (e) { logHookError('stop-hook signatures', e); } // git's verdict on each commit: signed, untrusted, bad, unsigned
       try { const repos = taskRepos(ctx.taskTools, cwd, home.root, rec.id); if (repos.length) rec.repos = repos; } catch (e) { logHookError('stop-hook repos', e); } // its note goes in each
       try { if (home.dir && !home.legacy) ensureLocal(home); } catch {} // excluded from git before anything is written there
+      // a clean copy never outlives its task: the ones this task made in Waymark's root are removed now and the removal is checked
+      let copiesNote = '';
+      try { const c = closeCopies(taskStart(records, h.session_id, claimed) || turn.startedAt || Date.now() - 6 * 3600000, cwd); if (c.removed.length || c.left.length) copiesNote = ` · copias limpias: ${c.removed.length} retirada${c.removed.length === 1 ? '' : 's'}${c.left.length ? `, ${c.left.length} sin poder retirar (${c.left.map((p) => path.basename(p)).join(', ')}: \`waymark.mjs copy --clean\`)` : ''}`; } catch (e) { logHookError('stop-hook copies', e); }
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { for (const { root, record } of touchedRepos(gaps.changed, home.root, rec, home.slug)) { appendRecord(root, record); refreshTasks(projectHome(root), true); } } catch (e) { logHookError('stop-hook touched', e); } // each other project it changed files in hears of it
       try { expireGrants(rec.id); } catch (e) { logHookError('stop-hook grants', e); } // a permission given for this task ends with it (docs/adr/0045)
@@ -1268,7 +1272,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + confirmAsk(rec)));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + confirmAsk(rec)));
     } catch (e) {
       logHookError('stop-hook', e);
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence

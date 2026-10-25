@@ -136,6 +136,16 @@ export function checkSensitive(c, cwd, session = 'unknown', lines = null) {
 }
 
 // → the denial reason, or null.
+// A junction or symbolic link to a node_modules (mklink /J, New-Item -ItemType Junction|SymbolicLink, ln -s): the package manager of the
+// copy can purge the repo's modules through it, which deleted a project's own dependencies. A clean copy installs from the store.
+const LINK = /\bmklink\b[^\n]*\/[JD]\b|New-Item\b[^\n|;]*-ItemType\s+(?:Junction|SymbolicLink)|\bln\s+-[a-z]*s[a-z]*\b/i;
+export function checkLink(command) {
+  const text = String(command || '');
+  return LINK.test(text) && /node_modules/i.test(text)
+    ? 'Waymark: a junction or link to a node_modules is denied: the clean copy\'s package manager can purge the repo\'s own modules through it. Make the copy with `waymark.mjs copy HEAD` (a short folder Waymark owns; it prints the install step, which installs from the store with no network) and remove it with `waymark.mjs copy --remove <path>`.'
+    : null;
+}
+
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
@@ -150,6 +160,8 @@ export function gate(hook, agent) {
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
   // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
+    const link = checkLink(c.command);
+    if (link) return link;
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
     return changesProject(c.command) ? withNote(checkDecision({ command: c.command }, turns(), hook.session_id, undefined, cwd)) : null;

@@ -184,7 +184,9 @@ export function copyPath(cmd) {
 }
 export const copyPaths = (commands) => [...new Set(commands.filter((c) => WORKTREE_ADD.test(c)).map(copyPath).filter((p) => p && p.length >= 8))];
 // The command adds a clean copy or runs in one of `copies` (a later call naming its path, another shell, its own variable).
-export const inCopy = (command, copies = []) => WORKTREE_ADD.test(command) || copies.some((p) => slash(command).includes(p));
+// Waymark's own copy root (~/.waymark/tmp, made by `waymark.mjs copy`) and its command count as a clean copy too, with no path to track.
+const OWN_COPY = /waymark\.mjs["']?\s+copy(?:\s|$)|[\\/]\.waymark[\\/]tmp[\\/]/;
+export const inCopy = (command, copies = []) => WORKTREE_ADD.test(command) || OWN_COPY.test(command) || copies.some((p) => slash(command).includes(p));
 // Where one run executes, read from the `cd` / Push-Location before it in the same command; a variable there is resolved
 // from its assignment in the command. 'temp': a scratch or temp folder (a clean copy or a helper, never the project);
 // 'unknown': a variable nothing in the command assigns, so the hook cannot tell where it ran; null: the session's folder

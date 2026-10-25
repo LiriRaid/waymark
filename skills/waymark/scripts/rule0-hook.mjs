@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
@@ -112,6 +112,33 @@ export function otherSessionLine(cwd, session, now = new Date()) {
   const o = otherOpen(cwd, session, now)[0];
   return o ? ` Another session${o.agent ? ` (${o.agent})` : ''} has a turn open in this project since ${new Date(o.at).toLocaleString('sv').slice(11, 16)} ("${o.prompt}"): if it is still running, tell the user before changing files it may be changing.` : '';
 }
+// The projects next to this one (an API and its FE) are two sessions that never hear of each other: the card names them once, at the start. From then
+// on one line says what a sibling did since this session's previous prompt (a task it closed with its Aprendido, a turn it opened); nothing new says
+// nothing, so it costs 0. It arrives with the next prompt: no hook can push to a running session. The previous prompt's time is kept per session in
+// ~/.waymark/.siblings.json, because open.json loses its entry when the turn closes. The session's first prompt only notes the time.
+export const SIBLINGS_SHOWN = 2, SIBLING_LEARNED = 110;
+export function siblingsLine(cwd, session, { now = Date.now(), stateFile = path.join(HOME, '.siblings.json') } = {}) {
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')) || {}; } catch {}
+  const key = session || 'unknown', since = seen[key];
+  for (const [k, at] of Object.entries(seen)) if (now - at > 7 * 86400000) delete seen[k];
+  seen[key] = now;
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return ''; }
+  if (!since) return '';
+  const news = [];
+  for (const h of workspaceSiblings(projectHome(cwd).root)) {
+    if (!h.dir || h.legacy) continue;
+    const name = path.basename(h.root), said = [];
+    for (const r of readTaskRecords(h).filter((x) => x.id && !x.kind && Date.parse(x.at || 0) > since).slice(-2)) {
+      const learned = aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')).replace(/\s+/g, ' ').trim();
+      said.push(`${r.id.match(/T\d+[a-z]?$/)?.[0] || r.id}${r.agent ? ` (${r.agent})` : ''} closed${learned ? `: ${learned.length > SIBLING_LEARNED ? learned.slice(0, SIBLING_LEARNED - 1) + '…' : learned}` : ''}`);
+    }
+    const open = otherOpen(h.root, '', new Date(now)).filter((o) => Date.parse(o.at || 0) > since).map((o) => o.next?.match(/T\d+[a-z]?$/)?.[0]).filter(Boolean);
+    for (const id of new Set(open)) said.push(`${id} en curso`);
+    if (said.length) news.push(`${name}: ${said.join('; ')}`);
+  }
+  return news.length ? ` Workspace (a sibling project did this since your last prompt; W tasks --workspace has it whole): ${news.slice(0, SIBLINGS_SHOWN).join(' | ')}.` : '';
+}
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
@@ -197,6 +224,7 @@ export function reminder(hook, agent) {
   let ids = '', other = '', unclosed = false;
   try { ids = taskLine(cwd, new Date(), { session, prompt: hook.prompt }); } catch {}
   try { other = otherSessionLine(cwd, session); } catch {}
+  try { other += siblingsLine(cwd, session); } catch (e) { logHookError('rule0-hook siblings', e); }
   try { // this session's last turn never closed (interrupted, or a background agent still running): its open entry is newer than anything the session recorded
     const open = openTurn(cwd, session), home = projectHome(cwd), last = open && !home.legacy ? readRecords(home.log).filter((r) => r.session === session).pop() : null;
     unclosed = !!open && !(last && Date.parse(last.at || 0) > Date.parse(open.at || 0));

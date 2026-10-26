@@ -160,6 +160,16 @@ test('counter-example: in the library repository a piece promoted from a feature
   assert.equal(C.judgeMove(scope, 'ui', 'src/app/shared/spinner', 'src/app/features/inbox').verdict, 'follows');
 });
 
+// The skills that place UI teach the repo's convention first; the scope rule appears only as the "profile default" of a repo with none.
+test('no skill teaches the scope rule as the rule: every mention outside the architecture profile says "profile default"', () => {
+  const md = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.md')) md.push(p); } };
+  walk(path.join(ROOT, 'skills'));
+  const taught = md.filter((f) => !f.replace(/\\/g, '/').endsWith('architectures/screaming.md')).flatMap((f) => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => [`${path.relative(ROOT, f)}:${i + 1}`, l]))
+    .filter(([, l]) => /scope rule|second feature needs it|two or more → shared|2\+ → shared/i.test(l) && !/profile default/i.test(l));
+  assert.deepEqual(taught.map(([at]) => at), []);
+});
+
 test('a component of the newer naming (no .component suffix, @Component in the file) is counted, a plain class beside it is not', () => {
   const d = repo([{ date: '2023-01-01T10:00:00Z', files: {
     ...many(4, (i) => [`src/app/shared/card-${i}/card-${i}.ts`, '@Component({ selector: "c" })\nexport class C {}']),

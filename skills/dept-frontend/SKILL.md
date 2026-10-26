@@ -21,7 +21,7 @@ Guest (no Waymark block in context) → `../waymark/references/coexistence.md` �
 The brief must answer:
 1. **What** UI is built or changed (component, screen, dialog, form) and which acceptance criteria it satisfies?
 2. **Why / for whom** — which user task does it serve?
-3. **Where** — which feature owns it (scope rule: one feature → inside it; two or more → shared), exact folder per *Placement rules*, and which existing shared or library component is reused?
+3. **Where** — where the repo already puts this kind of piece (`memory.md` → Architecture, `W convention`; the scope rule only as "profile default" when the repo shows none), exact folder per *Placement rules*, and which existing shared or library component is reused?
 4. **Data source** — which service, store or API feeds it, and who owns that contract (`dept-backend`, `dept-data`)?
 5. **States** — loading, empty, error, success, disabled, plus hover/focus/active?
 6. **Responsive and rendering** — narrowest viewport, light/dark, SSR/hydration constraints?

@@ -107,7 +107,8 @@ const outsideTask = (promptText, more = {}) => {
 };
 test('2d: logic — a notification turn after the close, with no change, writes no ghost task; a real outside task still does', () => {
   assert.equal(outsideTask('sube el cambio', { resumed: true }), null, 'resumed by a notification');
-  assert.ok(outsideTask('sube el cambio', { repeat: true }), 'counter-example: the same words asked again are a new task, not a ghost');
+  const again = [prompt('sube el cambio'), say('Waymark → L2 · dept-devops'), ...call('Bash', { command: 'git push' }), prompt('sube el cambio'), say('Waymark → L2 · dept-devops'), ...call('Bash', { command: 'git push' })];
+  assert.ok(cierreGaps(currentTurn(again), CIERRE(), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [], outside: true }), 'counter-example: the same words asked again are a new task, not a ghost');
   assert.equal(outsideTask('   '), null, 'an empty prompt');
   assert.ok(outsideTask('sube el cambio'), 'counter-example: a task with a Cierre whose changes are all outside the project is recorded');
 });

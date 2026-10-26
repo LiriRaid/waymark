@@ -234,6 +234,21 @@ export function withSubagents(usage, sub) {
   return { ...usage, input: usage.input + sub.input, cacheWrite: usage.cacheWrite + sub.cacheWrite, cacheRead: usage.cacheRead + sub.cacheRead, output: usage.output + sub.output, fresh: usage.fresh + fresh, total: usage.total + total, subagents: total };
 }
 
+// The harness cut the turn (docs/adr/0048): its last message is a synthetic one no model wrote, with error `rate_limit` (the quota: session, spend or weekly
+// limit) or `server_error` (the provider: a dropped connection, an overload). → { cause: 'usage limit' | 'provider', text } or null. Only the last message of
+// the turn counts: a notice from an earlier turn, or the same words in a model's reply, excuse nothing.
+export function externalStop(lines) {
+  let last = null;
+  for (const d of lines) {
+    if (isPrompt(d)) { last = null; continue; }
+    if (d.type === 'assistant' && !d.isSidechain) last = d;
+  }
+  if (!last || last.message?.model !== '<synthetic>') return null;
+  const text = (last.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(' ').replace(/\s+/g, ' ').trim();
+  const cause = last.error === 'rate_limit' ? 'usage limit' : last.error === 'server_error' ? 'provider' : null;
+  return cause ? { cause, text: text.slice(0, 160) } : null;
+}
+
 // Context size and time of the last main-agent response, and whether the last answered turn opened with "Waymark →".
 // A usage limit leaves a synthetic response (model "<synthetic>", usage all 0) that no model read: it is skipped, or the
 // session would look empty and the brakes would let its costly resume through.

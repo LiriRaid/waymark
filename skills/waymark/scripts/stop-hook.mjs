@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
+import { CIERRE, externalStop, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
@@ -1121,7 +1121,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     skills: [...new Set(turn.tools.filter((t) => t.name === 'Skill').map((t) => String(t.input.skill || '')))],
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
-    outcome: outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned, gaps.win), // hecho | parcial | bloqueado, as a label
+    outcome: gaps.external ? { result: 'parcial', cause: 'external', why: gaps.external.cause } : outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned, gaps.win), // hecho | parcial | bloqueado, as a label
     ...(gaps.win && (gaps.win.unanswered.length || gaps.win.failed.length || gaps.win.twoActions.length) ? { window: gaps.win } : {}), // what the user chose in the window and the Cierre left out (docs/adr/0046)
     ...(gaps.askedRepos?.length ? { askedRepos: gaps.askedRepos.slice(0, 6) } : {}),
     unresolved: gaps.missing.map(maskSecrets),
@@ -1170,6 +1170,12 @@ export const confirmAsk = (rec) => (rec?.outcome?.result === 'hecho' ? ' · ¿Se
 // tokens of context, it says the next task is cheaper in a new session: every response re-reads the whole context, and
 // the context card resumes the work there.
 export const NEW_SESSION = 200000;
+// The Cierre the agent never wrote, built from what the turn shows, for the handoff: the ask, what changed (✔1) and what is left (▶2). The harness's own notice is not copied.
+export function cutCierre(rec, changed, stopped) {
+  const files = [...new Set((changed || []).map((f) => path.basename(String(f))))].slice(0, 6).join(', ');
+  const ask = String(rec.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return `## Cierre · ${rec.id}\nResultado: parcial (${stopped.cause})\nAprendido: pedido «${ask}» ← ✔1 cambiado: ${files || 'nada'} · ▶2 terminar, verificar y cerrar (el turno se cortó: nada se evaluó)`;
+}
 export function summaryLine(id, ev, context = 0, { ask: asking = true } = {}) {
   const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
   const ask = asking && /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
@@ -1270,7 +1276,15 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       }
       // a reply with no Cierre that ends asking the user, with options: the task is in progress (a pause, not an end); the
       // next prompt keeps this turn's snapshot and the task's start, and the turn that ends it is judged
-      if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
+      // the quota or the provider cut the turn before a Cierre (docs/adr/0048): nothing is demanded and no testigo is judged (none applies: not ✘), the work is
+      // recorded parcial for an external cause, and a handoff is left for whoever continues. A turn that already carries its Cierre is judged as any other.
+      const stopped = CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, '')) ? null : externalStop(lines);
+      if (stopped) {
+        gaps.external = stopped;
+        gaps.missing = [];
+        gaps.steps = gaps.steps.map((s) => (s.applies ? { ...s, applies: false, pass: null, why: [], na: stopped.cause } : s));
+        gaps.findings = [`the turn was cut by the ${stopped.cause}: no testigo was judged`];
+      } else if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
       if (gaps.missing.length && !h.stop_hook_active) {
         answer(agent, agent.out.block(blockReason(gaps)));
         return;
@@ -1324,7 +1338,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       }
       try { writeTaskLine(home, rec); } catch (e) { logHookError('stop-hook memory', e); } // the task's Work in progress line, from its Aprendido
       let relay = '';
-      try { relay = writeRelay(home, rec) === 'written' ? ' · relevo en .waymark/next-prompt.md' : ''; } catch (e) { logHookError('stop-hook relay', e); } // the steps it leaves, for whoever starts next (any agent)
+      try { relay = writeRelay(home, gaps.external ? { ...rec, cierre: cutCierre(rec, gaps.changed, gaps.external) } : rec) === 'written' ? ' · relevo en .waymark/next-prompt.md' : ''; } catch (e) { logHookError('stop-hook relay', e); } // the steps it leaves, for whoever starts next (any agent)
       try { if (home.dir && !home.legacy) learn(home, rec, readTaskRecords(home)); } catch (e) { logHookError('stop-hook learn', e); } // what it observed: gates, areas, procedures (docs/adr/0023)
       try { if (home.dir && !home.legacy) syncIdentity(home.memory, stackOf(home.root)); } catch {} // Identity names the repo's package manager
       try { saveSnapshot(h.session_id, cwd); } catch {} // a turn resumed without a prompt diffs from this close, not the last prompt
@@ -1335,7 +1349,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + relay + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + confirmAsk(rec)));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + (gaps.external ? ` · turno cortado por ${gaps.external.cause}: ningún testigo evaluado` : '') + relay + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + confirmAsk(rec)));
     } catch (e) {
       logHookError('stop-hook', e);
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence

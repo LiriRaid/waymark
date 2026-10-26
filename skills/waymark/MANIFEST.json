@@ -175,7 +175,7 @@
   "waymark/scripts/provenance/taskmd.mjs": "aa235a536a0f6255e33061d6e60c066b127a6ce398af169bfce677b2aeedd51d",
   "waymark/scripts/provenance/tasks.mjs": "f8cf9abf22b04e2b852b72e21e84f8b39f1c6c3634d5cbbe54d1d148acb417fd",
   "waymark/scripts/report.mjs": "52005e0a4b6bca8452e76869befa134c555e32607d8218f73f50fab4586c9952",
-  "waymark/scripts/rule0-hook.mjs": "78d9f98e48887ad79aa56ed04b4777695c1e6d69e3f38df73311dfe01a95e75a",
+  "waymark/scripts/rule0-hook.mjs": "ec68b3681ddae2fbca02ac2f75d46de6f8ee32bd323b97f1f1d03496314fd1c7",
   "waymark/scripts/runs.mjs": "28aca77dd270911c689aa72adebd8609f863a7123f8f19f500fcdf00eabfd4c9",
   "waymark/scripts/runtime.mjs": "a5d8c9c63cc22a42b8ad3d047b85a916f4344be61a1ce1c6029aa976429b2187",
   "waymark/scripts/scorecard.mjs": "791766f8abdb4419858c60286b714b006854f33ef77a737cda47ec33f95b4a5d",

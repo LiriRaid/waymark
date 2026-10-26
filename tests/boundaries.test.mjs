@@ -147,3 +147,43 @@ test('2e: go-ahead words and an offer are no confirmation; "Push notifications: 
   assert.equal(outcome('Resultado: parcial (falta calcular la cuota del préstamo)', [], [], 2).cause, undefined);
   assert.equal(outcome('Resultado: parcial (falta el endpoint del proveedor de pagos)', [], [], 2).cause, undefined);
 });
+
+// ---- M3 (2e) · "sí T1, T2", "sí a las dos", "no", and a step the user says is theirs ----
+const closedAs = (dir, session, id, file = 'src/a.mjs') => P.appendRecord(dir, { id, agent: 'claude', at: new Date().toISOString(), session, cwd: dir, level: 2, files: [file], cierre: `## Cierre · ${id}\nResultado: hecho\nAprendido: x ← y`, outcome: { result: 'hecho' } });
+const confirmed = (dir) => P.readRecords(P.projectHome(dir).log).filter((x) => x.kind === 'confirm' && x.confirmed).flatMap((x) => x.confirmed);
+test('2e: logic — "sí T1, T2" confirms both tasks of the session; a number that is no task of the session confirms nothing', async () => {
+  const dir = tmpRepo(), s = 's-ids';
+  closedAs(dir, s, '2026-10-26 · T1'); closedAs(dir, s, '2026-10-26 · T2', 'src/app.css');
+  const r = await ask(dir, s, 'sí T1, T2');
+  assert.match(r.out, /confirmadas? como hechas?/);
+  assert.deepEqual(confirmed(dir).sort(), ['2026-10-26 · T1', '2026-10-26 · T2']);
+  const other = tmpRepo();
+  closedAs(other, s, '2026-10-26 · T1');
+  assert.ok(!/confirmada/.test((await ask(other, s, 'sí T9')).out), 'counter-example: T9 is no task of the session');
+});
+test('2e: CSS/HTML — "sí a las dos" confirms the last two tasks that said hecho', async () => {
+  const dir = tmpRepo(), s = 's-both';
+  closedAs(dir, s, '2026-10-26 · T1', 'src/app.css'); closedAs(dir, s, '2026-10-26 · T2', 'src/index.html');
+  await ask(dir, s, 'sí a las dos');
+  assert.deepEqual(confirmed(dir).sort(), ['2026-10-26 · T1', '2026-10-26 · T2']);
+});
+test('2e: a bare "no" after a hecho reaches the model as a follow-up and is recorded as the user\'s word; after a question it is an answer', async () => {
+  const dir = tmpRepo(), s = 's-no';
+  closedAs(dir, s, '2026-10-26 · T1');
+  const r = await ask(dir, s, 'no');
+  assert.doesNotMatch(r.out, /"decision":"block"/, 'the model reads it');
+  assert.match(JSON.parse(r.out).hookSpecificOutput.additionalContext, /said "no" to 2026-10-26 · T1/);
+  assert.deepEqual(P.readRecords(P.projectHome(dir).log).filter((x) => x.refuted).map((x) => [x.refuted, x.said]), [[['2026-10-26 · T1'], 'no']]);
+  const asked = tmpRepo();
+  closedAs(asked, s, '2026-10-26 · T1');
+  await ask(asked, s, 'no', 'Listo.\n\n¿Lo subo ahora?\n- Sí\n- No');
+  assert.ok(!P.readRecords(P.projectHome(asked).log).some((x) => x.refuted), 'counter-example: the no answers the question');
+});
+test('2e: a step the user says is theirs ("los PR los abro yo", "yo despliego") is offered as a Conventions line, never written; one already there is not', async () => {
+  const { ownedOffer } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const day = new Date('2026-10-26T12:00:00Z');
+  assert.match(ownedOffer('ok, pero los PR los abro yo', '# P\n', day), /offer .*"- PRs: the user \(2026-10-26: «ok, pero los PR los abro yo»\)" under Conventions; never write it without their yes/);
+  assert.match(ownedOffer('yo despliego a producción', '# P\n', day), /- Deploys: the user/);
+  assert.equal(ownedOffer('yo despliego', '# P\n## Conventions specific to this project\n- Deploys: the user (2026-10-01: «yo despliego»)\n', day), '', 'counter-example: already written');
+  assert.equal(ownedOffer('despliega tú a producción', '# P\n', day), '', 'counter-example: the agent is asked to do it');
+});

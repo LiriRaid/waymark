@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
 import { commandFiles } from './tool-hook.mjs';
@@ -67,19 +67,57 @@ export function taskLine(cwd, now = new Date(), { session = null, prompt = '' } 
 // last reply ended asking something else (the "sí" answers that), nor when the task is not the session's last thing.
 export const YES = /^\s*(?:s[ií]|yes|confirmo|confirmado|correcto|completo)\s*[.!¡]*\s*$/i; // go-ahead words (dale, ok, vale) are no confirmation: they answer an offer
 const OFFER = /\b(?:si quieres|si prefieres|quieres que|puedo|te parece|want me|shall i|should i|would you|let me know)\b|[¿?]/i;
+// "sí T3, T4" names the tasks; "sí a las dos" / "sí a todas" counts back over the session's tasks that said hecho; a bare "no" after a hecho says it is not
+// done (the model reads it and continues it as a follow-up; the record keeps the user's word).
+const YES_IDS = /^\s*(?:s[ií]|yes|confirmo)(?=[\s,:])[\s,:]*((?:T\d+[a-z]?(?:\s*(?:,|y|and|&)\s*)?)+)\s*[.!]*\s*$/i;
+const YES_MANY = /^\s*(?:s[ií]|yes)[\s,]*(?:a\s+)?(?:las|los|both|all)?\s*(dos|tres|cuatro|ambas|ambos|todas|todos|\d+)\s*[.!]*\s*$/i;
+const NO = /^\s*no\s*[.!]*\s*$/i;
+const COUNT = { dos: 2, ambas: 2, ambos: 2, tres: 3, cuatro: 4 };
 export function confirmation(hook, agent, cwd) {
-  if (!YES.test(String(hook.prompt || ''))) return null;
+  const prompt = String(hook.prompt || '');
+  const named = prompt.match(YES_IDS)?.[1], many = prompt.match(YES_MANY)?.[1], no = NO.test(prompt);
+  if (!YES.test(prompt) && !named && !many && !no) return null;
   const session = hook.session_id || 'unknown';
   if (openTurn(cwd, session)) return null;
-  const last = lastOfSession(cwd, session);
-  if (!last?.id || last.kind || last.outcome?.result !== 'hecho') return null;
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy || !fs.existsSync(home.memory)) return null;
+  const all = readRecords(home.log).filter((r) => r.session === session), last = all.pop();
+  if (!named && !many && (!last?.id || last.kind || last.outcome?.result !== 'hecho')) return null;
   const lines = agent.read(hook), reply = [...lines].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
   const text = (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-  if (closingQuestions(text).length || OFFER.test(text.split('\n').slice(-4).join('\n'))) return null; // the reply ended offering or asking: the yes answers that
-  const home = projectHome(cwd);
-  if (!confirmTasks(home, [last.id], { note: hook.prompt, agent: agent.name, session, always: true }).length) return null;
+  if (closingQuestions(text).length || OFFER.test(text.split('\n').slice(-4).join('\n'))) return null; // the reply ended offering or asking: the yes or the no answers that
+  if (no) {
+    appendRecord(home.root, { kind: 'confirm', agent: agent.name, at: new Date().toISOString(), session, refuted: [last.id], said: 'no' });
+    return { no: last.id };
+  }
+  const done = new Set(all.concat(last || []).filter((r) => r.kind === 'confirm').flatMap((r) => r.confirmed || []));
+  const hecho = all.concat(last || []).filter((r) => r.id && !r.kind && r.outcome?.result === 'hecho');
+  let ids;
+  if (named) {
+    const nums = named.match(/T\d+[a-z]?/gi).map((t) => t.toUpperCase());
+    ids = nums.map((t) => [...hecho].reverse().find((r) => String(r.id).match(/T\d+[a-z]?$/i)?.[0].toUpperCase() === t)?.id);
+    if (ids.some((x) => !x)) return null; // a number that is no task of the session: an ordinary message
+  } else if (many) {
+    const open = hecho.filter((r) => !done.has(r.id));
+    ids = /^tod/i.test(many) ? open.map((r) => r.id) : open.slice(-(COUNT[many.toLowerCase()] || Number(many))).map((r) => r.id);
+    if (!ids.length) return null;
+  } else ids = [last.id];
+  if (!confirmTasks(home, ids, { note: hook.prompt, agent: agent.name, session, always: true }).length) return null;
   refreshTasks(home, true);
-  return { id: last.id };
+  return { id: ids.join(', '), ids };
+}
+
+// A step the user says is theirs ("los PR los abro yo", "yo despliego"), with no Conventions line for it yet: the agent offers the line once, in the user's words
+// and dated, and writes it only on their yes (decision 13). → the line for the reminder, or ''.
+const OWNED = [['Deploys', /\b(?:yo\s+(?:despliego|hago\s+el\s+deploy|subo\s+a\s+producci[oó]n)|(?:el\s+)?deploy\s+lo\s+hago\s+yo|I\s+deploy)\b/i], ['PRs', /\b(?:los\s+PRs?\s+los\s+abro\s+yo|yo\s+abro\s+(?:los\s+)?(?:PRs?|pull\s+requests?)|I\s+open\s+the\s+PRs?)\b/i],
+  ['Commits', /\b(?:los\s+commits?\s+los\s+hago\s+yo|yo\s+hago\s+los\s+commits?)\b/i], ['Migrations', /\b(?:las\s+migraciones\s+las\s+corro\s+yo|yo\s+corro\s+las\s+migraciones)\b/i]];
+export function ownedOffer(prompt, memory, now = new Date()) {
+  const text = String(prompt || '').trim(), mem = String(memory || '').replace(/<!--[\s\S]*?-->/g, '');
+  for (const [key, re] of OWNED) {
+    if (!re.test(text) || new RegExp(`^[ \\t]*[-*]?[ \\t]*${key}:`, 'im').test(mem)) continue;
+    return ` The user said this step is theirs: offer once, in your choice window, to write "- ${key}: the user (${now.toISOString().slice(0, 10)}: «${text.slice(0, 120)}»)" under Conventions; never write it without their yes.`;
+  }
+  return '';
 }
 // Soft cap of a task (docs/adr/0044): past 60 minutes, 150 tool calls or 40 changed files, whichever comes first, the agent is told once to
 // offer the user closing it and opening a new task for what remains. A project changes the numbers in memory.md: "Soft cap: 90 min / 200 calls / 60 files".
@@ -238,7 +276,9 @@ export function reminder(hook, agent) {
   const cwd = hook.cwd || process.cwd();
   let yes = null;
   try { yes = confirmation(hook, agent, cwd); } catch (e) { logHookError('rule0-hook confirmation', e); }
-  if (yes) return agent.out.blockPrompt ? agent.out.blockPrompt(`Waymark: ${yes.id} confirmada como hecha (tu «sí»); no queda nada por hacer en ella.`) : agent.out.context('UserPromptSubmit', `Waymark: the user's "sí" confirmed ${yes.id} as done and the hook closed it. Answer in one line: no routing line, no Cierre.${agent.note(SKILLS_DIR)}`);
+  const plural = yes?.ids?.length > 1;
+  if (yes?.ids) return agent.out.blockPrompt ? agent.out.blockPrompt(`Waymark: ${yes.id} ${plural ? 'confirmadas como hechas' : 'confirmada como hecha'} (tu «sí»); no queda nada por hacer en ${plural ? 'ellas' : 'ella'}.`) : agent.out.context('UserPromptSubmit', `Waymark: the user's "sí" confirmed ${yes.id} as done and the hook closed ${plural ? 'them' : 'it'}. Answer in one line: no routing line, no Cierre.${agent.note(SKILLS_DIR)}`);
+  const refuted = yes?.no ? ` The user said "no" to ${yes.no}: it is not done. Continue it as its follow-up; ask what is missing if it is not clear.` : '';
   let st = { openedWithWaymark: false };
   let lines = null;
   try { lines = agent.read(hook); st = sessionState(lines); } catch {}
@@ -274,7 +314,9 @@ export function reminder(hook, agent) {
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   let cap = '';
   try { cap = softCapLine(hook, agent, cwd, taskStartMark(hook.session_id), Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
-  const text = (st.openedWithWaymark ? short : full) + ids + other + repo + (held?.line || '') + cap + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  let owned = '';
+  try { owned = ownedOffer(hook.prompt, fs.readFileSync(projectHome(cwd).memory, 'utf8')); } catch {}
+  const text = (st.openedWithWaymark ? short : full) + ids + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }

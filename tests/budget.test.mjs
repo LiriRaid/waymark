@@ -67,7 +67,8 @@ test('2g: logic — past 150 calls the agent is told once to offer a new task; b
 test('2g: CSS/HTML — 45 changed stylesheets reach the files cap; the minutes cap counts the time worked since the task\'s start', () => {
   const [told] = cap(edits(45, 'css', at(-5000)), Date.now() - 5 * 60000);
   assert.match(told, /45 changed files/);
-  const [slow] = cap(Array.from({ length: 16 }, (_, i) => call('Read', { file_path: '/work/proj/src/app.css' }, at(-(75 - i * 5) * 60000))).flat(), Date.now() - 75 * 60000);
+  const start = Date.now() - 76 * 60000; // before the first call, so none falls outside the task
+  const [slow] = cap(Array.from({ length: 16 }, (_, i) => call('Read', { file_path: '/work/proj/src/app.css' }, at(-(75 - i * 5) * 60000))).flat(), start);
   assert.match(slow, /run 7\d min, 16 calls/);
   const [calls] = cap(edits(45, 'css', at(-5000)), 0);
   assert.equal(calls, '', 'counter-example: no task in progress, nothing to measure');

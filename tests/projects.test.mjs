@@ -48,6 +48,25 @@ test('13: counter-example — records written before the log carried an outcome 
   assert.equal(await SC.measure('records.parcialShare', p), 0.5);
 });
 
+// a parcial the quota or the provider caused, and a close with testigos left unresolved
+const extra = (p, i, rec) => P.appendRecord(p, { schema: 'waymark.record/v1', id: `2026-10-2${i} · T${40 + i}`, agent: 'claude', at: new Date(Date.UTC(2026, 9, 20 + i)).toISOString(), session: `x${++n}`, level: 2, evaluation: { tokens: 1, score: '1/2' }, ...rec });
+for (const [kind, files] of [['logic', ['src/orders.service.ts']], ['CSS/HTML', ['src/app/button.component.scss', 'src/app/button.component.html']]]) {
+  test(`13: ${kind} — a parcial for an external cause is out of the share on both sides, and the unresolved share is reported beside it`, async () => {
+    const p = project(`ext-${kind.length}`, mix(2, 2, 'claude', files));
+    for (let i = 0; i < 3; i++) extra(p, i, { files, outcome: { result: 'parcial', cause: 'external', why: 'usage limit' }, unresolved: ['Verificar'] });
+    extra(p, 5, { files, outcome: { result: 'hecho' }, unresolved: ['Revisar'] });
+    assert.equal(await SC.measure('records.parcialShare', p), 2 / 5, 'the three cut turns count for nothing');
+    const r = await SC.projectsReport([p]);
+    assert.equal(r.total.unresolvedShare, 1 / 5, 'a hecho that left a testigo unresolved; the cut turns are not judged');
+    assert.match(SC.renderProjects(r), /parcial 40 % · unresolved 20 %/);
+  });
+}
+test('13: counter-example — a parcial with no cause, or a cause of the work, still counts as parcial', async () => {
+  const p = project('own', mix(1, 3));
+  extra(p, 1, { files: ['src/a.ts'], outcome: { result: 'parcial', cause: 'work' } });
+  assert.equal(await SC.measure('records.parcialShare', p), 2 / 5);
+});
+
 test('13: CSS/HTML — the same for a project whose tasks only touched styles and templates', async () => {
   const p = project('site', mix(2, 8, 'claude', ['src/app/button.component.css', 'src/app/button.component.html']));
   assert.equal(await SC.measure('records.parcialShare', p), 0.2);

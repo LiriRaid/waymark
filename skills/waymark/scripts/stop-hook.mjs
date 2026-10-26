@@ -1061,13 +1061,16 @@ export function evaluate(gaps, usage, model = null, measured = null, links = nul
   const rank = (v) => (v === false ? 0 : v === 'exception' ? 1 : v === 'warn' ? 2 : 3);
   const worst = (a, b) => (rank(a) <= rank(b) ? a : b);
   for (const s of gaps.steps.filter((x) => x.applies)) steps[s.label] = worst(steps[s.label] ?? true, s.pass === false ? false : s.exception ? 'exception' : s.warn ? 'warn' : true);
+  // a turn the quota or the provider cut judged nothing: each step it would have applied is 'na', and the score says why instead of 0/0
+  if (gaps.external) for (const s of gaps.steps.filter((x) => x.na === gaps.external.cause)) steps[s.label] = 'na';
   const ok = Object.values(steps).filter((v) => v === true || v === 'warn').length, exceptions = Object.values(steps).filter((v) => v === 'exception').length;
   const marks = exceptions + Object.values(steps).filter((v) => v === 'warn').length;
+  const score = gaps.external ? `n/a (cut: ${gaps.external.cause})` : `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`;
   const est = estimate(usage, model); // the user's own pairs per model (calibrate.mjs); none → no %
   const split = usage?.cacheRead !== undefined ? { usage: { input: usage.input, cacheWrite: usage.cacheWrite, cacheRead: usage.cacheRead, output: usage.output } } : {};
   // shared with another session: quotaOwn is this session's part, prorated by cost (an estimate, never a pair)
   const quota = measured ? { quotaPct: measured.pct, quotaBy: measured.shared ? 'measured:shared' : 'measured', quotaEst: est.pct, ...(measured.shared && measured.own !== undefined ? { quotaOwn: measured.own } : {}) } : { quotaPct: est.pct, quotaBy: est.by };
-  return { steps, score: `${ok}/${Object.keys(steps).length}${marks ? ` · ${marks} ⚠` : ''}`, ...(exceptions ? { exceptions } : {}), ...(gaps.omitted ? { omitted: gaps.omitted } : {}), tokens: usage?.total || 0, ...split, ...(links ? { links } : {}), model, ...quota };
+  return { steps, score, ...(exceptions ? { exceptions } : {}), ...(gaps.omitted ? { omitted: gaps.omitted } : {}), tokens: usage?.total || 0, ...split, ...(links ? { links } : {}), model, ...quota };
 }
 
 // Branch of the repo that holds each changed file (null when not a repo), so the record shows where the work went.
@@ -1202,7 +1205,7 @@ export function cutCierre(rec, changed, stopped) {
   return `## Cierre · ${rec.id}\nResultado: parcial (${stopped.cause})\nAprendido: pedido «${ask}» ← ✔1 cambiado: ${files || 'nada'} · ▶2 terminar, verificar y cerrar (el turno se cortó: nada se evaluó)`;
 }
 export function summaryLine(id, ev, context = 0, { ask: asking = true } = {}) {
-  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
+  const s = Object.entries(ev.steps).map(([k, v]) => `${k} ${v === 'na' ? 'n/a' : v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ');
   const ask = asking && /^(none|default|pairs:[12]|family:.+)$/.test(String(ev.quotaBy || ''))
     ? ` · ¿qué % marcó tu cuota en esta tarea? node "${path.join(path.dirname(fileURLToPath(import.meta.url)), 'calibrate.mjs').replace(/\\/g, '/')}" "${id}" <pct>` : '';
   const fresh = context > NEW_SESSION ? ` · contexto ~${Math.round(context / 1000)}k: la próxima tarea, en una sesión nueva (la tarjeta la retoma)` : '';

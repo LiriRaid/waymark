@@ -74,6 +74,12 @@ const recent = async (root, n = 30, full = true) => {
   return full ? last.filter((r) => r.schema) : last;
 };
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);
+// The tasks the parcial share judges: a record from before the log carried an outcome says nothing either way, and a parcial for an
+// external cause (the quota, the provider cut the turn) says nothing of the work, so neither is counted on either side.
+const judged = (rs) => rs.filter((r) => r.outcome?.result && r.outcome.cause !== 'external');
+const parcialOf = (rs) => share(judged(rs), (r) => r.outcome.result === 'parcial');
+// The share that closed with testigos still unresolved: shown beside parcial in the real-use report, not a check (no lock of its own).
+const unresolvedOf = (rs) => share(judged(rs), (r) => (r.unresolved || []).length > 0);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 // A check's score from its value: ge scores value over threshold, le scores 1 within it and threshold over value above it.
 const scoreOf = (op, value, threshold) => (op === 'ge' ? Math.min(1, value / threshold) : value <= threshold ? 1 : Math.min(1, threshold / value));
@@ -88,7 +94,7 @@ const MEASURES = {
   },
   async 'records.detailShare'(root) { return share(await recent(root, 30, false), (r) => r.schema); },
   // Real use (docs/adr/0049): the share of the last 30 tasks that closed parcial, the agents that closed them, and the median tokens of a task.
-  async 'records.parcialShare'(root) { return share((await recent(root, 30, false)).filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'); }, // a record from before the log carried an outcome says nothing either way
+  async 'records.parcialShare'(root) { return parcialOf(await recent(root, 30, false)); },
   async 'records.agentSpread'(root) { const rs = await recent(root, 30, false); const named = new Set(rs.map((r) => r.agent).filter(Boolean)); return named.size || null; }, // a record with no agent is no second agent
   async 'records.medianTokens'(root) { return median((await recent(root, 30, true)).map((r) => r.evaluation?.tokens).filter((t) => t > 0)); },
   async 'records.pinnedShare'(root) { return share(await recent(root, 20), (r) => r.pinned); },
@@ -148,7 +154,7 @@ const MEASURES = {
 export const MEASURE_NAMES = Object.keys(MEASURES);
 
 // ---- one check → { score 0..1, status: pass | fail | pending | unmeasured, detail } ----
-async function runCheck(root, c) {
+async function runCheck(root, c, lastPoint = Infinity) {
   if (c.kind === 'exists') {
     const missing = as(c.files).filter((f) => !expand(root, f).exists);
     return missing.length ? { score: 0, status: 'fail', detail: `missing: ${missing.join(', ')}` } : { score: 1, status: 'pass' };
@@ -173,7 +179,7 @@ async function runCheck(root, c) {
     let value = null;
     try { value = fn ? await fn(root) : null; } catch { value = null; }
     if (value === null || value === undefined) return { score: 0, status: 'unmeasured', detail: `${c.measure} cannot be measured here yet` };
-    if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in point ${c.frozenIn}` };
+    if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in ${c.frozenIn > lastPoint ? 'the next release' : `point ${c.frozenIn}`}` };
     const score = scoreOf(c.op, value, c.threshold);
     return { score, status: score >= 1 ? 'pass' : 'fail', value, detail: `${c.measure} = ${fmt(value)} (${c.op === 'ge' ? '≥' : '≤'} ${c.threshold})` };
   }
@@ -184,10 +190,10 @@ const floor1 = (x) => Math.floor(x * 10 + 1e-9) / 10;
 
 export async function scorecard(root) {
   const card = readScorecard(root);
-  const criteria = [];
+  const criteria = [], lastPoint = Math.max(...card.criteria.flatMap((k) => k.checks.map((c) => c.point || 0)));
   for (const k of card.criteria) {
     const results = [];
-    for (const c of k.checks) results.push({ id: c.id, what: c.what, point: c.point, ...(await runCheck(root, c)) });
+    for (const c of k.checks) results.push({ id: c.id, what: c.what, point: c.point, ...(await runCheck(root, c, lastPoint)) });
     criteria.push({ id: k.id, name: k.name, weight: k.weight, target: k.target, percent: (results.reduce((a, r) => a + r.score, 0) / results.length) * 100, checks: results });
   }
   const total = criteria.reduce((a, k) => a + (k.weight * k.percent) / 100, 0);
@@ -229,10 +235,10 @@ export async function projectsReport(roots = namedProjects()) {
     if (!fs.existsSync(root)) { projects.push({ name, missing: true }); continue; }
     const rs = await recent(root, 30, false);
     pooled.push(...rs); full.push(...await recent(root, 30, true));
-    projects.push({ name, tasks: rs.length, parcialShare: share(rs.filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
+    projects.push({ name, tasks: rs.length, parcialShare: parcialOf(rs), unresolvedShare: unresolvedOf(rs), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
   }
   const agents = countBy(pooled.filter((r) => r.agent), (r) => r.agent);
-  const total = { tasks: pooled.length, parcialShare: share(pooled.filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
+  const total = { tasks: pooled.length, parcialShare: parcialOf(pooled), unresolvedShare: unresolvedOf(pooled), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
   const values = { '13.6': total.parcialShare, '9.9': Object.keys(agents).length || null, '8.9': total.medianTokens };
   const checks = Object.entries(DIR_CHECKS).map(([id, m]) => {
     const c = checkOf(id), value = values[id];
@@ -244,8 +250,8 @@ const countBy = (rs, f) => rs.reduce((o, r) => { const k = f(r); o[k] = (o[k] ||
 export function renderProjects(r) {
   const pc = (v) => (v === null || v === undefined ? '—' : `${Math.round(v * 1000) / 10} %`);
   const out = ['Waymark real use · the last 30 tasks of each project named', ''];
-  for (const p of r.projects) out.push(p.missing ? `  ${p.name}: path not found` : `  ${p.name}: ${p.tasks} tasks · parcial ${pc(p.parcialShare)} · agents ${Object.entries(p.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`);
-  out.push('', `  Together: ${r.total.tasks} tasks · parcial ${pc(r.total.parcialShare)} · median ${r.total.medianTokens === null ? '—' : `${Math.round(r.total.medianTokens / 1000)}k`} tokens per task · ${r.total.oneAgent ? `one agent (${Object.keys(r.total.agents)[0]}): nothing here shows the other agents work` : `agents ${Object.entries(r.total.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`}`);
+  for (const p of r.projects) out.push(p.missing ? `  ${p.name}: path not found` : `  ${p.name}: ${p.tasks} tasks · parcial ${pc(p.parcialShare)} · unresolved ${pc(p.unresolvedShare)} · agents ${Object.entries(p.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`);
+  out.push('', `  Together: ${r.total.tasks} tasks · parcial ${pc(r.total.parcialShare)} · unresolved ${pc(r.total.unresolvedShare)} · median ${r.total.medianTokens === null ? '—' : `${Math.round(r.total.medianTokens / 1000)}k`} tokens per task · ${r.total.oneAgent ? `one agent (${Object.keys(r.total.agents)[0]}): nothing here shows the other agents work` : `agents ${Object.entries(r.total.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`}`);
   for (const c of r.checks) out.push(`  ${c.id} ${c.measure}: ${c.status}${c.value === null || c.value === undefined ? '' : ` (${Number.isInteger(c.value) ? c.value : c.value.toFixed(3)})`}`);
   return out.join('\n');
 }

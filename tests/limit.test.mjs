@@ -95,6 +95,30 @@ for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'sr
   });
 }
 
+// a model's own answer before the cut, as the transcript has it
+const answer = (text, model = 'claude-sonnet-5-5') => ({ type: 'assistant', timestamp: at(), message: { model, usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'text', text }] } });
+for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'src/app/shared/button.component.scss']]) {
+  test(`12: ${kind} — the cut record names the model that worked and each step it would have judged as n/a, never 0/0 or <synthetic>`, async () => {
+    const { records } = await session(file, [answer('sigo con el archivo'), LIMIT]);
+    const rec = records.find((r) => r.id);
+    assert.equal(rec.evaluation.model, 'claude-sonnet-5-5', 'the harness notice is no model');
+    assert.equal(rec.inputs.model, 'claude-sonnet-5-5');
+    assert.match(rec.evaluation.score, /^n\/a \(cut: usage limit\)$/);
+    const steps = Object.values(rec.evaluation.steps);
+    assert.ok(steps.length > 0 && steps.every((v) => v === 'na'), JSON.stringify(rec.evaluation.steps));
+    const { incidents } = await import(`file://${SCRIPTS}/incidents.mjs`);
+    const failed = { id: '2026-10-26 · T0', evaluation: { steps: Object.fromEntries(Object.keys(rec.evaluation.steps).map((k) => [k, false])) } };
+    assert.equal(incidents([failed, rec]).open.length, Object.keys(rec.evaluation.steps).length, 'an n/a step neither opens nor closes an incident');
+  });
+}
+test('12: counter-example — a turn that was not cut keeps its score as passed/applied and its steps as ✔/✘', async () => {
+  const { evaluate } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const steps = [{ label: 'Cierre', applies: true, pass: true }, { label: 'Verificar', applies: true, pass: false }, { label: 'Revisar', applies: false, pass: null, na: 'usage limit' }];
+  const ev = evaluate({ steps }, { total: 0 }, 'claude-sonnet-5-5');
+  assert.equal(ev.score, '1/2');
+  assert.deepEqual(ev.steps, { Cierre: true, Verificar: false }, 'a step that did not apply stays out, even with an na of its own');
+});
+
 for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'src/app/shared/button.component.html']]) {
   test(`12: ${kind} — the real grace notice, then the model ends with no Cierre: no block, parcial(usage limit), a handoff`, async () => {
     const { dir, out, records } = await session(file, [NOTICE, say('Resultado: parcial. No pude cumplir los puntos del hook porque se acaba el límite.')]);

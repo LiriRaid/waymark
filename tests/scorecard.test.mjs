@@ -81,6 +81,7 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
     { id: '4', what: 'le over', point: 0, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: 0.25 },
     { id: '5', what: 'pending', point: 4, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: null, frozenIn: 3 },
     { id: '6', what: 'not built', point: 11, kind: 'measure', measure: 'conformance.cases', op: 'ge', threshold: 30 },
+    { id: '7', what: 'pending past the plan', point: 4, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: null, frozenIn: 14 },
   ]));
   const r = (await S.scorecard(root)).criteria[0].checks;
   const share = r[0].value;
@@ -91,6 +92,7 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
   assert.equal(r[3].score, 0.25 / share);
   assert.deepEqual([r[4].status, r[4].score, r[5].status, r[5].score], ['pending', 0, 'unmeasured', 0]);
   assert.match(r[4].detail, /frozen in point 3/);
+  assert.match(r[6].detail, /frozen in the next release$/, 'a point past the last one of the card is no point of this plan');
 });
 
 test('0: the total is a weighted sum and the rendered figure is cut, never rounded up', async () => {

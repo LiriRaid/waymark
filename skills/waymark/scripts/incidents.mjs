@@ -23,7 +23,7 @@ export function incidents(records) {
     const steps = r.evaluation.steps;
     for (const [label, ok] of Object.entries(steps)) {
       if (LABELS && !LABELS.has(label)) continue;
-      if (ok === 'exception') continue; // declared, not proven: it neither opens nor closes an incident
+      if (ok === 'exception' || ok === 'na') continue; // declared, not proven, or a cut turn that judged nothing: it neither opens nor closes an incident
       if (ok) { open.delete(label); continue; }
       const cause = clip(String([...(r.unresolved || []), ...(r.findings || [])][0] || '').replace(/\s+/g, ' '), 120);
       const o = open.get(label) || { label, since: r.id, count: 0 };

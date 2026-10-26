@@ -33,7 +33,7 @@ export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir()
   for (const d of lines) {
     if (d.version) agent = d.version;
     if (d.type !== 'assistant' || d.isSidechain) continue;
-    if (d.message?.model) model = d.message.model;
+    if (d.message?.model && d.message.model !== '<synthetic>') model = d.message.model; // the harness's cut notice is no model's answer
     for (const c of d.message?.content || []) if (c.type === 'tool_use' && /^mcp__/.test(c.name)) mcp.add(c.name.split('__')[1]);
   }
   let waymark = null;

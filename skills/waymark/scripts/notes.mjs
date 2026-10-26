@@ -184,6 +184,8 @@ export function fetchNotes(cwd, remote = defaultRemote(cwd), timeout = 60000) {
 // The remote's notes as last fetched or pushed: a ref of their own, never the local one.
 export const trackRef = (remote = 'origin', ref = NOTES_REF) => `refs/notes/remotes/${remote}/${ref.replace(/^refs\/notes\//, '')}`;
 const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
+// The command that takes that refspec out of .git/config again (git 2.30+), for the user to run after their yes: the remote's notes stop coming back.
+export const unsetFetchSpecCmd = (remote = 'origin') => `git config --fixed-value --unset remote.${remote}.fetch "${fetchSpec(remote)}"`;
 const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
 const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
 export const hasNotes = (cwd) => REFS.some((ref) => !!refSha(cwd, ref));

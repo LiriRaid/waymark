@@ -24,11 +24,19 @@ export function pushPref(slug, file = prefsFile()) {
 }
 
 // Adds the project to the `Notes push:` (or `Notes push never:`) line of the preferences, creating the line when there is none.
+// The contrary line loses the project and keeps `(expired <date> for <slug>: <the new rule>)`, or the older answer would still win;
+// the note never repeats a key, or the key's regex would read it as the line.
 export function savePushPref(slug, kind = 'yes', { file = prefsFile(), now = new Date() } = {}) {
   const key = kind === 'never' ? 'Notes push never' : 'Notes push';
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
-  const re = kind === 'never' ? /^(.*Notes push never:[ \t]*)([^—\n]*)(.*)$/im : /^(.*Notes push:[ \t]*)([^—\n]*)(.*)$/im;
+  const NEVER = /^(.*Notes push never:[ \t]*)([^—\n]*)(.*)$/im, YES = /^(.*Notes push:[ \t]*)([^—\n]*)(.*)$/im;
+  const other = kind === 'never' ? YES : NEVER, old = text.match(other);
+  if (old && names(old[2]).includes(slug)) {
+    const rest = names(old[2]).filter((n) => n !== slug).join(', ');
+    text = text.replace(other, (_, a, b, c) => `${a}${rest}${rest ? ' ' : ''}${c.trim() ? c.trim() : '—'} (expired ${now.toLocaleDateString('sv')} for ${slug}: the user now said ${kind === 'never' ? 'never push' : 'push at each close'})`);
+  }
+  const re = kind === 'never' ? NEVER : YES;
   const hit = text.match(re);
   if (hit) {
     const list = names(hit[2]);

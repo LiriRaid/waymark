@@ -41,7 +41,7 @@ import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
-import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes, defaultRemote } from './notes.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes, defaultRemote, unsetFetchSpecCmd } from './notes.mjs';
 import { pushPref, savePushPref } from './notes-remote.mjs';
 import { stackOf, rowProblem } from './stack.mjs';
 import { found } from './connect-agents.mjs';
@@ -279,7 +279,8 @@ export function ignoreLines(cwd) {
 export function footprint(cwd) {
   const at = ignoreLines(cwd);
   if (!at) return '';
-  const spec = hasFetchSpec(at.home.root) ? ' Also in .git/config: the notes fetch refspec (local to this clone, never versioned).' : '';
+  const remote = defaultRemote(at.home.root);
+  const spec = hasFetchSpec(at.home.root, remote) ? ` Also in .git/config: the notes fetch refspec (local to this clone, never versioned; it brings the remote's task notes back). It may stay; to take it out, after the user's yes: ${unsetFetchSpecCmd(remote)}` : '';
   return `repo: Waymark wrote ${at.found.length} ignore block${at.found.length > 1 ? 's' : ''} (${at.found.map(([d]) => d).join(' ')}) into this project's versioned .gitignore, so they show as a change of the project's own files. Offer, with the choice window: ${W} localize shows the plan and --apply moves them to .git/info/exclude (this clone only); the .gitignore change that leaves is the user's to commit or discard.${spec}`;
 }
 // Moves those blocks out of the versioned .gitignore into .git/info/exclude. A .gitignore Waymark created and nothing else holds is removed.

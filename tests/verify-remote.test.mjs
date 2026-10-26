@@ -148,6 +148,28 @@ test('the preference: per project, saved once, read back; "never" wins and the o
   fs.rmSync(file);
 });
 
+test('a newer answer expires the contrary one: never then yes pushes, yes then never stops, the other projects keep theirs', () => {
+  const file = path.join(home, 'preferences.md'), now = new Date('2026-10-26T12:00:00Z');
+  fs.rmSync(file, { force: true });
+  R.savePushPref('front', 'never', { now });
+  R.savePushPref('api', 'never', { now });
+  R.savePushPref('front', 'yes', { now });
+  assert.deepEqual([R.pushPref('front'), R.pushPref('api')], ['yes', 'never'], 'the newer yes wins; the other project keeps its never');
+  let text = fs.readFileSync(file, 'utf8');
+  assert.match(text, /Notes push never: api — .*\(expired 2026-10-26 for front: the user now said push at each close\)/);
+  R.savePushPref('front', 'never', { now });
+  assert.equal(R.pushPref('front'), 'never', 'and back');
+  text = fs.readFileSync(file, 'utf8');
+  assert.match(text, /Notes push: — .*\(expired 2026-10-26 for front: the user now said never push\)/);
+  assert.equal(text.match(/Notes push:/g).length, 1, 'still one line each');
+  fs.writeFileSync(file, '- Notes push never: front\n');
+  R.savePushPref('front', 'yes', { now });
+  assert.equal(R.pushPref('front'), 'yes', 'a hand-written line with no reason expires too');
+  R.savePushPref('third', 'never', { now });
+  assert.deepEqual([R.pushPref('third'), R.pushPref('front')], ['never', 'yes'], 'counter-example: a never for one project expires nothing of another');
+  fs.rmSync(file);
+});
+
 test('the push at the close: with the project\'s yes the hook pushes at every close, with a remote only, without prompting; without it nothing leaves', () => {
   const remote = bare(), d = project(remote), slug = P.projectHome(d).slug;
   P.appendRecord(d, rec(1));

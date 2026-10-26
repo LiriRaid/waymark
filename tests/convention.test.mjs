@@ -236,6 +236,55 @@ test('check lists Waymark\'s lines in a versioned .gitignore, and localize moves
   assert.equal(ignoreLines(d), null);
 });
 
+test('a mass move between layers is stopped once per task with the convention\'s line: logic pieces by git mv, styles and templates by Move-Item; a small or same-layer move runs', async () => {
+  const T = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const d = sharedUi(), sf = path.join(d, '..', `move-gate-${path.basename(d)}.json`); temps.push(sf);
+  const ts = 'git mv src/app/shared/button-1/button-1.component.ts src/app/shared/button-2/button-2.component.ts src/app/shared/modals/confirm-modal.component.ts src/app/features/inbox/';
+  const deny = T.checkMove(ts, d, 's1', 't1', sf);
+  assert.match(deny, /moves 3 files from src\/app\/shared\/button-1 \(shared\) to src\/app\/features\/inbox \(features\): a structural change/);
+  assert.match(deny, /CONTRADICTS the project's convention: .*first commit|CONTRADICTS the project's convention/);
+  assert.match(deny, /The recommended option is not to move/);
+  assert.equal(T.checkMove(ts, d, 's1', 't1', sf), null, 'asked once: after the answer it runs');
+  assert.match(T.checkMove(ts, d, 's1', 't2', sf) || '', /structural change/, 'a new task asks again');
+  const css = 'Move-Item -Path src/app/shared/button-3/*.css,src/app/shared/button-4/*.css,src/app/shared/button-5/*.css -Destination src/app/features/contacts';
+  assert.match(T.checkMove(css, d, 's2', 't1', sf) || '', /moves 3 files .*\(shared\) to src\/app\/features\/contacts \(features\).*CONTRADICTS.*style pieces/, 'styles count, judged as styles');
+  assert.match(T.checkMove('Move-Item src/app/shared/button-4/*.html,src/app/shared/button-4/*.css,src/app/shared/button-4/*.ts src/app/features/contacts', d, 's2b', 't1', sf) || '', /moves 3 files/, 'positional Move-Item, a template with its style');
+  assert.match(T.checkMove('cd src/app && mv shared/button-5 features/inbox/', d, 's3', 't1', sf) || '', /moves 3 files/, 'a folder counts the files it holds, after a cd');
+  assert.equal(T.checkMove('git mv src/app/shared/button-1/button-1.component.ts src/app/shared/button-2/button-2.component.ts src/app/features/inbox/', d, 's4', 't1', sf), null, 'counter-example: two files is no mass move');
+  assert.equal(T.checkMove('mv src/app/shared/button-1 src/app/shared/buttons-old', d, 's5', 't1', sf), null, 'counter-example: inside the same layer');
+  assert.equal(T.checkMove('git mv a.txt b.txt', d, 's6', 't1', sf), null, 'counter-example: nothing that exists between layers');
+});
+
+test('through the hook: a mass git mv out of the shared home is denied before it runs, and the files stay where they were', () => {
+  const d = sharedUi();
+  fs.mkdirSync(path.join(d, '.waymark'), { recursive: true }); fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), '# P\n');
+  const t = path.join(d, '..', `move-${path.basename(d)}.jsonl`); temps.push(t);
+  fs.writeFileSync(t, [{ type: 'user', uuid: 'p1', timestamp: new Date().toISOString(), message: { role: 'user', content: 'mueve los botones a inbox' } }, { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L3 · dept-architecture' }] } }].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const command = 'git mv src/app/shared/button-1 src/app/features/inbox/button-1';
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'tool-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd: d, session_id: 's-move-e2e', transcript_path: t }), encoding: 'utf8', env: process.env });
+  assert.match(r.stdout, /"permissionDecision":"deny"/, r.stdout + r.stderr);
+  assert.match(r.stdout, /a structural change.*CONTRADICTS/);
+  assert.ok(fs.existsSync(path.join(d, 'src', 'app', 'shared', 'button-1', 'button-1.component.css')));
+});
+
+test('the notes refspec in .git/config is named with the command that takes it out; that command, run, leaves the remote\'s own fetch line', async () => {
+  const { footprint } = await import(`file://${SCRIPTS}/waymark.mjs`);
+  const { hasFetchSpec } = await import(`file://${SCRIPTS}/notes.mjs`);
+  const d = withOldBlocks({ 'src/a.html': '<a></a>' });
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-conv-remote-')); temps.push(remote);
+  spawnSync('git', ['init', '-q', '--bare', remote]);
+  spawnSync('git', ['remote', 'add', 'origin', remote], { cwd: d });
+  spawnSync('git', ['config', '--add', 'remote.origin.fetch', '+refs/notes/waymark*:refs/notes/remotes/origin/waymark*'], { cwd: d });
+  const line = footprint(d), cmd = line.match(/after the user's yes: (git config .*)$/)?.[1];
+  assert.ok(cmd, line);
+  assert.ok(hasFetchSpec(d));
+  const args = cmd.match(/"[^"]*"|\S+/g).slice(1).map((a) => a.replace(/^"|"$/g, ''));
+  assert.equal(spawnSync('git', args, { cwd: d }).status, 0);
+  assert.equal(hasFetchSpec(d), false);
+  assert.match(spawnSync('git', ['config', '--get-all', 'remote.origin.fetch'], { cwd: d, encoding: 'utf8' }).stdout, /^\+refs\/heads\/\*:refs\/remotes\/origin\/\*$/m, 'the remote\'s own line stays');
+  assert.doesNotMatch(footprint(d), /refspec/, 'counter-example: no refspec, no sentence');
+});
+
 test('counter-example: a .gitignore with only the project\'s own lines, and a folder with no Waymark memory, have nothing to move; a .gitignore only Waymark wrote and git never tracked is removed', async () => {
   const { footprint, localize } = await import(`file://${SCRIPTS}/waymark.mjs`);
   const clean = repo([{ date: '2024-01-01T10:00:00Z', files: { '.gitignore': 'dist/\n', 'src/a.html': '<a></a>' } }]);

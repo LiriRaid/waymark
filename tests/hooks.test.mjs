@@ -1955,6 +1955,27 @@ test('stack: the package manager and versions come from the repo (packageManager
   assert.match(JSON.parse(line.stdout).hookSpecificOutput.additionalContext, /Repo: pnpm 11\.5\.0 · @angular\/core 21\.2\.15/, 'every prompt carries the stack as the repo has it');
 });
 
+test('Identity: the template\'s Package manager placeholder becomes the repo\'s own at session start, marked to confirm; another stack names its tool; no manifest leaves it', async () => {
+  const { syncIdentity, stackOf } = await import(`file://${SCRIPTS}/stack.mjs`);
+  const hole = '- Package manager / build tool: <pnpm | bundle | uv | gradle | …>';
+  const repo = memRepo('identity-pm'), mem = path.join(repo, '.waymark', 'memory.md');
+  fs.appendFileSync(mem, `${hole}\n`);
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ dependencies: { '@angular/core': '^21.0.0' } }));
+  fs.writeFileSync(path.join(repo, 'yarn.lock'), '');
+  spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
+  assert.match(fs.readFileSync(mem, 'utf8'), /^- Package manager \/ build tool: yarn \(read from the repo: yarn\.lock; to confirm\)$/m);
+  assert.equal(syncIdentity(mem, stackOf(repo)), false, 'filled once: the line now names the repo manager');
+  const rb = memRepo('identity-rb'), rbMem = path.join(rb, '.waymark', 'memory.md');
+  fs.appendFileSync(rbMem, `${hole}\n`);
+  fs.writeFileSync(path.join(rb, 'Gemfile'), "source 'https://rubygems.org'\n");
+  assert.equal(syncIdentity(rbMem, stackOf(rb)), true);
+  assert.match(fs.readFileSync(rbMem, 'utf8'), /build tool: bundler \(bundle exec\) \(read from the repo; to confirm\)/);
+  const bare = memRepo('identity-none'), bareMem = path.join(bare, '.waymark', 'memory.md');
+  fs.appendFileSync(bareMem, `${hole}\n`);
+  assert.equal(syncIdentity(bareMem, stackOf(bare)), false, 'counter-example: no manifest, nothing is guessed');
+  assert.match(fs.readFileSync(bareMem, 'utf8'), /build tool: <pnpm/);
+});
+
 test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
   const repo = memRepo('card', '- ▶ [2026-10-04 · T3] waiting for the user\n- [2026-10-04 · T2] older pending: Pendiente: x\n- Gotcha: a note\n- ✔ [2026-10-05 · T1] done thing\n');
   fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));

@@ -21,7 +21,7 @@ import { census, fillMemory } from './convention.mjs';
 import { fillRuntime, runtimeDir } from './runtime.mjs';
 import { fillEyes, cleanEyes } from './eyes.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations, syncIdentity, PM_PLACEHOLDER } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -82,6 +82,10 @@ export function digest(cwd, agentName = 'claude') {
   // the template's Architecture placeholder becomes what the repo itself shows (docs/adr/0043), never over a line somebody wrote
   if (!home.legacy && /^- Architecture:\s*<slug/m.test(best.text)) {
     try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
+  }
+  // the template's Package manager placeholder becomes the repo's own (lockfile or packageManager), marked to confirm
+  if (!home.legacy && PM_PLACEHOLDER.test(best.text)) {
+    try { if (syncIdentity(home.memory, stackOf(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook identity', e); }
   }
   out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; W check offers the move). W = ${W_CMD}.` : `Project memory: ${where} (read; full file there) and tasks.md next to it (where the work stands). W = ${W_CMD}.`);
   // the Node the stack needs, when this machine's is not it (a legacy Angular on Node 24): a `runtime` row in Quality gates the first time, never over a line somebody wrote

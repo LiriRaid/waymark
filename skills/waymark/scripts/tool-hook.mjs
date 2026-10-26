@@ -24,6 +24,7 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
 import { inRoot } from './copy.mjs';
+import { census, groupOf, judgeMove } from './convention.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
@@ -214,6 +215,75 @@ export function checkMigration(file, memory, session, stateFile = path.join(proc
   return `Waymark: this project migrates with its own script (Conventions: "Migrations: ${script.slice(0, 120)}"), and this writes a migration file by hand. Use the script to make it and to run it; if it cannot do what the task needs, say so in your choice window and write it by hand only if the user chooses that.`;
 }
 
+// A move of pieces between layers (shared, core, features) is a structural change (decision 11, docs/adr/0043): `git mv`, `mv` or Move-Item of
+// MASS_MOVE files or more out of one layer into another is denied once per task and pair of layers, with the follows/CONTRADICTS line of the
+// project's own convention, so the user decides it in its own window. The census runs only when a command moves something.
+const MOVE = /^(git\s+mv|mv|Move-Item|move)\s/i, MASS_MOVE = 3;
+const unixPath = (w) => String(w).replace(/^\/([a-z])\//i, '$1:/');
+function filesUnder(abs, cap = 2000) {
+  const base = path.basename(abs);
+  if (/[*?]/.test(base)) { // a glob in the last segment, as the shell would expand it
+    const re = new RegExp(`^${base.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+    try { return fs.readdirSync(path.dirname(abs)).filter((n) => re.test(n)).flatMap((n) => filesUnder(path.join(path.dirname(abs), n), cap)); } catch { return []; }
+  }
+  let st; try { st = fs.statSync(abs); } catch { return []; }
+  if (st.isFile()) return [abs];
+  const out = [], walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (out.length >= cap) return; const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.push(p); } };
+  try { walk(abs); } catch {}
+  return out;
+}
+// → [{ files: [abs], to: abs }] for each move in the command (sources expanded to the files they hold).
+export function layerMoves(command, cwd = process.cwd()) {
+  const out = [];
+  for (const p of shellRuns(command)) {
+    const text = String(p.text).trim(), m = text.match(MOVE);
+    if (!m) continue;
+    const dir = path.resolve(cwd, unixPath(String(p.cd || '.').replace(/^["']|["']$/g, '')));
+    const words = [...text.slice(m[0].length).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].map((w) => w[1] ?? w[2] ?? w[3]);
+    let to = null;
+    const from = [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (/^(-Destination|-t|--target-directory)$/i.test(w)) { to = words[++i]; continue; }
+      if (/^--target-directory=/.test(w)) { to = w.split('=')[1]; continue; }
+      if (/^-(Path|LiteralPath)$/i.test(w)) { from.push(...String(words[++i] || '').split(',')); continue; }
+      if (/^-/.test(w) || /^[<>&|]/.test(w)) continue;
+      from.push(...w.split(','));
+    }
+    if (!to) to = from.pop();
+    if (!to || !from.length) continue;
+    out.push({ files: from.filter(Boolean).flatMap((s) => filesUnder(path.resolve(dir, unixPath(s)))), to: path.resolve(dir, unixPath(to)) });
+  }
+  return out;
+}
+export function checkMove(command, cwd, session, task = '', stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.move-gate.json')) {
+  const moves = layerMoves(command, cwd);
+  if (!moves.some((m) => m.files.length)) return null;
+  const root = projectHome(cwd).root;
+  if (!root) return null;
+  const conv = census(root), rel = (f) => path.relative(root, f).replace(/\\/g, '/');
+  const pairs = new Map();
+  for (const m of moves) for (const f of m.files) {
+    const from = rel(f), to = rel(m.to);
+    if (from.startsWith('..') || to.startsWith('..')) continue;
+    const gf = groupOf(conv, from), gt = groupOf(conv, to);
+    if (gf === gt) continue;
+    const key = `${gf}→${gt}`, at = pairs.get(key) || { gf, gt, from: path.posix.dirname(from), to, n: 0, style: 0 };
+    at.n++; if (/\.(s?css|less|sass|styl)$/i.test(f)) at.style++;
+    pairs.set(key, at);
+  }
+  const big = [...pairs.values()].filter((p) => p.n >= MASS_MOVE).sort((a, b) => b.n - a.n)[0];
+  if (!big) return null;
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
+  const key = `${session}:${task}:${norm(root)}:${big.gf}→${big.gt}`;
+  if (seen[key]) return null;
+  seen[key] = Date.now();
+  try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  const v = judgeMove(conv, big.style === big.n ? 'style' : 'ui', big.from, big.to);
+  return `Waymark: this moves ${big.n} files from ${big.from} (${big.gf}) to ${big.to} (${big.gt}): a structural change. It was not run. Ask it apart, in its own choice window (never inside "recommended on everything"), showing what moves (from where to where, how many files), the convention the repo holds and this line: ${v.line}.${v.verdict === 'contradicts' ? ' The recommended option is not to move.' : ''} Run it again only after the user's answer.`;
+}
+
 // An ego-browser script, with the files it imports by file:/// URL, checked before it runs (docs/adr/0047): the local dev server and the design
 // link the user wrote in the request are the only hosts; a profile-wide clear and a typed password never run. → the deny reason, or null.
 function checkEyes(command, turns) {
@@ -256,6 +326,11 @@ export function gate(hook, agent) {
     if (trailer) return trailer;
     if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
+    if (/(?:^|[;&|(\s])(?:mv|move|Move-Item)\s/i.test(c.command)) { // a census that cannot run leaves the move to the decision gate below
+      let move = null;
+      try { move = checkMove(c.command, cwd, hook.session_id, taskKey()); } catch (e) { logHookError('tool-hook move', e); }
+      if (move) return withNote(move);
+    }
     const lines = turns(), own = projectHome(cwd).root;
     for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, taskKey()); if (deny) return withNote(deny); }
     return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, cwd));

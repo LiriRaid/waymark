@@ -138,11 +138,15 @@ export function stackLine(root, { direct = false } = {}) {
   return [`${s.pm}${s.pmVersion ? ` ${s.pmVersion}` : ''}`, ...deps].join(' · ') + run;
 }
 
-// memory.md's Identity line "Package manager…: <name>" set to the repo's manager when it names another. → true when
-// rewritten.
+// memory.md's Identity line "Package manager…: <name>" set to the repo's manager when it names another, and the template's
+// `<pnpm | bundle | …>` placeholder filled with it, marked to confirm (another stack: its own tool). → true when rewritten.
+export const PM_PLACEHOLDER = /^(- Package manager[^:\n]*:\s*)<[^>\n]*>[ \t]*$/m;
 export function syncIdentity(memoryFile, stack) {
-  if (!stack?.pm) return false;
-  const text = read(memoryFile);
+  if (!stack) return false;
+  const text = read(memoryFile), hole = text.match(PM_PLACEHOLDER);
+  const said = stack.pm ? `${stack.pm} (read from the repo: ${stack.from}; to confirm)` : stack.other ? `${stack.other} (read from the repo; to confirm)` : '';
+  if (hole && said) { fs.writeFileSync(memoryFile, text.replace(hole[0], () => `${hole[1]}${said}`)); return true; }
+  if (!stack.pm) return false;
   const m = text.match(/^(- Package manager[^:\n]*:\s*)([A-Za-z]+)([^\n]*)$/m);
   if (!m || m[2].toLowerCase() === stack.pm) return false;
   fs.writeFileSync(memoryFile, text.replace(m[0], () => `${m[1]}${stack.pm} (read from the repo: ${stack.from})`));

@@ -23,6 +23,7 @@ const { cierreGaps, outcome, reposNotNamed, namedRepos } = await import(`file://
 const { currentTurn } = await import(`file://${SCRIPTS}/transcript.mjs`);
 const V = await import(`file://${SCRIPTS}/verify.mjs`);
 const M = await import(`file://${SCRIPTS}/manifest.mjs`);
+const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
 const { repoOf } = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -57,6 +58,18 @@ test('11: logic — switching or logging into a gh account is denied always; a p
   assert.equal(T.checkGh('gh pr create --title "x"', 'abre el PR de este cambio'), null, 'asked for: it goes through');
   for (const c of ['gh auth status', 'gh pr view 12', 'gh pr list', 'git commit -m "gh pr create is the user\'s"', "git commit -F - <<'EOF'\ngh auth switch is denied\nEOF"])
     assert.equal(T.checkGh(c, 'agrega reintentos'), null, `counter-example: ${c}`);
+});
+test('11: the gh guard sees a command run through another shell, global flags before the subcommand, and a pull request made through the API', () => {
+  for (const c of ['bash -c "gh auth switch -u x"', 'cmd /c "gh pr create --fill"', "pwsh -c 'gh pr merge 3 --squash'", 'powershell -Command "gh auth login"', 'gh --hostname github.com auth switch', 'gh -R a/b pr create --fill',
+    'gh api -X POST repos/a/b/pulls -f title=x -f head=f -f base=main', 'gh api --method PUT repos/a/b/pulls/3/merge'])
+    assert.ok(T.checkGh(c, 'agrega reintentos'), c);
+  assert.equal(T.checkGh('gh api -X POST repos/a/b/pulls -f title=x', 'abre el PR de este cambio'), null, 'asked for: through the API too');
+  // counter-examples: reading is never asked
+  for (const c of ['gh api repos/a/b/pulls', 'bash -c "gh auth status"', 'gh --version', 'gh api -X POST repos/a/b/issues -f title=x', 'cmd /c "gh pr view 3"']) assert.equal(T.checkGh(c, 'agrega reintentos'), null, c);
+});
+test('5: the link guard sees ln --symbolic and a junction made by a script toward a node_modules', () => {
+  for (const c of ['ln --symbolic ../app/node_modules node_modules', `node -e "require('fs').symlinkSync('../app/node_modules','node_modules','junction')"`, `node -e "fs.symlinkSync(src + '/node_modules', 'node_modules', 'dir')"`]) assert.match(T.checkLink(c) || '', /junction or link to a node_modules is denied/, c);
+  for (const c of ['ln --symbolic a b', `node -e "fs.symlinkSync('a','b')"`, 'ls node_modules']) assert.equal(T.checkLink(c), null, c);
 });
 test('11: the gh guard sees past a prefix and a negation, and "merge" alone opens nothing', () => {
   for (const c of ['GH_TOKEN=x gh pr create --fill', 'command gh auth switch -u x', '& gh pr create', 'gh.exe auth switch', 'sudo gh auth login', 'cd api && gh.exe pr create'])
@@ -300,4 +313,14 @@ test('11: logic — "PRs: the user" in the project\'s Conventions denies opening
 
 test('11: CSS/HTML — a styles change follows the same rule: its PR is the user\'s where the project says so', () => {
   assert.match(T.checkGh('gh pr create --title "estilos del botón" --body "ancho 40px"', 'abre el PR del botón', PRS('the user')) || '', /PRs: the user/);
+});
+
+test('11: the pre-tool hook sends every gh command to the guard: a PR through the API and an account switch past a global flag are denied there too', () => {
+  const d = mk({});
+  const transcript = path.join(d, 't.jsonl');
+  fs.writeFileSync(transcript, JSON.stringify({ type: 'user', uuid: 'p', message: { role: 'user', content: 'agrega reintentos al servicio' } }) + '\n');
+  const run = (command) => T.gate({ tool_name: 'Bash', tool_input: { command }, cwd: d, session_id: 's-gh', transcript_path: transcript }, claude);
+  assert.match(run('gh api -X POST repos/a/b/pulls -f title=x') || '', /pull request is the user's/);
+  assert.match(run('gh --hostname github.com auth switch') || '', /changing the gh account/);
+  assert.equal(run('gh api repos/a/b/pulls'), null, 'counter-example: a read');
 });

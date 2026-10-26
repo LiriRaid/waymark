@@ -141,7 +141,7 @@ export function checkSensitive(c, cwd, session = 'unknown', lines = null) {
 // → the denial reason, or null.
 // A junction or symbolic link to a node_modules (mklink /J, New-Item -ItemType Junction|SymbolicLink, ln -s): the package manager of the
 // copy can purge the repo's modules through it, which deleted a project's own dependencies. A clean copy installs from the store.
-const LINK = /\bmklink\b[^\n]*\/[JD]\b|New-Item\b[^\n|;]*-ItemType\s+(?:Junction|SymbolicLink)|\bln\s+-[a-z]*s[a-z]*\b/i;
+const LINK = /\bmklink\b[^\n]*\/[JD]\b|New-Item\b[^\n|;]*-ItemType\s+(?:Junction|SymbolicLink)|\bln\s+-[a-z]*s[a-z]*\b|\bln\s+[^\n;&|]*--symbolic\b|\bsymlinkSync\s*\(/i; // a script's fs.symlinkSync too
 export function checkLink(command) {
   const text = String(command || '');
   return LINK.test(text) && /node_modules/i.test(text)
@@ -152,9 +152,13 @@ export function checkLink(command) {
 // The user's accounts and pull requests are the user's (docs/adr/0046): switching the gh account is denied always; opening or merging a pull
 // request only when the task's own words ask for one. Waymark reads `git config user.email` and `gh auth status` when it needs to know
 // whose they are, and never writes either anywhere.
-const GH_START = String.raw`(?:^|[;&|(]\s*|\n\s*)(?:(?:[A-Za-z_]\w*=\S*|&|command|sudo|env|exec)\s+)*gh(?:\.exe)?\s+`; // after an env assignment, `command`, `sudo`, PowerShell's `&`, or the .exe
+// after an env assignment, `command`, `sudo`, PowerShell's `&`, the .exe, inside another shell (`bash -c "…"`, `cmd /c "…"`, `pwsh -Command '…'`), and past
+// gh's global flags (`gh --hostname x auth switch`, `gh -R a/b pr create`)
+const GH_START = String.raw`(?:^|[;&|(]\s*|\n\s*|(?:-c|\/c|-Command)\s+["']?)(?:(?:[A-Za-z_]\w*=\S*|&|command|sudo|env|exec)\s+)*gh(?:\.exe)?\s+(?:-{1,2}[\w-]+(?:=\S+|\s+(?!auth\b|pr\b|api\b)[^\s-]\S*)?\s+)*`;
 const GH_AUTH = new RegExp(`${GH_START}auth\\s+(?:switch|login|logout|refresh|setup-git)\\b`);
 const GH_PR = new RegExp(`${GH_START}pr\\s+(create|merge|ready)\\b`);
+// the same through the REST API: a POST, PUT or PATCH to a repository's pulls opens, updates or merges one
+const GH_API_PR = new RegExp(`${GH_START}api\\b(?=[^\\n;&|]*(?:-X|--method)[ =]?(?:POST|PUT|PATCH)\\b)(?=[^\\n;&|]*\\/pulls\\b)([^\\n;&|]*)`);
 // What the request says about a pull request, with what it denies left out ("no abras el PR").
 const asking = (text, words) => new RegExp(String.raw`\b(?:${words})\b`, 'i').test(String(text).replace(/\b(?:no|sin|nunca|don't|do not|never)\b[^.\n]{0,30}\b(?:pull requests?|PRs?|merge)\b/gi, ' '));
 // The project's rule of who opens pull requests (Conventions: "PRs: the user" or "Pull requests: the agent, when asked"), never an account. → the line, or null.
@@ -162,7 +166,8 @@ const prRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').
 export function checkGh(command, asked = '', memory = '') {
   const sk = shellSkeleton(command, { quotes: false });
   if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
-  const pr = sk.match(GH_PR)?.[1], rule = prRule(memory);
+  const api = sk.match(GH_API_PR)?.[1];
+  const pr = sk.match(GH_PR)?.[1] || (api !== undefined ? (/\/merge\b/.test(api) ? 'merge' : 'create') : undefined), rule = prRule(memory);
   if (pr && rule && /:\s*(?:the\s+)?(?:user|usuario)\b/i.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
   // opening one needs the words "pull request" or "PR"; merging one also takes "merge" ("resuelve el conflicto de merge" opens nothing)
   if (pr && !asking(asked, pr === 'merge' ? 'pull requests?|PRs?|merge|mergea\\w*|fusiona\\w*' : 'pull requests?|PRs?')) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
@@ -246,7 +251,7 @@ export function gate(hook, agent) {
   if (c.command !== undefined) {
     const link = checkLink(c.command);
     if (link) return link;
-    if (/\bgh\s+(?:auth|pr)\b/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
+    if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
     if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open

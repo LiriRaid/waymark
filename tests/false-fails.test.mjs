@@ -207,12 +207,14 @@ test('procedures at the department load: a Skill dept-* call (or a read of its S
   assert.match(load || '', /Waymark procedures of dept-frontend/);
   assert.deepEqual([[...procDelivered('s-load', 0, file)].sort(), [...procLate('s-load', 0, file)]], [['dept-frontend', 'dept-qa'], ['dept-frontend']]);
   assert.equal(await packContext({ ...at('s-load'), tool_name: 'Skill', tool_input: { skill: 'dept-frontend' } }, claude, file), null, 'once per task and department');
-  // logic: loaded before any change, in time; the first edit hands no second copy
+  // logic: loaded before any change, nothing goes in at the load (a turn that changes nothing is handed nothing); the first edit hands it, in time
   const file2 = path.join(home, 'packed-load2.json');
-  assert.match(await packContext({ ...at('s-load2'), tool_name: 'Skill', tool_input: { skill: 'waymark:dept-backend', args: 'L2' } }, claude, file2) || '', /Waymark procedures of dept-backend/, 'the plugin form of the name');
-  assert.deepEqual([...procLate('s-load2', 0, file2)], []);
-  // another agent loads a skill by reading its SKILL.md, by a read tool or a shell command
+  assert.equal(await packContext({ ...at('s-load2'), tool_name: 'Skill', tool_input: { skill: 'waymark:dept-backend', args: 'L2' } }, claude, file2), null, 'counter-example: no change yet');
+  assert.match(await packContext({ ...at('s-load2'), tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', 'c.mjs') } }, claude, file2) || '', /Waymark procedures of dept-qa/, 'the first edit hands as before');
+  assert.match(await packContext({ ...at('s-load2'), tool_name: 'Skill', tool_input: { skill: 'waymark:dept-backend' } }, claude, file2) || '', /Waymark procedures of dept-backend/, 'the plugin form of the name');
+  // another agent loads a skill by reading its SKILL.md, by a read tool or a shell command (after a change)
   const file3 = path.join(home, 'packed-load3.json');
+  await packContext({ ...at('s-load3'), tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', 'b.html') } }, claude, file3);
   assert.match(await packContext({ ...at('s-load3'), tool_name: 'Read', tool_input: { file_path: path.join(home, 'skills', 'dept-data', 'SKILL.md') } }, claude, file3) || '', /Waymark procedures of dept-data/);
   assert.match(await packContext({ ...at('s-load3'), tool_name: 'Bash', tool_input: { command: 'cat ~/.agents/skills/dept-security/SKILL.md' } }, claude, file3) || '', /Waymark procedures of dept-security/);
   // counter-example: a skill that is no department, a procedures.md read, another SKILL.md: nothing handed

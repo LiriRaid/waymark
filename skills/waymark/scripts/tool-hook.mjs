@@ -313,15 +313,16 @@ export function deptLoaded(c) {
   return null;
 }
 
-// The procedures of a department at the moment it is loaded, once per task. A load after the task's first change (the Stop asked for the
-// department) is handed too, so the agent need not edit again to get it, and kept as late: the testigo records it, never blocks on it.
+// The procedures of a department loaded after the task's first change (the Stop asked for it), once per task: no edit may follow to carry
+// them, so they go in at the load, kept as late (the testigo records it, never blocks on it). Before any change nothing goes in here: the
+// first edit hands them, and a turn that changes nothing is handed nothing.
 function handOnLoad(dept, session, since, file) {
+  const all = readPacked(file), st = all[session]?.since === since ? all[session] : null;
+  if (!st?.files?.length) return null;
   const procsDone = procDelivered(session, since, file);
   const text = procsDone.has(dept) ? null : procedureText(dept);
   if (!text) return null;
-  const all = readPacked(file), st = all[session]?.since === since ? all[session] : { since, files: [], procs: [] };
-  const late = (st.files || []).length > 0;
-  all[session] = { ...st, since, at: Date.now(), procs: [...procsDone, dept], late: [...(st.late || []), ...(late ? [dept] : [])] };
+  all[session] = { ...st, at: Date.now(), procs: [...procsDone, dept], late: [...(st.late || []), dept] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   return `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook when ${dept} loaded: it counts as read, no need to open the file):\n${text}`;
 }

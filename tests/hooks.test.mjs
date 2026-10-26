@@ -1064,14 +1064,14 @@ test('install-hooks: four entries added after the others, idempotent, old path/m
   assert.equal(first.steps.length, 4);
   assert.equal(first.settings.model, 'x', 'other keys kept');
   assert.deepEqual(first.settings.hooks.Stop.map((e) => e.hooks[0].command), ['node other-framework.js', 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/stop-hook.mjs"'], 'after the existing hooks');
-  assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill');
+  assert.equal(first.settings.hooks.PreToolUse[0].matcher, 'Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill|mcp__engram__mem_save|mcp__engram__mem_update');
   assert.deepEqual(planHooks(first.settings, { scripts: '/s/waymark/scripts' }).steps, [], 'idempotent');
   const old = { hooks: {
     PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node "C:\\old\\waymark\\scripts\\tool-hook.mjs"' }] }],
     UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/rule0-hook.mjs"' }] }, { hooks: [{ type: 'command', command: 'node "/x/waymark/scripts/rule0-hook.mjs"' }, theirs] }],
   } };
   const second = planHooks(old, { scripts: '/s/waymark/scripts' });
-  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs"' }] }]);
+  assert.deepEqual(second.settings.hooks.PreToolUse, [{ matcher: 'Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill|mcp__engram__mem_save|mcp__engram__mem_update', hooks: [{ type: 'command', command: 'node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/tool-hook.mjs"' }] }]);
   assert.deepEqual(second.settings.hooks.UserPromptSubmit.map((e) => e.hooks.map((h) => h.command)), [['node "/s/waymark/scripts/hook-run.cjs" "/s/waymark/scripts/rule0-hook.mjs"'], ['node other-framework.js']], 'the duplicate goes, the other hook stays');
   assert.ok(second.steps.some((s) => /remove duplicate UserPromptSubmit/.test(s)));
   assert.equal(old.hooks.PreToolUse[0].matcher, 'Bash|PowerShell', 'the input is not mutated');

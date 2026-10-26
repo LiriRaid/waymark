@@ -15,6 +15,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
+import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
+import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
 import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
@@ -212,9 +214,21 @@ function checkEyes(command, turns) {
   return why ? `Waymark: this ego-browser script was not run: ${why}. The eyes look at the local dev server as the user, already signed in (docs/adr/0047).` : null;
 }
 
+// A mem_save or mem_update that would keep a secret (docs/adr/0045): a strong format, a value named like a secret, or a value of the project's
+// .env files or of a sensitive file the user allowed. Denied before engram keeps it, naming the kind and the line, never the value.
+function checkMemorySave(text, cwd, session) {
+  loadKnownValues(projectHome(cwd).root, { session });
+  try {
+    const hits = findSecrets(text);
+    if (!hits.length && maskSecrets(text) !== text) hits.push({ kind: 'un valor con nombre de secreto', line: 0 });
+    return hits.length ? `Waymark: this memory was not saved: it holds a secret (${[...new Set(hits.map((h) => `${h.kind}${h.line ? `, line ${h.line}` : ''}`))].slice(0, 3).join(' · ')}). Save it again without the value: name where it lives (the file, the variable), never what it is.` : null;
+  } finally { clearKnownValues(); }
+}
+
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
+  if (c.memory !== undefined) return checkMemorySave(c.memory, cwd, hook.session_id);
   // The guard that cannot judge a command denies it: failing open there let a command with a bracket in it read what the guard exists to stop.
   let sensitive;
   const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };

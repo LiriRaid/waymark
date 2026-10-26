@@ -175,3 +175,78 @@ test('10e: the secrets testigo reports a value read from a .env that reaches a m
   K.clearKnownValues();
   assert.deepEqual(secretHits([{ where: 'mem_save', text: `la base usa ${VALUE}` }]), [], 'counter-example: a hook that loaded nothing knows nothing');
 });
+
+// ---- H7: what the masker knows beyond the .env files ----
+const PEM_BODY = 'MIIEowIBAAKCAQEAsynthETICbodyLINE0000111122223333444455556666777788889999';
+const PEM = `-----BEGIN RSA PRIVATE KEY-----\n${PEM_BODY}\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END RSA PRIVATE KEY-----\n`;
+const AWS_SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYsyntheticKEY';
+test('10e: logic — a private key is masked whole, body included, and a value named like a secret (aws_secret_access_key, client_secret) is masked', async () => {
+  const { maskSecrets } = await import(`file://${SCRIPTS}/provenance/secrets.mjs`);
+  const pem = maskSecrets(`la llave:\n${PEM}fin`);
+  assert.ok(!pem.includes(PEM_BODY) && !pem.includes('QUJDREVG'), pem);
+  assert.match(pem, /la llave:[\s\S]*fin/, 'the text around it stays');
+  assert.ok(!maskSecrets(`aws_secret_access_key = ${AWS_SECRET}`).includes(AWS_SECRET));
+  assert.ok(!maskSecrets('client_secret: Abc123xyz9Q').includes('Abc123xyz9Q'));
+  assert.ok(!maskSecrets(`${PEM.split('\n').slice(0, 2).join('\n')}`).includes(PEM_BODY), 'a key cut before its END line');
+  // counter-examples: prose and a name that only starts with the word
+  assert.equal(maskSecrets('secret_rotation_policy monthly'), 'secret_rotation_policy monthly');
+  assert.equal(maskSecrets('the token expires tomorrow'), 'the token expires tomorrow');
+});
+
+test('10e: the values of a sensitive file the user allowed (a key, a credentials file) are known too; one not allowed is never read', () => {
+  const d = envProject({ 'keys/deploy.pem': PEM, 'config/credentials': `[default]\naws_access_key_id = AKIAABCDEFGHIJKLMNOP\naws_secret_access_key = ${AWS_SECRET}\n`, 'keys/other.pem': PEM.replace(PEM_BODY, 'OTHERbodyNOTallowed0000111122223333') });
+  reset();
+  const now = new Date().toISOString();
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(path.join(home, 'preferences.md'), `- Sensitive allow: keys/deploy.pem · session s-k7 · ${now}\n- Sensitive allow: credentials\n`);
+  K.loadKnownValues(d, { session: 's-k7' });
+  const masked = K.maskKnown(`body ${PEM_BODY} and ${AWS_SECRET} and ${VALUE}`);
+  assert.ok(![PEM_BODY, AWS_SECRET, VALUE].some((v) => masked.includes(v)), masked);
+  assert.equal(K.knownIn('OTHERbodyNOTallowed0000111122223333').length, 0, 'counter-example: a key with no permission is not read');
+  // CSS/HTML: a stylesheet is untouched with every value loaded
+  assert.equal(K.maskKnown('.btn { width: 40px; color: #ff0000 }'), '.btn { width: 40px; color: #ff0000 }');
+  K.clearKnownValues(); reset();
+});
+
+test('10e: a mem_save mid-session that carries a secret is denied before it is saved, never quoting the value; a clean one passes', async () => {
+  const { gate } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const d = envProject();
+  const save = (content) => gate({ tool_name: 'mcp__engram__mem_save', tool_input: { title: 'base de datos', content }, cwd: d, session_id: 's-mem' }, claude);
+  for (const c of [`la base usa ${VALUE}`, `llave:\n${PEM}`, `aws_secret_access_key = ${AWS_SECRET}`]) {
+    const why = save(c) || '';
+    assert.match(why, /secret|sensitive/i, c.slice(0, 30));
+    assert.ok(![VALUE, PEM_BODY, AWS_SECRET].some((v) => why.includes(v)), 'never the value');
+  }
+  assert.equal(save('el botón mide 40px y el color es #ff0000'), null, 'counter-example: a measure and a color');
+  assert.equal(gate({ tool_name: 'mcp__engram__mem_update', tool_input: { id: 1, content: `x ${VALUE}` }, cwd: d, session_id: 's-mem' }, claude) ? 'denied' : 'passed', 'denied', 'mem_update too');
+});
+
+test('10e: end to end — an L2 task closed by the end-of-turn hook keeps no value of a .env, an allowed key or a credentials file in its record, memory, tasks or engram', () => {
+  const d = withMemory(envProject({ 'keys/deploy.pem': PEM }));
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: d, encoding: 'utf8' });
+  fs.writeFileSync(path.join(d, '.gitignore'), '.env*\nkeys/\n.waymark/\n.engram/\n'); git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'base');
+  fs.writeFileSync(path.join(d, 'src', 'a.ts'), 'y');
+  reset();
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(path.join(home, 'preferences.md'), `- Sensitive allow: keys/deploy.pem · session s-e2e7 · ${new Date().toISOString()}\n`);
+  const stub = path.join(d, 'engram-stub.mjs'), saved = path.join(d, 'engram-saved.txt');
+  fs.writeFileSync(stub, `import fs from 'node:fs';\nif (process.argv[2] === 'version') { console.log('engram 9.9.9'); process.exit(0); }\nfs.appendFileSync(${JSON.stringify(saved)}, JSON.stringify(process.argv.slice(2)) + '\\n');\n`);
+  const at = new Date().toISOString(), id = taskIds(d).next;
+  const cierre = `## Cierre · ${id}\nResultado: hecho\nEvidencia: observada la conexión con ${VALUE}\nAprendido: la base usa ${VALUE} y la llave ${PEM_BODY} con aws_secret_access_key = ${AWS_SECRET} ← .env.local`;
+  const lines = [{ type: 'user', uuid: 'p1', timestamp: at, message: { role: 'user', content: 'conecta la base' } }, { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: 'Waymark → L2 · dept-backend' }] } },
+    { type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: path.join(d, 'src', 'a.ts') } }] } }, { type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'ok' }] } },
+    { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: cierre }] } }];
+  const file = path.join(d, 't.jsonl');
+  fs.writeFileSync(file, lines.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: file, cwd: d, session_id: 's-e2e7', stop_hook_active: true, last_assistant_message: cierre }), env: { ...process.env, WAYMARK_HOME: home, WAYMARK_ENGRAM: stub }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const h = P.projectHome(d), read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const log = read(h.log);
+  assert.match(log, new RegExp(id.replace(/[·]/g, '.')), 'the task was recorded');
+  assert.ok(read(saved).length > 0, 'engram was written');
+  for (const [where, text] of [['record', log], ['memory.md', read(h.memory)], ['tasks.md', read(path.join(h.dir, 'tasks.md'))], ['engram', read(saved)]]) {
+    for (const v of [VALUE, PEM_BODY, AWS_SECRET]) assert.ok(!text.includes(v), `${where} holds ${v.slice(0, 6)}…`);
+  }
+  reset();
+});

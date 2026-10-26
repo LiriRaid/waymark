@@ -5,7 +5,7 @@ import { knownIn, maskKnown } from '../lib/known.mjs';
 // Secret formats that are unambiguous wherever they appear: the testigo "sin secretos"
 // looks for these in the memory, mem_save and the task's diff; "password=…" is only masked in what Waymark writes.
 const SECRET_FORMATS = [
-  ['llave privada', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g],
+  ['llave privada', /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----(?:[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----|[\s\S]*$)/g], // the whole block, body included (a key cut before END to the end)
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
   ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g],
   ['API key sk-', /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/g],
@@ -31,7 +31,8 @@ export const deepMask = (v) => (typeof v === 'string' ? maskStrong(v) : Array.is
 const shaped = (v, bare) => v.length >= (bare ? 10 : 6) && (/\d/.test(v) || (!bare && /[^A-Za-z0-9ñÑáéíóúÁÉÍÓÚ]/.test(v)) || (/[a-z]/.test(v) && /[A-Z]/.test(v)));
 export function maskSecrets(text) {
   return maskStrong(text)
-    .replace(/\b(contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|bearer)(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)([^\s"'`,;]+)\3/gi,
+    // a name that ends with the word counts too: aws_secret_access_key, client_secret, DB_PASSWORD (never one that only starts with it)
+    .replace(/\b((?:[A-Za-z0-9]+[_.-])*?(?:contrase(?:ñ|n)a|password|passwd|pwd|clave|token|secret|api[_ -]?key|access[_-]?key|bearer))(\s*(?:es|is|=|:)\s*|\s+)(["'`]?)([^\s"'`,;]+)\3/gi,
       (all, key, sep, quote, value) => ((/^bearer$/i.test(key) && value.length >= 8) || shaped(value, !/(?:es|is|=|:)/i.test(sep)) ? `${key}${sep}[redactado]` : all))
     .replace(/(\/\/[^\s:/@]+:)[^\s@/]+@/g, '$1[redactado]@')
     .replace(/(\s-u\s+[^\s:]+:)\S+/g, '$1[redactado]');

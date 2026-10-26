@@ -1208,7 +1208,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a session with no status line (the desktop app): what it spent, so the quota's rises are split with it too
       try { if (agent.name === 'claude') recordSpend(h.session_id, h.transcript_path); } catch (e) { logHookError('stop-hook spend', e); }
       const cwd = h.cwd || process.cwd(), home = projectHome(cwd);
-      try { loadKnownValues(home.root); } catch {} // what the project's .env files hold is masked in everything this hook writes (docs/adr/0045)
+      try { loadKnownValues(home.root, { session: h.session_id }); } catch {} // what the project's .env files and the sensitive files the user allowed hold is masked in everything this hook writes (docs/adr/0045)
       // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
       const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));
       const prompts = lines.filter(isPrompt).map(promptText).slice(-3); // this task: the current prompt and the two before it

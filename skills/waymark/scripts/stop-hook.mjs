@@ -30,6 +30,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
+import { eyesProvider, eyesDue, observeEyes, eyesGaps } from './eyes.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
@@ -574,7 +575,9 @@ function observeTurn(S) {
     options: optionsLint(ctx.decisions, S.level),
     guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root, { session: ctx.session }), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
-    browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name)).map((t) => t.name === 'Skill' ? t.input.skill : t.name).slice(0, 5) },
+    browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && /\bego-browser\s+nodejs\b/.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
+    // the eyes (docs/adr/0047): browser calls that measured or clicked after the last change; the provider the machine has when none was used
+    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), provider: ctx.eyes?.provider || null, reply }),
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
@@ -723,9 +726,9 @@ function readExceptions(S) {
   // The exception lines (docs/adr/0012): written after a block, they let the step pass as ⚠ "excepción declarada", never
   // as ✔ (nothing ran to prove it). → the line, or undefined.
   const excLine = (re) => exc.match(re)?.[0]?.trim().slice(0, 160);
-  const noComp = excLine(/no comprobado \(.{3,}\)/i), testsNo = excLine(/Tests:\s*no \(.{3,}\)/i), buildNo = excLine(/Build:\s*no \(.{3,}\)/i), secretsNo = excLine(/Secretos:\s*no \(.{3,}\)/i);
+  const noComp = excLine(/no comprobado \(.{3,}\)/i), testsNo = excLine(/Tests:\s*no \(.{3,}\)/i), buildNo = excLine(/Build:\s*no \(.{3,}\)/i), secretsNo = excLine(/Secretos:\s*no \(.{3,}\)/i), eyesNo = excLine(/Ojos:\s*no \(.{3,}\)/i);
   const excepted = {};
-  return { noComp, testsNo, buildNo, secretsNo, excepted };
+  return { noComp, testsNo, buildNo, secretsNo, eyesNo, excepted };
 }
 
 // Testigo decision: the user's answer in the choice window came before the first change.
@@ -831,6 +834,7 @@ function whenOf(S) {
     repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
     specAndCode: observed.tests.specsChanged.length > 0 && code.some((f) => !SPEC.test(path.basename(f))),
     push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
+    eyesDue: eyesDue({ provider: observed.eyes?.provider, ui, level: Number(level), changed }), // a seen change at L2+, or an L1 of styles and templates with no spec, and a browser to look with
   };
   return { when, risk };
 }
@@ -871,6 +875,10 @@ const WITNESS = {
     const { buildAfter, buildNo, ctx, excepted, styleOnlyChange } = S;
     // a legacy stack's build takes minutes and a stylesheet or a template with no binding is what it would only re-compile: a styles-only change owes none there
     return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ctx.legacy && styleOnlyChange ? (excepted.build = 'legacy stack: a styles-only change needs no full build', []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'];
+  },
+  eyes: (S) => {
+    const { eyesNo, excepted, observed } = S;
+    return observed.eyes.afterLastChange ? [] : eyesNo ? (excepted.eyes = eyesNo, []) : eyesGaps(observed.eyes, observed.eyes.provider);
   },
   docs: (S) => {
     const { retried } = S;
@@ -963,7 +971,10 @@ function composeSteps(S) {
 // The review a small, plain change skips is recorded with its reason, so the record says why nothing blocked.
 function omittedOf(S, steps) {
   const r = steps.find((s) => s.id === 'review');
-  return r && !r.applies && S.code.length && S.level >= 2 && !r.na ? { Review: `riesgo bajo (${S.risk.reason})` } : null;
+  const out = r && !r.applies && S.code.length && S.level >= 2 && !r.na ? { Review: `riesgo bajo (${S.risk.reason})` } : {};
+  // a seen change with no browser to look with (ego, a declared Playwright, the agent's panel): said, never blocked
+  if (S.ui && S.level >= 2 && !S.observed.eyes.provider) out.Ojos = 'sin navegador (ni ego-browser, ni Playwright declarado, ni panel del agente): la pantalla no se pudo mirar';
+  return Object.keys(out).length ? out : null;
 }
 
 // → null (no project files changed, L0) or { level, changed, reply, missing[] (blocks), findings[] (recorded), dept, observed }.
@@ -1228,6 +1239,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.root = home.root;
+      try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
       // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
       let turnAll = [];
       try { if (turn.startedAt) turnAll = turnCommitsAll(turn.tools, cwd, turn.startedAt); } catch (e) { logHookError('stop-hook commits', e); }

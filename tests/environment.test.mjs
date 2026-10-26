@@ -138,6 +138,35 @@ test('11: logic — a migration file written by hand where the project has its o
   assert.equal(T.checkMigration(f, '# P\n\n## Conventions\n- …\n', 's4', sf), null, 'counter-example: no script in the Conventions: nothing to prefer');
   assert.equal(T.checkMigration(f, '<!-- Migrations: bin/migrate -->\n', 's5', sf), null, 'the template\'s own example is no rule');
 });
+
+// The script is read from the repo itself and written once to Conventions, marked to confirm, so the guard has something to prefer.
+const S = await import(`file://${SCRIPTS}/stack.mjs`);
+const MEM = '# P\n\n## Work in progress\n\n## Conventions specific to this project\n- …\n';
+test('11: logic — the migration command comes from the repo (a package.json script, Prisma, Rails, Django, Alembic, Laravel) and is written once to Conventions', () => {
+  const prisma = mk({ 'package.json': JSON.stringify({ dependencies: { '@nestjs/core': '10', '@prisma/client': '5' }, devDependencies: { prisma: '5' }, scripts: { 'prisma:generate': 'prisma generate', 'prisma:migrate': 'npm run prisma:backup && prisma migrate dev', 'prisma:deploy': 'prisma migrate deploy', 'prisma:status': 'prisma migrate status' } }), 'package-lock.json': '{}', 'prisma/schema.prisma': 'model A { id Int @id }' }, MEM);
+  assert.equal(S.migrationCommand(prisma), 'npm run prisma:migrate', 'the script that makes one, not deploy or status');
+  assert.equal(S.migrationCommand(mk({ 'package.json': JSON.stringify({ devDependencies: { prisma: '5' } }), 'prisma/schema.prisma': 'x' })), 'npx prisma migrate dev --name <name>', 'Prisma with no script');
+  assert.equal(S.migrationCommand(mk({ 'package.json': JSON.stringify({ dependencies: { typeorm: '0.3' }, scripts: { 'migration:run': 'typeorm migration:run', 'migration:generate': 'typeorm migration:generate' } }), 'pnpm-lock.yaml': '' })), 'pnpm run migration:generate');
+  assert.equal(S.migrationCommand(mk({ Gemfile: 'gem "rails"\n', 'bin/rails': '#!/usr/bin/env ruby', 'db/migrate/001_a.rb': 'x' })), 'bin/rails generate migration <Name>');
+  assert.equal(S.migrationCommand(mk({ 'manage.py': 'x', 'app/migrations/0001_initial.py': 'x' })), 'python manage.py makemigrations');
+  assert.equal(S.migrationCommand(mk({ 'alembic.ini': '[alembic]' })), 'alembic revision --autogenerate -m "<message>"');
+  assert.equal(S.migrationCommand(mk({ artisan: '<?php', 'composer.json': '{}' })), 'php artisan make:migration <name>');
+  const file = path.join(prisma, '.waymark', 'memory.md');
+  assert.ok(S.fillMigrations(file, prisma));
+  const text = fs.readFileSync(file, 'utf8');
+  assert.match(text, /^- Migrations: `npm run prisma:migrate` \(to confirm: detected from the repo\)$/m);
+  assert.equal(S.fillMigrations(file, prisma), null, 'once');
+  assert.match(T.checkMigration(path.join(prisma, 'prisma', 'migrations', '20261026_a', 'migration.sql'), text, 's-pm', path.join(prisma, 'm.json')) || '', /npm run prisma:migrate/, 'the guard prefers it');
+  const own = mk({ 'package.json': JSON.stringify({ scripts: { migrate: 'node m.js' } }) }, MEM.replace('- …', '- Migrations: bin/migrate new <name>'));
+  assert.equal(S.fillMigrations(path.join(own, '.waymark', 'memory.md'), own), null, 'never over a line somebody wrote');
+});
+
+test('11: CSS/HTML — a front end with no migration command gets no line, and a stylesheet in a folder named like migrations is never asked about', () => {
+  const d = mk({ 'package.json': JSON.stringify({ dependencies: { '@angular/core': '20' }, scripts: { start: 'ng serve', build: 'ng build' } }), 'src/app/migration-wizard/migration-wizard.component.css': '.a{}' }, MEM);
+  assert.equal(S.migrationCommand(d), null);
+  assert.equal(S.fillMigrations(path.join(d, '.waymark', 'memory.md'), d), null);
+  assert.equal(T.checkMigration(path.join(d, 'src', 'app', 'migrations', 'banner.component.css'), fs.readFileSync(path.join(d, '.waymark', 'memory.md'), 'utf8'), 's-css', path.join(d, 'm.json')), null, 'counter-example: no script, nothing to prefer');
+});
 test('11: CSS/HTML — a styles file under a folder with "migrate" in a path is no migration; through the hook the file is denied', async () => {
   const d = mk({ 'db/migrate/001_a.rb': 'a\n', 'src/app.css': 'a{}\n' }, CONV);
   assert.equal(T.checkMigration(path.join(d, 'src', 'app.css'), CONV, 's1', path.join(d, 'm.json')), null);

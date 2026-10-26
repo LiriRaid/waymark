@@ -21,7 +21,7 @@ import { census, fillMemory } from './convention.mjs';
 import { fillRuntime } from './runtime.mjs';
 import { fillEyes, cleanEyes } from './eyes.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins, gateCell, rowProblem } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -88,6 +88,8 @@ export function digest(cwd, agentName = 'claude') {
   if (!home.legacy) { try { if (fillRuntime(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook runtime', e); } }
   // the dev server the eyes look at (docs/adr/0047): proposed from package.json, "to confirm" until the user's first seen change; the captures of a week ago go
   if (!home.legacy) { try { if (fillEyes(home.memory, home.root)) best.text = read(home.memory); cleanEyes(); } catch (e) { logHookError('session-hook eyes', e); } }
+  // the project's own migration command (docs/adr/0046): "to confirm" in Conventions, so a migration written by hand is asked about first
+  if (!home.legacy) { try { if (fillMigrations(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook migrations', e); } }
   const runtime = best.text.match(/^\|\s*runtime\s*\|\s*([^|]+)\|/im)?.[1]?.trim().replace(/`/g, '');
   if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);
   const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);

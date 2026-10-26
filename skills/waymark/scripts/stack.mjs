@@ -185,3 +185,41 @@ export function profileOf(root) {
   if (slug === 'generic' && s?.other) { const own = String(s.other).split(' ')[0].replace(/^[.]/, ''); if (own && fs.existsSync(path.join(stacks, `${own}.md`))) slug = own; }
   return { slug, exists: fs.existsSync(path.join(stacks, `${slug}.md`)) };
 }
+
+// ---- the project's own migration command (docs/adr/0046): read from the repo, written once to Conventions, preferred over a handwritten file ----
+const MAKES = /generate|create|new|make|\bdev\b|migrate$/i, APPLIES_ONLY = /deploy|status|reset|revert|rollback|down|resolve|seed|studio|backup/i;
+// → the command that makes a migration in this repo, or null: a package.json script (the one that makes one before one that only applies),
+// Prisma with no script, Rails, Django, Alembic, Laravel.
+export function migrationCommand(root) {
+  const has = (f) => fs.existsSync(path.join(root, f));
+  const pkg = json(path.join(root, 'package.json'));
+  if (pkg) {
+    const pm = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : has('bun.lockb') || has('bun.lock') ? 'bun' : 'npm';
+    const names = Object.entries(pkg.scripts || {}).filter(([k, v]) => /migrat/i.test(k) && !APPLIES_ONLY.test(k) && !/migrate (deploy|status|reset)/.test(v));
+    const pick = names.find(([k]) => /generate|create|new|make/i.test(k)) || names.find(([, v]) => /migrate dev|migration:generate|makemigrations|make:migration/.test(v)) || names.find(([k]) => MAKES.test(k));
+    if (pick) return `${RUNNERS[pm].run} ${pick[0]}`;
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps.prisma || deps['@prisma/client']) return 'npx prisma migrate dev --name <name>';
+  }
+  if (has('bin/rails') && has('Gemfile')) return 'bin/rails generate migration <Name>';
+  if (has('manage.py')) return 'python manage.py makemigrations';
+  if (has('alembic.ini')) return 'alembic revision --autogenerate -m "<message>"';
+  if (has('artisan')) return 'php artisan make:migration <name>';
+  return null;
+}
+// Writes "- Migrations: `<command>` (to confirm: detected from the repo)" under Conventions when the repo has one and no line says so yet.
+// → the line written, or null.
+export function fillMigrations(memoryFile, root) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  if (/^[ \t]*[-*]?[ \t]*Migrations?:/im.test(text.replace(/<!--[\s\S]*?-->/g, ''))) return null;
+  const cmd = migrationCommand(root);
+  if (!cmd) return null;
+  const line = `- Migrations: \`${cmd}\` (to confirm: detected from the repo)`;
+  const at = text.match(/^## Conventions[^\n]*\n/m);
+  if (!at) return null;
+  const head = at.index + at[0].length, rest = text.slice(head);
+  const out = /^- …\n/.test(rest) ? text.slice(0, head) + line + '\n' + rest.slice(4) : text.slice(0, head) + line + '\n' + rest;
+  fs.writeFileSync(memoryFile, out);
+  return line;
+}

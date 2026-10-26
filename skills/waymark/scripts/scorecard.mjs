@@ -64,11 +64,13 @@ const text = (files) => files.filter((f) => TEXT.test(f)).map((f) => { try { ret
 const as = (v) => (Array.isArray(v) ? v : [v]);
 
 // ---- measures: a number computed from the project's records or sources; null when it cannot be measured here ----
-// The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields.
+// The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields. Only the records the
+// measured version's hooks wrote count: one another version wrote (inputs.waymark) is not this version's to answer for; one with no version stays.
+const VERSION = (() => { try { return fs.readFileSync(path.join(HERE, '..', 'VERSION'), 'utf8').trim(); } catch { return null; } })();
 const recent = async (root, n = 30, full = true) => {
   const { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
   const h = projectHome(root);
-  const last = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind).slice(-n) : [];
+  const last = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind && (!VERSION || !r.inputs?.waymark || r.inputs.waymark === VERSION)).slice(-n) : [];
   return full ? last.filter((r) => r.schema) : last;
 };
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);

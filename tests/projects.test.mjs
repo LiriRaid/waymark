@@ -115,3 +115,16 @@ test('13: the command prints each project and says "one agent"', async () => {
   assert.match(r.stdout, /one agent/i);
   assert.match(r.stdout, /10 tasks/);
 });
+
+// ---- the checks of what the hooks write read the records the measured version wrote ----
+test('1.2: logic — a record another version wrote is not this version\'s to answer for; one with no version stays; none of this version is unmeasured', async () => {
+  const VERSION = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
+  const p = project('versions', mix(0, 4));
+  for (let i = 0; i < 3; i++) P.appendRecord(p, { schema: 'waymark.record/v1', id: `2026-10-2${i} · T${20 + i}`, agent: 'claude', at: new Date(Date.UTC(2026, 9, 20 + i)).toISOString(), session: `old${i}`, level: 2, files: ['src/a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'parcial' } });
+  assert.equal(await SC.measure('records.parcialShare', p), 0, 'the three parcial of 0.0.1 are not counted');
+  P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-25 · T30', agent: 'claude', at: new Date(Date.UTC(2026, 9, 25)).toISOString(), session: 'cur', level: 2, files: ['src/app.css'], inputs: { waymark: VERSION }, outcome: { result: 'parcial' }, cierre: '## Cierre\nResultado: parcial\nEvidencia: x\nAprendido: y' });
+  assert.equal(await SC.measure('records.parcialShare', p), 1 / 5, 'CSS/HTML: a parcial this version wrote counts');
+  const only = project('only-old', []);
+  P.appendRecord(only, { schema: 'waymark.record/v1', id: '2026-10-20 · T1', agent: 'claude', at: new Date().toISOString(), session: 'o', level: 2, files: ['a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'hecho' } });
+  assert.equal(await SC.measure('records.parcialShare', only), null, 'counter-example: no record of this version: unmeasured, never passed');
+});

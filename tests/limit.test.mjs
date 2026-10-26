@@ -25,7 +25,9 @@ let calls = 0;
 const at = () => new Date().toISOString();
 const prompt = (text) => ({ type: 'user', uuid: `p${Math.random()}`, timestamp: at(), message: { role: 'user', content: text } });
 const say = (text) => ({ type: 'assistant', timestamp: at(), message: { content: [{ type: 'text', text }] } });
-const tool = (name, input) => { const id = `u${++calls}`; return [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: at(), message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }]; };
+const tool = (name, input, out = 'ok') => { const id = `u${++calls}`; return [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: at(), message: { content: [{ type: 'tool_result', tool_use_id: id, content: out }] } }]; };
+// the other real shape: the harness tells the model in the middle of the turn, as a meta user message, and the model goes on for a short grace
+const NOTICE = { type: 'user', isMeta: true, usageLimitNote: 'wrap_up', timestamp: at(), message: { role: 'user', content: [{ type: 'text', text: "[Usage limit reached; a short grace allowance remains, then this turn is cut off without warning. Judge what's left.]" }] } };
 // what the harness writes when it cuts the turn: a synthetic assistant message no model produced
 const cut = (error, text) => ({ type: 'assistant', timestamp: at(), isApiErrorMessage: true, error, message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0 }, content: [{ type: 'text', text }] } });
 const LIMIT = cut('rate_limit', "You've hit your session limit · resets 2:50pm (America/Tegucigalpa)");
@@ -40,6 +42,16 @@ test('12: the notice is read from the turn\'s last message: a usage limit, a dro
   assert.equal(externalStop([prompt('x'), LIMIT, prompt('sigue'), say('Waymark → L1')]), null, 'counter-example: a notice from an earlier turn excuses nothing');
   assert.equal(externalStop([prompt('x'), say('el texto "session limit" en mi respuesta')]), null, 'counter-example: the words in a model reply are not the harness notice');
   assert.equal(externalStop([prompt('x'), cut('invalid_request', 'API Error: 400 bad request')]), null, 'counter-example: another API error');
+});
+
+test('12: the grace notice in the middle of the turn (a meta user message with usageLimitNote) is a usage limit too, whatever the model says after it', () => {
+  const edit = tool('Edit', { file_path: '/work/a.ts' }).flat();
+  const s = externalStop([prompt('x'), ...edit, NOTICE, say('Resultado: parcial. No alcanzo a correr los tests.')]);
+  assert.deepEqual([s?.cause, s?.grace], ['usage limit', true], JSON.stringify(s));
+  assert.equal(externalStop([prompt('x'), { ...NOTICE, usageLimitNote: undefined }, say('ok')])?.cause, 'usage limit', 'the text alone, in a meta message, is the notice');
+  assert.equal(externalStop([prompt('x'), NOTICE, say('ok'), prompt('sigue'), say('listo')]), null, 'counter-example: a notice of an earlier turn excuses nothing');
+  assert.equal(externalStop([prompt('[Usage limit reached; esto lo escribí yo]'), say('ok')]), null, 'counter-example: the user typing the words is a prompt, not the notice');
+  assert.equal(externalStop([prompt('x'), ...tool('Bash', { command: 'cat log' }, '[Usage limit reached; from a log]').flat(), say('ok')]), null, 'counter-example: a tool result with the words is not the notice');
 });
 
 const run = (script, payload) => new Promise((resolve) => {
@@ -57,7 +69,7 @@ const session = async (file, ending, { spec = false } = {}) => {
   fs.mkdirSync(path.join(dir, path.dirname(file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), 'a\n');
   spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A'], { cwd: dir }); spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base'], { cwd: dir });
   fs.writeFileSync(path.join(dir, file), 'b\n');
-  const lines = [prompt('ajusta el archivo y deja los tests en verde'), say('Waymark → L2 · dept-backend'), ...tool('Skill', { skill: 'dept-backend' }), ...tool('Edit', { file_path: path.join(dir, file) }), ...(spec ? tool('Bash', { command: 'pnpm exec vitest run a.spec.ts' }) : []), ...ending];
+  const lines = [prompt('ajusta el archivo y deja los tests en verde'), say('Waymark → L2 · dept-backend'), ...tool('Skill', { skill: 'dept-backend' }), ...tool('Edit', { file_path: path.join(dir, file) }), ...(spec ? tool('Bash', { command: 'pnpm exec vitest run a.spec.ts' }, spec === 'red' ? ' FAIL  src/a.spec.ts > a > works\n Tests  1 failed | 3 passed (4)' : ' Tests  4 passed (4)') : []), ...ending];
   const transcript = path.join(dir, 't.jsonl');
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const session_id = `s-limit-${++calls}`;
@@ -82,6 +94,33 @@ for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'sr
     assert.ok(!relay.includes('resets 2:50pm'), 'the quota notice itself is not copied');
   });
 }
+
+for (const [kind, file] of [['logic', 'src/orders.service.ts'], ['css/html', 'src/app/shared/button.component.html']]) {
+  test(`12: ${kind} — the real grace notice, then the model ends with no Cierre: no block, parcial(usage limit), a handoff`, async () => {
+    const { dir, out, records } = await session(file, [NOTICE, say('Resultado: parcial. No pude cumplir los puntos del hook porque se acaba el límite.')]);
+    assert.ok(!/"decision":"block"|"continue":false/.test(out), `no block: ${out.slice(0, 200)}`);
+    const rec = records.find((r) => r.id);
+    assert.deepEqual([rec?.outcome?.result, rec?.outcome?.cause], ['parcial', 'external']);
+    assert.match(rec.outcome.why, /usage limit/);
+    const relay = fs.readFileSync(path.join(P.projectHome(dir).dir, 'next-prompt.md'), 'utf8');
+    assert.match(relay, new RegExp(path.basename(file).replace(/\./g, '\\.')));
+    assert.ok(!relay.includes('grace allowance'), 'the quota notice itself is not copied');
+  });
+}
+
+test('12: the grace notice and a Cierre that misses a testigo: judged and recorded as any other, but not blocked', async () => {
+  const { out, records } = await session('src/a.ts', [NOTICE, say('## Cierre · 2026-10-26 · T1\nResultado: hecho\nEvidencia: observada el archivo cambiado\nAprendido: x ← y')]);
+  assert.ok(!/"decision":"block"|"continue":false/.test(out), `no block: ${out.slice(0, 300)}`);
+  const rec = records.find((r) => r.id);
+  assert.ok(rec, 'recorded');
+  assert.notEqual(rec.outcome?.cause, 'external', 'its Cierre is judged, not excused');
+});
+
+test('12: counter-example — a real red spec after the change with no notice still blocks the close', async () => {
+  const { out, records } = await session('src/a.ts', [say('## Cierre · 2026-10-26 · T1\nResultado: hecho\nEvidencia: observada la spec\nAprendido: x ← y')], { spec: 'red' });
+  assert.match(out, /"decision":"block"/, 'the red spec is judged');
+  assert.ok(!records.some((r) => r.outcome?.cause === 'external'));
+});
 
 test('12: a dropped provider is the same: parcial(provider), no block', async () => {
   const { out, records } = await session('src/a.ts', [DROP]);

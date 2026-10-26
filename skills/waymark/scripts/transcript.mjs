@@ -249,12 +249,18 @@ export function withSubagents(usage, sub) {
 // The harness cut the turn (docs/adr/0048): its last message is a synthetic one no model wrote, with error `rate_limit` (the quota: session, spend or weekly
 // limit) or `server_error` (the provider: a dropped connection, an overload). → { cause: 'usage limit' | 'provider', text } or null. Only the last message of
 // the turn counts: a notice from an earlier turn, or the same words in a model's reply, excuse nothing.
+// The quota also warns in the middle of the turn: a meta user message (usageLimitNote, "[Usage limit reached; a short grace allowance remains…") after
+// which the model goes on for a short grace and ends as it can. → { cause: 'usage limit', text, grace: true }: the hook never blocks such a turn.
+const GRACE = /^\s*\[Usage limit reached/i;
+export const graceNotice = (d) => d.type === 'user' && !!d.isMeta && !d.isSidechain && (!!d.usageLimitNote || GRACE.test(promptText(d)));
 export function externalStop(lines) {
-  let last = null;
+  let last = null, grace = null;
   for (const d of lines) {
-    if (isPrompt(d)) { last = null; continue; }
+    if (isPrompt(d)) { last = null; grace = null; continue; }
+    if (graceNotice(d)) grace = d;
     if (d.type === 'assistant' && !d.isSidechain) last = d;
   }
+  if (grace && last?.message?.model !== '<synthetic>') return { cause: 'usage limit', text: promptText(grace).replace(/\s+/g, ' ').trim().slice(0, 160), grace: true };
   if (!last || last.message?.model !== '<synthetic>') return null;
   const text = (last.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(' ').replace(/\s+/g, ' ').trim();
   const cause = last.error === 'rate_limit' ? 'usage limit' : last.error === 'server_error' ? 'provider' : null;

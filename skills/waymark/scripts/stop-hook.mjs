@@ -1282,7 +1282,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // next prompt keeps this turn's snapshot and the task's start, and the turn that ends it is judged
       // the quota or the provider cut the turn before a Cierre (docs/adr/0048): nothing is demanded and no testigo is judged (none applies: not ✘), the work is
       // recorded parcial for an external cause, and a handoff is left for whoever continues. A turn that already carries its Cierre is judged as any other.
-      const stopped = CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, '')) ? null : externalStop(lines);
+      // the grace notice of the quota in this turn: a Cierre written in the grace is judged and recorded, never blocked (the quota left no room for more)
+      const limit = externalStop(lines), graced = !!limit?.grace;
+      const stopped = CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, '')) ? null : limit;
+      if (graced && !stopped && gaps.missing.length) { gaps.findings = [...(gaps.findings || []), `the usage limit's grace ended the turn: ${gaps.missing.length} testigo(s) missing, recorded, not blocked`]; gaps.missing = []; }
       if (stopped) {
         gaps.external = stopped;
         gaps.missing = [];

@@ -108,11 +108,111 @@ test('8: the provider is what the machine has: ego first, Playwright where the p
 test('8: the record keeps the eyes: provider, calls, measures, and nothing of the page', () => {
   const g = judge([...head(2, CSS), ...ego(MEASURE)]);
   const o = g.observed.eyes;
-  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'measures', 'provider', 'references'].sort());
+  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'measures', 'provider', 'references'].sort());
   assert.ok(!JSON.stringify(o).includes('localhost'), 'no URL, no text of the page');
 });
 
 test('8: ego-browser counts as the browser the task tried', () => {
   const g = judge([...head(2, CSS), ...ego(LOOK)]);
   assert.ok(g.observed.browser.tried.length >= 1);
+});
+
+// ---- the dev server row and the captures folder ----
+const proj = (pkg, files = {}) => { const d = fs.mkdtempSync(path.join(home, 'p-')); fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify(pkg)); for (const [f, t] of Object.entries(files)) fs.writeFileSync(path.join(d, f), t); return d; };
+const MEMORY = '# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | npx tsc --noEmit | 2026-10-25 |\n| build | | |\n\n## Design system\n';
+const memoryOf = (text = MEMORY) => { const f = path.join(fs.mkdtempSync(path.join(home, 'm-')), 'memory.md'); fs.writeFileSync(f, text); return f; };
+
+test('8: logic — the dev server comes from package.json and the framework: the script, the port, the local URL', () => {
+  const ng = proj({ scripts: { start: 'ng serve', build: 'ng build' }, dependencies: { '@angular/core': '17.0.0' } }, { 'pnpm-lock.yaml': '' });
+  assert.deepEqual(Eyes.devServer(ng), { command: 'pnpm run start', port: 4200, url: 'http://localhost:4200' });
+  const vite = proj({ scripts: { dev: 'vite --port 4300' }, devDependencies: { vite: '5.0.0', react: '18.0.0' } });
+  assert.deepEqual(Eyes.devServer(vite), { command: 'npm run dev', port: 4300, url: 'http://localhost:4300' }, 'a --port in the script wins over the default');
+  assert.equal(Eyes.devServer(proj({ scripts: { start: 'node server.js' }, dependencies: { express: '4.0.0' } })), null, 'counter-example: an API shows nothing');
+  assert.equal(Eyes.devServer(proj({ scripts: { build: 'ng build' }, dependencies: { '@angular/core': '17.0.0' } })), null, 'counter-example: no start, dev or serve script: never invented');
+});
+
+test('8: CSS/HTML — a static site served by a tool gets its row too', () => {
+  const site = proj({ scripts: { serve: 'http-server . -p 8081' }, devDependencies: { 'http-server': '14.0.0' } }, { 'index.html': '<p>x</p>' });
+  assert.deepEqual(Eyes.devServer(site), { command: 'npm run serve', port: 8081, url: 'http://localhost:8081' });
+});
+
+test('8: the eyes row is written once, after the last Quality gates row, and never over one somebody wrote', () => {
+  const root = proj({ scripts: { start: 'ng serve' }, dependencies: { '@angular/core': '17.0.0' } });
+  const file = memoryOf();
+  const row = Eyes.fillEyes(file, root);
+  assert.match(row, /^\| eyes \| `npm run start` · http:\/\/localhost:4200 \| to confirm/);
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.indexOf('| eyes |') > text.indexOf('| build |') && text.indexOf('| eyes |') < text.indexOf('## Design system'));
+  assert.equal(Eyes.fillEyes(file, root), null, 'once');
+  const own = memoryOf(MEMORY.replace('| build | | |', '| build | | |\n| eyes | npm run dev · http://localhost:3000 | 2026-10-25 |'));
+  assert.equal(Eyes.fillEyes(own, root), null, 'counter-example: the user\'s own row stays');
+  assert.equal(Eyes.fillEyes(memoryOf(), proj({ scripts: { start: 'node server.js' }, dependencies: { express: '4.0.0' } })), null, 'counter-example: a backend gets no row');
+  assert.deepEqual(Eyes.readEyesRow(fs.readFileSync(file, 'utf8')), { command: 'npm run start', url: 'http://localhost:4200', confirmed: false });
+  assert.equal(Eyes.readEyesRow(fs.readFileSync(own, 'utf8')).confirmed, true);
+});
+
+test('8: captures live under the Waymark home, one folder per task, and go after seven days', () => {
+  const dir = Eyes.eyesDir('shop', '2026-10-25 · T7');
+  assert.ok(dir.startsWith(path.join(home, 'eyes', 'shop')) && /2026-10-25-T7$/.test(dir), dir);
+  const old = Eyes.eyesDir('shop', '2026-10-10 · T1'), fresh = Eyes.eyesDir('shop', '2026-10-24 · T2');
+  for (const d of [old, fresh]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'a.png'), 'x'); }
+  const now = Date.now();
+  fs.utimesSync(old, new Date(now - 8 * 86400000), new Date(now - 8 * 86400000));
+  fs.utimesSync(fresh, new Date(now - 2 * 86400000), new Date(now - 2 * 86400000));
+  assert.match(Eyes.eyesLine(now), /2 capture folders/);
+  assert.deepEqual(Eyes.cleanEyes(now).map((p) => path.basename(p)), ['2026-10-10-T1']);
+  assert.ok(!fs.existsSync(old) && fs.existsSync(fresh), 'counter-example: a recent folder stays');
+  assert.match(Eyes.eyesLine(now), /1 capture folder\b/);
+  fs.rmSync(path.join(home, 'eyes'), { recursive: true, force: true });
+  assert.equal(Eyes.eyesLine(now), '', 'nothing to list');
+});
+
+test('8: the record keeps the paths of the captures the task made in its folder, and no other', () => {
+  const inside = path.join(home, 'eyes', 'shop', '2026-10-25-T7', 'button-390.png').replace(/\\/g, '/');
+  const g = judge([...head(2, CSS), ...ego('await page.screenshot({ path: "' + inside + '" });\n' + MEASURE), ...ego('await page.screenshot({ path: "/work/proj/leak.png" });')]);
+  assert.deepEqual(g.observed.eyes.captures, [inside]);
+});
+
+test('8: the session card shows the eyes row and drops the captures past seven days', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const repo = fs.mkdtempSync(path.join(home, 'r-')); spawnSync('git', ['init', '-q'], { cwd: repo });
+  fs.mkdirSync(path.join(repo, '.waymark')); fs.writeFileSync(path.join(repo, '.waymark', 'memory.md'), MEMORY);
+  fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { start: 'ng serve' }, dependencies: { '@angular/core': '17.0.0' } }));
+  const old = Eyes.eyesDir('gone', '2026-10-01 · T1'); fs.mkdirSync(old, { recursive: true });
+  fs.utimesSync(old, new Date(Date.now() - 9 * 86400000), new Date(Date.now() - 9 * 86400000));
+  const out = spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout;
+  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /eyes: [^\n]*localhost:4200/);
+  assert.ok(!fs.existsSync(old), 'the old capture folder is gone');
+});
+
+// ---- found by the review ----
+test('8: counter-example — the words ego-browser nodejs in an echo or a grep are not a call; a trivial evaluate measures nothing', () => {
+  const g = (...c) => judge([...head(2, CSS), ...c.flat()]);
+  assert.equal(eyes(g(call('Bash', { command: "echo 'ego-browser nodejs getBoundingClientRect'" }))).pass, false);
+  assert.equal(eyes(g(call('Bash', { command: 'grep -n "ego-browser nodejs" notes.md' }))).pass, false);
+  assert.equal(eyes(g(ego('console.log(await page.evaluate(() => 1));'))).pass, false, 'evaluate alone is not a measurement');
+  assert.equal(eyes(g(call('Bash', { command: 'cd web && ego-browser nodejs <<\'EOF\'\n' + MEASURE + '\nEOF' }))).pass, true, 'after a cd, still the program');
+});
+
+test('8: Playwright counts when it runs a test or a screenshot, not when it is only installed', () => {
+  const g = (cmd) => judge([...head(2, CSS), ...call('Bash', { command: cmd })], { eyes: { provider: 'playwright' } });
+  assert.equal(eyes(g('pnpm exec playwright test e2e/button.spec.ts')).pass, true);
+  assert.equal(eyes(g('npx playwright screenshot http://localhost:4200 /tmp/a.png')).pass, true);
+  assert.equal(eyes(g('npx playwright install chromium')).pass, false);
+});
+
+test('8: references counts the verdict lines of the Cierre, not the words in prose', () => {
+  const reply = CIERRE + '\nResultado: parcial (falta el spec)\nbotón: igual — ancho 374\nmodal: parecido — alto 28 contra 40\nfalta el hover del título';
+  const g = judge([...head(2, CSS), ...ego(MEASURE)], {}, reply);
+  assert.equal(g.observed.eyes.references, 2);
+});
+
+test('8: an expired capture folder takes its empty project folder with it; one with a live task keeps it', () => {
+  const dead = Eyes.eyesDir('lone', '2026-10-01 · T1'), live = Eyes.eyesDir('busy', '2026-10-24 · T1'), old2 = Eyes.eyesDir('busy', '2026-10-02 · T1');
+  for (const d of [dead, live, old2]) fs.mkdirSync(d, { recursive: true });
+  const now = Date.now(), t = (d, days) => fs.utimesSync(d, new Date(now - days * 86400000), new Date(now - days * 86400000));
+  t(dead, 9); t(old2, 9); t(live, 1);
+  Eyes.cleanEyes(now);
+  assert.ok(!fs.existsSync(path.dirname(dead)), 'the empty project folder is gone');
+  assert.ok(fs.existsSync(live) && !fs.existsSync(old2), 'counter-example: the project with a live task stays');
 });

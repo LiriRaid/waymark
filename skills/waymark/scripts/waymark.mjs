@@ -53,6 +53,7 @@ import { learnedEntries } from './learned.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
 import { makeCopy, removeCopy, orphans, cleanOrphans, copyRoot } from './copy.mjs';
+import { eyesLine } from './eyes.mjs';
 import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -357,6 +358,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => footprint(cwd));
   await add(() => gatesLine(cwd));
   await add(() => copiesLine());
+  await add(() => eyesLine());
   await add(() => longpathsLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));

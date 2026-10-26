@@ -4,6 +4,7 @@
 // computed size or style of an element, a script run in the page) or clicks (with the state after it), after the task's last change.
 import fs from 'node:fs';
 import path from 'node:path';
+import { waymarkHome, slash } from './lib/paths.mjs';
 
 const EXE = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
 const EGO = 'ego-browser';
@@ -31,7 +32,11 @@ export function eyesDue({ provider, ui, level, changed = [] }) {
 }
 
 // A script run in the page that measures or clicks: not a goto and a snapshot alone.
-const MEASURES = /getBoundingClientRect|getComputedStyle|\b(?:offset|client|scroll)(?:Width|Height)\b|\binnerWidth\b|\.evaluate\(|\.(?:click|dblclick|fill|press|selectOption)\(|mouse\.click/;
+const MEASURES = /getBoundingClientRect|getComputedStyle|\b(?:offset|client|scroll)(?:Width|Height)\b|\binnerWidth\b|\.(?:click|dblclick|fill|press|selectOption)\(|mouse\.click/;
+// The program being run, at the start of a command or of a segment after ; & | ( or a line: never the words inside an echo or a grep.
+const AT_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:npx\s+|pnpm\s+exec\s+|yarn\s+|bunx\s+)?(?:\S*[\\/])?`;
+export const RUNS_EGO = new RegExp(AT_START + String.raw`ego-browser(?:\.exe|\.cmd)?\s+nodejs\b`);
+const RUNS_PLAYWRIGHT = new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
 const PANEL = /^mcp__[\w-]*(?:browser|chrome)[\w-]*__(\w+)$/i;
 const PANEL_ACTS = new Set(['form_input']);
 const text = (t) => String(t.input?.command ?? '');
@@ -48,6 +53,7 @@ export function observeEyes(tools, { from = -1, provider = null, reply = '' } = 
   const writes = new Map();
   for (const t of tools) if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') writes.set(String(t.input.file_path).replace(/\\/g, '/').toLowerCase(), t.input.content);
   let calls = 0, measures = 0, used = null;
+  const captures = [];
   tools.forEach((t, i) => {
     let kind = null, measuring = false;
     const panel = PANEL.exec(t.name || '');
@@ -56,16 +62,81 @@ export function observeEyes(tools, { from = -1, provider = null, reply = '' } = 
       const name = panel[1], input = t.input || {};
       measuring = (name === 'javascript_tool' && MEASURES.test(String(input.text || ''))) || PANEL_ACTS.has(name) || (name === 'computer' && /click|drag/.test(String(input.action || '')));
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
-      if (/\bego-browser\s+nodejs\b/.test(text(t))) { kind = 'ego'; measuring = MEASURES.test(scriptOf(t, writes)); }
-      else if (/\b(?:npx|pnpm exec|yarn|bunx)\s+playwright\s+test\b|\bplaywright\s+test\b/.test(text(t))) { kind = 'playwright'; measuring = true; }
+      if (RUNS_EGO.test(text(t))) { kind = 'ego'; measuring = MEASURES.test(scriptOf(t, writes)); }
+      else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; }
     }
     if (!kind) return;
+    if (kind === 'ego') for (const m of scriptOf(t, writes).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
     if (measuring && i > from) measures++;
   });
-  const verdicts = (String(reply).match(/\b(?:igual|parecido|falta)\b/gi) || []).length;
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, references: verdicts };
+  const verdicts = (String(reply).match(/:\s*(?:igual|parecido|falta)\b\s*[—–-]/gi) || []).length; // "<element>: igual — <measurement>", never the word in prose
+  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, references: verdicts, captures };
+}
+
+// ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----
+export const eyesRoot = () => path.join(waymarkHome(), 'eyes');
+export const EYES_DAYS = 7;
+export const eyesDir = (project, task) => path.join(eyesRoot(), String(project || 'project'), String(task || 'task').replace(/\s*·\s*/g, '-').replace(/[^\w.-]+/g, '-'));
+const taskFolders = () => {
+  const out = [];
+  try { for (const p of fs.readdirSync(eyesRoot())) { const pd = path.join(eyesRoot(), p); try { for (const t of fs.readdirSync(pd)) { const d = path.join(pd, t); if (fs.statSync(d).isDirectory()) out.push({ path: d, at: fs.statSync(d).mtimeMs }); } } catch {} } } catch {}
+  return out;
+};
+// Removes the task folders older than a week; → the paths removed.
+export function cleanEyes(now = Date.now()) {
+  const gone = [];
+  for (const f of taskFolders()) if (now - f.at > EYES_DAYS * 86400000) { try { fs.rmSync(f.path, { recursive: true, force: true }); gone.push(f.path); fs.rmdirSync(path.dirname(f.path)); } catch {} } // rmdir only succeeds on an empty project folder
+  return gone;
+}
+// One line for `check`: what is kept and for how long; '' with none.
+export function eyesLine(now = Date.now()) {
+  const list = taskFolders();
+  return list.length ? `eyes: ${list.length} capture folder${list.length > 1 ? 's' : ''} in ${slash(eyesRoot())} (kept ${EYES_DAYS} days; the session card removes the older ones)` : '';
+}
+
+// ---- the dev server the eyes look at: a row of Quality gates in memory.md, proposed from package.json and confirmed once ----
+const PORTS = [[/@angular\/cli|@angular\/core/, 4200], [/\bnext\b|\bnuxt\b|react-scripts/, 3000], [/\bvite\b|@sveltejs|\bastro\b|solid-js/, 5173], [/vue-cli-service|@vue\/cli-service/, 8080]];
+const UI_DEPS = /^(?:@angular\/core|react|react-dom|vue|svelte|@sveltejs\/kit|next|nuxt|astro|solid-js|lit|vite|react-scripts|http-server|live-server|serve|browser-sync)$/;
+// → { command, port, url } for a project that has a screen and a start, dev or serve script; null otherwise (never invented).
+export function devServer(root) {
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(path.join(root || '', 'package.json'), 'utf8')); } catch { return null; }
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  if (!deps.some((d) => UI_DEPS.test(d))) return null;
+  const script = ['dev', 'start', 'serve'].find((s) => pkg.scripts?.[s]);
+  if (!script) return null;
+  const body = String(pkg.scripts[script]), has = (f) => fs.existsSync(path.join(root, f));
+  const pm = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : 'npm';
+  const port = Number(body.match(/(?:--port[= ]|-p[= ]?)(\d{2,5})\b/)?.[1]) || PORTS.find(([re]) => deps.some((d) => re.test(d)))?.[1] || 8080;
+  return { command: `${pm} run ${script}`, port, url: `http://localhost:${port}` };
+}
+const EYES_ROW = /^\|\s*eyes\s*\|\s*([^|]*)\|\s*([^|]*)\|/im;
+// Writes the `eyes` row at the end of Quality gates when the repo has a screen and a start script and no row says so yet; never over one somebody wrote.
+export function fillEyes(memoryFile, root) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  if (!text || EYES_ROW.test(text) || /^\|\s*dev server\s*\|/im.test(text)) return null;
+  const s = devServer(root);
+  if (!s) return null;
+  const row = `| eyes | \`${s.command}\` · ${s.url} | to confirm: proposed from package.json; confirm once on the first seen change |`;
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => /^## Quality gates/.test(l));
+  if (start < 0) return null;
+  let last = -1;
+  for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]); i++) if (lines[i].trim().startsWith('|')) last = i;
+  if (last < 0) return null;
+  lines.splice(last + 1, 0, row);
+  fs.writeFileSync(memoryFile, lines.join('\n'));
+  return row;
+}
+// The row as written: { command, url, confirmed }; null with none. `dev server` is the older name browser-verify used.
+export function readEyesRow(memory) {
+  const m = String(memory || '').match(EYES_ROW) || String(memory || '').match(/^\|\s*dev server\s*\|\s*([^|]*)\|\s*([^|]*)\|/im);
+  if (!m) return null;
+  const cell = m[1].replace(/`/g, '').trim(), [command, url] = cell.split(/\s·\s/).map((x) => x.trim());
+  return { command, url: url || null, confirmed: !/^to confirm/i.test(m[2].trim()) };
 }
 
 // The block: what the eyes still owe.

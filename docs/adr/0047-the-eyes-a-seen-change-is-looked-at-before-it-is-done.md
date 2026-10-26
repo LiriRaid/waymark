@@ -15,7 +15,8 @@ Test 0 (2026-10-25, one static local page, ego 0.6.0.16): 390 px emulation by `p
 - **The provider is what the machine has.** ego-browser first (on `PATH`, or where its installer puts it), then Playwright where the project declares it, then the agent's own browser panel (read from the calls the turn made). The hook reads tool calls, never words: an `ego-browser nodejs` call counts when its script, or the file it imports, measures or clicks.
 - **The source of truth** is what the user sent: their screenshots or a design link. The Cierre answers each listed element "igual / parecido / falta" with its measurement. The model compares; there is no pixel diff.
 - **Host.** `localhost` and the local names only, under the user already logged in on the platform: Waymark creates no test users or profiles and signs in nowhere, and never types credentials. The one other host is a design-reference URL the user wrote in the request, read-only. No command that clears the browser profile.
-- **The record keeps** `observed.eyes = { provider, calls, measures, afterLastChange, references }`: counts only, never a URL or the text of a page. Captures live outside the repo.
+- **The record keeps** `observed.eyes = { provider, calls, measures, afterLastChange, references, captures }`: counts and the paths of the captures the task made in its own folder, never a URL or the text of a page.
+- **Captures and the dev server.** Captures go to `~/.waymark/eyes/<project>/<task>/`, never the repo; the session card removes task folders older than seven days and `check` lists what is kept. The dev server is the `eyes` row of Quality gates in `memory.md` (command · local URL; never credentials), proposed from `package.json` (`dev`, `start` or `serve`) and the framework's port, marked "to confirm" until the user confirms it once on the first seen change; a project with no screen or no such script gets no row.
 - **The rule is in the instructions block** (`templates/instructions.md`): "Eyes: localhost, no credentials" replaces "never offer or run browser verification", and the testigo is quoted. The block does not grow (10,950 → 10,942).
 
 ## Alternatives considered
@@ -29,4 +30,4 @@ Test 0 (2026-10-25, one static local page, ego 0.6.0.16): 390 px emulation by `p
 - A seen change costs a browser round (about the cost of the checks 0011 removed) but it is bounded: one task space, one measurement per element, no offers and no accounts.
 - A machine with no ego and no declared Playwright keeps the old behaviour; the panel counts only when the agent used it.
 - `skills/browser-verify` gains the mode `eyes` and ego as first provider; the departments, stacks and UI skills say the eyes run by themselves instead of "only when the user asks".
-- Still to build: the `eyes` row of `memory.md` for the dev server, and the captures folder with its 7-day clean-up listed by `check`.
+- `browser-verify`'s older `dev server` row is still read; new rows are written as `eyes`.

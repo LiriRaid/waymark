@@ -113,17 +113,21 @@ test('5: a close removes the copies of its own repository made since the task be
 test('5: logic — improvised and test folders older than a task are orphans; a recent one, or any other name, is not; clean removes them', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-places-')); temps.push(dir);
   const old = new Date(Date.now() - 24 * 3600000);
-  for (const n of ['yawt-api', 'wm-old', 'waymark-x', 'tmp.abc', 'tmp.other']) { fs.mkdirSync(path.join(dir, n)); fs.utimesSync(path.join(dir, n), old, old); }
+  for (const n of ['api-copy', 'wm-old', 'waymark-x', 'tmp.abc', 'tmp.other', 'notes']) { fs.mkdirSync(path.join(dir, n)); fs.utimesSync(path.join(dir, n), old, old); }
+  // an improvised worktree under any name is told by its .git file; a folder with a .git *folder* (a clone the user keeps) or no .git is not
+  fs.writeFileSync(path.join(dir, 'api-copy', '.git'), 'gitdir: C:/work/api/.git/worktrees/api-copy\n'); fs.utimesSync(path.join(dir, 'api-copy'), old, old);
+  fs.mkdirSync(path.join(dir, 'notes', '.git')); fs.utimesSync(path.join(dir, 'notes'), old, old);
   fs.mkdirSync(path.join(dir, 'tmp.abc', '.git')); fs.utimesSync(path.join(dir, 'tmp.abc'), old, old); // a tmp.* that holds a repository copy is ours; another program's scratch is not
   fs.mkdirSync(path.join(dir, 'wm-fresh'));
   fs.mkdirSync(path.join(dir, 'projects'));
   fs.utimesSync(path.join(dir, 'projects'), old, old);
   const found = C.orphans({ places: [dir] });
-  assert.deepEqual(found.map((o) => path.basename(o.path)).sort(), ['tmp.abc', 'waymark-x', 'wm-old', 'yawt-api']);
+  assert.deepEqual(found.map((o) => path.basename(o.path)).sort(), ['api-copy', 'tmp.abc', 'waymark-x', 'wm-old']);
   assert.match(W.copiesLine(found), /copies: 4 folders left behind .*copy --clean shows them and --apply removes them/);
   const r = C.cleanOrphans(found);
   assert.equal(r.removed, 4);
   assert.ok(fs.existsSync(path.join(dir, 'wm-fresh')) && fs.existsSync(path.join(dir, 'projects')) && fs.existsSync(path.join(dir, 'tmp.other')), 'counter-example: a fresh folder, another name and another program\'s tmp.* stay');
+  assert.ok(fs.existsSync(path.join(dir, 'notes')), 'counter-example: a clone with its own .git folder is the user\'s, not an improvised worktree');
   assert.equal(W.copiesLine([]), '');
 });
 test('5: CSS/HTML — the CLI: copy makes it, copy --remove removes it, copy --clean only plans until --apply', () => {

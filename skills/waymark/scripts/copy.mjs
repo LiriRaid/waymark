@@ -45,10 +45,12 @@ export function removeCopy(p, { cwd = process.cwd() } = {}) {
 }
 
 // The folders left behind: every copy in the root, and the temp folders of Waymark's tests and of an agent's own improvised copies
-// (yawt-*, wm-*, waymark-*, tmp.*) in the OS temp folder and at the top of the disk, older than `maxAgeMs` (a running task's is not one).
-const ORPHAN = /^(?:yawt-|wm-|waymark-)/;
+// (a git worktree an agent improvised under any name, wm-*, waymark-*, tmp.*) in the OS temp folder and at the top of the disk, older than `maxAgeMs`
+// (a running task's is not one). A worktree is told by what it is, never by a project's name: its `.git` is a file that points to the repository.
+const ORPHAN = /^(?:wm-|waymark-)/;
+const worktree = (p) => { try { return /^gitdir:/.test(fs.readFileSync(path.join(p, '.git'), 'utf8')); } catch { return false; } };
 // `tmp.*` is what other programs name their scratch folders too: it is a leftover of ours only when it holds a repository copy or its modules.
-const ours = (p, name) => ORPHAN.test(name) || (/^tmp\./.test(name) && ['.git', 'node_modules'].some((e) => fs.existsSync(path.join(p, e))));
+const ours = (p, name) => ORPHAN.test(name) || worktree(p) || (/^tmp\./.test(name) && ['.git', 'node_modules'].some((e) => fs.existsSync(path.join(p, e))));
 export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [copyRoot(), os.tmpdir(), path.parse(os.tmpdir()).root] } = {}) {
   const out = [];
   for (const dir of [...new Set(places)]) {
@@ -57,7 +59,7 @@ export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [co
     for (const name of names) {
       const p = path.join(dir, name);
       if (dir !== copyRoot() && !ours(p, name)) continue;
-      if (dir === path.parse(os.tmpdir()).root && !ORPHAN.test(name)) continue; // the top of the disk: only the names an improvised copy took
+      if (dir === path.parse(os.tmpdir()).root && !ORPHAN.test(name) && !worktree(p)) continue; // the top of the disk: only Waymark's names and improvised worktrees
       if (dir === copyRoot() && name.startsWith('.')) continue;
       try { const st = fs.statSync(p); if (st.isDirectory() && now - st.mtimeMs > maxAgeMs) out.push({ path: p, ageH: Math.round((now - st.mtimeMs) / 3600000) }); } catch {}
     }

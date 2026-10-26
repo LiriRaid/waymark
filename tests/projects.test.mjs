@@ -42,6 +42,12 @@ test('13: logic — the share of parcial, the agents and the median tokens of a 
   assert.equal(await SC.measure('records.medianTokens', p), 1_000_000);
 });
 
+test('13: counter-example — records written before the log carried an outcome do not dilute the share', async () => {
+  const p = project('old', mix(2, 2));
+  for (let i = 0; i < 6; i++) P.appendRecord(p, { schema: 'waymark.record/v1', id: `2026-09-0${i + 1} · T1`, agent: 'claude', at: new Date(Date.UTC(2026, 8, 1 + i)).toISOString(), session: `o${i}`, level: 2, files: ['a.ts'] });
+  assert.equal(await SC.measure('records.parcialShare', p), 0.5);
+});
+
 test('13: CSS/HTML — the same for a project whose tasks only touched styles and templates', async () => {
   const p = project('site', mix(2, 8, 'claude', ['src/app/button.component.css', 'src/app/button.component.html']));
   assert.equal(await SC.measure('records.parcialShare', p), 0.2);

@@ -64,7 +64,7 @@ export async function buildReport(roots = [process.cwd()]) {
     const records = readTaskRecords(home).filter((r) => r.id && !r.kind), reverted = revertedCommits(home.root);
     for (const r of records) {
       tasks++;
-      bump(counts.level, String(r.level ?? 'unknown'));
+      bump(counts.level, pick(r.level === undefined || r.level === null ? null : String(r.level), ['0', '1', '2', '3', 'Q']));
       bump(counts.outcome, pick(r.outcome?.result, ['hecho', 'parcial', 'bloqueado']));
       if (r.outcome?.cause) bump(counts.cause, pick(r.outcome.cause, ['external']));
       bump(counts.department, pick(String(r.department?.declared || '').replace(/^dept-/, ''), DEPARTMENTS));

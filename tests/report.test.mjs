@@ -81,6 +81,7 @@ test('13: counter-example — values off the lists become "other"; nothing free-
   assert.deepEqual(leaks(r), []);
   assert.ok(!JSON.stringify(r).match(/my-secret-agent-name|canary-dept|canary-model|canary-testigo|canary-stack|enormous/));
   assert.equal(r.counts.agent.other, 1);
+  assert.ok(Object.keys(r.counts.level).every((k) => ['0', '1', '2', '3', 'Q', 'unknown', 'other'].includes(k)), 'the level passes a list too');
   assert.equal(r.counts.department.other, 1);
   assert.equal(r.counts.failedTestigo.other, 1);
 });

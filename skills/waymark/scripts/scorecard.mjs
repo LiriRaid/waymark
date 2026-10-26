@@ -86,7 +86,7 @@ const MEASURES = {
   },
   async 'records.detailShare'(root) { return share(await recent(root, 30, false), (r) => r.schema); },
   // Real use (docs/adr/0049): the share of the last 30 tasks that closed parcial, the agents that closed them, and the median tokens of a task.
-  async 'records.parcialShare'(root) { return share(await recent(root, 30, false), (r) => r.outcome?.result === 'parcial'); },
+  async 'records.parcialShare'(root) { return share((await recent(root, 30, false)).filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'); }, // a record from before the log carried an outcome says nothing either way
   async 'records.agentSpread'(root) { const rs = await recent(root, 30, false); const named = new Set(rs.map((r) => r.agent).filter(Boolean)); return named.size || null; }, // a record with no agent is no second agent
   async 'records.medianTokens'(root) { return median((await recent(root, 30, true)).map((r) => r.evaluation?.tokens).filter((t) => t > 0)); },
   async 'records.pinnedShare'(root) { return share(await recent(root, 20), (r) => r.pinned); },
@@ -227,10 +227,10 @@ export async function projectsReport(roots = namedProjects()) {
     if (!fs.existsSync(root)) { projects.push({ name, missing: true }); continue; }
     const rs = await recent(root, 30, false);
     pooled.push(...rs); full.push(...await recent(root, 30, true));
-    projects.push({ name, tasks: rs.length, parcialShare: share(rs, (r) => r.outcome?.result === 'parcial'), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
+    projects.push({ name, tasks: rs.length, parcialShare: share(rs.filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
   }
   const agents = countBy(pooled.filter((r) => r.agent), (r) => r.agent);
-  const total = { tasks: pooled.length, parcialShare: share(pooled, (r) => r.outcome?.result === 'parcial'), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
+  const total = { tasks: pooled.length, parcialShare: share(pooled.filter((r) => r.outcome?.result), (r) => r.outcome.result === 'parcial'), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
   const values = { '13.6': total.parcialShare, '9.9': Object.keys(agents).length || null, '8.9': total.medianTokens };
   const checks = Object.entries(DIR_CHECKS).map(([id, m]) => {
     const c = checkOf(id), value = values[id];

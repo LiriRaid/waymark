@@ -51,8 +51,10 @@ const ORPHAN = /^(?:wm-|waymark-)/;
 const worktree = (p) => { try { return /^gitdir:/.test(fs.readFileSync(path.join(p, '.git'), 'utf8')); } catch { return false; } };
 // `tmp.*` is what other programs name their scratch folders too: it is a leftover of ours only when it holds a repository copy or its modules.
 const ours = (p, name) => ORPHAN.test(name) || worktree(p) || (/^tmp\./.test(name) && ['.git', 'node_modules'].some((e) => fs.existsSync(path.join(p, e))));
-export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [copyRoot(), os.tmpdir(), path.parse(os.tmpdir()).root] } = {}) {
+export function orphans({ maxAgeMs = 6 * 3600000, now = Date.now(), places = [copyRoot(), os.tmpdir(), path.parse(os.tmpdir()).root], home = os.homedir() } = {}) {
   const out = [];
+  // the home: only the .wm-* folders older versions of the test suite made there (never another folder of the user's)
+  try { for (const name of fs.readdirSync(home)) if (/^\.wm-/.test(name)) { const p = path.join(home, name); const st = fs.statSync(p); if (st.isDirectory() && now - st.mtimeMs > maxAgeMs) out.push({ path: p, ageH: Math.round((now - st.mtimeMs) / 3600000) }); } } catch {}
   for (const dir of [...new Set(places)]) {
     let names = [];
     try { names = fs.readdirSync(dir); } catch { continue; }

@@ -49,6 +49,9 @@ function run(root, extra = []) {
   return { summary, why: problems(summary) || (r.status === 0 ? '' : `exit ${r.status}`), output: `${r.stdout}\n${r.stderr}` };
 }
 
+// Why a run is not clean: its tests, and the temp folders it left behind (a green run that leaves one is a failed run). '' when clean.
+export const verdict = (r, left) => [r.why, left > 0 ? `the run left ${left} temp folder${left > 1 ? 's' : ''} behind (wm-* or waymark-*)` : ''].filter(Boolean).join('; ');
+
 // A copy of what the repository holds now (tracked and untracked files, not ignored ones), as its own git repository.
 function copyOfTree(root) {
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-gate-'));
@@ -74,7 +77,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     const r = go();
     let left = tempFolders() - before;
     if (left > 0) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 4000); left = tempFolders() - before; } // another process's folder (a suite of another session) is gone a moment later; ours stay
-    if (left > 0) r.why = [r.why, `the run left ${left} temp folder${left > 1 ? 's' : ''} behind (wm-* or waymark-*)`].filter(Boolean).join('; ');
+    r.why = verdict(r, left);
     const s = r.summary;
     console.log(`${r.why ? '✘' : '✔'} ${name}: ${s ? `tests ${s.tests}, pass ${s.pass}, skipped ${s.skipped}, todo ${s.todo}, fail ${s.fail}` : 'no summary'}${r.why ? ` — ${r.why}` : ''}`);
     if (r.why) { bad++; console.log(failures(r.output) || r.output.split('\n').filter((l) => /^✖|^not ok/.test(l)).slice(0, 20).join('\n')); }

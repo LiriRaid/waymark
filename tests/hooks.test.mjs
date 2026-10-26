@@ -345,7 +345,7 @@ test('pre-existing and docs by action: a failing gate asks for a clean copy; the
   assert.equal(docs(judge(failing, cierre(id).replace('observada timeouts en el log de pedidos', 'inferida de la doc de Meta Cloud API (check: x)'))).applies, false, '"inferida de docs" alone triggers nothing');
 });
 test('2b: a .ts with a sibling template counts as UI; a service does not', () => {
-  const dir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-ui-')); // may sit under the OS temp folder: the project root (ctx.cwd) keeps its files out of the scratch rule
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-ui-')); // under the suite's own temp root: the project root (ctx.cwd) keeps its files out of the scratch rule, and nothing lands in tests/
   temps.push(dir);
   for (const f of ['article-form.ts', 'article-form.html', 'articles.service.ts']) fs.writeFileSync(path.join(dir, f), '');
   const ui = (file) => cierreGaps(currentTurn([prompt('x'), say('Waymark → L2 · dept-frontend'), call('Edit', { file_path: path.join(dir, file) })]), '## Cierre · x', undefined, undefined, { cwd: dir }).observed.browser.ui;

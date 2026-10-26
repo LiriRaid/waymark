@@ -179,3 +179,28 @@ test('5: gate-tests counts the wm-* and waymark-* folders of a temp folder, so a
   assert.equal(G.tempFolders(dir), 2, 'counter-example: a folder with another name is none of ours');
   assert.equal(G.tempFolders(path.join(dir, 'missing')), 0);
 });
+
+// ---- what older runs left: the home's .wm-* folders, the sandboxes of a suite that died ----
+test('5: logic — the .wm-* folders older versions of the suite left in the home are orphans; any other folder of the home is not', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-home-')); temps.push(home);
+  const old = new Date(Date.now() - 24 * 3600000);
+  for (const n of ['.wm-false-proc-abc', '.wm-x', '.config', 'wm-fresh-in-home']) { fs.mkdirSync(path.join(home, n)); fs.utimesSync(path.join(home, n), old, old); }
+  const found = C.orphans({ places: [], home });
+  assert.deepEqual(found.map((o) => path.basename(o.path)).sort(), ['.wm-false-proc-abc', '.wm-x']);
+});
+test('5: logic — a suite starts by removing the sandboxes of suites whose process is gone; a live one, a young one or another name stays', async () => {
+  const { sweepDead } = await import('./helpers/isolate.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-sweep-')); temps.push(tmp);
+  const old = new Date(Date.now() - 3 * 3600000);
+  const dead = 'wm-test-999999-aaaa', live = `wm-test-${process.pid}-bbbb`, young = 'wm-test-999998-cccc', other = 'wm-other-999997';
+  for (const n of [dead, live, young, other]) fs.mkdirSync(path.join(tmp, n));
+  for (const n of [dead, live, other]) fs.utimesSync(path.join(tmp, n), old, old);
+  const gone = sweepDead(tmp, (pid) => pid === process.pid);
+  assert.deepEqual(gone.map((p) => path.basename(p)), [dead]);
+  assert.ok([live, young, other].every((n) => fs.existsSync(path.join(tmp, n))));
+});
+test('5: gate-tests — a run that leaves temp folders is a failed run even with every test green, and says how many', () => {
+  assert.equal(G.verdict({ why: '' }, 0), '');
+  assert.equal(G.verdict({ why: '' }, 2), 'the run left 2 temp folders behind (wm-* or waymark-*)');
+  assert.equal(G.verdict({ why: 'fail 1' }, 1), 'fail 1; the run left 1 temp folder behind (wm-* or waymark-*)');
+});

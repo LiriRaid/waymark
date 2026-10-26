@@ -86,6 +86,17 @@ test('10d: what exposes no content passes; what prints it does not', () => {
   for (const c of ['cat .env', 'grep KEY .env', 'sed -n 1p .env', 'head .env', 'tail -1 .env', 'Get-Content .env', 'git show HEAD:.env', 'cp .env /dev/stdout', 'ls > .env', 'cat .env | wc -l']) assert.match(String(commandSensitive(c, d, cfg)), /\.env$/, c);
 });
 
+test('10d: a quiet program stops being quiet when its names feed a reader, a substitution reads, or a flag makes it read the file', () => {
+  const d = proj({ '.env': 'KEY=abc12345', 'src/app.css': 'a {}', 'src/index.html': '<a></a>' }), cfg = loadRisk(d);
+  // logic: the names of a quiet program piped into a reader, a substitution inside a quiet program, a flag that reads the file
+  for (const c of ['Get-ChildItem .env* | Get-Content', 'Get-Item .env | Get-Content', 'gci .env | % { Get-Content $_ }', 'ls .env* | xargs cat', 'ls .env | xargs -I{} cat {}', 'git ls-files .env | xargs cat',
+    'ls $(cat .env)', 'ls `cat .env`', 'wc -l $(cat .env)', 'file -f .env', 'file --files-from .env', 'wc --files0-from=.env', 'git status -v .env', 'git status --verbose .env']) assert.match(String(commandSensitive(c, d, cfg)), /\.env$/, c);
+  // counter-example: names and counts only, also when a counter receives them
+  for (const c of ['ls .env*', 'git check-ignore .env', 'ls -la .env | wc -l', 'git ls-files .env | wc -l', 'ls .env | grep -c x', 'Test-Path .env', 'git status .env']) assert.equal(commandSensitive(c, d, cfg), null, c);
+  // CSS/HTML: the same shapes over a stylesheet and a template are no sensitive read
+  for (const c of ['ls src/*.css | xargs cat', 'Get-Item src/index.html | Get-Content', 'wc -l $(cat src/app.css)', 'file -f src/index.html']) assert.equal(commandSensitive(c, d, cfg), null, c);
+});
+
 test('10d: CSS/HTML — a task that edits environments/*.css, a template or .env.example never meets the guard; editing .env does', () => {
   const d = proj({ 'src/environments/app.css': 'a {}', 'src/environments/index.html': '<a></a>', '.env.example': 'KEY=', '.env': 'KEY=1' });
   for (const f of ['src/environments/app.css', 'src/environments/index.html', '.env.example']) assert.equal(checkSensitive({ files: [path.join(d, f)] }, d, 's1'), null, f);

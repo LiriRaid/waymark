@@ -64,12 +64,15 @@ function globMatches(abs) {
 
 // A command that names a file and prints only its name, its metadata or a count: ls, stat, test -f, file, wc, git check-ignore | ls-files | status,
 // grep -c | -l | -q. It exposes no content, so the guard lets it through (a redirect target is still checked: that is a write). cat, grep with no
-// count, sed, head, Get-Content stay denied.
+// count, sed, head, Get-Content stay denied. A flag that makes it read the file as a list of names (file -f, wc --files0-from) or show a diff
+// (git status -v) prints the content in its errors or its output, so it is not quiet.
 const NO_CONTENT = new Set(['ls', 'dir', 'stat', 'test', '[', '[[', 'file', 'wc', 'realpath', 'readlink', 'basename', 'dirname', 'test-path', 'get-childitem', 'gci', 'get-item', 'gi']);
+const READS_LIST = { file: /^(-f|--files-from)(=.*)?$|^-[a-zA-Z]*f/, wc: /^--files0-from(=.*)?$/ };
 export function exposesNothing(words) {
   const prog = path.basename(String(words[0] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.(exe|cmd)$/, ''), rest = words.slice(1);
+  if (READS_LIST[prog] && rest.some((w) => READS_LIST[prog].test(w))) return false;
   if (NO_CONTENT.has(prog)) return true;
-  if (prog === 'git') return /^(check-ignore|ls-files|status|ls-tree|rev-parse|rev-list)$/.test(rest.find((w) => !w.startsWith('-')) || '');
+  if (prog === 'git') return /^(check-ignore|ls-files|status|ls-tree|rev-parse|rev-list)$/.test(rest.find((w) => !w.startsWith('-')) || '') && !rest.some((w) => /^(-v+|--verbose)$/.test(w));
   if (/^(grep|egrep|fgrep|rg|ag)$/.test(prog)) return rest.some((f) => /^(-[a-zA-Z]*[clLq][a-zA-Z]*|--count|--files-with-matches|--files-without-match|--quiet|--silent)$/.test(f));
   return false;
 }
@@ -78,18 +81,24 @@ const envFileOf = (words, i) => (i > 0 && /^--env-file(-if-exists)?$/.test(words
 
 // The secret-bearing path an existing file or a redirect target of the command names, or null. Any command naming one counts (cat, type,
 // Get-Content, head, tail, less, cp, git…): the guard judges the argument, never the program. A shell run through another shell
-// (bash -c "cat .env") is read inside. It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`), nor a script
-// that opens the file by itself.
+// (bash -c "cat .env") is read inside, and so is a substitution ($(cat .env), `cat .env`) whatever program receives it. A quiet program
+// stays quiet only when its output goes nowhere or to another quiet one (ls .env | wc -l): piped into a reader (| xargs cat, | Get-Content)
+// its names are opened. It does not stop what a command only reaches by searching (`grep -r KEY .`, `find`), nor a script that opens the
+// file by itself.
 export function commandSensitive(command, cwd, cfg, depth = 0) {
-  for (const p of shellRuns(command)) {
+  if (depth < 2) {
+    for (const m of String(command).matchAll(/\$\(([^()]+)\)|`([^`]+)`/g)) { const inner = commandSensitive(m[1] ?? m[2], cwd, cfg, depth + 1); if (inner) return inner; }
+  }
+  const parts = shellRuns(command).map((p) => ({ ...p, words: [...String(p.text).matchAll(WORD)].map((m) => m[1] ?? m[2] ?? m[3]) }));
+  for (const [n, p] of parts.entries()) {
     const dir = path.resolve(cwd, expandHome(unquote(p.cd || '.')).replace(/^\/([a-z])\//i, '$1:/'));
-    const words = [...String(p.text).matchAll(WORD)].map((m) => m[1] ?? m[2] ?? m[3]);
+    const { words } = p;
     const targets = [...String(p.text).matchAll(REDIRECT)].map((m) => m[1] ?? m[2] ?? m[3]);
     if (depth < 2 && SHELLS.test(path.basename(String(words[0] || '').replace(/\\/g, '/')))) {
       for (const w of words.slice(1)) if (/\s/.test(w)) { const inner = commandSensitive(w, dir, cfg, depth + 1); if (inner) return inner; }
     }
     const patternOf = (i) => (i > 0 && PATTERN_FLAG.test(words[i - 1])) || PATTERN_FLAG.test(String(words[i]).replace(/[=:].*$/, ''));
-    const quiet = exposesNothing(words);
+    const quiet = exposesNothing(words) && (p.sep !== '|' || !parts[n + 1] || exposesNothing(parts[n + 1].words));
     const candidates = [...words.flatMap((w, i) => (envFileOf(words, i) ? [] : pathsIn(w, i === 0).map((c) => [c, false, patternOf(i)]))), ...targets.map((t) => [t, true, false])];
     for (const [w, isTarget, pattern] of candidates) {
       if (!w || /^-|^[<>&|]/.test(w)) continue;

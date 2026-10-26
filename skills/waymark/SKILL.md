@@ -57,3 +57,4 @@ One **owner** department plus 1–2 supporting ones (e.g. "crear un modal de con
 | stack or architecture conventions | `stacks/<stack>.md`, `architectures/<arch>.md` — only the sections the level asks for |
 | a provider's status or source | `skill-registry.md` — search the capability, do not read it whole |
 | new private-layer file | `templates/private-layer/` |
+| handing the user a command to run with `!` (any department) | nothing to read: write it in this session's shell (the Environment line: PowerShell or bash); a command in the other's syntax fails, and the end-of-turn hook records it |

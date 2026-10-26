@@ -262,3 +262,24 @@ test('11: a manifest and an anchor signed by the key under the wildcard principa
     assert.equal(said.anchorEdited, 'bad', `${where}: counter-example, an edited anchor`);
   }
 });
+
+// ---- a command handed with "!" is written for the user's shell ----
+const { bangShell } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+test('11: logic — a "!" command in bash syntax for a PowerShell session, or the reverse, is a finding; the same command in its shell is not', () => {
+  assert.equal(bangShell('Corre esto:\n```\n! export DATABASE_URL=x && npm run migrate\n```', 'powershell').length, 1);
+  assert.equal(bangShell('Corre `! rm -rf dist && npm run build`', 'powershell').length, 1);
+  assert.equal(bangShell('! $env:DATABASE_URL="x"; npm run migrate', 'bash').length, 1);
+  assert.equal(bangShell('! Remove-Item -Recurse dist', 'bash').length, 1);
+  assert.deepEqual(bangShell('! $env:DATABASE_URL="x"; npm run migrate', 'powershell'), [], 'counter-example: PowerShell syntax for PowerShell');
+  assert.deepEqual(bangShell('! export DATABASE_URL=x && npm run migrate', 'bash'), [], 'counter-example: bash for bash');
+  assert.deepEqual(bangShell('! git status\n! npm test', 'powershell'), [], 'counter-example: what runs in both');
+  assert.deepEqual(bangShell('Listo, sin comandos', 'powershell'), []);
+});
+
+test('11: CSS/HTML — a stylesheet command with a bash redirect for a PowerShell session is a finding; "!important" in a rule is no command', () => {
+  assert.equal(bangShell('! npx stylelint "src/**/*.css" 2>/dev/null | head -20', 'powershell').length, 1);
+  assert.deepEqual(bangShell('El botón usa:\n```css\n.btn { color: red !important }\n```\n!important no hace falta', 'powershell'), [], 'counter-example');
+  const edited = [{ type: 'user', uuid: 'p', message: { role: 'user', content: 'ajusta el botón' } }, { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L1 · dept-frontend' }, { type: 'tool_use', id: 'e', name: 'Edit', input: { file_path: '/work/p/src/button.css' } }] } }, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e', content: 'ok' }] } }];
+  const g = cierreGaps(currentTurn(edited), '## Cierre · 2026-10-26 · T1\nResultado: hecho\nEvidencia: observada x\nAprendido: y ← z\nCorre `! rm -rf dist`', undefined, undefined, { ids: P.taskIds('/nowhere'), shell: 'powershell', cwd: '/work/p' });
+  assert.ok(g.findings.some((f) => /shell/.test(f)), g.findings.join(' | '));
+});

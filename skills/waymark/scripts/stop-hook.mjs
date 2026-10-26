@@ -952,6 +952,7 @@ function composeSteps(S) {
     const why = 'the project memory was searched after the task\'s first change';
     mem.pass = false; mem.why = [why]; findings.push(why);
   }
+  for (const c of bangShell(reply, ctx.shell)) findings.push(`a command handed with "!" is written for the other shell (this session's is ${ctx.shell}): "${c}"`);
   if (observed.eyes?.offHost) findings.push(`an eyes call opened a page that is not local nor the design link the user wrote (${observed.eyes.offHost}): it does not count as the look of the change`);
   const proc = steps.find((s) => s.id === 'procedure');
   if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change
@@ -1163,7 +1164,19 @@ export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cau
 // invisible to every other agent, so the notice says where it belongs (docs/adr/0043).
 const NATIVE_MEMORY = /[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]/;
 export const nativeMemoryWrites = (tools) => [...new Set(tools.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(t.name)).map((t) => String(t.input?.file_path || '')).filter((p) => NATIVE_MEMORY.test(p)))];
-export const nativeMemoryNote = (files) => files.length ? ` · ⚠ escribió en la memoria nativa del agente (${files.length} archivo${files.length > 1 ? 's' : ''}): una regla tuya va a ~/.waymark/preferences.md (vale en todo proyecto) o a .waymark/memory.md → Conventions (del proyecto), con fecha y tu frase` : '';
+// The commands the reply hands the user with "!" (docs/adr/0046) that are written for the other shell: bash syntax in a PowerShell session (export,
+// VAR=x cmd, a /dev/null redirect, rm -rf, a pipe into head/tail/grep/wc/xargs/sed/awk, sudo, source) or PowerShell's in bash ($env:, a Verb-Noun
+// cmdlet, $null). A command that runs in both is never one. → the commands, cut to 80 characters.
+const BASH_ONLY = /(?:^|[;&|]\s*)export\s+\w+=|(?:^|[;&|]\s*)[A-Z_][A-Z0-9_]*=\S+\s+\w|\/dev\/null|\brm\s+-[a-z]*r[a-z]*\b|\|\s*(?:head|tail|grep|wc|xargs|sed|awk)\b|(?:^|[;&|]\s*)(?:sudo|source)\s/;
+const PWSH_ONLY = /\$env:\w+|\b(?:Get|Set|Remove|New|Copy|Move|Test|Invoke|Start|Stop)-[A-Z]\w+|\$null\b/;
+export function bangShell(reply, shell) {
+  if (!/^(powershell|bash)$/.test(shell || '')) return [];
+  const wrong = shell === 'powershell' ? BASH_ONLY : PWSH_ONLY, out = [];
+  for (const m of String(reply || '').matchAll(/(?:(?:^|\n)[ \t]*`?|`)!\s?((?!important\b)[\w.$~"'/][^\n`]*)/g)) if (wrong.test(m[1].trim())) out.push(m[1].trim().slice(0, 80));
+  return out;
+}
+
+export const nativeMemoryNote =(files) => files.length ? ` · ⚠ escribió en la memoria nativa del agente (${files.length} archivo${files.length > 1 ? 's' : ''}): una regla tuya va a ~/.waymark/preferences.md (vale en todo proyecto) o a .waymark/memory.md → Conventions (del proyecto), con fecha y tu frase` : '';
 
 // The question at the end of a task that said hecho: a bare "sí" closes it for good (the per-prompt hook runs `done`); any other
 // message continues it. Shown to the user, never added to the model's context.
@@ -1254,6 +1267,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
       try { ctx.requests = requestRefs(task.filter(isPrompt)); } catch {} // the screenshots and the design links the user sent: what the eyes compare against
+      // the shell a "!" command runs in, only from evidence: the session used PowerShell, or Bash off Windows; otherwise none is judged
+      try { const used = new Set(sessionTools(lines).map((t) => t.name)); ctx.shell = used.has('PowerShell') ? 'powershell' : used.has('Bash') && process.platform !== 'win32' ? 'bash' : null; } catch {}
       // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
       let turnAll = [];
       try { if (turn.startedAt) turnAll = turnCommitsAll(turn.tools, cwd, turn.startedAt); } catch (e) { logHookError('stop-hook commits', e); }

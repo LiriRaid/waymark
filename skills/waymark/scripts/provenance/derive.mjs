@@ -130,7 +130,7 @@ export function windowCheck(decisions, reply) {
 // The first choice window of an L2+ task judged on what it says of each option: its risk, its files or its cost, and exactly one option marked
 // (Recommended). `decisions` are the task's answered questions (decisionsIn: each carries its options). A window of one option, or a question
 // whose options are not known (asked in the chat), is not judged. → { options, missing: [...] } or null.
-const RISK = /riesgo|risk/i, FILES = /archivos?|files?/i, COST = /cost[eo]?\b|coste|tokens?|esfuerzo|effort|minutos?|minutes?/i, REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
+const REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
 export function optionsLint(decisions, level) {
   if (!(Number(level) >= 2)) return null;
   const first = (decisions || []).find((d) => d.optionList?.length >= 2);
@@ -139,12 +139,8 @@ export function optionsLint(decisions, level) {
   const missing = [];
   for (const d of window) {
     const q = String(d.question || '').slice(0, 30);
-    // the attributes are asked of the option the agent recommends: a window is a decision, and an alternative that says what it is needs no risk, files and cost
-    const marked1 = d.optionList.filter((o) => REC.test(String(o.label || '')));
-    for (const o of marked1.length === 1 ? marked1 : d.optionList) {
-      const text = String(o.description || ''), lacks = [!RISK.test(text) && 'risk', !(FILES.test(text) || COST.test(text)) && 'files or cost'].filter(Boolean);
-      if (lacks.length) missing.push(`${q} / ${String(o.label || '').slice(0, 30)}: ${lacks.join(', ')}`);
-    }
+    // only the mark is asked: risk, files and cost are kept as fields when an option says them (optionAttrs), never asked of it; asking them fired on 368
+    // of 398 real windows and said nothing about the decision
     const marked = d.optionList.filter((o) => REC.test(String(o.label || ''))).length;
     if (marked !== 1) missing.push(`${q}: ${marked ? 'more than one' : 'no'} option marked (Recommended)`);
   }

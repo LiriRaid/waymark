@@ -964,7 +964,7 @@ function composeSteps(S) {
   if (win?.failed.length) findings.push(`the Cierre marks ✘ what the user chose in the window: ${win.failed.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (win?.twoActions.length) findings.push(`a label the user chose holds two actions (apply and run, delete and deploy…): the Cierre must say which of them was done: ${win.twoActions.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (outsideRepos.length) findings.push(`changed a repository the Pedido does not name (Repos:): ${outsideRepos.slice(0, 3).join(', ')}`);
-  if (observed.options?.missing.length) findings.push(`the first choice window's options lack their attributes (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
+  if (observed.options?.missing.length) findings.push(`the first choice window does not mark exactly one option (Recommended) (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
   if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's

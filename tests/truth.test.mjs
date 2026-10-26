@@ -408,8 +408,8 @@ test('3j: the masker redacts what is shaped like a secret, not the prose around 
   assert.match(maskSecrets('Authorization: Bearer ' + 'ey' + 'J'.repeat(1) + 'hbGciOiJIUzI1NiJ9abc1234567890'), /\[redactado\]/);
   assert.ok(!maskSecrets('api key is sk-' + 'a1B2c3D4'.repeat(4)).includes('a1B2c3D4'), 'counter-example: a strong format is masked wherever it is');
 });
-test('3j: the options attributes are asked of the recommended option only', () => {
-  const win = (rec, alt) => [{ callId: 'c1', question: '¿Cómo?', optionList: [{ label: 'A (Recomendada)', description: rec }, { label: 'B', description: alt }] }];
+test('3j: the options attributes are never asked: only the mark (one option Recomendada)', () => {
+  const win = (rec, alt, label = 'A (Recomendada)') => [{ callId: 'c1', question: '¿Cómo?', optionList: [{ label, description: rec }, { label: 'B', description: alt }] }];
   assert.deepEqual(optionsLint(win('riesgo bajo; 3 archivos', 'la otra manera'), 2).missing, [], 'a plain alternative is fine');
   assert.equal(optionsLint(win('hace lo que se pide', 'riesgo bajo; 3 archivos'), 2).missing.length, 1, 'counter-example: the recommended one says nothing');
 });

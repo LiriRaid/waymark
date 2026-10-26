@@ -22,6 +22,8 @@ Stack- and language-agnostic: department rules are generic. Stack and architectu
 
 It is not an environment installer, not an orchestrator that runs agents, and not a workflow framework: it is skills the agent reads, hooks that run beside it and a record. It does not audit your dependencies.
 
+**Next to environment configurators.** Some tools configure the agents you already use: persistent memory, a development workflow, a skills library, personas and a deny-list of sensitive files, with a snapshot before every write (the public README of one such tool, read on 2026-10-25). Waymark configures no environment: it keeps one chained record per task and checks it. They answer different questions, what to set up for the agent and what the agent did, and one machine can have both: Waymark detects another framework and adapts to it (`coexistence`), and its learned layer already uses Engram for memory. Where they overlap (a deny-list of sensitive paths, memory across sessions) Waymark's own is described below and tested by its own suite, not compared with the other's. That README describes no per-task record and no hooks, while Waymark's guarantees rest on hooks where the agent lets one run. This is a reading of a public README on one date, not a test of the tool.
+
 What it records, and where each statement is tested:
 
 | Statement | Source |

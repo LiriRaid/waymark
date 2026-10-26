@@ -44,6 +44,35 @@ function roots(files, kinds) {
 }
 
 const groupOfSeg = (s) => (SHARED.test(s) ? 'shared' : CORE.test(s) ? 'core' : FEATURES.test(s) ? 'features' : 'other');
+// The home a piece outside the features belongs to: shared/components for shared/components/<piece>/<file>, shared for shared/<piece>/<file>.
+const homeKey = (segs) => (segs.length < 3 || groupOfSeg(segs[0]) === 'features' ? null : segs.slice(0, segs.length > 3 ? 2 : 1).join('/'));
+const libraryOf = (conv) => conv.homes.find((h) => h.group === 'shared' && h.ui >= MIN_PIECES) || null;
+const sinceOf = (h) => (h.since ? ` since ${h.since.hash} (${h.since.date})` : '');
+
+// A component of the newer naming in the history, where its file cannot be opened to look for @Component: <piece>/<piece>.ts.
+const namedLikeItsFolder = (rel) => { const p = rel.split('/'), base = p.pop(); return /\.ts$/.test(base) && !NAMED_TS.test(base) && !/\.(spec|test|d)\.ts$/.test(base) && base.replace(/\.ts$/, '') === p.pop(); };
+
+// The latest commit that moved at least MIN_PIECES UI pieces from one layer to another: { hash, date, n, from, to } or null. The tree after
+// it is what the census counts, so the line names it: the structure before that commit is the older convention.
+function lastMove(repo, root) {
+  const r = git(repo, ['log', '-M', '--diff-filter=R', '--name-status', '--format=@%h %cs', '-n', '300', '--', root], { timeout: 8000 });
+  if (r.status !== 0) return null;
+  const under = (f) => (f.startsWith(root + '/') ? f.slice(root.length + 1).split('/') : null);
+  for (const block of String(r.stdout).split('\n@').map((b) => b.replace(/^@/, ''))) {
+    const [head, ...rows] = block.split('\n'), [hash, date] = head.split(' '), counts = {};
+    for (const row of rows) {
+      const [st, from, to] = row.split('\t');
+      if (!/^R/.test(st || '') || !to || !(/^(component|modal)$/.test(kindOf(to, () => false) || '') || namedLikeItsFolder(to))) continue;
+      const a = under(from), b = under(to);
+      if (!a || !b || a.length < 2 || b.length < 2 || groupOfSeg(a[0]) === groupOfSeg(b[0])) continue;
+      const k = `${homeKey(a) || a[0]}\t${groupOfSeg(b[0])}`;
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    const best = Object.entries(counts).sort((x, y) => y[1] - x[1])[0];
+    if (best && best[1] >= MIN_PIECES) { const [from, to] = best[0].split('\t'); return { hash, date, n: best[1], from: `${root}/${from}`, to }; }
+  }
+  return null;
+}
 
 function listFiles(repo) {
   const r = git(repo, ['ls-files', '-co', '--exclude-standard']);
@@ -87,9 +116,9 @@ export function census(repoPath) {
   const files = listFiles(repo), kinds = new Map(files.map((f) => [f, kindOf(f, probe)])), rootList = roots(files, kinds);
   const lock = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'bun.lockb', 'bun.lock'].find((l) => fs.existsSync(path.join(repo, l))) || null;
   const docs = ['AGENTS.md', 'CLAUDE.md', 'ARCHITECTURE.md', 'CONTRIBUTING.md', 'docs/adr', 'docs/architecture', 'docs/architecture.md'].filter((d) => fs.existsSync(path.join(repo, d)));
-  const conv = { repo, root: rootList[0] || null, lockfile: lock, docs, total: 0, kinds: {}, layers: {}, featureFolders: {}, variant: 'none', structure: null };
+  const conv = { repo, root: rootList[0] || null, lockfile: lock, docs, total: 0, kinds: {}, layers: {}, featureFolders: {}, variant: 'none', structure: null, homes: [], moves: null };
   if (!conv.root) { conv.line = noConvention(conv, 'no source folder with components, services or styles'); return conv; }
-  const layerFiles = {};
+  const layerFiles = {}, homeCounts = {};
   for (const f of files) {
     if (!f.startsWith(conv.root + '/')) continue;
     const k = kinds.get(f);
@@ -104,7 +133,14 @@ export function census(repoPath) {
     if (group === 'features' && segs.length > 3) conv.featureFolders[segs[2]] = (conv.featureFolders[segs[2]] || 0) + 1;
     const top = segs.length > 1 ? segs[0] : null;
     if (top) layerFiles[top] = (layerFiles[top] || 0) + 1;
+    const home = homeKey(segs);
+    if (home && /^(component|modal|style)$/.test(k)) { const h = homeCounts[home] || (homeCounts[home] = { ui: 0, style: 0 }); h[k === 'style' ? 'style' : 'ui']++; }
   }
+  // a folder outside the features that holds a library of UI pieces is a home of its own, whatever the features hold (docs/adr/0043)
+  conv.homes = Object.entries(homeCounts).filter(([, h]) => h.ui >= MIN_PIECES || h.style >= MIN_PIECES)
+    .map(([key, h]) => ({ key, dir: `${conv.root}/${key}`, group: groupOfSeg(key.split('/')[0]), ...h })).sort((a, b) => b.ui - a.ui)
+    .map((h) => ({ ...h, since: firstCommit(repo, h.dir) }));
+  conv.moves = lastMove(repo, conv.root);
   for (const kind of Object.values(conv.kinds)) {
     const best = ['shared', 'core', 'features', 'other'].sort((a, b) => kind[b] - kind[a])[0];
     kind.dominant = kind.total >= MIN_PIECES && kind[best] / kind.total >= DOMINANT ? best : null;
@@ -114,6 +150,7 @@ export function census(repoPath) {
   if (hasLayers && ui.total >= MIN_PIECES) {
     const share = ui.shared / ui.total;
     conv.variant = share >= DOMINANT ? 'shared-ui' : share <= 1 - DOMINANT ? 'scope-rule' : 'mixed';
+    if (conv.variant !== 'shared-ui' && ui.features >= MIN_PIECES && libraryOf(conv)) conv.variant = 'shared-library';
   }
   // the oldest commit that added each of the three biggest layer folders: when the structure was set
   const dirs = Object.entries(layerFiles).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => `${conv.root}/${l}`);
@@ -129,8 +166,15 @@ function noConvention(conv, why) {
   return `no convention detected (${why}): the profile default applies, marked "profile default", never "the project's rule"`;
 }
 function summary(conv) {
+  const moved = conv.moves ? `; commit ${conv.moves.hash} (${conv.moves.date}) moved ${conv.moves.n} pieces from ${conv.moves.from} to ${conv.moves.to}: the tree before it shows the older convention, ask before following the newer one` : '';
+  const line = base(conv);
+  return conv.variant === 'none' ? line : `${line}${moved}`;
+}
+function base(conv) {
   const since = conv.structure ? `; the structure dates from ${conv.structure.hash} (${conv.structure.date})` : '';
   const ui = ['component', 'modal'].map((k) => conv.kinds[k]).filter(Boolean);
+  const lib = libraryOf(conv);
+  if (conv.variant === 'shared-library') return `Shared library + feature screens: reusable UI lives in ${lib.dir} (${lib.ui} pieces${sinceOf(lib)}); the features hold their own screens and pieces (${ui.reduce((a, k) => a + k.features, 0)})${since}`;
   if (conv.variant === 'shared-ui') return `Shared UI: ${ui.map((k) => `${k.shared}/${k.total}`).join(' + ')} UI pieces live in shared/, features hold the logic${since}`;
   if (conv.variant === 'scope-rule') return `Scope Rule: UI pieces live inside the feature that uses them (${ui.reduce((a, k) => a + k.features, 0)} of ${ui.reduce((a, k) => a + k.total, 0)})${since}`;
   if (conv.variant === 'mixed') return `mixed: UI pieces are split between shared/ and the features (${ui.reduce((a, k) => a + k.shared, 0)} / ${ui.reduce((a, k) => a + k.features, 0)}); follow the closest sibling file, ask on a structural change${since}`;
@@ -139,6 +183,10 @@ function summary(conv) {
 
 // Where a new piece of `kind` goes: the layer that holds most of that kind, with its evidence; null when the repo shows no convention for it.
 export function whereToPlace(conv, kind) {
+  const lib = libraryOf(conv);
+  if (conv.variant === 'shared-library' && /^(ui|component|modal)$/.test(kind)) {
+    return { layer: null, home: lib.dir, line: `two homes: a reusable piece goes to ${lib.dir} (${lib.ui} pieces${sinceOf(lib)}); a screen or a piece of one feature goes inside that feature; ask when it is unclear` };
+  }
   const ks = kind === 'ui' ? ['component', 'modal'].map((k) => conv.kinds[k]).filter(Boolean) : [conv.kinds[kind]].filter(Boolean);
   const k = ks.length === 1 ? ks[0] : ks.length ? ks.reduce((a, b) => ({ total: a.total + b.total, shared: a.shared + b.shared, core: a.core + b.core, features: a.features + b.features, other: a.other + b.other })) : null;
   if (!k || k.total < MIN_PIECES) return { layer: null, line: noConvention(conv, `fewer than ${MIN_PIECES} ${kind} pieces`) };
@@ -148,7 +196,21 @@ export function whereToPlace(conv, kind) {
 }
 
 // The verdict of moving pieces of `kind` out of `from` into `to` (groups or paths): the line a structural-change window shows.
+// The home a layer name or a path falls in (a layer name is its biggest home), or null.
+function homeOf(conv, spec) {
+  if (/^(shared|core|features|other)$/.test(spec)) return conv.homes.find((h) => h.group === spec) || null;
+  const rel = String(spec).replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/$/, '');
+  const under = conv.root && rel.startsWith(conv.root + '/') ? rel.slice(conv.root.length + 1) : rel;
+  return conv.homes.find((h) => under === h.key || under.startsWith(h.key + '/')) || null;
+}
+
+// The verdict of moving pieces of `kind` out of `from` into `to` (groups or paths): the line a structural-change window shows. A move out of a
+// home contradicts it even when another layer holds more pieces; a move into one follows it.
 export function judgeMove(conv, kind, from, to) {
+  const count = (h) => (h ? (kind === 'style' ? h.style : /^(ui|component|modal)$/.test(kind) ? h.ui : 0) : 0);
+  const hf = homeOf(conv, from), ht = homeOf(conv, to);
+  if (count(hf) >= MIN_PIECES && ht !== hf) return { verdict: 'contradicts', line: `CONTRADICTS the project's convention: ${hf.dir} has held ${count(hf)} ${kind} pieces${sinceOf(hf)}; moving them out to ${groupOf(conv, to)} goes against it. Recommended: do not move` };
+  if (count(ht) >= MIN_PIECES && ht !== hf) return { verdict: 'follows', line: `follows the convention: ${ht.dir} is where ${kind} pieces live (${count(ht)}${sinceOf(ht)})` };
   const f = groupOf(conv, from), t = groupOf(conv, to), at = whereToPlace(conv, kind);
   if (!at.layer) return { verdict: 'no-convention', line: at.line };
   if (f === at.layer && t !== at.layer) return { verdict: 'contradicts', line: `CONTRADICTS the project's convention: ${at.line}; moving ${kind} pieces from ${f} to ${t} goes against it. Recommended: do not move` };

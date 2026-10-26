@@ -86,6 +86,80 @@ test('counter-example: a repository with no convention gets the profile default,
   assert.equal(C.whereToPlace(conv, 'ui').layer, null);
 });
 
+// Two homes: a library of reusable UI pieces in shared/components and, in the features, their screens with their own modals and panels.
+// The features hold more pieces, so a census that only looks for the dominant layer reads it as the Scope Rule.
+const KIT = ['button', 'input', 'select', 'modal', 'editor', 'preview', 'reorder', 'schedule'];
+const SCREENS = [['admin', 'users'], ['admin', 'teams'], ['admin', 'brands'], ['inbox', 'inbox'], ['inbox', 'header'], ['inbox', 'panel'], ['inbox', 'sidebar'],
+  ['contacts', 'contacts'], ['contacts', 'card'], ['contacts', 'profile'], ['tickets', 'tickets'], ['tickets', 'detail'], ['tickets', 'form-modal'], ['admin', 'role-modal']];
+const libraryAndScreens = () => repo([{ date: '2020-03-13T10:00:00Z', files: {
+  ...many(KIT.length, (i) => [`src/app/shared/components/kit-${KIT[i - 1]}/kit-${KIT[i - 1]}.component.ts`, `// kit ${KIT[i - 1]}`]),
+  ...many(KIT.length, (i) => [`src/app/shared/components/kit-${KIT[i - 1]}/kit-${KIT[i - 1]}.component.html`, `<div class="kit-${KIT[i - 1]}"></div>`]),
+  ...many(KIT.length, (i) => [`src/app/shared/components/kit-${KIT[i - 1]}/kit-${KIT[i - 1]}.component.css`, `.kit-${KIT[i - 1]} { display: block }`]),
+  ...Object.fromEntries(SCREENS.map(([f, s]) => [`src/app/features/${f}/${s}/${s}.component.ts`, `// screen ${f} ${s}`])),
+  'src/app/features/admin/admin.routes.ts': '', 'src/app/features/inbox/inbox.routes.ts': '', 'src/app/features/inbox/services/inbox.service.ts': '',
+} }]);
+// the same repository after one commit moved half of the library into the features that used each piece
+const movedOut = () => {
+  const d = libraryAndScreens(), date = '2020-10-14T10:00:00Z';
+  for (const [k, f] of [['editor', 'admin'], ['preview', 'inbox'], ['reorder', 'admin'], ['schedule', 'admin']]) {
+    fs.mkdirSync(path.join(d, `src/app/features/${f}/components`), { recursive: true });
+    g(d, date, 'mv', `src/app/shared/components/kit-${k}`, `src/app/features/${f}/components/kit-${k}`);
+  }
+  g(d, date, 'commit', '-q', '-m', 'move');
+  return d;
+};
+
+test('logic: a library of reusable UI in shared/components is a home of its own: moving a piece out of it CONTRADICTS, although the features hold more pieces', () => {
+  const conv = C.census(libraryAndScreens());
+  assert.equal(conv.variant, 'shared-library', conv.line);
+  const home = conv.homes.find((h) => h.dir === 'src/app/shared/components');
+  assert.ok(home && home.ui === KIT.length && home.since?.date === '2020-03-13', JSON.stringify(conv.homes));
+  assert.match(conv.line, /src\/app\/shared\/components/);
+  for (const from of ['src/app/shared/components/kit-editor', 'shared/components', 'shared']) {
+    const v = C.judgeMove(conv, 'ui', from, 'src/app/features/inbox');
+    assert.equal(v.verdict, 'contradicts', `${from}: ${v.line}`);
+    assert.ok(v.line.includes(home.since.hash) && v.line.includes('2020-03-13') && /Recommended: do not move/.test(v.line), v.line);
+  }
+});
+
+test('logic: on a tree a mass move already changed, the census cites that move and a move out of the library still CONTRADICTS', () => {
+  const conv = C.census(movedOut());
+  assert.equal(conv.moves?.n, 4, JSON.stringify(conv.moves));
+  assert.equal(conv.moves.date, '2020-10-14');
+  assert.match(conv.line, /moved 4 pieces from src\/app\/shared\/components to features/);
+  assert.equal(C.judgeMove(conv, 'ui', 'src/app/shared/components/kit-button', 'src/app/features/admin').verdict, 'contradicts');
+});
+
+test('logic: a move of components of the newer naming (<piece>/<piece>.ts) is cited too; a helper named like no folder is not a piece', () => {
+  const d = repo([{ date: '2021-01-01T10:00:00Z', files: {
+    ...many(6, (i) => [`src/app/shared/components/kit-${i}/kit-${i}.ts`, `@Component({ selector: "kit-${i}" })\nexport class K${i} {}`]),
+    ...many(6, (i) => [`src/app/shared/components/kit-${i}/kit-${i}.html`, `<i>${i}</i>`]),
+    ...many(5, (i) => [`src/app/features/f${i}/f${i}.ts`, `@Component({ selector: "f-${i}" })\nexport class F${i} {}`]),
+    'src/app/shared/components/helpers.ts': 'export const h = 1;',
+  } }]);
+  for (const i of [1, 2, 3, 4]) { fs.mkdirSync(path.join(d, 'src/app/features/f1/components'), { recursive: true }); g(d, '2021-05-05T10:00:00Z', 'mv', `src/app/shared/components/kit-${i}`, `src/app/features/f1/components/kit-${i}`); }
+  g(d, '2021-05-05T10:00:00Z', 'mv', 'src/app/shared/components/helpers.ts', 'src/app/features/f1/helpers.ts');
+  g(d, '2021-05-05T10:00:00Z', 'commit', '-q', '-m', 'move');
+  const conv = C.census(d);
+  assert.deepEqual([conv.moves?.n, conv.moves?.date, conv.moves?.from], [4, '2021-05-05', 'src/app/shared/components'], JSON.stringify(conv.moves));
+});
+
+test('CSS/HTML: the styles and templates of the library are part of the home: moving them out CONTRADICTS, and a new reusable piece is placed in the library', () => {
+  const conv = C.census(libraryAndScreens());
+  assert.equal(C.judgeMove(conv, 'style', 'src/app/shared/components/kit-button', 'src/app/features/admin').verdict, 'contradicts');
+  const at = C.whereToPlace(conv, 'ui');
+  assert.match(at.line, /reusable .*src\/app\/shared\/components/, at.line);
+});
+
+test('counter-example: in the library repository a piece promoted from a feature into the library follows; a Scope Rule repository with one shared piece has no home', () => {
+  const conv = C.census(libraryAndScreens());
+  assert.equal(C.judgeMove(conv, 'ui', 'src/app/features/inbox/panel', 'src/app/shared/components').verdict, 'follows');
+  const scope = C.census(scopeRule());
+  assert.deepEqual(scope.homes, []);
+  assert.equal(scope.moves, null);
+  assert.equal(C.judgeMove(scope, 'ui', 'src/app/shared/spinner', 'src/app/features/inbox').verdict, 'follows');
+});
+
 test('a component of the newer naming (no .component suffix, @Component in the file) is counted, a plain class beside it is not', () => {
   const d = repo([{ date: '2023-01-01T10:00:00Z', files: {
     ...many(4, (i) => [`src/app/shared/card-${i}/card-${i}.ts`, '@Component({ selector: "c" })\nexport class C {}']),

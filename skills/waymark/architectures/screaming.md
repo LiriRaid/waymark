@@ -33,7 +33,8 @@ The folder names are the same; what differs is what goes in `shared/` and what s
 |---|---|---|
 | Scope Rule (profile default) | what 2+ features use | what only that feature uses, UI included |
 | Shared UI | every reusable UI piece (components, modals, pipes), even with one consumer | business logic: models, services, routes, pages |
-A repo that matches neither: describe what it does in `memory.md` and follow that. Never move a piece from one layer to the other to make a repo match a variant.
+| Shared library + feature screens | a library of reusable UI pieces (`shared/components`), even with one consumer | its screens and the modals and panels only that screen uses |
+A folder that has held a library of UI pieces since a commit is a home of its own: a move out of it contradicts the convention even when the features hold more pieces. A repo that matches none: describe what it does in `memory.md` and follow that. Never move a piece from one layer to the other to make a repo match a variant.
 
 ## Dependency rules
 | From | May import | Must not import |

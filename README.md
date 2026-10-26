@@ -74,6 +74,8 @@ What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'
 
 Waymark learns on your machine: each task you close teaches your own install, and nothing leaves it unless you send it (`docs/adr/0042`). To know whether it works beyond one machine, it needs **patterns** from people who use it: what happened, with which agent, version and level, and how often, said so that anyone could reuse it without knowing your project. Your **case** (code, prompts, paths, client names) stays with you. Share a pattern with the *Pattern report* issue form; send a change as a pull request against `develop`, which the author reviews and signs. How, with examples of a pattern and a case: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+`node "<skills-dir>/waymark/scripts/waymark.mjs" report [<project path> …] [--out <file>]` writes that summary for you to read before you share anything: counts and shapes only (the level, the kinds of check that failed, the outcome, buckets of time and tokens, the stack family, the agent and the model family), never a prompt, a path, a file name, code, a project name or an address, and Waymark never sends it. `scorecard --projects [<project path> …]` pools the last tasks of the projects you name, so the real-use numbers (how many closed parcial, which agents closed them) are read from use and not from the repository alone.
+
 Every task the author has recorded ran on Claude Code; the other adapters are judged by the conformance list, not yet by live use, so a report from Codex, Cursor, Gemini CLI or any other agent is worth the most. Waymark 2.0.19 is the baseline: its numbers come from tasks run on 2.0.18 and later, and each release after it says how much it improved.
 
 ## What each agent enforces

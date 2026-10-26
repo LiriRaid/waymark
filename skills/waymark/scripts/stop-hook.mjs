@@ -31,6 +31,7 @@ import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { eyesProvider, eyesDue, observeEyes, eyesGaps } from './eyes.mjs';
+import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
@@ -1116,6 +1117,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     ...(answers.length ? { answered: answers } : {}), // what the Cierre's Pedido line says of each item
     ...(meta.cost ? { cost: meta.cost } : {}),
     ...(meta.models?.length ? { models: meta.models, ...(meta.models.length > 1 ? { modelChanged: true } : {}) } : {}), // the model(s) the responses came from, and a change in the middle (docs/adr/0049)
+    ...(ctx.kind ? { projectKind: ctx.kind } : {}), // the project's kind as a label: stack family and size bucket (docs/adr/0049)
     observed: gaps.observed,
     evaluation: meta.evaluation,
     commands: turn.tools.filter(shell).map((t) => maskSecrets(cmdOf(t).slice(0, 200))).slice(0, 30),
@@ -1246,6 +1248,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.root = home.root;
+      try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
       // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
       let turnAll = [];

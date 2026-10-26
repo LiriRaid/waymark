@@ -64,7 +64,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', report: 'report.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);

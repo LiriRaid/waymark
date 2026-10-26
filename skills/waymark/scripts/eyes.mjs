@@ -41,6 +41,49 @@ const PANEL = /^mcp__[\w-]*(?:browser|chrome)[\w-]*__(\w+)$/i;
 const PANEL_ACTS = new Set(['form_input']);
 const text = (t) => String(t.input?.command ?? '');
 
+// ---- where the eyes may look (decision 1c): the local dev server, plus the design link the user wrote in the request, read only ----
+const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\]|[\w.-]+\.localhost|[\w.-]+\.test)$/i;
+const URL_RE = /\b(?:https?:\/\/[^\s'"`)<>\]]+|file:\/\/\/?[^\s'"`)<>]+)/gi;
+const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return null; } };
+// → 'local' | 'design' | 'off' for one URL, given the hosts the user wrote in the request.
+export function whereTo(url, allowed = []) {
+  if (/^file:/i.test(url)) return 'local';
+  const h = hostOf(url);
+  if (!h) return 'off';
+  return LOCAL_HOST.test(h) || LOCAL_HOST.test(`[${h}]`) ? 'local' : allowed.includes(h) ? 'design' : 'off';
+}
+// What the user's request carries for the eyes: the screenshots (image blocks) and the hosts of the links they wrote that are not local.
+export function requestRefs(prompts) {
+  let images = 0;
+  const hosts = new Set();
+  for (const d of prompts || []) {
+    if (d?.type !== 'user' || d.isMeta) continue;
+    const c = d.message?.content, parts = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
+    if (parts.some((p) => p.type === 'tool_result')) continue;
+    for (const p of parts) {
+      if (p.type === 'image') images++;
+      if (p.type === 'text') for (const u of String(p.text).match(URL_RE) || []) { const h = hostOf(u); if (h && whereTo(u) !== 'local') hosts.add(h); }
+    }
+  }
+  return { images, hosts: [...hosts] };
+}
+// ego's own reference (references/clearing-state.md): three commands empty the whole profile's cookies or cache and cannot be undone.
+const PROFILE_WIPE = /Network\.clearBrowserCookies|Network\.clearBrowserCache|Storage\.clearCookies["'`]\s*(?:\)|,\s*\{(?![^}]*browserContextId))/;
+const SITE_CLEAR = /Storage\.clearDataForOrigin|Network\.deleteCookies/;
+const PASSWORD = /\.(?:fill|type|pressSequentially)\(\s*["'`][^"'`]*(?:password|passwd|contrase)/i;
+// Why an eyes script must not run, or null: a profile-wide clear, a site clear or a navigation off the local host and the user's design link,
+// a password typed. Waymark signs in nowhere and never clears the user's profile.
+export function eyesRefusal(script, allowed = []) {
+  const s = String(script || '');
+  if (PROFILE_WIPE.test(s)) return 'it clears the cookies or the cache of the whole browser profile (every site the user is signed in to): never run it; clear one local origin with Storage.clearDataForOrigin if a test needs it';
+  if (PASSWORD.test(s)) return 'it types into a password field: Waymark signs in nowhere; look at the app as the user, already signed in';
+  const urls = s.match(URL_RE) || [];
+  const off = urls.filter((u) => whereTo(u, allowed) === 'off');
+  if (SITE_CLEAR.test(s) && urls.some((u) => whereTo(u, allowed) !== 'local')) return 'it clears a site that is not the local dev server';
+  if (off.length) return `it opens ${hostOf(off[0]) || 'a host'}, which is neither the local dev server nor a design link the user wrote in the request`;
+  return null;
+}
+
 // The ego-browser script behind a call: the command, and the files it imports (a file given to `ego-browser nodejs -e` by a file:/// URL) written earlier in the turn.
 function scriptOf(t, writes) {
   const cmd = text(t), files = [...cmd.matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => decodeURI(m[1]).replace(/\\/g, '/').toLowerCase());
@@ -49,30 +92,39 @@ function scriptOf(t, writes) {
 
 // What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts.
 // → { provider, calls, measures, afterLastChange, references }. Nothing of the page is kept: no URL, no text.
-export function observeEyes(tools, { from = -1, provider = null, reply = '' } = {}) {
+export function observeEyes(tools, { from = -1, provider = null, reply = '', allowed = [] } = {}) {
   const writes = new Map();
   for (const t of tools) if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') writes.set(String(t.input.file_path).replace(/\\/g, '/').toLowerCase(), t.input.content);
-  let calls = 0, measures = 0, used = null;
+  let calls = 0, measures = 0, used = null, offHost = 0, design = 0, panelAt = 'local';
   const captures = [];
   tools.forEach((t, i) => {
-    let kind = null, measuring = false;
+    let kind = null, measuring = false, where = 'local';
     const panel = PANEL.exec(t.name || '');
     if (panel) {
       kind = 'panel';
       const name = panel[1], input = t.input || {};
+      if (input.url && /^(navigate|preview_start|tabs_create)$/.test(name)) panelAt = whereTo(String(input.url), allowed); // the page the next panel calls look at
+      where = panelAt;
       measuring = (name === 'javascript_tool' && MEASURES.test(String(input.text || ''))) || PANEL_ACTS.has(name) || (name === 'computer' && /click|drag/.test(String(input.action || '')));
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
-      if (RUNS_EGO.test(text(t))) { kind = 'ego'; measuring = MEASURES.test(scriptOf(t, writes)); }
-      else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; }
+      if (RUNS_EGO.test(text(t))) {
+        kind = 'ego';
+        const s = scriptOf(t, writes), places = (s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
+        measuring = MEASURES.test(s);
+        where = places.includes('off') ? 'off' : places.includes('local') || !places.length ? 'local' : 'design'; // a script that compares the design with the local build looks at the build
+      } else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; where = (text(t).match(URL_RE) || []).some((u) => whereTo(u, allowed) === 'off') ? 'off' : 'local'; }
     }
     if (!kind) return;
+    if (where === 'off') offHost++;
+    if (where === 'design') design++;
+    if (where !== 'local') measuring = false; // only the local build is the change; the design is a reference
     if (kind === 'ego') for (const m of scriptOf(t, writes).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
     if (measuring && i > from) measures++;
   });
   const verdicts = (String(reply).match(/:\s*(?:igual|parecido|falta)\b\s*[—–-]/gi) || []).length; // "<element>: igual — <measurement>", never the word in prose
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, references: verdicts, captures };
+  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, references: verdicts, captures, offHost, design };
 }
 
 // ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----

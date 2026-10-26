@@ -108,7 +108,7 @@ test('8: the provider is what the machine has: ego first, Playwright where the p
 test('8: the record keeps the eyes: provider, calls, measures, and nothing of the page', () => {
   const g = judge([...head(2, CSS), ...ego(MEASURE)]);
   const o = g.observed.eyes;
-  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'measures', 'provider', 'references'].sort());
+  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references'].sort());
   assert.ok(!JSON.stringify(o).includes('localhost'), 'no URL, no text of the page');
 });
 
@@ -215,4 +215,58 @@ test('8: an expired capture folder takes its empty project folder with it; one w
   Eyes.cleanEyes(now);
   assert.ok(!fs.existsSync(path.dirname(dead)), 'the empty project folder is gone');
   assert.ok(fs.existsSync(live) && !fs.existsSync(old2), 'counter-example: the project with a live task stays');
+});
+
+// ---- H5: the eyes look at the local dev server; a design link the user wrote is read, never counted as the built screen ----
+const at_ = (url, body = MEASURE) => ego(`await page.goto("${url}");\n${body}`);
+const DESIGN = 'https://www.figma.com/design/AbC123/kit?node-id=1-2';
+test('8: CSS/HTML — a measurement counts only on a local page: localhost, 127.0.0.1, *.localhost, *.test, a file', () => {
+  for (const url of ['http://localhost:4200/', 'http://127.0.0.1:5173/x', 'http://app.localhost:3000/', 'https://shop.test/', 'file:///C:/work/proj/dist/index.html']) {
+    assert.equal(eyes(judge([...head(2, CSS), ...at_(url)])).pass, true, url);
+  }
+  const prod = judge([...head(2, CSS), ...at_('https://prod.example.com/')]);
+  assert.equal(eyes(prod).pass, false, 'counter-example: the production site is not the change');
+  assert.equal(prod.observed.eyes.offHost, 1);
+  assert.ok(prod.findings.some((f) => /not local/.test(f)), prod.findings.join(' | '));
+});
+
+test('8: logic — the design link the user wrote is a reference, read only: it counts as no eyes; one the user did not write is off-host', () => {
+  const asked = { requests: { images: 0, hosts: ['www.figma.com'] } };
+  const design = judge([...head(2, CSS), ...at_(DESIGN)], asked);
+  assert.equal(eyes(design).pass, false, 'the design is not the built screen');
+  assert.deepEqual([design.observed.eyes.design, design.observed.eyes.offHost], [1, 0]);
+  assert.equal(eyes(judge([...head(2, CSS), ...at_(DESIGN), ...at_('http://localhost:4200/')], asked, CIERRE + '\nbotón: igual — ancho 40')).pass, true, 'compared with the local build');
+  assert.equal(judge([...head(2, CSS), ...at_(DESIGN)]).observed.eyes.offHost, 1, 'counter-example: a design link not written by the user');
+});
+
+test('8: before the tool — a profile-wide clear, a site clear off the local host, a password typed, a host the user did not write: refused', () => {
+  const allowed = ['www.figma.com'];
+  for (const s of ['await page.cdp("Network.clearBrowserCookies");', 'await page.cdp("Network.clearBrowserCache")', 'await page.cdp("Storage.clearCookies", {});',
+    'await page.cdp("Storage.clearDataForOrigin", { origin: "https://mail.example.com", storageTypes: "all" });', 'await page.goto("http://localhost:4200/login"); await page.fill("#password", "x");',
+    'await page.fill(\'input[type=password]\', "x")', 'await page.goto("https://prod.example.com/")']) assert.ok(Eyes.eyesRefusal(s, allowed), s);
+  // counter-examples: scoped to the local app, a design read, a context-scoped clear
+  for (const s of ['await page.goto("http://localhost:4200/"); ' + MEASURE, `await page.goto("${DESIGN}"); console.log(await page.snapshot());`,
+    'await page.cdp("Storage.clearDataForOrigin", { origin: "http://localhost:4200", storageTypes: "all" });', 'await page.cdp("Storage.clearCookies", { browserContextId: ctx });',
+    'await page.fill("#email", "a@b.c")']) assert.equal(Eyes.eyesRefusal(s, allowed), null, s);
+});
+
+test('8: the request is read from the prompts: image blocks and the hosts of the links the user wrote', () => {
+  const img = { type: 'user', uuid: 'pi', timestamp: at(), message: { role: 'user', content: [{ type: 'text', text: `así debe quedar ${DESIGN} y en local http://localhost:4200` }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } };
+  assert.deepEqual(Eyes.requestRefs([img, say('ok')]), { images: 1, hosts: ['www.figma.com'] });
+});
+
+test('8: the pre-tool hook denies the eyes script that clears the profile or opens a host the user did not write; the design link written in the request passes', async () => {
+  const { gate } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-eyes-gate-'));
+  const transcript = path.join(proj, 't.jsonl');
+  fs.writeFileSync(transcript, [prompt(`ajusta el botón como en ${DESIGN}`)].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const run = (script) => gate({ tool_name: 'Bash', tool_input: { command: `ego-browser nodejs -e '${script}'` }, cwd: proj, session_id: 's-eyes-gate', transcript_path: transcript }, claude);
+  assert.match(run('await page.cdp("Network.clearBrowserCookies")') || '', /whole browser profile/);
+  assert.match(run('await page.goto("https://prod.example.com/")') || '', /neither the local dev server/);
+  assert.match(run('await page.fill("#password", "x")') || '', /password/);
+  assert.equal(run(`await page.goto("${DESIGN}")`), null, 'the design link the user wrote');
+  assert.equal(run('await page.goto("http://localhost:4200/"); ' + MEASURE.replace(/'/g, '"')), null, 'the local dev server');
+  assert.equal(gate({ tool_name: 'Bash', tool_input: { command: 'echo "ego-browser nodejs Network.clearBrowserCookies"' }, cwd: proj, session_id: 's-eyes-gate', transcript_path: transcript }, claude), null, 'counter-example: the words in an echo');
+  fs.rmSync(proj, { recursive: true, force: true });
 });

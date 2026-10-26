@@ -14,6 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
+import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
 import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
@@ -203,6 +204,14 @@ export function checkMigration(file, memory, session, stateFile = path.join(proc
   return `Waymark: this project migrates with its own script (Conventions: "Migrations: ${script.slice(0, 120)}"), and this writes a migration file by hand. Use the script to make it and to run it; if it cannot do what the task needs, say so in your choice window and write it by hand only if the user chooses that.`;
 }
 
+// An ego-browser script, with the files it imports by file:/// URL, checked before it runs (docs/adr/0047): the local dev server and the design
+// link the user wrote in the request are the only hosts; a profile-wide clear and a typed password never run. → the deny reason, or null.
+function checkEyes(command, turns) {
+  const files = [...String(command).matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => { try { return fs.readFileSync(decodeURI(m[1]), 'utf8'); } catch { return ''; } });
+  const why = eyesRefusal([command, ...files].join('\n'), requestRefs(turns().filter(isPrompt)).hosts);
+  return why ? `Waymark: this ego-browser script was not run: ${why}. The eyes look at the local dev server as the user, already signed in (docs/adr/0047).` : null;
+}
+
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
   if (!c) return null;
@@ -223,6 +232,7 @@ export function gate(hook, agent) {
     if (/\bgh\s+(?:auth|pr)\b/.test(c.command)) { const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n')); if (gh) return gh; } // the user's account and pull requests
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
+    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
     const lines = turns(), own = projectHome(cwd).root;
     for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, taskKey()); if (deny) return withNote(deny); }

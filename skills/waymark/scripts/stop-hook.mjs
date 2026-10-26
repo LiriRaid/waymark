@@ -30,7 +30,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { eyesProvider, eyesDue, observeEyes, eyesGaps } from './eyes.mjs';
+import { eyesProvider, eyesDue, observeEyes, eyesGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
@@ -578,7 +578,7 @@ function observeTurn(S) {
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && /\bego-browser\s+nodejs\b/.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
     // the eyes (docs/adr/0047): browser calls that measured or clicked after the last change; the provider the machine has when none was used
-    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), provider: ctx.eyes?.provider || null, reply }),
+    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [] }),
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
@@ -879,7 +879,8 @@ const WITNESS = {
   },
   eyes: (S) => {
     const { eyesNo, excepted, observed } = S;
-    return observed.eyes.afterLastChange ? [] : eyesNo ? (excepted.eyes = eyesNo, []) : eyesGaps(observed.eyes, observed.eyes.provider);
+    if (eyesNo) { excepted.eyes = eyesNo; return []; }
+    return eyesGaps(observed.eyes, observed.eyes.provider);
   },
   docs: (S) => {
     const { retried } = S;
@@ -951,6 +952,7 @@ function composeSteps(S) {
     const why = 'the project memory was searched after the task\'s first change';
     mem.pass = false; mem.why = [why]; findings.push(why);
   }
+  if (observed.eyes?.offHost) findings.push(`an eyes call opened a page that is not local nor the design link the user wrote (${observed.eyes.offHost}): it does not count as the look of the change`);
   const proc = steps.find((s) => s.id === 'procedure');
   if (proc?.applies && proc.pass && firstRealChange >= 0 && !observed.procedure.readBeforeChange) { // read only once blocked: too late to guide the change
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
@@ -1251,6 +1253,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       ctx.root = home.root;
       try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
+      try { ctx.requests = requestRefs(task.filter(isPrompt)); } catch {} // the screenshots and the design links the user sent: what the eyes compare against
       // every commit of the turn, with or without a trailer and in any repo it committed in, besides the task's own
       let turnAll = [];
       try { if (turn.startedAt) turnAll = turnCommitsAll(turn.tools, cwd, turn.startedAt); } catch (e) { logHookError('stop-hook commits', e); }

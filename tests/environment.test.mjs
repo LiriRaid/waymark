@@ -283,3 +283,21 @@ test('11: CSS/HTML — a stylesheet command with a bash redirect for a PowerShel
   const g = cierreGaps(currentTurn(edited), '## Cierre · 2026-10-26 · T1\nResultado: hecho\nEvidencia: observada x\nAprendido: y ← z\nCorre `! rm -rf dist`', undefined, undefined, { ids: P.taskIds('/nowhere'), shell: 'powershell', cwd: '/work/p' });
   assert.ok(g.findings.some((f) => /shell/.test(f)), g.findings.join(' | '));
 });
+
+// ---- who opens pull requests, per project (Conventions), never an account ----
+const PRS = (who) => `# P\n\n## Conventions specific to this project\n- PRs: ${who} (2026-10-26: «los PR los abro yo»)\n`;
+test('11: logic — "PRs: the user" in the project\'s Conventions denies opening or merging one even when the request names it, citing the rule', () => {
+  assert.match(T.checkGh('gh pr create --title "reintentos"', 'abre el PR de este cambio', PRS('the user')) || '', /this project's Conventions say "PRs: the user/);
+  assert.match(T.checkGh('gh pr merge 12', 'mergea el PR', PRS('the user')) || '', /PRs: the user/);
+  assert.match(T.checkGh('gh pr create', 'abre el PR', '# P\n## Conventions\n- Pull requests: the user\n') || '', /Pull requests: the user/, 'the long name too');
+  // counter-examples: the agent may open one when the rule says so and the request asks; no rule keeps today's guard; reading a PR is never asked
+  assert.equal(T.checkGh('gh pr create --fill', 'abre el PR', PRS('the agent, when asked')), null);
+  assert.equal(T.checkGh('gh pr create --fill', 'abre el PR', '# P\n'), null);
+  assert.ok(T.checkGh('gh pr create --fill', 'agrega reintentos', PRS('the agent, when asked')), 'not asked: still the user\'s');
+  assert.equal(T.checkGh('gh pr view 12', 'revisa el PR', PRS('the user')), null);
+  assert.equal(T.checkGh('gh pr create', 'abre el PR', '<!-- - PRs: the user -->\n'), null, 'the template\'s own example is no rule');
+});
+
+test('11: CSS/HTML — a styles change follows the same rule: its PR is the user\'s where the project says so', () => {
+  assert.match(T.checkGh('gh pr create --title "estilos del botón" --body "ancho 40px"', 'abre el PR del botón', PRS('the user')) || '', /PRs: the user/);
+});

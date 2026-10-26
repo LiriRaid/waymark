@@ -157,10 +157,13 @@ const GH_AUTH = new RegExp(`${GH_START}auth\\s+(?:switch|login|logout|refresh|se
 const GH_PR = new RegExp(`${GH_START}pr\\s+(create|merge|ready)\\b`);
 // What the request says about a pull request, with what it denies left out ("no abras el PR").
 const asking = (text, words) => new RegExp(String.raw`\b(?:${words})\b`, 'i').test(String(text).replace(/\b(?:no|sin|nunca|don't|do not|never)\b[^.\n]{0,30}\b(?:pull requests?|PRs?|merge)\b/gi, ' '));
-export function checkGh(command, asked = '') {
+// The project's rule of who opens pull requests (Conventions: "PRs: the user" or "Pull requests: the agent, when asked"), never an account. → the line, or null.
+const prRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*((?:PRs?|Pull requests?):[ \t]*[^\n]+)$/im)?.[1]?.trim() || null;
+export function checkGh(command, asked = '', memory = '') {
   const sk = shellSkeleton(command, { quotes: false });
   if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
-  const pr = sk.match(GH_PR)?.[1];
+  const pr = sk.match(GH_PR)?.[1], rule = prRule(memory);
+  if (pr && rule && /:\s*(?:the\s+)?(?:user|usuario)\b/i.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
   // opening one needs the words "pull request" or "PR"; merging one also takes "merge" ("resuelve el conflicto de merge" opens nothing)
   if (pr && !asking(asked, pr === 'merge' ? 'pull requests?|PRs?|merge|mergea\\w*|fusiona\\w*' : 'pull requests?|PRs?')) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
   return null;
@@ -243,7 +246,7 @@ export function gate(hook, agent) {
   if (c.command !== undefined) {
     const link = checkLink(c.command);
     if (link) return link;
-    if (/\bgh\s+(?:auth|pr)\b/.test(c.command)) { const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n')); if (gh) return gh; } // the user's account and pull requests
+    if (/\bgh\s+(?:auth|pr)\b/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
     if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open

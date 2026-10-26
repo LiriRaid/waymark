@@ -18,7 +18,7 @@ import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblin
 import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes, defaultRemote } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
 import { census, fillMemory } from './convention.mjs';
-import { fillRuntime } from './runtime.mjs';
+import { fillRuntime, runtimeDir } from './runtime.mjs';
 import { fillEyes, cleanEyes } from './eyes.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
 import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations } from './stack.mjs';
@@ -91,7 +91,8 @@ export function digest(cwd, agentName = 'claude') {
   // the project's own migration command (docs/adr/0046): "to confirm" in Conventions, so a migration written by hand is asked about first
   if (!home.legacy) { try { if (fillMigrations(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook migrations', e); } }
   const runtime = best.text.match(/^\|\s*runtime\s*\|\s*([^|]+)\|/im)?.[1]?.trim().replace(/`/g, '');
-  if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);
+  const nodeAt = runtimeDir(runtime), posix = (p) => String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
+  if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : nodeAt ? `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): run every gate with ${nodeAt} first on the PATH, never \`nvm use\` (it switches the machine's Node) — bash: PATH="${posix(nodeAt)}:$PATH" <gate> · PowerShell: $env:PATH="${nodeAt};$env:PATH"; <gate>.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);
   const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);
   if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.

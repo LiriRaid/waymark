@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
-import { runtimePrefix } from './runtime.mjs';
+import { runtimePrefix, runtimeDir, runtimeEnv } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
 import { git as gitIn } from './lib/git.mjs';
@@ -68,11 +68,14 @@ function rawGateCommand(root, memoryFile) {
   return tsc && project ? { cmd: `${exec} tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
 }
 
-// The gate as it runs on this machine: a repo that needs another Node than the machine's (memory.md → Quality gates, the `runtime` row) has its command
-// started through the manager that runs it (`volta run --node 14 …`), so the hook's own re-run fails for the code and not for the runtime.
+// The gate as it runs on this machine: a repo that needs another Node than the machine's (memory.md → Quality gates, the `runtime` row, `node <dir>`) runs
+// with that folder first on the PATH, so the hook's own re-run fails for the code and not for the runtime, and a chained command (`cd web && npx tsc`)
+// is left as it is. A command the user wrote in the row stays their prefix.
 export function gateCommand(root, memoryFile) {
-  const gate = rawGateCommand(root, memoryFile), prefix = memoryFile ? runtimePrefix(read(memoryFile)) : null;
-  return gate && prefix ? { ...gate, cmd: `${prefix} ${gate.cmd}`, runtime: prefix } : gate;
+  const gate = rawGateCommand(root, memoryFile), cell = memoryFile ? runtimePrefix(read(memoryFile)) : null;
+  if (!gate || !cell) return gate;
+  const dir = runtimeDir(cell);
+  return dir ? { ...gate, env: runtimeEnv(dir), runtime: cell } : { ...gate, cmd: `${cell} ${gate.cmd}`, runtime: cell };
 }
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills
@@ -90,14 +93,14 @@ const programOf = (cmd) => {
   const first = String(cmd).trim().replace(/^(?:cd\s+\S+\s*&&\s*)/, '').split(/\s+/)[0] || '';
   return /^[A-Za-z][\w.+-]*$/.test(first) && !/^(node|npm|npx|pnpm|yarn|bun|deno|cd|echo|true|test)$/i.test(first) ? first : null;
 };
-export const onPath = (program) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
+export const onPath = (program, env) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true, ...(env ? { env } : {}) }).status === 0;
 
 export function runGate(gate, cwd, ms = GATE_MS) {
   const t0 = Date.now();
   // a toolchain that is not installed here cannot fail the code: the gate did not run, and the result says so
   const program = programOf(gate.cmd);
-  if (program && !onPath(program)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
-  const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true });
+  if (program && !onPath(program, gate.env)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
+  const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true, ...(gate.env ? { env: gate.env } : {}) }); // the runtime row's Node first on the PATH
   const timedOut = r.status === 124 || r.error?.code === 'ETIMEDOUT';
   return { cmd: gate.cmd, from: gate.from, ok: !timedOut && r.status === 0, s: Math.round((Date.now() - t0) / 1000), timedOut };
 }

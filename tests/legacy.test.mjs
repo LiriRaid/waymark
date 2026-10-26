@@ -15,7 +15,8 @@ process.env.WAYMARK_ENGRAM = '';
 const temps = [];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const R = await import(`file://${SCRIPTS}/runtime.mjs`);
-const { gateCommand } = await import(`file://${SCRIPTS}/testigos.mjs`);
+const T = await import(`file://${SCRIPTS}/testigos.mjs`);
+const { gateCommand } = T;
 const { digest } = await import(`file://${SCRIPTS}/session-hook.mjs`);
 
 const MEMORY = '# P\n\n## Work in progress\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | | <date> |\n| build | | |\n<!-- a comment after the table -->\n\n## Design system\n';
@@ -39,45 +40,69 @@ test('6: logic — the Node comes from the repo (volta, .nvmrc, engines) before 
   assert.equal(R.neededNode(repo({ name: 'plain', dependencies: { express: '^4' } })), null, 'counter-example: a repo that asks for nothing');
   for (const [range, major, ok] of [['>=14 <17', 14, true], ['>=14 <17', 18, false], ['^16 || >=18', 20, true], ['^16 || >=18', 17, false], ['14.x', 14, true], ['14.x', 16, false], ['', 24, true]]) assert.equal(R.satisfiesMajor(range, major), ok, `${range} / ${major}`);
 });
-test('6: logic — a machine outside the range runs the gates through the manager it has; inside it, nothing', () => {
-  const d = repo(ng(10));
-  assert.deepEqual(R.runtimeOf(d, { machine: 24, has: volta }), { use: 14, from: 'angular 10', machine: 24, via: 'volta', prefix: 'volta run --node 14' });
-  assert.equal(R.runtimeOf(d, { machine: 24, has: fnm }).prefix, 'fnm exec --using=14');
-  const lone = R.runtimeOf(d, { machine: 24, has: none });
-  assert.deepEqual([lone.via, lone.prefix, lone.use], [null, null, 14], 'no manager: the Node that is needed is still told');
-  assert.equal(R.runtimeOf(d, { machine: 14, has: volta }), null, 'counter-example: the machine already runs Node 14');
-  assert.equal(R.runtimeOf(repo(ng(21)), { machine: 24, has: volta }), null, 'counter-example: a modern Angular on the machine\'s Node');
+// A Node of another major is a folder on this machine (nvm-windows, nvm, Volta, fnm, asdf, mise): the gate runs with it first on the PATH, never a
+// prefix glued to a chained command and never a switch of the machine's Node.
+const nodeHome = (layout) => {
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-nodes-')); temps.push(h);
+  for (const [dir, bin] of layout) { fs.mkdirSync(path.join(h, dir), { recursive: true }); fs.writeFileSync(path.join(h, dir, bin), ''); }
+  return h;
+};
+test('6: logic — the folder of the Node the repo needs is found in any manager, the newest of that major', () => {
+  const win = nodeHome([['AppData/Roaming/nvm/v14.17.0', 'node.exe'], ['AppData/Roaming/nvm/v14.21.3', 'node.exe'], ['AppData/Roaming/nvm/v16.20.2', 'node.exe'], ['AppData/Roaming/nvm/v12.0.0', 'nothing.txt']]);
+  const env = { APPDATA: path.join(win, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(win, 'AppData', 'Local') };
+  assert.deepEqual(R.nodeDir(14, { env, home: win, platform: 'win32' }), { via: 'nvm-windows', dir: path.join(win, 'AppData', 'Roaming', 'nvm', 'v14.21.3') });
+  assert.equal(R.nodeDir(12, { env, home: win, platform: 'win32' }), null, 'counter-example: a folder with no node binary');
+  const nix = nodeHome([['.nvm/versions/node/v14.21.3/bin', 'node'], ['.volta/tools/image/node/12.22.12/bin', 'node'], ['.local/share/mise/installs/node/10.24.1/bin', 'node'], ['.asdf/installs/nodejs/8.17.0/bin', 'node']]);
+  assert.deepEqual(R.nodeDir(14, { env: {}, home: nix, platform: 'linux' }), { via: 'nvm', dir: path.join(nix, '.nvm', 'versions', 'node', 'v14.21.3', 'bin') });
+  assert.equal(R.nodeDir(12, { env: {}, home: nix, platform: 'linux' }).via, 'volta');
+  assert.equal(R.nodeDir(10, { env: {}, home: nix, platform: 'linux' }).via, 'mise');
+  assert.equal(R.nodeDir(8, { env: {}, home: nix, platform: 'linux' }).via, 'asdf');
+  assert.equal(R.nodeDir(18, { env: {}, home: nix, platform: 'linux' }), null);
+});
+test('6: logic — a machine outside the range runs the gates with that folder; inside it, nothing; Angular 8 and 9 come from the official table', () => {
+  const d = repo(ng(10)), dir = '/n/v14.21.3';
+  const found = () => ({ via: 'nvm-windows', dir });
+  assert.deepEqual(R.runtimeOf(d, { machine: 24, dirOf: found }), { use: 14, from: 'angular 10', machine: 24, via: 'nvm-windows', dir, prefix: `node ${dir}` });
+  const lone = R.runtimeOf(d, { machine: 24, dirOf: () => null });
+  assert.deepEqual([lone.via, lone.prefix, lone.use], [null, null, 14], 'no folder: the Node that is needed is still told');
+  assert.equal(R.runtimeOf(d, { machine: 14, dirOf: found }), null, 'counter-example: the machine already runs Node 14');
+  assert.equal(R.runtimeOf(repo(ng(21)), { machine: 24, dirOf: found }), null, 'counter-example: a modern Angular on the machine\'s Node');
+  assert.deepEqual([R.neededNode(repo(ng(9))).use, R.neededNode(repo(ng(8))).use], [12, 10]);
 });
 test('6: CSS/HTML — the same for a styles-only legacy fixture: the runtime is the stack\'s, not the change\'s', () => {
   const d = repo(ng(11), { 'src/styles.css': 'a{}\n', 'src/app/app.component.html': '<p></p>\n' });
-  assert.equal(R.runtimeOf(d, { machine: 22, has: volta }).prefix, 'volta run --node 14');
-  assert.equal(R.runtimeOf(repo(ng(12), { 'src/styles.css': 'a{}\n' }), { machine: 14, has: volta }), null, 'counter-example');
+  assert.equal(R.runtimeOf(d, { machine: 22, dirOf: () => ({ via: 'fnm', dir: '/f/v14' }) }).prefix, 'node /f/v14');
+  assert.equal(R.runtimeOf(repo(ng(12), { 'src/styles.css': 'a{}\n' }), { machine: 14, dirOf: () => ({ via: 'fnm', dir: '/f/v14' }) }), null, 'counter-example');
 });
 
 // ---- the row, and the hook's own re-run ----
-test('6: logic — the row lands once in Quality gates, never over one somebody wrote, and the re-run starts with its prefix', () => {
-  const d = repo(ng(10)), mem = path.join(d, '.waymark', 'memory.md');
-  const row = R.fillRuntime(mem, d, { machine: 24, has: volta });
-  assert.match(row, /^\| runtime \| `volta run --node 14` \| to confirm: node 14 \(angular 10\), this machine runs 24 · via volta \|$/);
+test('6: logic — the row lands once, never over one somebody wrote, and the re-run puts the folder first on the PATH, chained commands untouched', () => {
+  const bin = nodeHome([['v14', process.platform === 'win32' ? 'marker.cmd' : 'marker']]), dir = path.join(bin, 'v14');
+  if (process.platform === 'win32') fs.writeFileSync(path.join(dir, 'marker.cmd'), '@exit /b 0\r\n'); else { fs.writeFileSync(path.join(dir, 'marker'), '#!/bin/sh\nexit 0\n'); fs.chmodSync(path.join(dir, 'marker'), 0o755); }
+  const d = repo(ng(10, { scripts: { typecheck: 'cd . && marker' } })), mem = path.join(d, '.waymark', 'memory.md');
+  const row = R.fillRuntime(mem, d, { machine: 24, dirOf: () => ({ via: 'nvm-windows', dir }) });
+  assert.equal(row, `| runtime | \`node ${dir}\` | to confirm: node 14 (angular 10), this machine runs 24 · via nvm-windows |`);
   const text = fs.readFileSync(mem, 'utf8');
   assert.ok(text.indexOf('| runtime |') > text.indexOf('| build |') && text.indexOf('| runtime |') < text.indexOf('<!-- a comment'), 'at the end of the table');
-  assert.equal(R.fillRuntime(mem, d, { machine: 24, has: volta }), null, 'once');
-  assert.equal(R.runtimePrefix(text), 'volta run --node 14');
+  assert.equal(R.fillRuntime(mem, d, { machine: 24, dirOf: () => ({ via: 'nvm-windows', dir }) }), null, 'once');
   const gate = gateCommand(d, mem);
-  assert.match(gate.cmd, /^volta run --node 14 /, 'the hook\'s own re-run runs on the repo\'s Node');
-  assert.equal(gate.runtime, 'volta run --node 14');
+  assert.equal(gate.cmd, 'npm run typecheck', 'counter-example of the old prefix: the command itself is untouched');
+  assert.ok(String(Object.entries(gate.env).find(([k]) => /^path$/i.test(k))?.[1]).startsWith(dir + path.delimiter), 'the folder first on the PATH');
+  const { runGate } = T;
+  const ran = runGate({ cmd: 'cd . && marker', from: 'test', env: gate.env }, d);
+  assert.equal(ran.ok, true, `a chained command runs with the folder first: ${JSON.stringify(ran)}`);
+  assert.equal(runGate({ cmd: 'cd . && marker', from: 'test' }, d).ok, false, 'counter-example: without it the program is not found');
   const mine = repo(ng(10), {}, MEMORY.replace('| build | | |', '| build | | |\n| runtime | `nvm exec 14` | mine |'));
-  assert.equal(R.fillRuntime(path.join(mine, '.waymark', 'memory.md'), mine, { machine: 24, has: volta }), null, 'counter-example: a row somebody wrote stays');
-  assert.equal(R.fillRuntime(path.join(repo(ng(21)), '.waymark', 'memory.md'), repo(ng(21)), { machine: 24, has: volta }), null, 'counter-example: nothing needed, nothing written');
-  const noManager = repo(ng(10));
-  assert.match(R.fillRuntime(path.join(noManager, '.waymark', 'memory.md'), noManager, { machine: 24, has: none }), /^\| runtime \| none \(needs node 14 from angular 10: no volta or fnm on this machine\) \|/);
-  assert.equal(R.runtimePrefix(fs.readFileSync(path.join(noManager, '.waymark', 'memory.md'), 'utf8')), null, 'a "none" row prefixes nothing');
+  assert.equal(R.fillRuntime(path.join(mine, '.waymark', 'memory.md'), mine, { machine: 24, dirOf: () => ({ via: 'nvm', dir }) }), null, 'counter-example: a row somebody wrote stays');
+  assert.match(gateCommand(mine, path.join(mine, '.waymark', 'memory.md')).cmd, /^nvm exec 14 /, 'a command the user wrote is still their prefix');
+  const noNode = repo(ng(10));
+  assert.match(R.fillRuntime(path.join(noNode, '.waymark', 'memory.md'), noNode, { machine: 24, dirOf: () => null }), /^\| runtime \| none \(needs node 14 from angular 10: no Node 14 folder in nvm-windows, nvm, Volta, fnm, asdf or mise\) \|/);
+  assert.equal(R.runtimePrefix(fs.readFileSync(path.join(noNode, '.waymark', 'memory.md'), 'utf8')), null, 'a "none" row prefixes nothing');
 });
-test('6: CSS/HTML — the session card carries the row for a styles fixture as for any other, and says when no manager can run the Node', () => {
-  const d = repo(ng(10), { 'src/styles.css': 'a{}\n' });
+test('6: CSS/HTML — the session card tells the agent how to put the folder first in each shell, for a styles fixture as for any other', () => {
+  const d = repo(ng(10), { 'src/styles.css': 'a{}\n' }, MEMORY.replace('| build | | |', '| build | | |\n| runtime | `node C:\\nvm\\v14.21.3` | to confirm |'));
   const card = digest(d);
-  assert.match(card, /Runtime: (none \(needs node 14 from angular 10|this machine's Node is not the one this repo needs .*"volta run --node 14"|this machine's Node is not the one this repo needs .*"fnm exec --using=14")/);
-  assert.match(fs.readFileSync(path.join(d, '.waymark', 'memory.md'), 'utf8'), /\| runtime \|/);
+  assert.match(card, /Runtime: .*bash: PATH=".*v14\.21\.3:\$PATH" <gate> .*PowerShell: \$env:PATH="C:\\nvm\\v14\.21\.3;\$env:PATH"; <gate>/);
   const modern = repo(ng(21), { 'src/styles.css': 'a{}\n' });
   assert.ok(!/Runtime:/.test(digest(modern)), 'counter-example: a modern repo gets no runtime line');
 });
@@ -202,4 +227,12 @@ test('6: CSS/HTML — a tracked stylesheet buried under a long path asks for it 
   fs.mkdirSync(path.join(d, deep), { recursive: true }); fs.writeFileSync(path.join(d, deep, 'theme.css'), 'a{}\n');
   g(d, 'add', '-A'); g(d, 'commit', '-q', '-m', 'base');
   assert.match(W.longpathsLine(d, { platform: 'win32' }), /a tracked path is over 200 characters/);
+});
+
+test('6: the stack profile keeps its legacy section: the runtime folder, one Karma spec with CHROME_BIN, the heap of a slow build, the repo\'s lockfile first', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, '..', 'stacks', 'angular.md'), 'utf8');
+  const legacy = text.slice(text.indexOf('## Legacy repos'), text.indexOf('\n## ', text.indexOf('## Legacy repos') + 5));
+  assert.ok(legacy.length > 100, 'the section exists');
+  for (const must of [/node <folder>/, /never `nvm use`/, /--watch=false --browsers=ChromeHeadless --include=<spec file>/, /CHROME_BIN/, /--max_old_space_size=4096/, /lockfile win/, /Angular 8 runs on Node 10, 9 on Node 12/]) assert.match(legacy, must);
+  assert.doesNotMatch(legacy, /volta run --node|fnm exec/, 'counter-example: the old command prefix is gone');
 });

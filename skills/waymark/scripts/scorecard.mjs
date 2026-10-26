@@ -65,14 +65,23 @@ const as = (v) => (Array.isArray(v) ? v : [v]);
 
 // ---- measures: a number computed from the project's records or sources; null when it cannot be measured here ----
 // The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields. Only the records the
-// measured version's hooks wrote count: one another version wrote (inputs.waymark) is not this version's to answer for; one with no version stays.
+// measured version's hooks wrote count: one another version wrote (inputs.waymark) is not this version's to answer for.
 // A pre-release is the version it leads to: what an installed 2.0.19-dev writes is measured as 2.0.19.
 const release = (v) => String(v || '').replace(/-[0-9A-Za-z.-]+$/, '');
 const VERSION = (() => { try { return release(fs.readFileSync(path.join(HERE, '..', 'VERSION'), 'utf8').trim()) || null; } catch { return null; } })();
+// The writer version of each record, in date order. One with no version (a task only a commit's trailer holds, or one from before records
+// named it) is the version that ran at its date: the last record before it that names one, else the first after it; with none named, null.
+const writers = (rs) => {
+  let v = null;
+  const at = rs.map((r) => (r.inputs?.waymark ? (v = release(r.inputs.waymark)) : v));
+  const first = at.find(Boolean) || null;
+  return at.map((x) => x || first);
+};
 const recent = async (root, n = 30, full = true) => {
   const { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
   const h = projectHome(root);
-  const last = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind && (!VERSION || !r.inputs?.waymark || release(r.inputs.waymark) === VERSION)).slice(-n) : [];
+  const tasks = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind) : [], by = writers(tasks);
+  const last = tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION).slice(-n);
   return full ? last.filter((r) => r.schema) : last;
 };
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);

@@ -40,9 +40,9 @@ export function incidents(records) {
 export const incidentsAt = (cwd) => incidents(readTaskRecords(projectHome(cwd)));
 
 // One line for the context card, or ''.
-export function incidentsLine(found) {
+export function incidentsLine(found, w = WAYMARK_CMD) { // w: the command as the text around it names it (the card defines W)
   if (!found.open.length && !found.rules.length) return '';
   const open = found.open.map((o) => `${o.label} ✘${o.count > 1 ? `×${o.count}` : ''} (${o.last})`).join(', ');
   const rules = found.rules.map((r) => `${r.label} failed ${r.failures}×`).join(', ');
-  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (${WAYMARK_CMD} incidents)`;
+  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (${w} incidents)`;
 }

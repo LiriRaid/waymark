@@ -52,7 +52,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 
-export const CARD_HEAD = 'Waymark context card (already recalled). Pointers, not facts: verify in the code; the code wins, fix the entry.\n';
+export const CARD_HEAD = 'Waymark context card. Pointers, not facts: the code wins; fix the entry.\n';
 // The commands script, defined once in the card as W; a line added after the card says W only when the card defined it.
 export const W_CMD = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
 const wIn = (text) => (text.includes(` W = ${W_CMD}`) ? 'W' : W_CMD);
@@ -65,6 +65,13 @@ export const EXTRA = {
 };
 // The open tasks of Work in progress lines: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]".
 export const openIds = (lines) => lines.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
+// The open IDs as the card lists them: a date said once for the IDs that follow it, at most OPEN_MAX, the rest counted (W tasks lists them).
+const OPEN_MAX = 6;
+export const openList = (ids) => {
+  let day = null;
+  const shown = ids.slice(0, OPEN_MAX).map((id) => { const [d, t] = id.split(' · '); if (t && d === day) return t; day = t ? d : null; return id; });
+  return shown.join(', ') + (ids.length > OPEN_MAX ? ` +${ids.length - OPEN_MAX} (W tasks)` : '');
+};
 export const HELD_MAX = 520; // characters of the held message the card carries; a longer one is kept whole in held-full.md
 export const HELD_MORE = ' … (the rest: .waymark/held-full.md)';
 export function digest(cwd, agentName = 'claude') {
@@ -104,12 +111,12 @@ export function digest(cwd, agentName = 'claude') {
   if (last) {
     const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 110)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 90)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
   // listed, not asked: `W check` asks which already work, so the first reply of a session is the user's task
-  if (open.length) out.push(`Open tasks (▶): ${open.join(', ')} (W check asks the user which already work).`);
+  if (open.length) out.push(`Open tasks (▶): ${openList(open)} (W check asks the user which already work).`);
   const relay = home.legacy ? '' : readRelay(home); // what the last task left for whoever starts next (.waymark/next-prompt.md), any agent
   if (relay) out.push(`Handoff (the steps the last task left; the user's request comes first): ${relay.replace(/\n+/g, ' · ')}`);
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
@@ -122,12 +129,12 @@ export function digest(cwd, agentName = 'claude') {
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
     .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c && !rowProblem(c, home.root)).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
-  try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
+  try { const inc = incidentsLine(incidents(all), 'W'); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 2, 110, last?.id); } catch {} // the last closed is already above
+  try { if (!home.legacy) learned = learnedLines(home, 2, 90, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at your first edit of each file (never run it yourself); on demand: W memory <section> (Conventions · Identity), W tasks.`);
+  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); on demand: W memory <section> (Conventions · Identity), W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {

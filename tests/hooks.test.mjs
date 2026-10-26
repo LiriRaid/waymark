@@ -1857,7 +1857,7 @@ test('done: the user confirms tasks that work: they leave Work in progress, a ch
   const wip = ['- ▶ [2026-10-04 · T4c] que el usuario recargue y confirme', '- ▶ [2026-10-04 · T3] skeleton de 5 filas', '- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'].join('\n');
   const repo = memRepo('done', wip + '\n'), h = projectHome(repo), NOW = new Date(2026, 9, 5, 12, 0);
   const digest = spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } });
-  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, 2026-10-04 · T3, 2026-10-04 · T9 \(W check asks the user which already work\)\./);
+  assert.match(JSON.parse(digest.stdout).hookSpecificOutput.additionalContext, /Open tasks \(▶\): 2026-10-04 · T4c, T3, T9 \(W check asks the user which already work\)\./);
   assert.deepEqual(P.confirmTasks(h, ['2026-10-04 · T4c', '2026-10-04 · T3', '2026-10-04 · T7'], { note: 'ya las vi, funcionan', now: NOW }), ['2026-10-04 · T4c', '2026-10-04 · T3']);
   const lines = (fs.readFileSync(h.memory, 'utf8').match(/## Work in progress\n([\s\S]*?)\n## /)[1]).split('\n').filter((l) => l.startsWith('-'));
   assert.deepEqual(lines, ['- Gotcha: una nota', '- ▶ [2026-10-04 · T9] sigue abierta'], 'confirmed tasks leave Work in progress; the confirm record keeps them');
@@ -1983,13 +1983,13 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   appendRecord(repo, { id: '2026-10-05 · T1', agent: 'codex', at: '2026-10-05T10:00:00Z', commits: [], cierre: '## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: tooltips ← user; next: spec', evaluation: { steps: { Decision: true, Enrutar: false }, score: '1/2' }, unresolved: ['the routing line names no owner department'] });
   const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
   assert.match(card, /Last closed: 2026-10-05 · T1 · codex · hecho · tooltips ← user; next: spec \(whole record: W tasks "2026-10-05 · T1"\)/);
-  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T2 \(W check/, 'an older pending line is open too');
+  assert.match(card, /Open tasks \(▶\): 2026-10-04 · T3, T2 \(W check/, 'an older pending line is open too');
   assert.match(card, /Notes:\n- Gotcha: a note/);
   assert.match(card, /Repo \(read now\): pnpm 11\.5\.0/);
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
-  assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\)/);
+  assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\) \(W incidents\)/, 'the card says W, defined above');
   assert.match(card, /W = node "[^"]+waymark\.mjs"\./);
-  assert.match(card, /Commands: the hook hands you W pack at your first edit of each file.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /Commands: the hook hands you W pack at a file's first edit.*W memory <section> \(Conventions · Identity\)/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 

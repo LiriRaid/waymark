@@ -136,13 +136,13 @@ test('13: the command prints each project and says "one agent"', async () => {
 });
 
 // ---- the checks of what the hooks write read the records the measured version wrote ----
-test('1.2: logic — a record another version wrote is not this version\'s to answer for; one with no version stays; none of this version is unmeasured', async () => {
+test('1.2: logic — a record another version wrote is not this version\'s to answer for; one with no version is the version of its date; none of this version is unmeasured', async () => {
   const VERSION = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
   const p = project('versions', mix(0, 4));
   for (let i = 0; i < 3; i++) P.appendRecord(p, { schema: 'waymark.record/v1', id: `2026-10-2${i} · T${20 + i}`, agent: 'claude', at: new Date(Date.UTC(2026, 9, 20 + i)).toISOString(), session: `old${i}`, level: 2, files: ['src/a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'parcial' } });
-  assert.equal(await SC.measure('records.parcialShare', p), 0, 'the three parcial of 0.0.1 are not counted');
+  assert.equal(await SC.measure('records.parcialShare', p), null, 'the three parcial of 0.0.1 are not counted, nor the four with no version before them (0.0.1 is the first named)');
   P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-25 · T30', agent: 'claude', at: new Date(Date.UTC(2026, 9, 25)).toISOString(), session: 'cur', level: 2, files: ['src/app.css'], inputs: { waymark: VERSION }, outcome: { result: 'parcial' }, cierre: '## Cierre\nResultado: parcial\nEvidencia: x\nAprendido: y' });
-  assert.equal(await SC.measure('records.parcialShare', p), 1 / 5, 'CSS/HTML: a parcial this version wrote counts');
+  assert.equal(await SC.measure('records.parcialShare', p), 1, 'CSS/HTML: a parcial this version wrote counts');
   const only = project('only-old', []);
   P.appendRecord(only, { schema: 'waymark.record/v1', id: '2026-10-20 · T1', agent: 'claude', at: new Date().toISOString(), session: 'o', level: 2, files: ['a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'hecho' } });
   assert.equal(await SC.measure('records.parcialShare', only), null, 'counter-example: no record of this version: unmeasured, never passed');
@@ -154,4 +154,18 @@ test('1.2: a pre-release writes for the release it leads to: 2.0.19-dev counts f
   P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-26 · T40', agent: 'claude', at: new Date(Date.UTC(2026, 9, 26)).toISOString(), session: 'dev1', level: 2, files: ['src/a.ts'], inputs: { waymark: `${release}-dev` }, outcome: { result: 'parcial' } });
   P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-26 · T41', agent: 'claude', at: new Date(Date.UTC(2026, 9, 26, 1)).toISOString(), session: 'dev2', level: 2, files: ['src/app.html'], inputs: { waymark: '0.0.1-dev' }, outcome: { result: 'parcial' } });
   assert.equal(await SC.measure('records.parcialShare', p), 1 / 2, 'the -dev of this release counts; another release\'s -dev does not');
+});
+
+// A record with no version (one only a commit's Waymark-Task trailer holds) is the version that ran at its date.
+test('1.2: a record with no version takes the version that ran at its date: a commit of another release does not count for this one', async () => {
+  const VERSION = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
+  const rec = (id, day, result, files, waymark) => P.appendRecord(p, { schema: 'waymark.record/v1', id, agent: 'claude', at: new Date(Date.UTC(2026, 9, day)).toISOString(), session: `v${day}`, level: 2, files, ...(waymark ? { inputs: { waymark } } : {}), outcome: { result } });
+  const p = project('dated', []);
+  rec('2026-10-20 · T1', 20, 'hecho', ['src/a.ts'], '0.0.1');
+  rec('2026-10-21 · T2', 21, 'parcial', ['src/a.ts']); // logic: written while 0.0.1 ran
+  rec('2026-10-22 · T3', 22, 'parcial', ['src/app.css', 'src/app.html']); // CSS/HTML: the same
+  assert.equal(await SC.measure('records.parcialShare', p), null, 'the records with no version from 0.0.1\'s days are not this version\'s: unmeasured');
+  rec('2026-10-25 · T4', 25, 'hecho', ['src/a.ts'], VERSION);
+  rec('2026-10-26 · T5', 26, 'parcial', ['src/app.css']);
+  assert.equal(await SC.measure('records.parcialShare', p), 1 / 2, 'counter-example: a record with no version from this version\'s days still counts');
 });

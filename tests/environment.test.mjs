@@ -22,6 +22,7 @@ const T = await import(`file://${SCRIPTS}/tool-hook.mjs`);
 const { cierreGaps, outcome, reposNotNamed, namedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { currentTurn } = await import(`file://${SCRIPTS}/transcript.mjs`);
 const V = await import(`file://${SCRIPTS}/verify.mjs`);
+const M = await import(`file://${SCRIPTS}/manifest.mjs`);
 const { repoOf } = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -200,4 +201,35 @@ test('11: git verifies a tag signed by the key under the wildcard principal, and
   const a = V.signatureState(d, 'v1', { tag: true, allowed });
   assert.equal(a.state, 'signed', JSON.stringify(a));
   assert.equal(V.signatureState(d, 'v2', { tag: true, allowed }).state, 'untrusted', 'counter-example: a key the file does not hold');
+});
+// The ssh-keygen of Git for Windows expands a bare `*` argument as a file glob, so `-I *` named no principal and a good signature read
+// "untrusted". Each ssh-keygen this machine has (Git's first on PATH, then the system one) must verify the manifest and an anchor alike.
+const KEYGENS = [...new Set([process.platform === 'win32' && 'C:\\Program Files\\Git\\usr\\bin', process.platform === 'win32' && 'C:\\Windows\\System32\\OpenSSH', ''].filter((d) => d === '' || (d && fs.existsSync(path.join(d, 'ssh-keygen.exe')))))];
+const underKeygen = (dir, code) => {
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', env: { ...process.env, PATH: dir ? `${dir}${path.delimiter}${process.env.PATH}` : process.env.PATH } });
+  return JSON.parse(String(r.stdout).trim().split('\n').pop() || 'null');
+};
+test('11: a manifest and an anchor signed by the key under the wildcard principal verify with every ssh-keygen; another key and an edit do not', () => {
+  const keys = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-keys-')); temps.push(keys);
+  const key = (n) => { const f = path.join(keys, n); spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', n, '-f', f]); return f; };
+  const mine = key('mine'), other = key('other');
+  const pub = (f) => fs.readFileSync(`${f}.pub`, 'utf8').trim().split(' ').slice(0, 2).join(' ');
+  // CSS/HTML: the manifest lists a stylesheet and a template, as the release's does
+  const manifest = (dir, signer) => { fs.mkdirSync(dir); const m = path.join(dir, 'MANIFEST.json'); fs.writeFileSync(m, JSON.stringify({ version: '9.9.9', files: { 'ui/app.css': 'a1', 'ui/index.html': 'b2' } }, null, 1) + '\n'); fs.writeFileSync(path.join(dir, 'ALLOWED_SIGNERS'), `# keys\n* ${pub(mine)}\n`); M.signManifest(signer, m); return m; };
+  const good = manifest(path.join(keys, 'good'), mine), stranger = manifest(path.join(keys, 'stranger'), other), edited = manifest(path.join(keys, 'edited'), mine);
+  fs.appendFileSync(edited, ' ');
+  const url = (f) => JSON.stringify(`file://${path.join(SCRIPTS, f).replace(/\\/g, '/')}`);
+  // signed here, verified under each ssh-keygen: the Windows one refuses a temp key file whose permissions are open, which is no verify matter
+  const sig = spawnSync('ssh-keygen', ['-Y', 'sign', '-f', mine, '-n', 'waymark-anchor'], { input: 'anchor 1', encoding: 'utf8' }).stdout;
+  for (const dir of KEYGENS) {
+    const said = underKeygen(dir, `const M = await import(${url('manifest.mjs')}); const S = await import(${url('sign.mjs')});
+      const files = ${JSON.stringify([good, stranger, edited])}; const t = { allowed: [${JSON.stringify(`* ${pub(mine)}`)}], revoked: new Set(), principals: ['*'] };
+      const sig = ${JSON.stringify(sig)};
+      console.log(JSON.stringify({ manifests: files.map((f) => M.manifestSignature(f).state), by: M.manifestSignature(files[0]).by, anchor: S.verifySignature('anchor 1', sig, 'waymark-anchor', { t }).state, anchorEdited: S.verifySignature('anchor 2', sig, 'waymark-anchor', { t }).state }));`);
+    const where = dir || 'PATH';
+    assert.deepEqual(said?.manifests, ['signed', 'untrusted', 'bad'], `${where}: ${JSON.stringify(said)}`);
+    assert.equal(said.by, '*', where);
+    assert.equal(said.anchor, 'signed', `${where}: the anchor`);
+    assert.equal(said.anchorEdited, 'bad', `${where}: counter-example, an edited anchor`);
+  }
 });

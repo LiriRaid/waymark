@@ -164,8 +164,8 @@
         "dept-qa",
         "dept-frontend"
       ],
-      "capability": "test.browser",
-      "when": "Verify a change in a real browser: smoke, states, responsive, console errors, screenshots",
+      "capability": "test.browser, eyes",
+      "when": "The eyes of a seen change (measure, click, compare; ego first) and browser checks: smoke, states, responsive, console errors, screenshots",
       "level": "L2",
       "inspiredBy": "anthropics/skills webapp-testing (Apache-2.0)"
     },

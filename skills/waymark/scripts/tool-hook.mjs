@@ -4,8 +4,7 @@
 // script with `--agent <name>`). Runs locally (0 tokens unless it fires). Every L1–L3 change to project files (edits,
 // and shell commands that change files: git checkout --, sed -i, rm, redirects) is denied until the task has a
 // choice-window question (AskUserQuestion), so a retry never applies a decision before asking. A turn routed Q is told once to re-route (by tool call: the owner dept-* with args "L<n>"). The
-// message asks for the foreseeable sub-decisions in the same call; browser verification is never offered (only when the
-// user asks); the branch is the user's, never pushed as a sub-decision. An unrouted reply inside an open task inherits its routing.
+// message asks for the foreseeable sub-decisions in the same call; browser verification is never offered beyond the eyes the end-of-turn hook asks for (ADR 0047); the branch is the user's, never pushed as a sub-decision. An unrouted reply inside an open task inherits its routing.
 // Memory and scratch files are exempt; L0 skipped. Procedure and mem_search are recorded and scored by the end-of-turn hook, not denied.
 // A git commit whose "Waymark-Task" trailer the end-of-turn hook would record under another ID is denied with the right one.
 // Remove the hook from the agent's settings to disable it.
@@ -59,7 +58,7 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   let records = [];
   try { records = readRecords(projectHome(cwd).log); } catch {}
   if (!askedChoice(taskLines(lines, { since: taskStart(records, session) }))) {
-    return `Waymark: L${level} decision gate — the user decides every real decision, you never decide alone. Before changing files, ask in your choice window (AskUserQuestion): the approach with its optimal options (files, risk, cost; recommended marked, it may not be what the user needs) AND, as more questions in the same call (up to 4), every decision that shapes the work you can foresee — data/schema design, visual style, behavior details, defaults. Never offer, recommend or run browser verification (browser-verify, Playwright) unless the user asks for it: prove UI work with specs and the build. ` +
+    return `Waymark: L${level} decision gate — the user decides every real decision, you never decide alone. Before changing files, ask in your choice window (AskUserQuestion): the approach with its optimal options (files, risk, cost; recommended marked, it may not be what the user needs) AND, as more questions in the same call (up to 4), every decision that shapes the work you can foresee — data/schema design, visual style, behavior details, defaults. Never offer or recommend browser verification beyond the eyes (browser-verify, ego first; localhost only, never credentials), which the end-of-turn hook asks for after a seen change: prove UI work with specs, the build and the eyes. ` +
       'Later questions only confirm; the user\'s answer is recorded as is. The branch is the user\'s: never asked as a decision. If there is only one real way, or the user already chose in their message, confirm it there (that option + "otra cosa"). This gate stays until the user has been asked in this task.';
   }
   return null;

@@ -9,7 +9,7 @@ description: "Frontend. FIRST, before ui-*, to build or fix UI code: \"crear un 
 **Mission:** Build client-side UI (web or mobile) that is correct, accessible, performant and consistent with the stack's conventions.
 **Rules:** reactive state primitive and render optimization per stack profile · styling system first, tokens only · guard platform-only APIs when server-rendering · clean up subscriptions, listeners and animations · every UI state (loading, empty, error, success)
 **UX musts:** match the existing screens (spacing, density, components) · visible focus and full keyboard path · labels on every control · loading / empty / error states that look like the project's own
-**Skills by default:** `ui-build` · `library-docs` (+ the stack's framework / UI-library MCP when the user has one; `run` / `browser-verify` only when the user asks)
+**Skills by default:** `ui-build` · `library-docs` (+ the stack's framework / UI-library MCP when the user has one; `browser-verify` = the eyes, automatic at the end of a seen change; `run` only when the user asks)
 **DoD:** Works in the running app, a11y basics pass, all states handled, tests cover criteria.
 
 ## Entry
@@ -76,7 +76,7 @@ In `procedures.md` (same folder), one section per task:
 | `ui.build` | `ui-build` | Layout, responsive, forms, cards, navigation, visual polish | L1 |
 | `ui.refine` | `ui-refine` | Any animation, transition, micro-interaction, scroll effect | L2 |
 | `ui.system` | `ui-system` | Premium polish, hierarchy, dashboards, landing pages (when requested) | L2 |
-| `test.browser` | `browser-verify` | Flows, responsive checks, screenshots, only when the user asks | — |
+| `test.browser` | `browser-verify` | The eyes at the end of a seen change (L2+; L1 CSS/HTML with no spec); other flows when the user asks | — |
 | `app.run` | `run` | See the change working in the real app | L2 (L1 for visible changes) |
 | `docs.library` | `library-docs` (→ the docs MCP servers the user has) | Framework, styling or UI library API not verified this session | Q |
 | `framework.cli` | the stack's framework CLI/docs MCP, if the user has one (e.g. `angular-cli` for Angular); none → `library-docs` | Generators, best practices, migrations | L1 |

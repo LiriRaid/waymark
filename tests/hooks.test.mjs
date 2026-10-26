@@ -185,7 +185,7 @@ test('3c: the gate asks every work-shaping decision first and offers the browser
   const deny = checkDecision(path.join(repo, 'a.ts'), [prompt('x', 'ubr'), say('Waymark → L2 · dept-backend')], 's7', path.join(home, `gate-${n++}.json`), repo);
   assert.ok(!/feat\/other-work|include where the work goes/.test(deny), 'no branch option pushed');
   assert.match(deny, /every decision that shapes the work/);
-  assert.match(deny, /Never offer, recommend or run browser verification[^.]*unless the user asks/, 'T2l: the browser is never offered');
+  assert.match(deny, /Never offer or recommend browser verification beyond the eyes/, 'ADR 0047: only the eyes, never an offer');
   assert.ok(!/test user|Playwright when/.test(deny));
   assert.match(deny, /Later questions only confirm; the user's answer is recorded as is/);
   assert.ok(!/→ confirmada|sub-decision/.test(deny), '3e-1: no prose markers left to write');

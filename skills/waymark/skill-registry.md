@@ -36,7 +36,7 @@
 | `run` | built-in | app.run | Launch the app and see the change working | L2 | built-in | - |
 | `ui-build` | skill | ui.build | Build new UI (component, screen, modal, form, dashboard) with an intentional design direction; follows the project design system | L1 | installed | - |
 | `ui-refine` | skill | ui.refine | Improve existing UI by mode: critique, polish, simplify, clarify, harden, adapt, animate, boldify/quieten | L1 | installed | - |
-| `browser-verify` | skill | test.browser | Verify a change in a real browser: smoke, states, responsive, console errors, screenshots | L2 | installed | - |
+| `browser-verify` | skill | test.browser, eyes | The eyes of a seen change (measure, click, compare; ego first) and browser checks: smoke, states, responsive, console errors, screenshots | L2 | installed | - |
 | `angular-cli` | mcp (angular) | docs.library (Angular) + framework.cli | Angular: search_documentation (official docs), get_best_practices, find_examples, ai_tutor, list_projects, onpush_zoneless_migration. Use via library-docs | Q | configured | npx -y @angular/cli mcp |
 | `primeng` | mcp (angular) | docs.library (PrimeNG) + ui.library | PrimeNG: search, list, get_component, get_example, get_guide, get_setup, validate_usage, version. Use via library-docs | Q | configured | npx -y @primeng/mcp |
 
@@ -74,7 +74,7 @@ _No dedicated skills yet. Use Shared, or propose one (waymark `references/skills
 | `simplify` | built-in | review.simplify | Clean-up pass: reuse, simplification, efficiency | L3 | built-in | - |
 | `run` | built-in | app.run | Launch the app and see the change working | L2 | built-in | - |
 | `ui-audit` | skill | ui.audit | Audit UI code against WCAG 2.2 AA and interface rules; findings with rule id and file:line | L2 | installed | - |
-| `browser-verify` | skill | test.browser | Verify a change in a real browser: smoke, states, responsive, console errors, screenshots | L2 | installed | - |
+| `browser-verify` | skill | test.browser, eyes | The eyes of a seen change (measure, click, compare; ego first) and browser checks: smoke, states, responsive, console errors, screenshots | L2 | installed | - |
 
 ## dept-devops
 

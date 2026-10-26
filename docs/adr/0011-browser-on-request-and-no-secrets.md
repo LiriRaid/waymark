@@ -1,6 +1,6 @@
 # 0011 · The browser only on request, no secrets in the chain, and turns counted from the last close
 
-**Status:** accepted (2026-10-03, Waymark 2.0.0-dev, step 3c). Amends 0010 (browser step, decisions, memory) and 0004 (what a record keeps).
+**Status:** accepted (2026-10-03, Waymark 2.0.0-dev, step 3c). Amends 0010 (browser step, decisions, memory) and 0004 (what a record keeps). Its browser clause is superseded by 0047 (the eyes).
 
 ## Context
 Test A of the 3c fixes ran in a real project with Claude (Opus 5.5 medium). T2d was an L2 feature: an upload indicator inside the editor and image resize handles. It took ~17% of the 5-hour quota (2% + 15% across a quota reset) and scored 10/12. T2e applied the code-review findings; it took ~2% and scored 9/11. The review of both records and the session transcript found:

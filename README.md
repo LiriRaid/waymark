@@ -190,6 +190,8 @@ A small L1 task loads the block plus one department and one procedure. `node <sk
 
 The bigger saving is not the size of each attempt but the **number of attempts**: a task costs *attempts × cost per attempt*. Waymark's fields (the ask and what each screenshot points at, evidence before the fix, reuse, verified APIs, the two-strike rule) aim at one attempt per task. Large tasks keep their plan as checkpoints in the project memory, so a context compaction does not make the agent guess what was done.
 
+Token use with and without Waymark has not been measured yet (`tests/ab/ab.mjs`), so no saving is claimed.
+
 Measured on real tasks ([`docs/audit-context.md`](docs/audit-context.md)), each model response re-reads the whole context (~58 k tokens in Claude Code), so the cost driver is the number of responses. The hooks do the routine's own steps instead of the agent: the git status comes with each prompt, each file's history at its first edit, a department loads once per session, and what was learned is saved at the close. A step the agent could forget is a step the hook does.
 
 ### MCP servers only where their framework is used

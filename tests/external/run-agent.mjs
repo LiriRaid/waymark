@@ -5,7 +5,11 @@
 // answered by the harness (the recommended option, else the first), because a headless session has no human; every answer is
 // logged. Tools are answered from a short allow list; a shell command outside it is denied with a reason, and the denial is
 // part of what the run records. Output: one JSON line per event, and a summary the corpus runner reads.
-//   node run-agent.mjs <clone> --prompt "<task>" --out <dir> [--model sonnet] [--timeout 900]
+//   node run-agent.mjs <clone> --prompt "<task>" --out <dir> [--model sonnet] [--timeout 900] [--arm with|without] [--instructions <file>]
+// --arm without is the A/B's other arm (tests/ab): `--safe-mode`, so no CLAUDE.md, skill, hook or MCP server loads, and none of
+// this checkout's either; authentication works as usual (code.claude.com/docs/en/cli-reference). --instructions appends the
+// instructions block to the system prompt of the arm with Waymark, for a CLI that does not load the user's CLAUDE.md under
+// --setting-sources project (ab.mjs probes it once).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,7 +25,8 @@ const prompt = opt('--prompt');
 const out = path.resolve(opt('--out', path.join(os.tmpdir(), 'waymark-run')));
 const model = opt('--model', 'sonnet');
 const timeoutS = Number(opt('--timeout', 900));
-if (!prompt || !fs.existsSync(clone)) { console.error('usage: run-agent.mjs <clone> --prompt "<task>" --out <dir> [--model sonnet] [--timeout 900]'); process.exit(2); }
+const arm = opt('--arm', 'with'), instructions = opt('--instructions');
+if (!prompt || !fs.existsSync(clone) || !/^(with|without)$/.test(arm)) { console.error('usage: run-agent.mjs <clone> --prompt "<task>" --out <dir> [--model sonnet] [--timeout 900] [--arm with|without] [--instructions <file>]'); process.exit(2); }
 fs.mkdirSync(out, { recursive: true });
 
 const hook = (f, matcher) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command: `node "${SCRIPTS}/${f}"` }] }];
@@ -40,9 +45,11 @@ fs.mkdirSync(wmHome, { recursive: true });
 const SAFE = /^\s*(cd\s+\S+\s*&&\s*)?(node|git(?!\s+(push|clone|remote|config))|ls|cat|pwd|echo|head|tail|wc|grep|rg|find|sed\s+-n|test|cargo|npm\s+(test|run)|npx|pytest|python|python3|php|composer\s+(test|validate)|terraform\s+(fmt|validate)|gradle|\.\/gradlew|make|ctest|go\s+(test|vet|build)|dotnet\s+(test|build)|ruff|mypy)\b/;
 const UNSAFE = /\brm\s+-rf?\s+(\/|~|\.\.)|\bcurl\b|\bwget\b|\bsudo\b|\bnpm\s+(i|install)\b|\bpip\s+install\b|Invoke-WebRequest|>\s*\/dev\/(sd|hd)|\bformat\b\s+[a-z]:/i;
 
-const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
-  '--setting-sources', 'project', '--settings', settings, '--add-dir', addon, '--model', model, '--permission-mode', 'acceptEdits'];
-const env = { ...process.env, WAYMARK_HOME: wmHome, WAYMARK_ENGRAM: '', WAYMARK_AGENTS_HOME: wmHome, CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: '1' };
+const args = arm === 'without'
+  ? ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio', '--safe-mode', '--model', model, '--permission-mode', 'acceptEdits']
+  : ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
+    '--setting-sources', 'project', '--settings', settings, '--add-dir', addon, '--strict-mcp-config', '--model', model, '--permission-mode', 'acceptEdits', ...(instructions ? ['--append-system-prompt-file', path.resolve(instructions)] : [])];
+const env = arm === 'without' ? { ...process.env, CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: '1' } : { ...process.env, WAYMARK_HOME: wmHome, WAYMARK_ENGRAM: '', WAYMARK_AGENTS_HOME: wmHome, CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL: '1' };
 const child = spawn('claude', args, { cwd: clone, env, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
 const log = fs.createWriteStream(path.join(out, 'stream.jsonl'));
 const answers = [], denials = [], tools = [];
@@ -90,7 +97,7 @@ child.on('close', (code) => {
   try { fs.rmSync(path.join(out, 'after'), { recursive: true, force: true }); fs.mkdirSync(path.join(out, 'after'), { recursive: true }); fs.cpSync(path.join(clone, '.waymark'), path.join(out, 'after', '.waymark'), { recursive: true }); } catch {}
   try { fs.writeFileSync(path.join(out, 'after', 'diff.patch'), spawnSync('git', ['diff'], { cwd: clone, encoding: 'utf8' }).stdout || ''); } catch {}
   const u = result?.usage || {};
-  const summary = { schema: 'waymark.external-run/v1', clone: path.basename(clone), model, prompt, exit: code, subtype: result?.subtype || null, error: !!result?.is_error, turns: result?.num_turns ?? null,
+  const summary = { schema: 'waymark.external-run/v1', clone: path.basename(clone), arm, model, prompt, exit: code, subtype: result?.subtype || null, error: !!result?.is_error, turns: result?.num_turns ?? null,
     usage: { input: u.input_tokens ?? null, cacheWrite: u.cache_creation_input_tokens ?? null, cacheRead: u.cache_read_input_tokens ?? null, output: u.output_tokens ?? null }, costUsd: result?.total_cost_usd ?? null,
     durationMs: result?.duration_ms ?? null, answers, denials, toolCalls: tools.length, result: String(result?.result ?? '').slice(0, 4000), at: new Date().toISOString() };
   fs.writeFileSync(path.join(out, 'summary.json'), JSON.stringify(summary, null, 1));

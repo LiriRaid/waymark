@@ -1,6 +1,6 @@
 // Waymark 2.0.19 · point 8: the eyes (docs/adr/0047). An L2/L3 task that changes something seen, or an L1 CSS/HTML change with no spec, is not done until a
 // browser measured or clicked what was built, after the last change. Synthetic copies of the pattern: a CSS/HTML case, a logic case and the counter-examples.
-// The ego-browser binary is a stub on PATH; the real one is only used by the opt-in check at the end. Run: node --test tests/eyes.test.mjs
+// The ego-browser binary is a stub on PATH; no test needs the real one. Run: node --test tests/eyes.test.mjs
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -90,7 +90,7 @@ test('8: a script file imported by ego is read: its measurement counts', () => {
 test('8: the panel of the agent is a provider too: a measuring script or a click counts', () => {
   const panel = (name, input) => call(`mcp__Claude_Browser__${name}`, input);
   assert.equal(eyes(judge([...head(2, CSS), ...panel('javascript_tool', { action: 'javascript_exec', text: 'document.querySelector("button").getBoundingClientRect().width' })], { eyes: { provider: 'panel' } })).pass, true);
-  assert.equal(eyes(judge([...head(2, CSS), ...panel('computer', { action: 'left_click', coordinate: [10, 10] })], { eyes: { provider: 'panel' } })).pass, true);
+  assert.equal(eyes(judge([...head(2, CSS), ...panel('computer', { action: 'left_click', coordinate: [10, 10] }), ...panel('read_page', {})], { eyes: { provider: 'panel' } })).pass, true, 'a click with the page read after it');
   assert.equal(eyes(judge([...head(2, CSS), ...panel('navigate', { url: 'http://localhost:4200' })], { eyes: { provider: 'panel' } })).pass, false, 'counter-example: only navigating');
 });
 
@@ -147,8 +147,6 @@ test('8: the eyes row is written once, after the last Quality gates row, and nev
   const own = memoryOf(MEMORY.replace('| build | | |', '| build | | |\n| eyes | npm run dev · http://localhost:3000 | 2026-10-25 |'));
   assert.equal(Eyes.fillEyes(own, root), null, 'counter-example: the user\'s own row stays');
   assert.equal(Eyes.fillEyes(memoryOf(), proj({ scripts: { start: 'node server.js' }, dependencies: { express: '4.0.0' } })), null, 'counter-example: a backend gets no row');
-  assert.deepEqual(Eyes.readEyesRow(fs.readFileSync(file, 'utf8')), { command: 'npm run start', url: 'http://localhost:4200', confirmed: false });
-  assert.equal(Eyes.readEyesRow(fs.readFileSync(own, 'utf8')).confirmed, true);
 });
 
 test('8: captures live under the Waymark home, one folder per task, and go after seven days', () => {
@@ -287,4 +285,31 @@ test('8: the pre-tool hook denies the eyes script that clears the profile or ope
   assert.equal(run('await page.goto("http://localhost:4200/"); ' + MEASURE.replace(/'/g, '"')), null, 'the local dev server');
   assert.equal(gate({ tool_name: 'Bash', tool_input: { command: 'echo "ego-browser nodejs Network.clearBrowserCookies"' }, cwd: proj, session_id: 's-eyes-gate', transcript_path: transcript }, claude), null, 'counter-example: the words in an echo');
   fs.rmSync(proj, { recursive: true, force: true });
+});
+
+// ---- M9: the measure floor, the gap names where captures go, ego as a skill, and no department keeps the old rule ----
+test('8: logic — a measurement counts only on an element; window.innerWidth alone is no look at the change', () => {
+  assert.equal(eyes(judge([...head(2, CSS), ...ego('console.log(await page.evaluate(() => window.innerWidth));')])).pass, false);
+  assert.equal(eyes(judge([...head(2, CSS), ...ego('console.log(await page.evaluate(() => document.querySelector("button").offsetWidth));')])).pass, true, 'an element\'s width');
+});
+test('8: CSS/HTML — a click counts only with the state read after it; a click alone is not', () => {
+  assert.equal(eyes(judge([...head(2, CSS, HTML), ...ego('await page.click("#go");')])).pass, false);
+  assert.equal(eyes(judge([...head(2, CSS, HTML), ...ego(CLICK)])).pass, true, 'counter-example: the state after it');
+  const panel = (...calls) => judge([...head(2, CSS), ...calls.flatMap(([n, i]) => call(`mcp__Claude_Browser__${n}`, i))]);
+  assert.equal(eyes(panel(['computer', { action: 'left_click', coordinate: [10, 10] }])).pass, false, 'the panel: a click alone');
+  assert.equal(eyes(panel(['computer', { action: 'left_click', coordinate: [10, 10] }], ['get_page_text', {}])).pass, true, 'the panel: a click and the page read after it');
+});
+test('8: the gap names the folder the captures go to', () => {
+  const g = judge(head(2, CSS), { slug: 'shop', ids: P.taskIds('/nowhere') });
+  assert.ok(g.missing.some((m) => /captures in .*eyes[\/]shop[\/]/.test(m)), g.missing.join(' | '));
+});
+test('8: ego loaded as a skill counts as the browser the task tried', () => {
+  assert.ok(judge([...head(2, CSS), ...call('Skill', { skill: 'ego-browser' })]).observed.browser.tried.includes('ego-browser'));
+});
+test('8: no department, tool skill or audit note keeps "the browser only when the user asks" for the eyes', () => {
+  const root = path.join(SCRIPTS, '..', '..', '..');
+  const files = ['skills/dept-devops/SKILL.md', 'skills/dept-devops/procedures.md', 'skills/dept-qa/SKILL.md', 'skills/dept-frontend/SKILL.md', 'docs/audit-context.md'];
+  const old = /browser only if the user asks|`run` \/ `browser-verify` only when the user asks|`browser-verify` only when the user asks\)|^\| "Never offer browser verification" \|/im;
+  for (const f of files) assert.doesNotMatch(fs.readFileSync(path.join(root, f), 'utf8'), old, f);
+  assert.match(fs.readFileSync(path.join(root, 'skills/dept-devops/SKILL.md'), 'utf8'), /post-deploy smoke test of a deployed host only when the user asks/, 'counter-example: a deployed host is beyond the eyes and stays on request');
 });

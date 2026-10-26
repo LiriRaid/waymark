@@ -22,7 +22,7 @@ Guest (no Waymark block in context) → `../waymark/references/coexistence.md` �
 3. **Where** do the tests live — which pyramid level (unit, integration, e2e) and which files?
 4. **How** is it reproduced or exercised — exact steps, inputs, data, viewport?
 5. Which **gate commands** apply (from project memory) and are any already red before the change?
-6. Is UI affected? Prove it with specs and the build; the browser only if the user asks for it.
+6. Is UI affected? Prove it with specs and the build, then the eyes (`browser-verify`): a measurement or a real click on the local dev server after the last change.
 7. **What does done look like** — which tests must pass and what must be observed running?
 
 ## Scope

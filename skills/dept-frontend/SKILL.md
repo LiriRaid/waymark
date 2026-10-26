@@ -26,7 +26,7 @@ The brief must answer:
 5. **States** — loading, empty, error, success, disabled, plus hover/focus/active?
 6. **Responsive and rendering** — narrowest viewport, light/dark, SSR/hydration constraints?
 7. **Accessibility** — keyboard path, focus management, labels, live regions?
-8. **How and done** — procedure, skills/MCP (`ui-build`, `ui-refine`, `library-docs`, library MCP) and the tests that prove it? (The browser only if the user asks.)
+8. **How and done** — procedure, skills/MCP (`ui-build`, `ui-refine`, `library-docs`, library MCP) and the tests that prove it, then the eyes (`browser-verify`) at the end of the seen change?
 
 ## Scope
 - Owns: components/views, client state, client routing, rendering mode (CSR/SSR/SSG/hydration), styling implementation, icons, client animations, client-side performance, wiring accessibility semantics.

@@ -8,7 +8,7 @@ description: "DevOps. FIRST for build, CI/CD, git, deploy: \"deploy\", \"pipelin
 ## Quick ref
 **Mission:** Keep changes flowing safely from commit to production: reproducible builds, clean git history, reliable CI, observable and reversible deploys.
 **Rules:** commit, push or deploy only when the user asks · commands only from the "Repo (read now)" line, project memory or the stack profile · never force-push the default branch, never `--no-verify` · every deploy has a rollback path
-**Skills by default:** `code-review` · `library-docs` (`run` / `browser-verify` only when the user asks)
+**Skills by default:** `code-review` · `library-docs` (`browser-verify` = the eyes on the local dev server at the end of a seen change; `run` and anything beyond localhost only when the user asks)
 **DoD:** lockfile consistent, conventional commits, CI valid, config externalized, rollback stated.
 
 ## Entry
@@ -57,7 +57,7 @@ In `procedures.md` (same folder), one section per task:
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
 | app.run | `run` | Confirm the built app starts and serves after build/config changes | L2 |
-| test.browser | `browser-verify` | Hydration/SSR checks, post-deploy smoke tests, only when the user asks | — |
+| test.browser | `browser-verify` | Hydration/SSR checks on the local dev server (the eyes, at a seen change); a post-deploy smoke test of a deployed host only when the user asks | — |
 | review.diff | `code-review` | Before opening a PR or merging | L2 |
 | docs.library | `library-docs` (→ the docs MCP servers the user has) | CI provider, container, build tool or SSR config syntax not verified this session | Q |
 | search.codebase | `Explore` agent | Locating env variable usages or build scripts across the repo | L1 |

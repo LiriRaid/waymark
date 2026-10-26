@@ -30,7 +30,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { eyesProvider, eyesDue, observeEyes, eyesGaps, referenceGaps, requestRefs } from './eyes.mjs';
+import { eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
@@ -886,7 +886,7 @@ const WITNESS = {
   eyes: (S) => {
     const { eyesNo, excepted, observed } = S;
     if (eyesNo) { excepted.eyes = eyesNo; return []; }
-    return [...eyesGaps(observed.eyes, observed.eyes.provider), ...referenceGaps(observed.eyes, S.ctx.requests)]; // the look after the last change, and the answer to the references the user sent
+    return [...eyesGaps(observed.eyes, observed.eyes.provider, S.ctx.slug ? eyesDir(S.ctx.slug, S.ctx.ids?.next) : null), ...referenceGaps(observed.eyes, S.ctx.requests)]; // the look after the last change, and the answer to the references the user sent
   },
   docs: (S) => {
     const { retried } = S;

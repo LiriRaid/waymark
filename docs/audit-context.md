@@ -42,7 +42,7 @@ The audit script compared every sentence of the block, the card, the reminder, t
 | The opener and the "user decides" rules | block + full reminder | ~417 chars on every prompt that gets the full reminder |
 | Department boilerplate: Entry, Procedures, Tools header, Learned rules | all 10 `dept-*/SKILL.md` | ~550 chars per department loaded |
 | The department skill again on every new task in the same session | `dept-*/SKILL.md` | 1.3–1.9k tokens plus one response per task. The routing testigo accepts a department invoked earlier in the session, but the block asks for it as the first tool call of every task. |
-| "Never offer browser verification" | block + `protocol.md` + 3 departments | small; kept where each rule acts |
+| "Eyes: localhost, no credentials" (2.0.19; it replaced "never offer browser verification") | block + `browser-verify` + the departments that place UI | small; kept where each rule acts |
 | `engram` rows ("mem_save after a decision") | 7 departments, `learning.md`, `consult.md` | they contradict the memory design below; an agent without engram (OpenCode) cannot follow them |
 
 ## 4. Memory today: seven places

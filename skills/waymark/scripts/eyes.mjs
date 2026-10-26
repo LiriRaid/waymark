@@ -31,8 +31,14 @@ export function eyesDue({ provider, ui, level, changed = [] }) {
   return level === 1 && files.length > 0 && files.every((f) => CSS_HTML.test(f)) && files.length === changed.length;
 }
 
-// A script run in the page that measures or clicks: not a goto and a snapshot alone.
-const MEASURES = /getBoundingClientRect|getComputedStyle|\b(?:offset|client|scroll)(?:Width|Height)\b|\binnerWidth\b|\.(?:click|dblclick|fill|press|selectOption)\(|mouse\.click/;
+// A script run in the page that measures an element, or acts on it and reads the state after: not a goto and a snapshot alone, not the window's width alone,
+// not a click whose result nobody read.
+const ELEMENT = /getBoundingClientRect|getComputedStyle|\b(?:offset|client|scroll)(?:Width|Height)\b/;
+const ACTS = /\.(?:click|dblclick|fill|press|selectOption|check|type)\(|mouse\.click/;
+const READS = /evaluate|textContent|innerText|getAttribute|isVisible|isChecked|inputValue|\.count\(|getBoundingClientRect|getComputedStyle|snapshot\(/;
+const measuresIn = (s) => ELEMENT.test(s) || (ACTS.test(s) && READS.test(s.slice(s.search(ACTS) + 1)));
+const MEASURES = { test: (s) => measuresIn(String(s)) };
+const PANEL_READS = new Set(['read_page', 'get_page_text', 'javascript_tool', 'find']);
 // The program being run, at the start of a command or of a segment after ; & | ( or a line: never the words inside an echo or a grep.
 const AT_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:npx\s+|pnpm\s+exec\s+|yarn\s+|bunx\s+)?(?:\S*[\\/])?`;
 export const RUNS_EGO = new RegExp(AT_START + String.raw`ego-browser(?:\.exe|\.cmd)?\s+nodejs\b`);
@@ -105,7 +111,9 @@ export function observeEyes(tools, { from = -1, provider = null, reply = '', all
       const name = panel[1], input = t.input || {};
       if (input.url && /^(navigate|preview_start|tabs_create)$/.test(name)) panelAt = whereTo(String(input.url), allowed); // the page the next panel calls look at
       where = panelAt;
-      measuring = (name === 'javascript_tool' && MEASURES.test(String(input.text || ''))) || PANEL_ACTS.has(name) || (name === 'computer' && /click|drag/.test(String(input.action || '')));
+      const acted = PANEL_ACTS.has(name) || (name === 'computer' && /click|drag/.test(String(input.action || '')));
+      const readAfter = () => tools.slice(i + 1).some((x) => PANEL_READS.has(PANEL.exec(x.name || '')?.[1]));
+      measuring = (name === 'javascript_tool' && MEASURES.test(String(input.text || ''))) || (acted && readAfter()); // an act counts with the page read after it
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
       if (RUNS_EGO.test(text(t))) {
         kind = 'ego';
@@ -183,13 +191,6 @@ export function fillEyes(memoryFile, root) {
   fs.writeFileSync(memoryFile, lines.join('\n'));
   return row;
 }
-// The row as written: { command, url, confirmed }; null with none. `dev server` is the older name browser-verify used.
-export function readEyesRow(memory) {
-  const m = String(memory || '').match(EYES_ROW) || String(memory || '').match(/^\|\s*dev server\s*\|\s*([^|]*)\|\s*([^|]*)\|/im);
-  if (!m) return null;
-  const cell = m[1].replace(/`/g, '').trim(), [command, url] = cell.split(/\s·\s/).map((x) => x.trim());
-  return { command, url: url || null, confirmed: !/^to confirm/i.test(m[2].trim()) };
-}
 
 // The references the request carried and the Cierre did not answer (decision 1b): one line per element, "<element>: igual | parecido | falta — <measurement>".
 export function referenceGaps(observed, refs) {
@@ -199,10 +200,12 @@ export function referenceGaps(observed, refs) {
 }
 
 // The block: what the eyes still owe.
-export function eyesGaps(observed, provider) {
+// `captures`: the task's folder for screenshots (eyesDir), named so they land under the Waymark home and go after a week, never in the repo.
+export function eyesGaps(observed, provider, captures = null) {
   if (observed?.afterLastChange) return [];
+  const where = captures ? `; captures in ${slash(captures)}` : '';
   const how = provider === 'ego' ? 'ego-browser nodejs (read `ego-browser skill` first): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it'
     : provider === 'playwright' ? 'the project\'s Playwright against the local dev server: a measurement of the element or a real click with the state after it'
       : 'the browser panel against the local dev server: a script that measures the element, or a real click with the state after it';
-  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${how}; or write Ojos: no (<why the screen cannot be checked>)`];
+  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
 }

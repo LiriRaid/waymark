@@ -250,6 +250,24 @@ test('8: before the tool — a profile-wide clear, a site clear off the local ho
     'await page.fill("#email", "a@b.c")']) assert.equal(Eyes.eyesRefusal(s, allowed), null, s);
 });
 
+// ---- H6: screenshots or a design link in the request owe an answer element by element ----
+test('8: CSS/HTML — screenshots in the request and no verdict line in the Cierre: the eyes ask for one per element; with them it passes', () => {
+  const refs = { requests: { images: 2, hosts: [] } }, lines = [...head(2, CSS), ...at_('http://localhost:4200/')];
+  const none = judge(lines, refs);
+  assert.equal(eyes(none).pass, false);
+  assert.ok(none.missing.some((m) => /igual|parecido|falta/.test(m)), none.missing.join(' | '));
+  assert.equal(eyes(judge(lines, refs, CIERRE + '\nbotón: igual — ancho 40\nícono: parecido — 18 contra 20')).pass, true);
+  const declared = judge(lines, { ...refs, blocked: true }, CIERRE.replace('Aprendido', 'Ojos: no (el diseño no está publicado)\nAprendido'));
+  assert.ok(!declared.missing.some((m) => /igual|parecido|falta/.test(m)), 'Ojos: no stays the declared way out');
+});
+
+test('8: logic — a design link written in the request is a reference too; counter-example: no reference, no verdict lines owed', () => {
+  const lines = [...head(2, CSS, HTML), ...at_('http://localhost:4200/')];
+  assert.equal(eyes(judge(lines, { requests: { images: 0, hosts: ['www.figma.com'] } })).pass, false);
+  assert.equal(eyes(judge(lines, { requests: { images: 0, hosts: [] } })).pass, true);
+  assert.equal(eyes(judge(lines)).pass, true, 'no request data: nothing owed');
+});
+
 test('8: the request is read from the prompts: image blocks and the hosts of the links the user wrote', () => {
   const img = { type: 'user', uuid: 'pi', timestamp: at(), message: { role: 'user', content: [{ type: 'text', text: `así debe quedar ${DESIGN} y en local http://localhost:4200` }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } };
   assert.deepEqual(Eyes.requestRefs([img, say('ok')]), { images: 1, hosts: ['www.figma.com'] });

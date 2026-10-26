@@ -191,6 +191,13 @@ export function readEyesRow(memory) {
   return { command, url: url || null, confirmed: !/^to confirm/i.test(m[2].trim()) };
 }
 
+// The references the request carried and the Cierre did not answer (decision 1b): one line per element, "<element>: igual | parecido | falta — <measurement>".
+export function referenceGaps(observed, refs) {
+  const n = (refs?.images || 0) + (refs?.hosts?.length || 0);
+  if (!n || observed?.references > 0) return [];
+  return [`the request carried ${n} reference${n > 1 ? 's' : ''} (${[refs.images ? `${refs.images} screenshot${refs.images > 1 ? 's' : ''}` : '', refs.hosts?.length ? 'a design link' : ''].filter(Boolean).join(' and ')}) and the Cierre answers none: one line per element asked or visible in them, "<element>: igual | parecido | falta — <measurement>"; or write Ojos: no (<why>)`];
+}
+
 // The block: what the eyes still owe.
 export function eyesGaps(observed, provider) {
   if (observed?.afterLastChange) return [];

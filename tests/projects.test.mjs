@@ -147,3 +147,11 @@ test('1.2: logic — a record another version wrote is not this version\'s to an
   P.appendRecord(only, { schema: 'waymark.record/v1', id: '2026-10-20 · T1', agent: 'claude', at: new Date().toISOString(), session: 'o', level: 2, files: ['a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'hecho' } });
   assert.equal(await SC.measure('records.parcialShare', only), null, 'counter-example: no record of this version: unmeasured, never passed');
 });
+
+test('1.2: a pre-release writes for the release it leads to: 2.0.19-dev counts for 2.0.19, 2.0.18-dev does not', async () => {
+  const release = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim().replace(/-.*$/, '');
+  const p = project('dev', mix(0, 1));
+  P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-26 · T40', agent: 'claude', at: new Date(Date.UTC(2026, 9, 26)).toISOString(), session: 'dev1', level: 2, files: ['src/a.ts'], inputs: { waymark: `${release}-dev` }, outcome: { result: 'parcial' } });
+  P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-26 · T41', agent: 'claude', at: new Date(Date.UTC(2026, 9, 26, 1)).toISOString(), session: 'dev2', level: 2, files: ['src/app.html'], inputs: { waymark: '0.0.1-dev' }, outcome: { result: 'parcial' } });
+  assert.equal(await SC.measure('records.parcialShare', p), 1 / 2, 'the -dev of this release counts; another release\'s -dev does not');
+});

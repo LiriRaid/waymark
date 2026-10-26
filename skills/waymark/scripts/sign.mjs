@@ -89,7 +89,7 @@ export function trust(skillDir = SKILL) {
 // ssh-keygen -Y verify takes an identity, not a pattern: a principal with a wildcard is checked with a name it matches (`*` → waymark), since
 // the ssh-keygen of Git for Windows expands a bare `*` argument as a file glob and then finds no principal. A list takes its first pattern.
 export const identityOf = (principal) => (String(principal).split(',').find((p) => p && !p.startsWith('!')) || '').replace(/\*/g, 'waymark').replace(/\?/g, 'w');
-const stamp = (ms) =>new Date(ms).toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z';
+const stamp = (ms) => new Date(ms).toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z';
 
 // The state of a signature over `data`: { state: 'signed' | 'revoked' | 'outside' | 'untrusted' | 'bad' | 'unchecked', by?, fingerprint? }.
 // `at` is when it was signed: a key is valid or not as of that time. Without ssh-keygen nothing can be checked.

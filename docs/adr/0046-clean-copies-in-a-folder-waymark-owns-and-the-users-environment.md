@@ -25,7 +25,7 @@ Real use showed Waymark and the agents it directs leaving things on the user's m
 - **Only the message with a path, no command.** The agent made the folder itself, which is what produced the long-path orphans. Rejected.
 - **Delete every `wm-*` and `waymark-*` folder older than a minute on `check`.** Another process of the user's may own one; six hours and the user's yes. Rejected.
 - **The hook rewrites the e-mail out of the history.** The user did not choose to rewrite what is published. Rejected: the file stops carrying it, the history stays.
-- **Block, not only record, an unanswered window choice.** The Cierre names a choice in its own words and a fuzzy match would block honest tasks. Rejected for the record and the finding.
+- **Block, not only record, an unanswered window choice.** The Cierre names a choice in its own words and a fuzzy match would block honest tasks. Rejected for the record and the finding. The gaps audit of 2026-10-26 raised it again (the plan says the Cierre "must answer" each choice), and the user confirmed the same day that the record and the finding are the answer: `hecho` cannot stand with a choice left out, and nothing blocks on a word match.
 
 ## Consequences
 

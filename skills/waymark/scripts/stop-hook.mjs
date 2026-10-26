@@ -1159,7 +1159,8 @@ export function questionRecord(turn, meta = {}) {
 }
 
 // The record of a turn the hook crashed on: no task ID (it is no task, like a Q), the cause, nothing judged.
-export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cause: `unevaluated:${String(err?.message || err).replace(/\s+/g, ' ').slice(0, 160)}`, agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd });
+// It keeps the files the turn changed, so they are not lost when the next prompt renews its snapshot (an unevaluated record is no close).
+export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cause: `unevaluated:${String(err?.message || err).replace(/\s+/g, ' ').slice(0, 160)}`, agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, ...(meta.files?.length ? { files: meta.files.slice(0, 200) } : {}) });
 
 // The files a turn wrote inside an agent's own memory folder (~/.claude/projects/<project>/memory/): a rule of the user kept there is
 // invisible to every other agent, so the notice says where it belongs (docs/adr/0043).
@@ -1233,7 +1234,12 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // notification's turn, which reads the whole stretch from the task's prompt. A reply that already carries its
       // Cierre is the end of the task: judged now.
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
-      if (pendingBackground(lines, since).length && !CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''))) return;
+      if (pendingBackground(lines, since).length && !CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''))) {
+        // deferred: a record that says so, with the turn's files, and a notice (docs/adr/0044); it is no close, so the next turn still judges this one
+        try { if (fs.existsSync(projectHome(cwd).memory)) { let files = []; try { files = turnChanged(h.session_id, cwd); } catch {} if (!files.length) files = [...new Set(currentTurn(lines, since).tools.filter((t) => EDITS.test(t.name)).map(fileOf).filter(Boolean))]; appendRecord(cwd, unevaluatedRecord('deferred: a background task is still running', { agent: agent.name, session: h.session_id, cwd, files })); } } catch (e) { logHookError('stop-hook deferred', e); }
+        answer(agent, agent.out.notice('Waymark: este turno se evaluará cuando termine la tarea en segundo plano.'));
+        return;
+      }
       h.last_assistant_message = effectiveReply(currentTurn(lines, since).texts, h.last_assistant_message); // one Cierre per task
       const claimed = String(h.last_assistant_message || '').replace(/\*\*|__/g, '').match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
@@ -1385,7 +1391,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence
       try {
         const cwd = parsed?.cwd || process.cwd();
-        if (parsed && fs.existsSync(projectHome(cwd).memory)) appendRecord(cwd, unevaluatedRecord(e, { agent: agent.name, session: parsed.session_id, cwd }));
+        let files = [];
+        try { files = turnChanged(parsed.session_id, cwd); } catch {}
+        if (parsed && fs.existsSync(projectHome(cwd).memory)) appendRecord(cwd, unevaluatedRecord(e, { agent: agent.name, session: parsed.session_id, cwd, files }));
         if (parsed) answer(agent, agent.out.notice(`Waymark: este turno no se evaluó (${String(e?.message || e).slice(0, 80)}); la causa está en ~/.waymark/hook-errors.log`));
       } catch (e2) { logHookError('stop-hook unevaluated', e2); }
     }

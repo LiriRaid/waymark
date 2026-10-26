@@ -1448,7 +1448,7 @@ test('2.0.7 background: an agent launched in the background (isAsync) holds the 
   assert.deepEqual(pendingBackground(notified), []);
 });
 
-test('T2o stop hook: no block and no record while the background review runs', () => {
+test('T2o stop hook: no block and no task record while the background review runs, only an unevaluated record and a notice', () => {
   const { cwd, log } = fresh();
   const transcript = path.join(home, `t-bg-${n}.jsonl`);
   const lines = [prompt('agrega reintentos al servicio de pedidos'), say('Waymark → L2 · dept-backend · skills: code-review'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(),
@@ -1456,8 +1456,9 @@ test('T2o stop hook: no block and no record while the background review runs', (
     { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_bg2', content: 'Running in the background' }] }, toolUseResult: { background: true } }, say('Espero el code-review.')];
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: `bg-${n}`, last_assistant_message: 'Espero el code-review.' }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
-  assert.equal(r.stdout.trim(), '', 'silent: not blocked');
-  assert.ok(!fs.existsSync(log) || !readLog(cwd).length, 'nothing recorded yet');
+  assert.doesNotMatch(r.stdout, /"decision":"block"/, 'not blocked');
+  assert.match(r.stdout, /se evaluará cuando termine la tarea en segundo plano/);
+  assert.ok(!fs.existsSync(log) || readLog(cwd).every((x) => x.kind === 'unevaluated' && /deferred/.test(x.cause)), 'no task recorded yet');
 });
 
 test('T2o: "Docker" is not docs, memory commands are not gates', () => {

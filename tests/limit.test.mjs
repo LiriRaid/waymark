@@ -139,3 +139,29 @@ test('12: counter-example — a notice that comes after a close is no new task',
   assert.ok(!records.some((r) => r.outcome?.cause === 'external'), 'a turn that carries its Cierre is judged as any other');
   assert.ok(!fs.existsSync(path.join(P.projectHome(dir).dir, 'next-prompt.md')), 'and leaves no handoff for a cut that did not cost it anything');
 });
+
+// ---- M3 (2b, 2c): a turn the hook could not judge leaves a record that keeps its files, and that record is no close ----
+test('2b: logic — a turn deferred for a background task leaves an unevaluated record with its files and a notice; the next turn still judges it', async () => {
+  const bg = [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id: 'bg1', name: 'Agent', input: { prompt: 'review' } }] } },
+    { type: 'user', timestamp: at(), toolUseResult: { isAsync: true, agentId: 'a1' }, message: { content: [{ type: 'tool_result', tool_use_id: 'bg1', content: 'launched' }] } }];
+  const { out, records } = await session('src/orders.service.ts', [...bg, say('Lanzado el agente en segundo plano.')]);
+  const rec = records.find((r) => r.kind === 'unevaluated');
+  assert.ok(rec, JSON.stringify(records).slice(0, 200));
+  assert.match(rec.cause, /deferred/);
+  assert.ok((rec.files || []).some((f) => /orders\.service\.ts$/.test(f)), `its files: ${JSON.stringify(rec.files)}`);
+  assert.match(out, /se evaluará cuando termine/);
+  assert.ok(!records.some((r) => r.id), 'counter-example: no task closed by it');
+});
+test('2b: CSS/HTML — the record of a turn that crashed carries the files it changed', async () => {
+  const { unevaluatedRecord } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const rec = unevaluatedRecord(new Error('boom'), { agent: 'claude', session: 's', cwd: '/w', files: ['/w/src/app.css', '/w/src/index.html'] });
+  assert.deepEqual([rec.kind, rec.files], ['unevaluated', ['/w/src/app.css', '/w/src/index.html']]);
+  assert.equal(unevaluatedRecord(new Error('boom'), { session: 's' }).files, undefined, 'counter-example: none known, none written');
+});
+test('2c: an unevaluated record is no close: the open turn keeps its snapshot; a task record closes it', async () => {
+  const { stillOpen } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
+  const open = { at: '2026-10-26T10:00:00Z' };
+  assert.equal(stillOpen(open, [{ session: 's', kind: 'unevaluated', at: '2026-10-26T10:05:00Z' }], 's'), true);
+  assert.equal(stillOpen(open, [{ session: 's', id: '2026-10-26 · T1', at: '2026-10-26T10:05:00Z' }], 's'), false, 'counter-example: a real close');
+  assert.equal(stillOpen(null, [], 's'), false);
+});

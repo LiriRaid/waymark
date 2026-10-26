@@ -68,7 +68,9 @@ for (const [kind, file, label] of [['logic', 'src/orders.service.mjs', 'a .mjs c
     const transcript = path.join(dir, 't.jsonl');
     const lines = (last) => [prompt('ajusta el servicio'), say('Waymark → L2 · dept-backend'), ...call('Edit', { file_path: path.join(dir, file) }), ...call('Agent', { run_in_background: true }), launch('toolu_bg', 'bg1'), say(last)];
     const stop = async (last, session) => { fs.writeFileSync(transcript, lines(last).map((l) => JSON.stringify(l)).join('\n') + '\n'); return hookRun('stop-hook.mjs', { transcript_path: transcript, cwd: dir, session_id: session, last_assistant_message: last }); };
-    assert.equal((await stop('Espero el review.', `rec-wait-${kind}`)).out.trim(), '', 'waiting: silent, no block');
+    const waiting = (await stop('Espero el review.', `rec-wait-${kind}`)).out;
+    assert.doesNotMatch(waiting, /"decision":"block"/, 'waiting: no block');
+    assert.match(waiting, /se evaluará cuando termine la tarea en segundo plano/, 'and a notice that says so (docs/adr/0044)');
     assert.notEqual((await stop(CIERRE(), `rec-cierre-${kind}`)).out.trim(), '', 'a Cierre in the reply: the hook judges it (here it answers)');
   });
 }

@@ -83,7 +83,15 @@ export function confirmation(hook, agent, cwd) {
 }
 // Soft cap of a task (docs/adr/0044): past 60 minutes, 150 tool calls or 40 changed files, whichever comes first, the agent is told once to
 // offer the user closing it and opening a new task for what remains. A project changes the numbers in memory.md: "Soft cap: 90 min / 200 calls / 60 files".
-export const SOFT_CAP = { minutes: 60, calls: 150, files: 40 };
+// Is the session's open turn still unclosed? Its open entry is newer than anything the session recorded, an unevaluated record aside (a crash or a
+// deferral is no close: the turn's changes stay in the snapshot until a real close).
+export function stillOpen(open, records, session) {
+  if (!open) return false;
+  const last = records.filter((r) => r.session === session && r.kind !== 'unevaluated').pop();
+  return !(last && Date.parse(last.at || 0) > Date.parse(open.at || 0));
+}
+
+export const SOFT_CAP ={ minutes: 60, calls: 150, files: 40 };
 export function softCap(memory) {
   const m = String(memory || '').match(/^[ \t]*[-*]?[ \t]*Soft cap:[ \t]*(\d+)\s*min\w*\s*\/\s*(\d+)\s*(?:calls|llamadas)\s*\/\s*(\d+)\s*(?:files|archivos)/im);
   return m ? { minutes: Number(m[1]), calls: Number(m[2]), files: Number(m[3]) } : SOFT_CAP;
@@ -243,8 +251,8 @@ export function reminder(hook, agent) {
   try { other = otherSessionLine(cwd, session); } catch {}
   try { other += siblingsLine(cwd, session); } catch (e) { logHookError('rule0-hook siblings', e); }
   try { // this session's last turn never closed (interrupted, or a background agent still running): its open entry is newer than anything the session recorded
-    const open = openTurn(cwd, session), home = projectHome(cwd), last = open && !home.legacy ? readRecords(home.log).filter((r) => r.session === session).pop() : null;
-    unclosed = !!open && !(last && Date.parse(last.at || 0) > Date.parse(open.at || 0));
+    const open = openTurn(cwd, session), home = projectHome(cwd);
+    unclosed = stillOpen(open, open && !home.legacy ? readRecords(home.log) : [], session);
   } catch {}
   try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change
   try { saveSnapshot(hook.session_id, cwd, { keep: unclosed }); } catch {} // the end-of-turn hook diffs against it; an unclosed turn's changes stay in it

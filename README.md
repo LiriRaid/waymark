@@ -72,6 +72,20 @@ Where it stands at the close of 2.0.18 (the baseline was 33.2 %): **98.1 %**, ab
 
 What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'s job; this chain covers the work the agent does on your code. Decisions: [`docs/adr/`](docs/adr).
 
+### Next to the supply-chain frameworks
+
+Waymark borrows ideas from software supply-chain work and claims none of its certifications. What each framework is for, and where Waymark stands against it:
+
+| Framework | What it is for | Where Waymark stands |
+|---|---|---|
+| [OpenSSF Scorecard](https://scorecard.dev) | Automated checks of an open-source repository's security practices | A different tool answering a different question. Waymark's own `scorecard` scores Waymark against its 13 criteria (ADR 0028); it is not an OpenSSF Scorecard result and says nothing about the project it runs in |
+| [SLSA](https://slsa.dev) | Levels of integrity for how an artifact was built, with provenance a build platform generates | The model for the idea of a record the hook computes instead of the agent declaring (ADR 0001, 0004). No SLSA level is claimed |
+| [in-toto](https://in-toto.io) | Attestations of the steps of a supply chain | `attest` exports one task as an in-toto Statement v1 with a predicate of Waymark's own (ADR 0027). What is signed and what is not is under "what it does not do" |
+| SBOM ([SPDX](https://spdx.dev), [CycloneDX](https://cyclonedx.org)) | An inventory of the components of a piece of software | Not an SBOM: the chain covers the work the agent does on your code, not your dependencies, which are `dept-security`'s job |
+| [NIST SSDF](https://csrc.nist.gov/pubs/sp/800/218/final) (SP 800-218) | A set of secure software development practices | Some of what Waymark checks (a review where the risk is, no secret in the diff, sensitive paths guarded) is the kind of practice it names; no practice-by-practice mapping has been made, and none is claimed |
+
+None of this is a compliance claim.
+
 ## Share what you learn: the pattern, not the case
 
 Waymark learns on your machine: each task you close teaches your own install, and nothing leaves it unless you send it (`docs/adr/0042`). To know whether it works beyond one machine, it needs **patterns** from people who use it: what happened, with which agent, version and level, and how often, said so that anyone could reuse it without knowing your project. Your **case** (code, prompts, paths, client names) stays with you. Share a pattern with the *Pattern report* issue form; send a change as a pull request against `develop`, which the author reviews and signs. How, with examples of a pattern and a case: [`CONTRIBUTING.md`](CONTRIBUTING.md).

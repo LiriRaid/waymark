@@ -33,7 +33,7 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { eyesProvider, eyesDue, observeEyes, eyesGaps, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -41,6 +41,7 @@ import { legacyStack } from './runtime.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes, defaultRemote } from './notes.mjs';
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
+import { softCapLine } from './rule0-hook.mjs';
 import { packedFiles, procDelivered, procLate } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
@@ -1009,7 +1010,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   // A turn no prompt of its own started (a notification after the close) or an empty one, and changed nothing, is no task:
   // its Cierre would be a ghost row (the notification's turn carries the original prompt).
   // A courtesy ("gracias", "ok") or a turn that only wrote the routine's own files (memory, notes) with no command that acts, is none either.
-  if (!changed.length && (ctx.resumed || !String(turn.prompt || '').trim() || COURTESY.test(String(turn.prompt)) || (turn.tools.some((t) => EDITS.test(t.name)) && !turn.tools.some(acting)))) return null;
+  if (!changed.length && (ctx.resumed || !String(turn.prompt || '').trim() || (COURTESY.test(String(turn.prompt)) && !turn.tools.some(acting)) || (turn.tools.some((t) => EDITS.test(t.name)) && !turn.tools.some(acting)))) return null;
   if (!changed.length && !(ctx.outside && CIERRE.test(lastText) && typeof earlyLevel === 'number' && earlyLevel > 0)) return null;
   const full = String(last || turn.texts[turn.texts.length - 1] || '').replace(/\*\*|__/g, ''); // **Campo:** reads as Campo:
   // Fields and claims are read from the Cierre block only: the prose above it ("la decisión: tuya…", "fallos previos")
@@ -1331,6 +1332,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // a clean copy never outlives its task: the ones this task made in Waymark's root are removed now and the removal is checked
       let copiesNote = '';
       try { const c = closeCopies(taskStart(records, h.session_id, claimed) || turn.startedAt || Date.now() - 6 * 3600000, cwd); if (c.removed.length || c.left.length) copiesNote = ` · copias limpias: ${c.removed.length} retirada${c.removed.length === 1 ? '' : 's'}${c.left.length ? `, ${c.left.length} sin poder retirar (${c.left.map((p) => path.basename(p)).join(', ')}: \`waymark.mjs copy --clean\`)` : ''}`; } catch (e) { logHookError('stop-hook copies', e); }
+      // a long turn the agent ran alone never reached the per-prompt hook's soft cap: the user hears it at the close (once per task), before the task's start is cleared
+      let capNote = '';
+      try { capNote = softCapLine(h, agent, cwd, taskStartMark(h.session_id), Date.now(), undefined, lines, { user: true }); } catch (e) { logHookError('stop-hook soft cap', e); }
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { for (const { root, record } of touchedRepos(gaps.changed, home.root, rec, home.slug)) { appendRecord(root, record); refreshTasks(projectHome(root), true); } } catch (e) { logHookError('stop-hook touched', e); } // each other project it changed files in hears of it
       try { expireGrants(rec.id); } catch (e) { logHookError('stop-hook grants', e); } // a permission given for this task ends with it (docs/adr/0045)
@@ -1375,7 +1379,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
-      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + (gaps.external ? ` · turno cortado por ${gaps.external.cause}: ningún testigo evaluado` : '') + relay + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + confirmAsk(rec)));
+      answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + (gaps.external ? ` · turno cortado por ${gaps.external.cause}: ningún testigo evaluado` : '') + relay + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + capNote + confirmAsk(rec)));
     } catch (e) {
       logHookError('stop-hook', e);
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence

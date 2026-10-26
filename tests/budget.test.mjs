@@ -64,11 +64,11 @@ test('2g: logic — past 150 calls the agent is told once to offer a new task; b
   assert.equal(repeat(), '', 'told once per task');
   assert.equal(again(), '');
 });
-test('2g: CSS/HTML — 45 changed stylesheets reach the files cap; the minutes cap counts from the task\'s start', () => {
+test('2g: CSS/HTML — 45 changed stylesheets reach the files cap; the minutes cap counts the time worked since the task\'s start', () => {
   const [told] = cap(edits(45, 'css', at(-5000)), Date.now() - 5 * 60000);
   assert.match(told, /45 changed files/);
-  const [slow] = cap([], Date.now() - 75 * 60000);
-  assert.match(slow, /run 75 min, 0 calls/);
+  const [slow] = cap(Array.from({ length: 16 }, (_, i) => call('Read', { file_path: '/work/proj/src/app.css' }, at(-(75 - i * 5) * 60000))).flat(), Date.now() - 75 * 60000);
+  assert.match(slow, /run 7\d min, 16 calls/);
   const [calls] = cap(edits(45, 'css', at(-5000)), 0);
   assert.equal(calls, '', 'counter-example: no task in progress, nothing to measure');
   const [older] = cap(edits(45, 'css', at(-3 * 3600000)), Date.now() - 5 * 60000);
@@ -158,4 +158,34 @@ test('2h: an order that adds more work than the fix still goes through the windo
     assert.equal(P.askedChoice([prompt(text), say('Waymark → L2 · dept-backend')]), false, text.slice(0, 50));
   }
   assert.equal(P.askedChoice([prompt('aplica los hallazgos del review'), say('Waymark → L2')]), true, 'counter-example: the plain order is the decision');
+});
+
+// ---- M3 · the size counts what a command changed and the time worked, and a courtesy that acts is work ----
+test('2g: logic — files a command changes (sed -i) count toward the cap, as Edit does', () => {
+  const dir = tmpRepo();
+  fs.mkdirSync(path.join(dir, 'src'));
+  for (let i = 0; i < 15; i++) fs.writeFileSync(path.join(dir, 'src', `s${i}.ts`), 'a');
+  const size = (cmd) => softCapLine({ session_id: `s-sh-${++n}`, cwd: dir }, { read: () => [...edits(30, 'ts', at(-5000)), ...Array.from({ length: 15 }, (_, i) => call('Bash', { command: `${cmd} src/s${i}.ts` }, at(-5000))).flat()] }, dir, Date.now() - 5 * 60000, Date.now(), path.join(dir, `cap-${n}.json`));
+  assert.match(size("sed -i 's/a/b/'"), /45 changed files/);
+  assert.equal(size('cat'), '', 'counter-example: a command that only reads changes nothing');
+});
+test('2g: logic — the minutes are the time worked: a pause longer than 15 minutes is not counted', () => {
+  const mark = Date.now() - 75 * 60000;
+  const [idle] = cap([...call('Bash', { command: 'git status' }, at(-75 * 60000)), ...call('Bash', { command: 'git status' }, at(-3 * 60000))], mark);
+  assert.equal(idle, '', 'one call, a 72-minute pause, one call: a few minutes worked');
+  const steady = Array.from({ length: 16 }, (_, i) => call('Bash', { command: 'git status' }, at(-(75 - i * 5) * 60000))).flat();
+  assert.match(cap(steady, mark)[0], /this task has run 7\d min/, 'counter-example: steady work past the hour is told');
+});
+test('2g: CSS/HTML — at the close of a long autonomous turn the user is told in their words, once', () => {
+  const dir = tmpRepo(), state = path.join(dir, 'cap.json');
+  const hook = { session_id: `s-cap-close-${++n}`, cwd: dir }, agent = { read: () => edits(45, 'css', at(-5000)) };
+  const mark = Date.now() - 5 * 60000;
+  assert.match(softCapLine(hook, agent, dir, mark, Date.now(), state, null, { user: true }), /tarea grande: 5 min, 45 llamadas y 45 archivos cambiados/);
+  assert.equal(softCapLine(hook, agent, dir, mark, Date.now(), state, null, { user: true }), '', 'once');
+});
+test('2g: a courtesy that acts is work: "ok sube el cambio" with a push, "listo, despliega" with a deploy, leave a record; a thanks alone does not', () => {
+  assert.ok(outside(turnOf('ok sube el cambio', call('Bash', { command: 'git push origin develop' }))));
+  assert.ok(outside(turnOf('listo, ahora despliega a producción', call('Bash', { command: 'firebase deploy --only hosting' }))));
+  assert.ok(outside(turnOf('vale, sube los estilos', call('Bash', { command: 'git push' }))), 'CSS/HTML: the push of a styles change');
+  assert.equal(outside(turnOf('ok gracias', call('Read', { file_path: '/work/proj/src/app.css' }))), null, 'counter-example: a thanks that only reads');
 });

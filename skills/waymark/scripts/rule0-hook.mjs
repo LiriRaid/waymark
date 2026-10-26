@@ -19,6 +19,8 @@ import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
 import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
+import { changesProject } from './runs.mjs';
+import { commandFiles } from './tool-hook.mjs';
 import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
@@ -86,16 +88,26 @@ export function softCap(memory) {
   const m = String(memory || '').match(/^[ \t]*[-*]?[ \t]*Soft cap:[ \t]*(\d+)\s*min\w*\s*\/\s*(\d+)\s*(?:calls|llamadas)\s*\/\s*(\d+)\s*(?:files|archivos)/im);
   return m ? { minutes: Number(m[1]), calls: Number(m[2]), files: Number(m[3]) } : SOFT_CAP;
 }
-export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null) {
+// The size of the task so far: its calls, the files it changed (by an edit or by a command that writes: sed -i, a script), and the minutes worked (a pause
+// longer than IDLE between two calls counts as IDLE). `user`: the line for the user at the close of a long turn, in their words, instead of the agent's.
+const IDLE = 15 * 60000;
+export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false } = {}) {
   if (!mark) return ''; // no task in progress: nothing to measure
   const home = projectHome(cwd), cap = softCap((() => { try { return fs.readFileSync(home.memory, 'utf8'); } catch { return ''; } })());
   const files = new Set();
-  let calls = 0;
+  let calls = 0, worked = 0, prev = mark;
   for (const d of lines || agent.read(hook)) {
-    if (d.type !== 'assistant' || d.isSidechain || (Date.parse(d.timestamp || '') || 0) < mark) continue;
-    for (const c of d.message?.content || []) if (c.type === 'tool_use') { calls++; if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(c.name) && c.input?.file_path) files.add(String(c.input.file_path)); }
+    const t = Date.parse(d.timestamp || '') || 0;
+    if (d.type !== 'assistant' || d.isSidechain || t < mark) continue;
+    for (const c of d.message?.content || []) {
+      if (c.type !== 'tool_use') continue;
+      calls++; worked += Math.min(Math.max(0, t - prev), IDLE); prev = Math.max(prev, t);
+      if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(c.name) && c.input?.file_path) files.add(String(c.input.file_path));
+      else if (/^(Bash|PowerShell)$/.test(c.name) && c.input?.command && changesProject(String(c.input.command))) for (const f of commandFiles(String(c.input.command), cwd)) files.add(f);
+    }
   }
-  const minutes = Math.round((now - mark) / 60000);
+  worked += Math.min(Math.max(0, now - prev), IDLE);
+  const minutes = Math.round(worked / 60000);
   if (minutes < cap.minutes && calls < cap.calls && files.size < cap.files) return '';
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
@@ -104,6 +116,7 @@ export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile 
   for (const [k, at] of Object.entries(seen)) if (now - at > 7 * 86400000) delete seen[k];
   seen[key] = now;
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return ''; }
+  if (user) return ` · tarea grande: ${minutes} min, ${calls} llamadas y ${files.size} archivos cambiados (tope ${cap.minutes} min / ${cap.calls} llamadas / ${cap.files} archivos): conviene cerrarla y abrir otra para lo que falta`;
   return ` Task size: this task has run ${minutes} min, ${calls} calls and ${files.size} changed files (soft cap ${cap.minutes} min / ${cap.calls} calls / ${cap.files} files): offer the user, in your choice window, to close it and open a new task for what remains.`;
 }
 // Another session of this project has a turn open: two sessions on one repo edit the same files without knowing. The line

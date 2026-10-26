@@ -1,6 +1,6 @@
 {
   "schema": "waymark.scorecard/v1",
-  "adr": "0048",
+  "adr": "0049",
   "about": "The definition of '95 %' (docs/adr/0028-scorecard.md). Every check is deterministic: a file, a pattern, a command's exit or a number computed from the records. A check scores 1 or 0, or a ratio against its threshold (a number above 1 is capped at 1). A criterion is the mean of its checks; the total is the sum of weight x criterion. `point` is the plan 2.0.18 point that makes the check pass (0 = it holds today); a check that fails before its point is the honest baseline, not a mistake. A threshold of null is frozen later by an amendment ADR, from the baseline, and scores 0 until then.",
   "criteria": [
     {
@@ -92,7 +92,8 @@
         { "id": "8.5", "what": "a deterministic replay bench recomputes the routine cost of recorded tasks under an older version's sizes", "point": 3, "kind": "exists", "files": ["bench/replay.mjs"] },
         { "id": "8.6", "what": "the routine share of the last 10 L2 tasks (cost units) is within its frozen threshold", "point": 4, "kind": "measure", "measure": "cost.routineShareL2", "op": "le", "threshold": 0.09, "frozenIn": 3 },
         { "id": "8.7", "what": "the routine share of the last 5 L1 tasks (cost units) is within its frozen threshold", "point": 4, "kind": "measure", "measure": "cost.routineShareL1", "op": "le", "threshold": 0.065, "frozenIn": 3 },
-        { "id": "8.8", "what": "each lever kept has a regression check on the replay", "point": 4, "kind": "exists", "files": ["tests/replay.test.mjs"] }
+        { "id": "8.8", "what": "each lever kept has a regression check on the replay", "point": 4, "kind": "exists", "files": ["tests/replay.test.mjs"] },
+        { "id": "8.9", "what": "the median tokens of a recent task: pending, frozen in the next release from the baseline of this one", "point": 13, "kind": "measure", "measure": "records.medianTokens", "op": "le", "threshold": null, "frozenIn": 14 }
       ]
     },
     {
@@ -105,7 +106,8 @@
         { "id": "9.5", "what": "a conformance suite of at least 30 behavioural cases that every adapter must pass", "point": 11, "kind": "measure", "measure": "conformance.cases", "op": "ge", "threshold": 30 },
         { "id": "9.6", "what": "a task started under one agent's payloads resumes under another's with the same memory, open task, precedent and chain", "point": 11, "kind": "exists", "files": ["tests/handoff.test.mjs"] },
         { "id": "9.7", "what": "a reference bench measures read-only clones of reference repositories", "point": 11, "kind": "exists", "files": ["bench/reference.mjs"] },
-        { "id": "9.8", "what": "the list of reference repositories lives outside the repository", "point": 11, "kind": "exists", "files": ["~/.waymark/reference-repos.json"] }
+        { "id": "9.8", "what": "the list of reference repositories lives outside the repository", "point": 11, "kind": "exists", "files": ["~/.waymark/reference-repos.json"] },
+        { "id": "9.9", "what": "recent tasks were closed by at least two different agents (one agent shows its count, never 100 %)", "point": 13, "kind": "measure", "measure": "records.agentSpread", "op": "ge", "threshold": 2 }
       ]
     },
     {
@@ -146,7 +148,8 @@
         { "id": "13.2", "what": "the Pedido is stored as numbered items at L2+", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedItems" },
         { "id": "13.3", "what": "the hook compares the Cierre's per-item answers with the items: an unanswered item is a warning and Resultado cannot read hecho", "point": 10, "kind": "contains", "files": ["skills/waymark/scripts/"], "pattern": "askedGaps" },
         { "id": "13.4", "what": "a corpus case with a missing item is a warning", "point": 10, "kind": "exists", "files": ["tests/corpus/asked-missing-item.json"] },
-        { "id": "13.5", "what": "the share of recent tasks that were redone as a follow-up on the same files is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.followUpShare", "op": "le", "threshold": 0.2, "frozenIn": 10 }
+        { "id": "13.5", "what": "the share of recent tasks that were redone as a follow-up on the same files is within its frozen threshold", "point": 10, "kind": "measure", "measure": "records.followUpShare", "op": "le", "threshold": 0.2, "frozenIn": 10 },
+        { "id": "13.6", "what": "the share of recent tasks that closed parcial is within its frozen threshold", "point": 13, "kind": "measure", "measure": "records.parcialShare", "op": "le", "threshold": 0.2, "frozenIn": 13 }
       ]
     }
   ]

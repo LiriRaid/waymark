@@ -31,7 +31,7 @@ test('0: the real scorecard has weights adding to 100, unique check ids and ever
   const checks = card.criteria.flatMap((k) => k.checks);
   assert.equal(new Set(checks.map((c) => c.id)).size, checks.length, 'a check id is used once');
   for (const c of checks) {
-    assert.ok(Number.isInteger(c.point) && c.point >= 0 && c.point <= 12, `${c.id}: the plan point that makes it pass`);
+    assert.ok(Number.isInteger(c.point) && c.point >= 0 && c.point <= 13, `${c.id}: the plan point that makes it pass`);
     assert.ok(['exists', 'contains', 'absent', 'run', 'measure'].includes(c.kind), `${c.id}: kind`);
     if (c.kind === 'measure') {
       assert.ok(S.MEASURE_NAMES.includes(c.measure), `${c.id}: measure ${c.measure} exists`);

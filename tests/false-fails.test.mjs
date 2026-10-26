@@ -190,6 +190,47 @@ test('procedures by the hook: the owner\'s procedures.md goes in once per task a
   assert.doesNotMatch(bare || '', /Waymark procedures/);
 });
 
+// The department loaded after the first change (a Stop asked for it) hands its own procedures at the load: no edit follows to carry them.
+test('procedures at the department load: a Skill dept-* call (or a read of its SKILL.md) hands that department\'s procedures.md; late after a change', async () => {
+  const repo = withMemory(repoAt('load'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  for (const f of ['a.css', 'b.html', 'c.mjs']) fs.writeFileSync(path.join(repo, 'src', f), 'x');
+  const transcript = path.join(home, 'load-session.jsonl');
+  fs.writeFileSync(transcript, [prompt('ajusta el botón', '2026-10-21T19:20:00Z'), ...run('Skill', { skill: 'dept-qa' })].map((l) => JSON.stringify(l)).join('\n'));
+  const { procDelivered, procLate } = await import(`file://${SCRIPTS}/lib/packed.mjs`);
+  const at = (session) => ({ cwd: repo, session_id: session, transcript_path: transcript });
+  // CSS/HTML: the stylesheet changed first (the session's last department went in), then the owner is loaded: its procedures go in, late
+  const file = path.join(home, 'packed-load.json');
+  const edit = await packContext({ ...at('s-load'), tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', 'a.css') } }, claude, file);
+  assert.match(edit || '', /Waymark procedures of dept-qa/);
+  const load = await packContext({ ...at('s-load'), tool_name: 'Skill', tool_input: { skill: 'dept-frontend' } }, claude, file);
+  assert.match(load || '', /Waymark procedures of dept-frontend/);
+  assert.deepEqual([[...procDelivered('s-load', 0, file)].sort(), [...procLate('s-load', 0, file)]], [['dept-frontend', 'dept-qa'], ['dept-frontend']]);
+  assert.equal(await packContext({ ...at('s-load'), tool_name: 'Skill', tool_input: { skill: 'dept-frontend' } }, claude, file), null, 'once per task and department');
+  // logic: loaded before any change, in time; the first edit hands no second copy
+  const file2 = path.join(home, 'packed-load2.json');
+  assert.match(await packContext({ ...at('s-load2'), tool_name: 'Skill', tool_input: { skill: 'waymark:dept-backend', args: 'L2' } }, claude, file2) || '', /Waymark procedures of dept-backend/, 'the plugin form of the name');
+  assert.deepEqual([...procLate('s-load2', 0, file2)], []);
+  // another agent loads a skill by reading its SKILL.md, by a read tool or a shell command
+  const file3 = path.join(home, 'packed-load3.json');
+  assert.match(await packContext({ ...at('s-load3'), tool_name: 'Read', tool_input: { file_path: path.join(home, 'skills', 'dept-data', 'SKILL.md') } }, claude, file3) || '', /Waymark procedures of dept-data/);
+  assert.match(await packContext({ ...at('s-load3'), tool_name: 'Bash', tool_input: { command: 'cat ~/.agents/skills/dept-security/SKILL.md' } }, claude, file3) || '', /Waymark procedures of dept-security/);
+  // counter-example: a skill that is no department, a procedures.md read, another SKILL.md: nothing handed
+  for (const [tool_name, tool_input] of [['Skill', { skill: 'ui-build' }], ['Read', { file_path: path.join(home, 'skills', 'dept-data', 'procedures.md') }], ['Read', { file_path: path.join(home, 'skills', 'ui-build', 'SKILL.md') }]]) {
+    assert.equal(await packContext({ ...at('s-load4'), tool_name, tool_input }, claude, path.join(home, 'packed-load4.json')), null, JSON.stringify(tool_input));
+  }
+});
+
+test('procedure testigo: a delivery late after the first change is recorded ✘ "after the first change", never blocks', () => {
+  const lines = [prompt('ajusta el botón'), say('Waymark → L1 · dept-frontend · skills: ninguna'), ...run('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
+    ...run('Edit', { file_path: '/work/proj/src/button.component.css', old_string: 'a', new_string: 'b' }), ...run('Skill', { skill: 'dept-frontend' })];
+  const g = judge(lines, { procDelivered: ['dept-frontend'], procLate: ['dept-frontend'] }), proc = step(g, 'procedure');
+  assert.equal(proc.pass, false);
+  assert.match(proc.why.join(' '), /after the task's first change/);
+  assert.ok(!g.missing.some((m) => /procedure|Enrutar|procedures\.md/.test(m)), `not blocked: ${g.missing.join(' | ')}`);
+  assert.equal(step(judge(lines, { procDelivered: ['dept-frontend'] }), 'procedure').pass, true, 'counter-example: delivered in time, read in time');
+});
+
 test('procedure testigo: a delivery counts as read; with neither a read nor a delivery it still blocks', () => {
   const lines = [prompt('agrega reintentos'), say('Waymark → L1 · dept-backend · skills: ninguna'), ...run('Skill', { skill: 'dept-backend' }),
     ...run('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), ...run('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' })];

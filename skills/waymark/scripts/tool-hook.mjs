@@ -302,9 +302,40 @@ function ownerDept(hook, agent) {
 // context, once per task and department, so the agent spends no response reading it. The delivery is kept with the packed
 // state and the procedure testigo counts it as read; with no hook before the tool the agent reads the file as before.
 const procedureText = (dept) => { try { return fs.readFileSync(path.join(SKILLS_DIR, dept, 'procedures.md'), 'utf8'); } catch { return null; } };
+// The department a call loads: a Skill call (`dept-x`, or `waymark:dept-x` as a plugin), or a read of its SKILL.md by a read tool or a shell
+// command (the agents that load a skill by reading it). → 'dept-x' or null.
+const DEPT_SKILL = /(?:^|[\\/])(dept-[a-z-]+)[\\/]SKILL\.md\b/i;
+export function deptLoaded(c) {
+  if (!c) return null;
+  if (c.skill !== undefined) return String(c.skill).match(/^(?:[\w-]+:)?(dept-[a-z-]+)$/)?.[1] || null;
+  for (const r of c.reads || []) { const m = String(r).match(DEPT_SKILL); if (m) return m[1]; }
+  if (c.command !== undefined && !changesProject(c.command)) return String(c.command).match(DEPT_SKILL)?.[1] || null;
+  return null;
+}
+
+// The procedures of a department at the moment it is loaded, once per task. A load after the task's first change (the Stop asked for the
+// department) is handed too, so the agent need not edit again to get it, and kept as late: the testigo records it, never blocks on it.
+function handOnLoad(dept, session, since, file) {
+  const procsDone = procDelivered(session, since, file);
+  const text = procsDone.has(dept) ? null : procedureText(dept);
+  if (!text) return null;
+  const all = readPacked(file), st = all[session]?.since === since ? all[session] : { since, files: [], procs: [] };
+  const late = (st.files || []).length > 0;
+  all[session] = { ...st, since, at: Date.now(), procs: [...procsDone, dept], late: [...(st.late || []), ...(late ? [dept] : [])] };
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
+  return `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook when ${dept} loaded: it counts as read, no need to open the file):\n${text}`;
+}
 
 export async function packContext(hook, agent, file = PACKED()) {
   const c0 = agent.call(hook), cwd = hook.cwd || process.cwd();
+  const loaded = deptLoaded(c0);
+  if (loaded) {
+    const h = projectHome(cwd);
+    if (!h.dir || h.legacy) return null;
+    let recs = [];
+    try { recs = readRecords(h.log); } catch {}
+    return handOnLoad(loaded, hook.session_id || 'unknown', taskStart(recs, hook.session_id || 'unknown'), file);
+  }
   // a shell command that changes files: the files it names (what it will change is known only after it runs)
   const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd) } : null) : c0;
   const home = projectHome(cwd);
@@ -332,7 +363,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])] };
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], late: all[session]?.since === since ? all[session].late || [] : [] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';

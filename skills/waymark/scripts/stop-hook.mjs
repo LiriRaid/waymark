@@ -41,7 +41,7 @@ import { legacyStack } from './runtime.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes, defaultRemote } from './notes.mjs';
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
-import { packedFiles, procDelivered } from './lib/packed.mjs';
+import { packedFiles, procDelivered, procLate } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { detectGuarded, guardedLine } from './lib/guard.mjs';
@@ -441,7 +441,7 @@ function observeTurn(S) {
   const firstRealChange = allTools.findIndex((t, i) => i >= base && isChange(t) && !(result(t)?.error || t.error));
   // the hook hands the owner's procedures.md at the first change (tool-hook.mjs): a delivery is a read, and it came before the change
   const procHanded = !!dept.declared && (ctx.procDelivered || []).includes(dept.declared);
-  const procBeforeChange = procHanded || allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
+  const procBeforeChange = (procHanded && !(ctx.procLate || []).includes(dept.declared)) || allTools.some((t, i) => procRe.test(where(t)) && readSomething(t) && (firstRealChange < 0 || i < firstRealChange));
   const secs = (t) => (result(t)?.at && t.at ? Math.max(0, (result(t).at - t.at) / 1000) : null);
   // Each part of a chained command (&&, ;, |) is judged alone, by its executable (provenance.mjs shellRuns): "npx tsc
   // --noEmit && grep T1 .waymark/memory.md" is a gate, `git commit -m "fix build"` is none. A part that writes Waymark's
@@ -1228,6 +1228,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
+      try { ctx.procLate = [...procLate(h.session_id, taskStart(records, h.session_id))]; } catch {} // handed when the department loaded after the first change
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
       ctx.pedido = pedidoItems(task); // the numbered items of the Pedido line the agent wrote (L2+): what the Cierre owes an answer to
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);

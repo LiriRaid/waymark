@@ -20,6 +20,7 @@ export function call(hook) {
   if (/^(Bash|PowerShell)$/.test(tool)) return { command: String(input.command || '') };
   if (tool === 'Read') return { reads: [input.file_path].filter(Boolean) }; // only the sensitive-path guard looks at reads
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return { files: [input.file_path || input.notebook_path].filter(Boolean) };
+  if (tool === 'Skill') return { skill: String(input.skill || '') }; // a department loaded: its procedures go in then (docs/adr/0027)
   return null;
 }
 

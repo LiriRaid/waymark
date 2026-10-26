@@ -68,7 +68,10 @@ const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i
 // Only the tools' own summary lines, never a count anywhere (a test titled "reports 2 errors" passes); eslint's
 // "✖ N problems" counts only with errors in it, since warnings alone exit 0.
 const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed|Failed to resolve import|ERR_MODULE_NOT_FOUND|Cannot find module '/im; // vitest prints "Tests  N failed" (two spaces); a spec red because its import does not resolve is a red
-const FAIL_LINE = /^\s*(?:FAIL|×)\s+\S/m; // vitest's " FAIL  file > case" and "× case", case-sensitive: a log line "fail to connect" is no test failure
+const FAIL_LINE = /^\s*(?:FAIL|×|✗)\s+\S/m; // vitest's " FAIL  file > case" and "× case", ava's and tap's "✗ case", case-sensitive: a log line "fail to connect" is no test failure
+// The test runner itself did not start (its package is missing, as in a clean copy with no install): the environment failed, not the spec. An import of
+// the code under test that does not resolve is still a red (FAIL_OUT).
+const RUNNER_MISSING = /Cannot find (?:module|package) '(?:[^']*[\\/])?node_modules[\\/](?:@?vitest|@?jest|mocha|karma|ts-node|jasmine)\b[^']*'|Cannot find (?:module|package) '(?:@?vitest|@?jest|mocha|karma|ts-node|jasmine)(?:[\\/][^']*)?'/i;
 const failOut = (text) => FAIL_OUT.test(text) || FAIL_LINE.test(text);
 // The part of a chained command whose own tool printed the failure: tsc's "error TS", eslint's "✖ N problems", a test runner's summary. The exit of a
 // line such as `prisma status | tail; eslint x.ts | tail` is no part's, and blaming the whole line sent the agent to the wrong command.
@@ -488,17 +491,19 @@ function observeTurn(S) {
   });
   const ranRed = (w) => {
     const next = allTools.findIndex((t, i) => i > w.at && specEditable(t)), codeFirst = allTools.some((t, i) => i >= base && i < w.at && specEditable(t));
-    return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && (!codeFirst || failedRun(t, 'test')));
+    return allTools.some((t, i) => i >= w.at && testCmd(t) && (next < 0 || i < next) && !RUNNER_MISSING.test(output(t)) && (!codeFirst || failedRun(t, 'test')));
   };
   const inWorktree = allTools.some((t, i) => i >= base && testCmd(t) && inCopy(t));
   // red-first is for new behavior: not for a spec that only moved its cases, nor for one an earlier turn of the task already changed
   const earlierSpecs = new Set((ctx.taskTools || []).filter((t) => !turn.tools.some((x) => x.id === t.id) && EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t)))).map((t) => path.basename(fileOf(t)).toLowerCase()));
   const movedOnly = casesRemoved > 0 && [...specWrites.values()].reduce((n, w) => n + w.adds, 0) <= casesRemoved;
+  // a spec that only moved (git mv, mv, Move-Item) and was never written is no new behavior
+  const moved = new Set(turn.tools.filter(shell).flatMap((t) => [...String(cmdOf(t)).matchAll(/(?:^|[;&|(]\s*)(?:git\s+mv|mv|move|Move-Item)\s+(?:-\S+\s+)*\S+\s+(?:-Destination\s+)?(\S+)/gi)].map((m) => path.basename(m[1].replace(/["']/g, '')).toLowerCase())));
   const notRed = inWorktree || movedOnly ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
-    .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !earlierSpecs.has(b.toLowerCase()) && (!w || (w.adds > 0 && !ranRed(w))); });
+    .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !earlierSpecs.has(b.toLowerCase()) && (w ? w.adds > 0 && !ranRed(w) : !moved.has(b.toLowerCase())); });
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
   // A run that never happened: the tool is not installed, or the command was refused (a permission denied, a hook that stopped it).
-  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || ''));
+  const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || '')) || RUNNER_MISSING.test(String(result(t)?.text || t.out || ''));
   // Docs: the same gate or test failing twice is retried only after consulting the docs (a docs call after the second
   // failure, before the next run of that command); retrying blind is how a wrong direction repeats.
   const cmdKey = (t) => cmdOf(t).replace(/\s+/g, ' ').trim();

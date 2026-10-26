@@ -306,6 +306,43 @@ test('3g: logic — a spec that only moved its cases, a barrel and a red from an
   const earlier = { taskTools: [{ name: 'Edit', id: 'earlier-1', input: { file_path: SPEC_B, new_string: caseText(1) } }] };
   assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')], earlier), true, 'a spec an earlier turn of the task already changed');
 });
+test('3g: logic — a spec that only moved (git mv, mv, Move-Item), with no write, asks for no red; a spec moved and given new cases still does', () => {
+  const red = (lines, gitChanged) => judge([...opening(2), ...lines], { ...inRepo, gitChanged }).observed.tests.red;
+  for (const mv of ['git mv src/a.spec.mjs src/b.spec.mjs', 'mv src/a.spec.mjs src/b.spec.mjs', 'Move-Item src/a.spec.mjs src/b.spec.mjs']) {
+    assert.equal(red([...edit(), ...sh(mv)], [FILE, SPEC_B]), true, mv);
+  }
+  assert.equal(red([...edit(), ...sh('git mv src/a.spec.mjs src/b.spec.mjs'), ...specEdit(SPEC_B, 0, 2)], [FILE, SPEC_B]), false, 'counter-example: moved, then new cases');
+  assert.equal(red([...edit()], [FILE, SPEC_B]), false, 'counter-example: a spec changed by a command that is no move');
+});
+test('3g: a runner that cannot start in the copy is the environment, not a red; an import of the code that does not resolve still is', () => {
+  const failedRun = (out) => judge([...opening(2), ...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('pnpm exec vitest run src/b.spec.mjs', { error: true, out })], inRepo);
+  for (const out of ["Error: Cannot find module 'vitest/config'", "Error: Cannot find module 'C:/copy/node_modules/jest/bin/jest.js'", "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'mocha' imported from x"]) {
+    assert.equal(failedRun(out).observed.tests.red, false, `${out}: no red`);
+  }
+  assert.equal(failedRun("Error: Cannot find module '../src/orders.service.mjs'").observed.tests.red, true, 'counter-example: the code under test does not resolve: a red');
+});
+test('3f: logic — a red run before the code it tests is the intended red, never "failed after the last change"; CSS/HTML — a red of the template spec before the template', () => {
+  const RED_B = ' FAIL  src/b.spec.mjs > retries\nAssertionError: expected 1 to be 3';
+  const g = judge([...opening(2), ...specEdit(SPEC_B, 0, 1), ...sh('pnpm exec vitest run src/b.spec.mjs', { error: true, out: RED_B }), ...edit(), ...sh('pnpm exec vitest run src/b.spec.mjs')], inRepo);
+  assert.deepEqual([g.observed.tests.red, g.observed.tests.failed], [true, []]);
+  const tpl = judge([...opening(2), ...specEdit('/work/proj/src/app.spec.ts', 0, 1), ...sh('pnpm exec vitest run src/app.spec.ts', { error: true, out: ' FAIL  src/app.spec.ts > renders' }), ...run('Edit', { file_path: '/work/proj/src/app.html', new_string: '<a (click)="go()">x</a>' }), ...sh('pnpm exec vitest run src/app.spec.ts')], inRepo);
+  assert.deepEqual(tpl.observed.tests.failed, []);
+  const after = judge([...opening(2), ...specEdit(SPEC_B, 0, 1), ...edit(), ...sh('pnpm exec vitest run src/b.spec.mjs', { error: true, out: RED_B })], inRepo);
+  assert.equal(after.observed.tests.failed.length, 1, 'counter-example: the red after the code is a real failure');
+});
+test('3d: a line marked ✗ is a failure line, as FAIL and × are; prose is not', () => {
+  // read from the output when a filter hides the exit code, as `| tail` does
+  const failed = (out) => judge([...opening(2), ...edit(), ...sh('npx mocha src/a.spec.mjs | tail -20', { out })], inRepo).observed.tests.failed.length;
+  assert.equal(failed('  ✗ retries three times\n  1 test failed'), 1);
+  assert.equal(failed('  ✔ retries three times'), 0, 'counter-example: a pass mark');
+});
+test('3a: a command that is the body of the package\'s build script is the build; another node script is not', () => {
+  const root = tmpRepo({ 'package.json': JSON.stringify({ scripts: { build: 'node scripts/build.mjs --prod' } }) });
+  const lines = (cmd, file) => [...opening(2), ...edit(file), ...sh('node --check src/orders.service.mjs'), ...run('Skill', { skill: 'code-review' }), ...sh(cmd)];
+  assert.equal(step(judge(lines('node scripts/build.mjs --prod', FILE), { ...inRepo, root }), 'build').pass, true, 'logic');
+  assert.equal(step(judge(lines('node scripts/build.mjs --prod', CSS), { ...inRepo, root }), 'build').pass, true, 'CSS/HTML');
+  assert.equal(step(judge(lines('node scripts/seed.mjs', FILE), { ...inRepo, root }), 'build').pass, false, 'counter-example');
+});
 test('3g: CSS/HTML — a stylesheet with a spec beside it needs no spec; a template that touches a binding does', () => {
   const repo = tmpRepo({ 'src/app.css': 'a {}', 'src/app.html': '<a></a>', 'src/app.spec.ts': '' });
   const at = (f) => path.join(repo, f);
@@ -411,7 +448,8 @@ test('3j: the masker redacts what is shaped like a secret, not the prose around 
 test('3j: the options attributes are never asked: only the mark (one option Recomendada)', () => {
   const win = (rec, alt, label = 'A (Recomendada)') => [{ callId: 'c1', question: '¿Cómo?', optionList: [{ label, description: rec }, { label: 'B', description: alt }] }];
   assert.deepEqual(optionsLint(win('riesgo bajo; 3 archivos', 'la otra manera'), 2).missing, [], 'a plain alternative is fine');
-  assert.equal(optionsLint(win('hace lo que se pide', 'riesgo bajo; 3 archivos'), 2).missing.length, 1, 'counter-example: the recommended one says nothing');
+  assert.deepEqual(optionsLint(win('hace lo que se pide', 'riesgo bajo; 3 archivos'), 2).missing, [], 'a recommended option that says no risk is fine too (368 of 398 real windows fired on it)');
+  assert.equal(optionsLint(win('hace lo que se pide', 'la otra', 'A'), 2).missing.length, 1, 'counter-example: no option marked');
 });
 test('3j: the cache a model change re-writes is not a routine call\'s cost; with the same model every call keeps its share', () => {
   const at = '2026-10-24T10:00:00.000Z';

@@ -113,7 +113,7 @@ test('report and render: the fixed context, the table by version and level, and 
   assert.ok(r.fixed.chars > 5000 && r.fixed.perPromptChars > 100, 'what Waymark injects, from size.mjs');
   const text = C.render(r);
   assert.match(text, /^Waymark cost · waymark\.cost\/v1 · 1 recorded task/);
-  assert.match(text, /2\.0\.16 · L2 · 1 ·/);
+  assert.match(text, /2\.0\.16 · [\w.-]+ · L2 · 1 ·/); // the model is a column (docs/adr/0049)
   assert.match(text, /Q and L0 write no evaluation/);
 });
 

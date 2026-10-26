@@ -30,7 +30,7 @@ export function tasksOf(cwd) {
     const links = r.evaluation.links || null;
     const u = r.evaluation.usage || {};
     return {
-      id: r.id, session: r.session || null, cwd: r.cwd || null, version: r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null,
+      id: r.id, session: r.session || null, cwd: r.cwd || null, version: r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null, modelChanged: !!r.modelChanged,
       tokens: r.evaluation.tokens, units: units(u), usage: u, links, subagents: r.evaluation.subagents ?? u.subagents ?? 0,
       responses: links ? LINKS.reduce((a, k) => a + (links[k]?.responses || 0), 0) : null,
       quotaPct: r.evaluation.quotaPct ?? null, quotaBy: r.evaluation.quotaBy || null, taskType: r.taskType || null,
@@ -53,7 +53,7 @@ export function linkShares(tasks) {
 // The routine share, by cost units, of the last `last` recorded tasks of one level: the number the thresholds of the scorecard
 // (checks 8.6 and 8.7) are frozen on. A rolling window, so a lever shows in the tasks that follow it and the history does not hold it back.
 export function routineShare(tasks, level, last = 10) {
-  const t = tasks.filter((x) => Number(x.level) === level && x.links).slice(-last);
+  const t = tasks.filter((x) => Number(x.level) === level && x.links && !x.modelChanged).slice(-last); // the cache rewrite after a model change is not the routine's
   const s = linkShares(t);
   return s ? { share: s.byUnits.routine, tasks: t.length } : null;
 }
@@ -64,20 +64,22 @@ export function backedOf(tasks) {
   return cited ? { cited, backed, ratio: round(backed / cited, 3) } : null;
 }
 
-// One row per (version, level).
+// The model a task is grouped under: its own, or `switched` when it changed in the middle (those are shown apart and kept out of the routine share).
+const modelOf = (t) => (t.modelChanged ? 'switched' : t.model || 'unknown');
+// One row per (version, model, level).
 export function groups(tasks) {
   const by = new Map();
-  for (const t of tasks) { const key = `${t.version}\u0000${t.level}`; (by.get(key) || by.set(key, []).get(key)).push(t); }
+  for (const t of tasks) { const key = `${t.version}\u0000${modelOf(t)}\u0000${t.level}`; (by.get(key) || by.set(key, []).get(key)).push(t); }
   return [...by.values()].map((g) => {
     const measured = g.filter((x) => String(x.quotaBy || '').startsWith('measured') && x.quotaPct !== null);
     return {
-      version: g[0].version, level: g[0].level, tasks: g.length, tokensMean: Math.round(mean(g.map((x) => x.tokens))), tokensMedian: Math.round(median(g.map((x) => x.tokens))),
+      version: g[0].version, model: modelOf(g[0]), level: g[0].level, tasks: g.length, tokensMean: Math.round(mean(g.map((x) => x.tokens))), tokensMedian: Math.round(median(g.map((x) => x.tokens))),
       responsesMean: round(mean(g.filter((x) => x.responses !== null).map((x) => x.responses)), 1), shares: linkShares(g),
       subagentShare: round(mean(g.map((x) => (x.subagents || 0) / x.tokens)), 3),
       backed: backedOf(g),
       windowPct: measured.length ? { mean: round(mean(measured.map((x) => x.quotaPct)), 1), tasks: measured.length } : null,
     };
-  }).sort((a, b) => String(a.version).localeCompare(String(b.version)) || Number(a.level) - Number(b.level));
+  }).sort((a, b) => String(a.version).localeCompare(String(b.version)) || String(a.model).localeCompare(String(b.model)) || Number(a.level) - Number(b.level));
 }
 
 // The first context of a session and the cost of resuming it, from the transcripts of the recorded sessions that are still here.
@@ -138,10 +140,10 @@ export function render(r) {
   const out = [`Waymark cost · ${r.schema} · ${r.tasks} recorded task(s) with an evaluation`, ''];
   out.push(`Fixed context: ${r.fixed.chars} chars (≈ ${r.fixed.tokens} tokens: instructions block ${r.fixed.parts.instructionsBlock} + card ${r.fixed.parts.contextCard} + skill descriptions ${r.fixed.parts.skillDescriptions}) · per prompt: ${r.fixed.perPromptChars} chars`);
   if (r.sessions) out.push(`Sessions: ${r.sessions.transcripts} of ${r.sessions.sessions} transcripts on this machine · first context ${r.sessions.firstContext ? `${k(r.sessions.firstContext.median)} tokens (median of ${r.sessions.firstContext.sessions})` : '—'} · a resume writes ${r.sessions.resume ? `${k(r.sessions.resume.median)} tokens (median of ${r.sessions.resume.resumes})` : '— (none seen)'}`);
-  out.push('', 'version · level · tasks · tokens/task (median) · responses · routine / work / reply by cost units (by tokens) · subagents · % of window (measured) · cited facts backed by a call');
+  out.push('', 'version · model · level · tasks · tokens/task (median) · responses · routine / work / reply by cost units (by tokens) · subagents · % of window (measured) · cited facts backed by a call');
   for (const g of r.groups) {
     const s = g.shares;
-    out.push(`${g.version} · L${g.level} · ${g.tasks} · ${k(g.tokensMean)} (${k(g.tokensMedian)}) · ${g.responsesMean ?? '—'} · ${s ? `${pct(s.byUnits.routine)} / ${pct(s.byUnits.work)} / ${pct(s.byUnits.reply)} (${pct(s.byTokens.routine)} routine)` : 'no links'} · ${pct(g.subagentShare)} · ${g.windowPct ? `${g.windowPct.mean} % (${g.windowPct.tasks} measured)` : '—'} · ${g.backed ? `${g.backed.backed}/${g.backed.cited}` : '—'}`);
+    out.push(`${g.version} · ${g.model} · L${g.level} · ${g.tasks} · ${k(g.tokensMean)} (${k(g.tokensMedian)}) · ${g.responsesMean ?? '—'} · ${s ? `${pct(s.byUnits.routine)} / ${pct(s.byUnits.work)} / ${pct(s.byUnits.reply)} (${pct(s.byTokens.routine)} routine)` : 'no links'} · ${pct(g.subagentShare)} · ${g.windowPct ? `${g.windowPct.mean} % (${g.windowPct.tasks} measured)` : '—'} · ${g.backed ? `${g.backed.backed}/${g.backed.cited}` : '—'}`);
   }
   out.push('', 'Q and L0 write no evaluation: their tokens are not recorded here. Cost units weigh each token by its published price ratio (cache read 0.1, cache write 1.25, output 5).');
   return out.join('\n');

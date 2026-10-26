@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { CIERRE, externalStop, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
+import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
@@ -1115,6 +1115,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm, pedido: Number(gaps.level) >= 2 ? ctx.pedido || [] : [] }), // schema v2: taskType, asked, reworks, reworkFiles
     ...(answers.length ? { answered: answers } : {}), // what the Cierre's Pedido line says of each item
     ...(meta.cost ? { cost: meta.cost } : {}),
+    ...(meta.models?.length ? { models: meta.models, ...(meta.models.length > 1 ? { modelChanged: true } : {}) } : {}), // the model(s) the responses came from, and a change in the middle (docs/adr/0049)
     observed: gaps.observed,
     evaluation: meta.evaluation,
     commands: turn.tools.filter(shell).map((t) => maskSecrets(cmdOf(t).slice(0, 200))).slice(0, 30),
@@ -1295,7 +1296,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       let measured = null;
       try { if (agent.name === 'claude') measured = measure(h.session_id); } catch {}
       const evaluation = evaluate(gaps, withSubagents(turnUsage(lines, since), subagentUsage(h.transcript_path, turn.startedAt)), ctx.inputs?.model || null, measured, turnLinks(lines, since));
-      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation, cost: { v: 1, byCall: costByCall(lines, since) } });
+      const rec = provenanceRecord(turn, gaps, ctx, { ...meta, evaluation, cost: { v: 1, byCall: costByCall(lines, since) }, models: modelsOf(lines, since) });
       try { rec.pinned = pinnedRules({ dept: gaps.dept?.declared, root: home.root, reads: all.map((t) => String(t.input?.file_path || t.input?.command || '')) }); } catch (e) { logHookError('stop-hook pinned', e); } // the rules that governed the task, by hash
       try { const p = takePrecedent(h.session_id); if (p) { rec.precedent = { task: p.task, score: p.score, chars: p.chars, files: p.files.length, used: usedOf(p, turn) }; keepPrecedent(h.session_id, null); } } catch (e) { logHookError('stop-hook precedent', e); } // what the first prompt was handed, and whether the task used it
       try { const den = deniedSince(h.session_id, turn.startedAt || 0); if (den.length) rec.denied = den.map((d) => ({ tool: d.tool, path: d.path, at: new Date(d.at).toISOString() })); } catch (e) { logHookError('stop-hook denied', e); } // what the sensitive-path guard stopped

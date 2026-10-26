@@ -145,6 +145,18 @@ export function turnUsage(lines, since = 0) {
   return { total: fresh + s.cacheRead, fresh, ...s, responses: seen.size };
 }
 
+// The models the turn's own responses came from, in order, each once: a session that changed model in the middle (`/model`) lists two. A synthetic message and a
+// subagent's response are not the session's model.
+export function modelsOf(lines, since = 0) {
+  const { from } = turnStart(lines, since);
+  const out = [];
+  for (const d of lines.slice(from)) {
+    const m = d.type === 'assistant' && !d.isSidechain ? d.message?.model : null;
+    if (m && m !== '<synthetic>' && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
 // Tokens of the subagents a turn launched (Claude Code writes each one to <session>/subagents/*.jsonl, next to the
 // session's transcript): every file with a response at or after `since`. Another agent's layout → zeros.
 export const subagentDir = (transcriptPath) => transcriptPath.replace(/\.jsonl$/i, '') + '/subagents';

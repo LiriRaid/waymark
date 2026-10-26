@@ -1,6 +1,6 @@
 {
   "schema": "waymark.scorecard/v1",
-  "adr": "0038",
+  "adr": "0048",
   "about": "The definition of '95 %' (docs/adr/0028-scorecard.md). Every check is deterministic: a file, a pattern, a command's exit or a number computed from the records. A check scores 1 or 0, or a ratio against its threshold (a number above 1 is capped at 1). A criterion is the mean of its checks; the total is the sum of weight x criterion. `point` is the plan 2.0.18 point that makes the check pass (0 = it holds today); a check that fails before its point is the honest baseline, not a mistake. A threshold of null is frozen later by an amendment ADR, from the baseline, and scores 0 until then.",
   "criteria": [
     {
@@ -98,7 +98,7 @@
     {
       "id": 9, "name": "Agnostic and adaptive", "weight": 12, "target": 96,
       "checks": [
-        { "id": "9.1", "what": "every agent Waymark knows has an adapter", "point": 0, "kind": "measure", "measure": "agents.adapterShare", "op": "ge", "threshold": 1 },
+        { "id": "9.1", "what": "every agent that can technically carry the chain has an adapter (Windsurf and Crush are coming soon, listed apart)", "point": 0, "kind": "measure", "measure": "agents.adapterShare", "op": "ge", "threshold": 1 },
         { "id": "9.2", "what": "the capability matrix is generated and tested", "point": 0, "kind": "exists", "files": ["tests/matrix.test.mjs"] },
         { "id": "9.3", "what": "one memory is shared by every agent (the chain is tested across agents)", "point": 0, "kind": "exists", "files": ["tests/memory-chain.test.mjs"] },
         { "id": "9.4", "what": "an unknown agent on the machine is detected", "point": 0, "kind": "exists", "files": ["tests/any-agent.test.mjs"] },

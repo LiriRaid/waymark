@@ -111,7 +111,7 @@ Generated from `agents/agents.json` and the adapters (`node skills/waymark/scrip
 | Droid | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 | Amp | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 
-Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Crush.
+Coming soon, no adapter yet (nothing is recorded or checked there): Windsurf (no session start and no documented way to hand the model context (a pre-hook can only exit 2 with stderr), so it cannot carry a card, a task ID, a record or a Cierre); Crush (one event only (PreToolUse), so it cannot carry a card, a task ID, a record or a Cierre).
 <!-- agent-matrix:end -->
 
 ## 2. Get the files

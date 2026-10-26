@@ -207,7 +207,11 @@ export function adapterless(all = found()) {
   const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
   if (!list.length) return '';
   const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
-  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
+  // an agent that cannot technically carry the chain yet (agents.json `soon`) is told with its reason; there is no adapter to draft for it (docs/adr/0048)
+  const soon = list.filter((a) => a.soon), able = list.filter((a) => !a.soon);
+  const waiting = soon.length ? `agents: ${soon.map((a) => `${a.name} (${a.dir.replace(/\\/g, '/')})`).join(', ')} on this machine ${soon.length > 1 ? 'are' : 'is'} coming soon: ${soon.map((a) => `${a.name} ${a.soon}`).join('; ')}. Their tasks are neither recorded nor checked yet (the pointer still shows where the work stands).` : '';
+  if (!able.length) return waiting;
+  return `${waiting ? waiting + ' Also ' : 'agents: '}${able.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
 }
 
 // Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change

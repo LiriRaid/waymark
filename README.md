@@ -113,8 +113,19 @@ Hooks differ by agent, so what Waymark can stop differs too. The tables are gene
 | Droid | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 | Amp | enforced | enforced | enforced | prevent | prevent | detect | enforced |
 
-Agents Waymark knows with no adapter yet (nothing is recorded or checked there): Windsurf, Crush.
+Coming soon, no adapter yet (nothing is recorded or checked there): Windsurf (no session start and no documented way to hand the model context (a pre-hook can only exit 2 with stderr), so it cannot carry a card, a task ID, a record or a Cierre); Crush (one event only (PreToolUse), so it cannot carry a card, a task ID, a record or a Cierre).
 <!-- agent-matrix:end -->
+
+## Pending real-use checks
+
+Tested and claimed are two different things: the conformance list runs every adapter against its own documented payloads, but only a live session shows what an agent really sends. These checks need a person, an account or a real quota, so no test stands in for them. Each line goes when it is done; none is scored.
+
+- **Codex and OpenCode:** one real L2 task in each, then `node "<skills-dir>/waymark/scripts/waymark.mjs" tasks` must show the agent, the Cierre and the choice window of that task.
+- **Gemini CLI:** a session that gets a model reply, not only the hooks.
+- **A handoff Claude → another agent:** stop a task when the quota ends, open it in another agent or account and check that the card shows the handoff (`.waymark/next-prompt.md`) and the task continues from it.
+- **The first live session** of Cursor, Copilot CLI, Kiro, Antigravity, Qwen Code, Droid and Amp: the card arrives, a task is recorded with its agent, and the end-of-turn checks run.
+- **A non-Anthropic model through OpenCode:** the same L2, to see the routine hold without Claude.
+- **The update notice** on a real install: tried only against a local server; it must be seen once when a release reaches `main`.
 
 ## Install
 
@@ -362,6 +373,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0045 · A permission the user gives works, only the user can give it, and nothing read is saved](docs/adr/0045-a-permission-the-user-gives-works-and-nothing-read-is-saved.md)
 - [0046 · Clean copies in a folder Waymark owns, and the safety of the user's environment](docs/adr/0046-clean-copies-in-a-folder-waymark-owns-and-the-users-environment.md)
 - [0047 · The eyes: a seen change is looked at before it is done](docs/adr/0047-the-eyes-a-seen-change-is-looked-at-before-it-is-done.md)
+- [0048 · A cut turn is not a failed task, and an agent that cannot carry the chain yet is coming soon](docs/adr/0048-a-cut-turn-is-not-a-failed-task-and-an-agent-that-cannot-yet-is-coming-soon.md)
 <!-- adr-index:end -->
 
 ## Contributing back

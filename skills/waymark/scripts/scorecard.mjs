@@ -18,6 +18,13 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.waymark', '.engram']);
 
 export const readScorecard = (root) => JSON.parse(fs.readFileSync(path.join(root, 'docs', 'scorecard.json'), 'utf8'));
 
+// Check 9.1: the share of the agents that can technically carry the chain that have an adapter. An agent marked `soon` in agents.json (with its reason)
+// is outside the count and listed apart (docs/adr/0048); with none able, there is no share, never 100 %.
+export function adapterShare(agents) {
+  const able = (agents || []).filter((a) => !a.soon || a.adapter); // one that gained an adapter counts again, whatever its field says
+  return able.length ? able.filter((a) => a.adapter).length / able.length : null;
+}
+
 // The lock covers everything but the ADR name and the prose of `about`: a weight, a criterion, a check or a threshold
 // cannot change without a new lock in an ADR.
 export function lockOf(card) {
@@ -111,8 +118,7 @@ const MEASURES = {
     return pushPref(projectHome(root).slug) === 'yes' ? unpushedNotes(root) : 0;
   },
   async 'agents.adapterShare'() {
-    const a = JSON.parse(fs.readFileSync(path.join(HERE, 'agents', 'agents.json'), 'utf8')).agents;
-    return a.length ? a.filter((x) => x.adapter).length / a.length : null;
+    return adapterShare(JSON.parse(fs.readFileSync(path.join(HERE, 'agents', 'agents.json'), 'utf8')).agents);
   },
   async 'size.fixedContext'(root) {
     const rows = (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root);

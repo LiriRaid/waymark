@@ -205,6 +205,6 @@ test('scorecard: the thresholds of 11.2 and 13.5 are frozen from the baseline, a
   const card = S.readScorecard(repo), check = (id) => card.criteria.flatMap((k) => k.checks).find((c) => c.id === id);
   assert.deepEqual([check('11.2').op, check('11.2').threshold], ['ge', 0.95]);
   assert.deepEqual([check('13.5').op, check('13.5').threshold], ['le', 0.2]);
-  assert.equal(card.adr, '0038');
+  assert.equal(card.adr, '0048');
   assert.equal(S.adrLock(repo, card), S.lockOf(card));
 });

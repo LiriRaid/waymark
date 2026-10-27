@@ -96,9 +96,9 @@ export const toolInput = (c) => (c.name === 'Skill' && PLUGIN.test(String(c.inpu
 // (main agent only).
 export function currentTurn(lines, since = 0) {
   const { i, from } = turnStart(lines, since);
-  const texts = [], tools = [], results = {};
+  const texts = [], textAt = [], tools = [], results = {};
   for (const d of lines.slice(from)) {
-    const cmd = d.type === 'user' && promptText(d).match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
+    const cmd =d.type === 'user' && promptText(d).match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) {
@@ -107,12 +107,12 @@ export function currentTurn(lines, since = 0) {
     }
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {
-      if (c.type === 'text' && c.text.trim()) texts.push(c.text);
+      if (c.type === 'text' && c.text.trim()) { texts.push(c.text); textAt.push([tools.length, c.text]); } // the index of the next tool call: what was said before it
       if (c.type === 'tool_use') tools.push({ name: c.name, input: toolInput(c), id: c.id, at });
     }
   }
   const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
-  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: Math.max(promptAt, since > promptAt ? since : 0), texts, tools, results };
+  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: Math.max(promptAt, since > promptAt ? since : 0), texts, textAt, tools, results };
 }
 
 // Every tool call of the main agent in the readable part of the session (for reads done in an earlier turn), with the
@@ -183,7 +183,8 @@ export function subagentUsage(transcriptPath, since = 0) {
 // Cost per link (schema v1): each main-agent response of the turn goes to the step its tool calls served.
 // routine = a department/waymark/review/docs skill, a waymark.mjs command, a read of a procedures file, the project's
 // memory or the waymark references, the choice window; reply = a response with no tool call (the Cierre); work = the
-// rest. A response with calls of several kinds takes routine. Subagent tokens stay apart (withSubagents). Messages are
+// rest. A response with calls of several kinds is split by its calls (its routine part, its work part) and counted as a work
+// response. Subagent tokens stay apart (withSubagents). Messages are
 // counted once, like turnUsage.
 const ROUTINE_CALL = (c) => {
   const i = c.input || {};
@@ -204,9 +205,14 @@ export function turnLinks(lines, since = 0) {
   }
   const zero = () => ({ responses: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });
   const links = { v: 1, routine: zero(), work: zero(), reply: zero() };
+  const add = (l, u, part) => { l.input += Math.round((u.input_tokens || 0) * part); l.cacheWrite += Math.round((u.cache_creation_input_tokens || 0) * part); l.cacheRead += Math.round((u.cache_read_input_tokens || 0) * part); l.output += Math.round((u.output_tokens || 0) * part); };
   for (const { u, calls } of byId.values()) {
-    const l = links[!calls.length ? 'reply' : calls.some(ROUTINE_CALL) ? 'routine' : 'work'];
-    l.responses++; l.input += u.input_tokens || 0; l.cacheWrite += u.cache_creation_input_tokens || 0; l.cacheRead += u.cache_read_input_tokens || 0; l.output += u.output_tokens || 0;
+    if (!calls.length) { links.reply.responses++; add(links.reply, u, 1); continue; }
+    // a response that loads a department beside the task's first read is split by its calls, as costByCall splits it: the work it does is work
+    const routine = calls.filter(ROUTINE_CALL).length / calls.length;
+    links[routine === 1 ? 'routine' : 'work'].responses++;
+    if (routine) add(links.routine, u, routine);
+    if (routine < 1) add(links.work, u, 1 - routine);
   }
   return links;
 }

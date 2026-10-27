@@ -757,7 +757,10 @@ function decisionWitness(S) {
   }
   const decision = [];
   let lateDecision = false;
-  if (ctx.decisions && !ctx.decisions.length) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick');
+  // an L1 with one real way says it in a `Camino:` line before its first change, and owes no window (one response fewer, each re-reading the context)
+  const turnChange = (S.turn?.tools || []).findIndex(changedFile);
+  const camino = Number(S.level) === 1 && (S.turn?.textAt || []).some(([at, t]) => (turnChange < 0 || at <= turnChange) && /^[ \t]*(?:[-*][ \t]*)?Camino:[ \t]*\S/m.test(t));
+  if (ctx.decisions && !ctx.decisions.length && !camino) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick (an L1 with one real way: a `Camino: <it>` line before its first change instead)');
   else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
   return { decision, lateDecision };
 }

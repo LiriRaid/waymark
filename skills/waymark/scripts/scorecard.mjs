@@ -153,7 +153,10 @@ const MEASURES = {
   },
   async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
   async 'cost.routineShareL2'(root) { const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href); return C.routineShare(C.tasksOf(root), 2, 10)?.share ?? null; },
-  async 'cost.routineShareL1'(root) { const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href); return C.routineShare(C.tasksOf(root), 1, 5)?.share ?? null; },
+  async 'cost.routineShareL1'(root) { // the tasks the measured version wrote, as the other checks of records (docs/adr/0049)
+    const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await recent(root, Infinity)).map((r) => r.id));
+    return C.routineShare(C.tasksOf(root).filter((t) => mine.has(t.id)), 1, 5)?.share ?? null;
+  },
   async 'precedent.precisionAt3'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).precisionAtK : null; },
   async 'precedent.maxChars'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).maxChars : null; },
   async 'conformance.cases'(root) {

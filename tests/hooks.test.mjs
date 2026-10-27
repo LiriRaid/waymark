@@ -374,6 +374,20 @@ test('3e-1: the decision is the choice window\'s answer, never the Cierre\'s wor
   assert.equal(checkCierre(l2(), cierre(id, 'algo que el hook no lee'), undefined, prompts, ctxFor(cwd)), null, 'with an answer, whatever the old Decisión line says is ignored');
 });
 
+test('3e-1: an L1 with one real way says it in a Camino line before its first change and owes no window; an L2, or a Camino after the change, still does', () => {
+  const { cwd } = fresh();
+  const id = taskIds(cwd).next;
+  const dec = (lines) => cierreGaps(currentTurn(lines), cierre(id), undefined, ['corrige el typo del título'], ctxFor(cwd, [])).steps.find((s) => s.id === 'decision');
+  const l1 = (...mid) => [prompt('corrige el typo del título'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), PACK(), ...mid];
+  const camino = say('Pedido: el typo del título · Captura: sin captura\nCamino: corregir la palabra en el template, nada más');
+  assert.equal(dec(l1(camino, call('Edit', { file_path: FILE }))).pass, true, 'logic: the Camino line before the edit');
+  assert.equal(dec(l1(camino, call('Edit', { file_path: path.join(cwd, 'src', 'app.component.css') }))).pass, true, 'CSS/HTML: the same for a stylesheet');
+  assert.equal(dec(l1(call('Edit', { file_path: FILE }))).pass, false, 'counter-example: an L1 with neither a window nor a Camino line');
+  assert.equal(dec(l1(call('Edit', { file_path: FILE }), camino)).pass, false, 'counter-example: a Camino written after the change');
+  const l2 = [prompt('agrega el reintento'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), camino, call('Edit', { file_path: FILE })];
+  assert.equal(dec(l2).pass, false, 'counter-example: an L2 asks in the window, whatever it says');
+});
+
 test('3e-1: an L1 Cierre is Resultado · Evidencia · Aprendido; older callers without ctx skip the ID and decision checks', () => {
   const turn = currentTurn([prompt('typo en el título'), say('Waymark → L1 · dept-frontend'), call('Skill', { skill: 'dept-frontend' }), PROC('dept-frontend'), PACK(), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx eslint src/orders.service.mjs' }), MEM()]);
   const base = '## Cierre\nResultado: hecho\nEvidencia: observada el typo en el título\nAprendido: "x ← y"';
@@ -3117,15 +3131,26 @@ test('cost per link: each response goes to routine, work or reply by its tool ca
     { type: 'user', message: { content: 'haz algo' } },
     as('m1', [{ type: 'tool_use', name: 'Skill', id: 'a', input: { skill: 'dept-qa', args: 'L1' } }], 5),
     as('m2', [{ type: 'tool_use', name: 'Edit', id: 'b', input: { file_path: 'x.js' } }], 7),
-    as('m2', [{ type: 'tool_use', name: 'Bash', id: 'c', input: { command: 'node waymark.mjs pack x' } }], 7), // same message streamed: counts once, routine wins
+    as('m2', [{ type: 'tool_use', name: 'Bash', id: 'c', input: { command: 'node waymark.mjs pack x' } }], 7), // same message streamed: counts once, split by its two calls
     as('m3', [{ type: 'tool_use', name: 'Read', id: 'd', input: { file_path: 'src/a.js' } }], 3),
     as('m4', [{ type: 'text', text: 'Cierre' }], 9),
   ];
   const l = turnLinks(lines);
   assert.equal(l.v, 1);
-  assert.deepEqual([l.routine.responses, l.work.responses, l.reply.responses], [2, 1, 1]);
-  assert.equal(l.routine.output, 12);
+  assert.deepEqual([l.routine.responses, l.work.responses, l.reply.responses], [1, 2, 1], 'a mixed response is a work response');
+  assert.equal(l.routine.output, 5 + 4, 'the department load whole, half of the mixed one');
+  assert.equal(l.work.output, 4 + 3);
   assert.equal(l.reply.cacheRead, 100);
+});
+
+test('cost per link: a department loaded in one response with the task\'s first read costs the routine its part only; loaded alone, the whole response', async () => {
+  const { turnLinks } = await import(`file://${SCRIPTS}/transcript.mjs`);
+  const as = (id, content) => ({ type: 'assistant', message: { id, content, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 90000, output_tokens: 30 } } });
+  const skill = { type: 'tool_use', name: 'Skill', id: 's', input: { skill: 'dept-frontend' } }, read = { type: 'tool_use', name: 'Read', id: 'r', input: { file_path: 'src/app.component.css' } }, edit = { type: 'tool_use', name: 'Edit', id: 'e', input: { file_path: 'src/app.component.css' } };
+  const together = turnLinks([{ type: 'user', message: { content: 'cambia el color' } }, as('a', [skill, read]), as('b', [edit]), as('c', [{ type: 'text', text: 'Cierre' }])]);
+  const apart = turnLinks([{ type: 'user', message: { content: 'cambia el color' } }, as('a', [skill]), as('b', [read]), as('c', [edit]), as('d', [{ type: 'text', text: 'Cierre' }])]);
+  assert.deepEqual([together.routine.cacheRead, together.work.cacheRead], [45000, 135000], 'one response fewer, and half of it is work');
+  assert.deepEqual([apart.routine.cacheRead, apart.routine.responses], [90000, 1], 'counter-example: a response that only loads the department is routine whole');
 });
 
 test('cost per link: a command that only names waymark.mjs (a syntax check, a git add) is work; a waymark.mjs subcommand is routine', async () => {

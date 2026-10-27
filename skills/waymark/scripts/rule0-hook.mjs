@@ -302,7 +302,7 @@ export function reminder(hook, agent) {
   let prec = '';
   try {
     if (!taskStartMark(hook.session_id)) {
-      const home = projectHome(cwd), p = home.dir && !home.legacy ? precedentFor(hook.prompt, readTaskRecords(home)) : null;
+      const home = projectHome(cwd), p = home.dir && !home.legacy ? precedentFor(hook.prompt, readTaskRecords(home), undefined, hook.session_id) : null;
       keepPrecedent(hook.session_id, p);
       if (p) prec = ` ${p.text}`;
     }

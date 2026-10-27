@@ -23,7 +23,7 @@ const Prov = await import(`file://${SCRIPTS}/provenance.mjs`);
 const day = new Date().toLocaleDateString('sv');
 let n = 0;
 // A recorded task: its ask, its files, its Aprendido, the gates it ran.
-const task = (prompt, files, learned = '', over = {}) => ({ id: `${day} · T${++n}`, at: new Date(Date.UTC(2026, 9, 1, 10, n)).toISOString(), session: 's', prompt, files, level: 2,
+const task = (prompt, files, learned = '', over = {}) => ({ id: `${day} · T${++n}`, at: new Date(Date.UTC(2026, 9, 1, 10, n)).toISOString(), session: `s${n}`, prompt, files, level: 2, // a session each, unless the test says
   cierre: `## Cierre · x\nResultado: hecho\nEvidencia: observada y\nAprendido: ${learned || 'nada nuevo'} ← pedido`, observed: { gates: [] }, ...over });
 const corpus = () => { n = 0; return [
   task('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.service.mjs', '/p/tests/orders.test.mjs'], 'el backoff se prueba con reloj falso, nunca con sleep', { observed: { gates: [{ cmd: 'cd /p && node --test tests/orders.test.mjs 2>&1 | tail -3' }, { cmd: 'node --check src/orders.service.mjs' }] } }),
@@ -170,4 +170,23 @@ test('the stop hook: the record keeps the precedent that was handed over and whe
   const rec = Prov.readTaskRecords(Prov.projectHome(d)).filter((r) => r.id === id).pop();
   assert.deepEqual(rec?.precedent, { task: `${day} · T1`, score: 9.1, chars: 310, files: 1, used: 'files' });
   assert.equal(P.takePrecedent('s-close'), null, 'the close took it');
+});
+
+test('a short ask is searched with its session\'s previous task, and the session\'s own tasks are never handed over: they are in its context', () => {
+  n = 0;
+  const c = [
+    task('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.service.mjs'], 'el backoff se prueba con reloj falso'),
+    task('corrige el login que falla con tokens vencidos', ['/p/src/auth.mjs'], 'el token vencido devuelve 401'),
+    task('ajusta los reintentos del servicio de pedidos con tope de cinco', ['/p/src/orders.service.mjs'], 'el tope va en la config', { session: 'live' }),
+  ];
+  const short = 'sigue con el punto 2';
+  assert.equal(P.queryOf(short, c, 'other'), short, 'no task of this session: the ask alone');
+  assert.match(P.queryOf(short, c, 'live'), /reintentos .*tope va en la config .*orders\.service\.mjs/, 'logic: the previous task of the session beside it');
+  const p = P.precedentFor(short, c, 0, 'live');
+  assert.equal(p?.task, c[0].id, 'found through the session\'s context, in another session');
+  assert.notEqual(P.precedentFor('ajusta los reintentos del servicio de pedidos', c, 0, 'live')?.task, c[2].id, 'counter-example: the session\'s own task is never handed');
+  const long = 'revisa la hoja de estilos del header, el espaciado del menú lateral en móvil, los colores de los botones primarios y el contraste del pie';
+  assert.equal(P.queryOf(long, c, 'live'), long, 'counter-example: a long ask names enough by itself');
+  const css = [task('ajusta el espaciado del header en styles.css', ['/p/src/styles.css']), task('cambia el color del header', ['/p/src/app.css'], 'los colores son tokens', { session: 'ui' })];
+  assert.equal(P.precedentFor('y el espaciado también', css, 0, 'ui')?.task, css[0].id, 'CSS/HTML: the same for a stylesheet');
 });

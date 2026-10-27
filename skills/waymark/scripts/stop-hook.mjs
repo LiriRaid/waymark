@@ -1279,7 +1279,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       ctx.rerun = (files) => (rerun ??= rerunGate(files, home)); // once per close, even when the turn is judged twice
       ctx.noBuild = buildNone(home.memory);
       ctx.testsBroken = testsBroken(home.memory);
-      try { ctx.legacy = legacyStack(home.root); } catch {}
+      try { ctx.legacy = legacyStack(home.root, fs.existsSync(home.memory) ? fs.readFileSync(home.memory, 'utf8') : ''); } catch {} // a framework under its legacy major, or a runtime row older than the machine's
       try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.related = (files) => { try { return relatedRun(home.memory, home.root, files); } catch { return null; } }; // the run of only these specs, from memory.md

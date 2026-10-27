@@ -45,6 +45,9 @@ function buildLabel(root) {
   return null;
 }
 
+// The Rails version Gemfile.lock pins, or null.
+export const railsVersion = (root) => read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] || null;
+
 // → { pm, pmVersion, from, exec, run, deps: [[name, version]] } for a Node project; { pm: null, other } for a Ruby, Python or
 // Go project; null when the folder has no manifest.
 export function stackOf(root) {
@@ -58,7 +61,7 @@ export function stackOf(root) {
       || (cBuild(root) ? ['CMakeLists.txt', cBuild(root)] : null)
       || buildLabel(root);
     if (!other) return null;
-    const rails = other[0] === 'Gemfile' ? read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] : null;
+    const rails = other[0] === 'Gemfile' ? railsVersion(root) : null;
     return { pm: null, other: other[1], deps: rails ? [['rails', rails]] : [] };
   }
   const declared = String(pkg.packageManager || '').match(/^(pnpm|yarn|bun|npm)@([\d.]+)/);

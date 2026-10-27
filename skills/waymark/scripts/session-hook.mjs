@@ -103,9 +103,13 @@ export function digest(cwd, agentName = 'claude') {
   if (!home.legacy) { try { if (fillMigrations(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook migrations', e); } }
   // the tests of the touched files from the repo's runner (Vitest related, Jest --findRelatedTests), "to confirm", when the row is empty: seconds, not the suite
   if (!home.legacy) { try { if (fillRelated(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook related', e); } }
-  const runtime = best.text.match(/^\|\s*runtime\s*\|\s*([^|]+)\|/im)?.[1]?.trim().replace(/`/g, '');
-  const nodeAt = runtimeDir(runtime), posix = (p) => String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
-  if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : nodeAt ? `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): run every gate with ${nodeAt} first on the PATH, never \`nvm use\` (it switches the machine's Node) — bash: PATH="${posix(nodeAt)}:$PATH" <gate> · PowerShell: $env:PATH="${nodeAt};$env:PATH"; <gate>.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);
+  // every runtime row, one language each: the folders go first on the PATH together, a "none (…)" says what is missing, a command the user wrote is their prefix
+  const runtimes = [...best.text.matchAll(/^\|\s*runtime\s*\|\s*([^|]+)\|/gim)].map((m) => m[1].trim().replace(/`/g, ''));
+  const dirs = runtimes.map(runtimeDir).filter(Boolean), posix = (p) => String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
+  const legacyRule = 'stacks/generic.md → Legacy repos';
+  for (const r of runtimes.filter((c) => /^none\b/i.test(c))) out.push(`Runtime: ${r}. ${legacyRule}.`);
+  if (dirs.length) out.push(`Runtime: this machine's runtime is not the one this repo needs (memory.md → Quality gates, the runtime rows): run every gate with ${dirs.join(' and ')} first on the PATH, never \`nvm use\`, \`rbenv global\`, \`pyenv global\` or \`sdk default\` (they switch the machine's runtime) — bash: PATH="${dirs.map(posix).join(':')}:$PATH" <gate> · PowerShell: $env:PATH="${dirs.join(';')};$env:PATH"; <gate>. ${legacyRule}.`);
+  for (const r of runtimes.filter((c) => !/^none\b/i.test(c) && !runtimeDir(c))) out.push(`Runtime: this machine's runtime is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${r}".`);
   const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);
   if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.

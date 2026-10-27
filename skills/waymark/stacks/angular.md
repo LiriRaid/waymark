@@ -28,12 +28,11 @@ Project memory example (Quality gates, verified commands):
 With `@analogjs/vitest-angular`, use `pnpm exec vitest run`; with Angular's builder, `pnpm exec ng test --no-watch`.
 
 ## Legacy repos (Angular before 14)
-The repo's own versions, scripts and lockfile win over everything above, which assumes v17 and later.
-- **Runtime.** Angular 8 runs on Node 10, 9 on Node 12, 10–13 on Node 14, 14–15 on Node 16, 16–17 on Node 18. When this machine's Node is not one of them, the session hook writes a `runtime` row in memory.md → Quality gates: `node <folder>`, the folder of that Node in nvm-windows, nvm, Volta, fnm, asdf or mise. The hook's own re-run of a gate puts it first on the PATH. Run every gate that way (the session card gives the bash and PowerShell form); never `nvm use`, which switches the machine's Node. `engines`, `volta.node` and `.nvmrc` of the repo's `package.json` come before the table.
+The rule for any stack is `generic.md` → Legacy repos (the `runtime` row, the testigos); what follows is only Angular's. The repo's own versions, scripts and lockfile win over everything above, which assumes v17 and later.
+- **Runtime.** Angular 8 runs on Node 10, 9 on Node 12, 10–13 on Node 14, 14–15 on Node 16, 16–17 on Node 18: the row is `node <folder>` when this machine's Node is not one of them; never `nvm use`, which switches the machine's Node. `engines`, `volta.node` and `.nvmrc` of the repo's `package.json` come before the table.
 - **Karma, one spec.** `<pm> exec ng test --watch=false --browsers=ChromeHeadless --include=<spec file>` with `CHROME_BIN` set to the machine's Chrome; the whole suite once at the end. `ng test` without `--watch=false` never ends.
 - **A slow build.** `node --max_old_space_size=4096 node_modules/@angular/cli/bin/ng build` (or `NODE_OPTIONS=--max_old_space_size=4096` before `<pm> exec ng build`) when the default heap runs out.
 - **Conventions are the repo's.** `NgModule`, `*ngIf`/`*ngFor` and Zone-based code are how it is written: follow them; the Frontend rules below are for v17 and later.
-- **What the testigos accept here.** A temp config a command makes and removes (`tsconfig.spec.tmp.json`) is no change. A build run in the background counts once its output shows success (read it before closing); a build that takes minutes may instead be declared `Build: no (<time>)`, and `Tests: no (<why>)` likewise. A styles-only change owes no full build. When the tests were already failing, write `| test (full) | broken at HEAD (<why>) | <date> |` in Quality gates: a failing test run is then the baseline's, with no clean copy to prove it.
 
 ## Conventions by department
 Only what is specific to Angular. General rules live in the `dept-*` department skills (`dept-frontend`, `dept-ux-ui`, `dept-qa`, `dept-security`, `dept-data`).

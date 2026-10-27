@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
-import { runtimePrefix, runtimeDir, runtimeEnv } from './runtime.mjs';
+import { runtimeCells, runtimeDir, runtimeEnv } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
 import { git as gitIn, topOf } from './lib/git.mjs';
@@ -68,14 +68,14 @@ function rawGateCommand(root, memoryFile) {
   return tsc && project ? { cmd: `${exec} tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
 }
 
-// The gate as it runs on this machine: a repo that needs another Node than the machine's (memory.md → Quality gates, the `runtime` row, `node <dir>`) runs
-// with that folder first on the PATH, so the hook's own re-run fails for the code and not for the runtime, and a chained command (`cd web && npx tsc`)
-// is left as it is. A command the user wrote in the row stays their prefix.
+// The gate as it runs on this machine: a repo that needs another runtime than the machine's (memory.md → Quality gates, a `runtime` row per language,
+// `<lang> <dir>`) runs with those folders first on the PATH, so the hook's own re-run fails for the code and not for the runtime, and a chained command
+// (`cd web && npx tsc`) is left as it is. A command the user wrote in a row stays their prefix.
 export function gateCommand(root, memoryFile) {
-  const gate = rawGateCommand(root, memoryFile), cell = memoryFile ? runtimePrefix(read(memoryFile)) : null;
-  if (!gate || !cell) return gate;
-  const dir = runtimeDir(cell);
-  return dir ? { ...gate, env: runtimeEnv(dir), runtime: cell } : { ...gate, cmd: `${cell} ${gate.cmd}`, runtime: cell };
+  const gate = rawGateCommand(root, memoryFile), cells = memoryFile ? runtimeCells(read(memoryFile)) : [];
+  if (!gate || !cells.length) return gate;
+  const dirs = cells.map(runtimeDir).filter(Boolean), prefixes = cells.filter((c) => !runtimeDir(c));
+  return { ...gate, ...(dirs.length ? { env: runtimeEnv(dirs) } : {}), ...(prefixes.length ? { cmd: `${prefixes.join(' ')} ${gate.cmd}` } : {}), runtime: cells.join(' · ') };
 }
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills

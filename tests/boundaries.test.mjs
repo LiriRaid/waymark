@@ -143,6 +143,8 @@ for (const [kind, file, other, redo] of [['logic', 'src/orders.service.mjs', 'ag
     const line = (prompt, reply = 'Listo.') => taskLine(dir, new Date(), { session, prompt, reply });
     assert.doesNotMatch(line(other), /follow-up/, 'a different subject: only the new ID');
     assert.doesNotMatch(line('Sigue con H4 del plan 2.0.19'), /follow-up/, '"sigue con" a new item is a new ask');
+    for (const p of ['dale un margen de 8px al botón', 'termina el formulario de contacto', 'acaba la tabla de pedidos']) assert.doesNotMatch(line(p), /follow-up/, `review: "${p}" names a new item`);
+    for (const p of ['dale', 'dale, hazlo', 'termina lo que estabas haciendo', 'termina eso', 'acaba T1']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, `counter-example: "${p}" continues`);
     for (const p of ['sigue', 'continúa por donde quedaste', 'disculpa se interrumpió, termina', redo, 'T1 otra vez']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, p);
     assert.match(line('hazlo', 'Faltan los tests de borde. ¿Los agrego?'), /follow-up 2026-10-25 · T1b/, 'it answers the question the last reply ended with');
     assert.doesNotMatch(line('hazlo', 'Listo, quedó aplicado.'), /follow-up/, 'counter-example: the same words with no question to answer');

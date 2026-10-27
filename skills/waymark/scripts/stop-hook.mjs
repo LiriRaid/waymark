@@ -33,7 +33,7 @@ import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
-import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
+import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
@@ -249,6 +249,14 @@ const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFile
 // …and only when the per-prompt hook offered it (ctx.offered, from open.json; undefined: not known): an ask that neither continued
 // nor redid the task is a new task, even on its files. → why it is not a follow-up ('offer' | 'files'), or null when it is one.
 const followUpFails = (id, changed, ctx) => /[a-z]$/.test(id) && ctx.offered !== undefined && (!ctx.offered || ctx.offered.replace(/[a-z]$/, '') !== id.replace(/[a-z]$/, '')) ? 'offer' : !followUpShares(id, changed, ctx) ? 'files' : null;
+// A part of the command that changes files names a path outside the repo: the home folder, or an absolute path not under `root`
+// (variables assigned in the same command expanded first).
+const HOME_REF = /(?:^|[\s"'=])(?:~[\\/]|\$HOME\b|\$\{HOME\}|\$env:USERPROFILE\b|%USERPROFILE%)/i;
+function writesOutside(command, root) {
+  const inside = slash(root);
+  return shellRuns(expandVars(command)).some((p) => mutatesFiles(p.text) && (HOME_REF.test(p.text)
+    || [...p.text.matchAll(/(?:^|[\s"'=])((?:[A-Za-z]:[\\/]|\/(?!dev\/null))[^\s"';|&]*)/g)].some((m) => { const at = slash(m[1]); return at !== inside && !at.startsWith(`${inside}/`); })));
+}
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
 // Variables assigned in the same command, in place: `W=…/waymark.mjs; node $W review a.ts` (sh) or `$W = "…"; node $W …`
 // (PowerShell) reads as `node …/waymark.mjs review a.ts`. A variable not assigned there stays as written.
@@ -940,8 +948,8 @@ function failsOf(S) {
 // The steps of the routine contract (waymark/routine.json): does each apply, did it pass, why not.
 function composeSteps(S) {
   const { askedRepos, changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, outsideRepos, renamed, reply, retried, risk, when, win } = S;
-  // an L2+ that changes files outside the repo (a reinstall, a copy into the agent's folder) still answers the window first; an L1 or a push does not
-  const outsideL2 = Number(level) >= 2 && (S.turn?.tools || []).some((t) => shell(t) && !t.error && changesProject(t.input.command));
+  // an L2+ that changes files outside the repo (a reinstall, a copy into the agent's folder) still answers the window first; an L1, a push or the repo's own cache does not
+  const outsideL2 = Number(level) >= 2 && (S.turn?.tools || []).some((t) => shell(t) && !t.error && changesProject(t.input.command) && writesOutside(t.input.command, ctx.cwd || process.cwd()));
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
@@ -1107,12 +1115,17 @@ export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as
 // A step the user owns (their deploy, their PR) never leaves a task parcial: when the Cierre's only gap is that step, and the
 // project's Conventions say it is the user's, the result is hecho with the step named (`userOwned`). A parcial for a cause
 // outside the work (the quota, a provider) carries `cause: 'external'`: the next ask is a new task unless the user says it continues.
-const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i, sign: /(?<!\p{L})(?:firm(?:a|e|ad[oa])s?|signatures?|sign(?:ed|ing|s)?|tags?)(?!\p{L})/iu };
+// a signature is the user's step only with a release object beside it ("tu tag firmado", "la firma del manifiesto"): a form's
+// signature field or HTML tags are the work
+const SIGNS = '(?:firm(?:a|e|ar|ad[oa]|es)?s?|sign(?:ed|ing|s)?|signatures?)', RELEASED = '(?:tags?|manifi?est(?:o|s)?|releases?|commits?|versi[oó]n|v\\d[\\w.]*)';
+const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i,
+  sign: new RegExp(`(?<!\\p{L})(?:${SIGNS}(?!\\p{L})[^,;]{0,40}?(?<!\\p{L})${RELEASED}|${RELEASED}(?!\\p{L})[^,;]{0,40}?(?<!\\p{L})${SIGNS})(?!\\p{L})`, 'iu') };
+const KEY_WORDS = { sign: /^(?:firmas?|signatures?|signing|tags?)$/i }; // a Conventions key names the step alone, with no object
 const EXTERNAL = /usage limit|l[ií]mite de uso|se agot[oó] la cuota|cuota (?:agotada|del plan|de uso)|quota (?:exceeded|reached)|rate.?limit|sin conexi[oó]n|connection (?:lost|refused)|proveedor (?:ca[ií]do|no responde)|servicio (?:externo|ca[ií]do)/i;
 const STEP_KEY = /^(?:the )?(?:deploys?|despliegues?|releases?|prs?|pull requests?|merges?|push(?:es)?|firmas?|signatures?|signing|tags?)$/i;
 export function ownedSteps(text) {
   const owned = new Set();
-  for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1]) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
+  for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if ((KEY_WORDS[step] || re).test(m[1].trim()) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
   return owned;
 }
 export function outcome(reply, items, answers, level, owned = new Set(), win = null) {

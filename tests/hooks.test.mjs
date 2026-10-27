@@ -2732,6 +2732,12 @@ test('re-close 11.1: an L2 that changes files outside the repo (a reinstall) ans
   assert.ok(l2.missing.some((m) => /no choice-window answer in this task/.test(m)), 'the window is owed');
   const l1 = gaps(turn(1));
   assert.deepEqual([l1.steps.find((s) => s.id === 'decision').applies], [false], 'counter-example: an L1 copy is the user\'s order');
+  // review: a cache or build folder of the repo is no change outside it
+  const local = (command) => gaps([prompt('reproduce el fallo'), say('Waymark → L2 · dept-qa'), call('Skill', { skill: 'dept-qa' }), PROC('dept-qa'), call('Bash', { command })]).steps.find((s) => s.id === 'decision').applies;
+  assert.equal(local('rm -rf .angular/cache && pnpm run build'), false, 'logic: the repo\'s own cache');
+  assert.equal(local('rm -rf dist/assets/css'), false, 'CSS/HTML: the repo\'s build output');
+  assert.equal(local('cp -r skills/waymark ~/.agents/skills/'), true, 'counter-example: a copy into the home folder');
+  assert.equal(local('Copy-Item -Recurse skills\\waymark C:\\Users\\x\\.agents\\skills\\'), true, 'counter-example: an absolute path outside the repo');
 });
 
 test('context brake: a message to a session at 300k is stopped before the model once, kept for the next session, and brought by its card', async () => {

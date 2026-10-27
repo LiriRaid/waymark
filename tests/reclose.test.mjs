@@ -69,6 +69,13 @@ test('13.6: a parcial turns hecho only when every gap is the user\'s; one gap of
   assert.equal(outcome('Resultado: parcial (falta tu PR del ajuste del botón)', [], [], 2, owned).result, 'hecho', 'counter-example: the only gap is the user\'s');
   assert.deepEqual([...ownedSteps('- Tags: v2.0.19 firmado\n- Firmas de commits: GPG\n')], [], 'counter-example: a Conventions line that does not name the user is no rule');
 });
+test('13.6 (review): a signature or a tag is the user\'s step only with a release object; a form\'s signature field or HTML tags are the work', () => {
+  const owned = ownedSteps(CONV);
+  for (const gap of ['falta firmar el tag v2.0.19', 'falta la firma del manifiesto', 'falta tu commit firmado', 'missing: sign the release tag']) assert.equal(outcome(`Resultado: parcial (${gap})`, [], [], 2, owned).result, 'hecho', gap);
+  assert.equal(outcome('Resultado: parcial (falta el campo de firma del formulario)', [], [], 2, owned).result, 'parcial', 'logic: a signature field is the work');
+  assert.equal(outcome('Resultado: parcial (faltan los tags meta del head)', [], [], 2, owned).result, 'parcial', 'CSS/HTML: HTML tags are the work');
+  assert.equal(outcome('Resultado: parcial (faltan las etiquetas del formulario y tu PR)', [], [], 2, owned).result, 'parcial', 'counter-example: one gap of the work keeps it parcial');
+});
 
 // ---- 8.6 ----
 test('8.6: the L2 routine share reads only the tasks the measured version wrote', async () => {

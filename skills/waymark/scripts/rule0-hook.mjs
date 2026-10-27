@@ -57,7 +57,9 @@ function lastOfSession(cwd, session) {
 // it ("sigue", "sigue con lo que quedó"; not "sigue con H4 del plan"), where it stopped or that it was cut, a task's number,
 // that what was done is wrong, or the answer to the question this session's last reply ended with.
 const END = '(?=$|[^\\p{L}\\p{N}_])';
-export const CONTINUES = new RegExp(`^\\s*(?:sigue|contin[uú]a|retoma|seguimos|reanuda|dale|termina|acaba|continue|resume|go on|finish)${END}(?!\\s+(?:con|with|el|la|los|las|the|to)\\s+(?!(?:eso|esto|ello|lo|it|that|this)${END}))`, 'iu');
+// "dale", "termina", "acaba" continue only alone or on what was there ("dale, hazlo", "termina lo que…", "acaba T1"); with an
+// object they are a new ask ("dale un margen al botón", "termina el formulario")
+export const CONTINUES = new RegExp(`^\\s*(?:(?:sigue|contin[uú]a|retoma|seguimos|reanuda|continue|resume|go on)${END}(?!\\s+(?:con|with|el|la|los|las|the|to)\\s+(?!(?:eso|esto|ello|lo|it|that|this)${END}))|(?:dale|termina|acaba|finish)(?=\\s*(?:$|[,.!;:])|\\s+(?:lo|eso|esto|ello|it|that|this)${END}|\\s+T\\d))`, 'iu');
 const STOPPED = /(?:se\s+(?:interrumpi[oó]|cort[oó])|por\s+donde\s+(?:qued|ibas|iba)|donde\s+(?:te\s+)?qued|where\s+(?:you|we)\s+left\s+off|(?:was|got)\s+(?:interrupted|cut))/iu;
 export const REDO = /(?<![\p{L}\p{N}])(?:no\s+funciona|no\s+sirve|no\s+(?:se\s+)?(?:ve|aplic[oó]|cambi[oó]|guard[oó]|carga)|no\s+(?:era|es)\s+eso|no\s+qued[oó]|sigue\s+(?:fallando|igual|sin|mal|apareciendo|saliendo)|(?:todav[ií]a|a[uú]n)\s+(?:falla|sale|aparece|no\s+(?:funciona|se\s+ve|sale|aparece|cambia))|otra\s+vez|de\s+nuevo|rehaz|deshaz|revi[eé]rte|vuelve\s+a\s+(?:hacer|intentar)|still\s+(?:fails|broken|not)|does\s*n[o']?t\s+work|not\s+working|try\s+again|redo|undo)(?![\p{L}\p{N}])/iu;
 const replyText = (lines) => {

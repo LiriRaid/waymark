@@ -12,7 +12,7 @@ import { base } from './ids.mjs';
 export const RECORD_V1 = 'waymark.record/v1';
 export const RECORD_V2 = 'waymark.record/v2';
 export const RECORD_SCHEMAS = [RECORD_V1, RECORD_V2];
-export const TASK_TYPES = ['fix', 'feature', 'refactor', 'docs', 'test', 'config', 'question'];
+export const TASK_TYPES = ['fix', 'feature', 'refactor', 'docs', 'test', 'config', 'question', 'ops'];
 const REWORK_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 const slash = (f) => String(f || '').replace(/\\/g, '/');
@@ -27,7 +27,9 @@ const strip = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀
 const VERBS = [
   ['fix', /\b(arregl\w*|corrig\w*|repar\w*|fix\w*|soluciona\w*|bug|errores?|falla\w*|no funciona|esta roto|rota)\b/],
   ['refactor', /\b(refactor\w*|reorganiz\w*|simplific\w*|limpi\w*|renombr\w*|extrae\w*|mueve|mover|restructur\w*|rename|clean ?up)\b/],
-  ['feature', /\b(agrega\w*|anad\w*|crea\w*|implementa\w*|construye\w*|nuevo|nueva|soporte|add|create|implement\w*|build|feature)\b/],
+  ['feature', /\b(agrega\w*|anad\w*|crea\w*|implementa\w*|construye\w*|nuevo|nueva|soporte|permite|habilita\w*|integra\w*|conecta\w*|muestra|mostrar|expone\w*|add|create|implement\w*|build|feature|enable|support|integrate|expose|show)\b/],
+  // work on the repository and its environment, not on its code: commits, pushes, merges, deploys, migrations, deletions, releases
+  ['ops', /\b(commit\w*|push|merge\w*|rebase|cherry-?pick|revert\w*|despleg\w*|deploy\w*|migra\w*|migrate|borra\w*|elimina\w*|delete|publica\w*|publish|release|tag|backup)\b/],
 ];
 
 // → one of TASK_TYPES, or null when nothing decides it (a label that is a guess would feed a dataset).
@@ -97,10 +99,36 @@ export function askedGaps(items, answers, resultado = '') {
   return gaps;
 }
 
+// What the user chose in the choice window (an option, a free-text answer) is an item of the ask too (docs/adr/0046). The hook reads the choices
+// from the window and writes them in the record (`window.chosen`), so the Cierre does not have to repeat them: a choice counts as kept unless a Cierre
+// line names it with ✘ (not done, or changed), and only that keeps a "hecho" from standing. A chosen label that holds two actions ("apply and run
+// it") is flagged: one label that says two things left a migration unrun under a task marked hecho.
+// → { items, failed, twoActions } (arrays; empty when all is as it should be).
+const plain = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const TWO_ACTIONS = /\s(?:y|and|&|\+)\s+(?:ejecuta\w*|aplica\w*|corre\w*|correr|borra\w*|elimina\w*|despliega\w*|desplegar|migra\w*|run|apply|delete|deploy|migrate)\b/i;
+export function windowCheck(decisions, reply) {
+  const out = { items: [], failed: [], twoActions: [] };
+  const lines = String(reply || '').split('\n');
+  // a multi-select answer joins its labels with commas: each label picked is its own item
+  const chosen = (decisions || []).flatMap((d) => { const parts = String(d.chosen ?? '').split(/,\s+/); return parts.length > 1 && (d.labels || []).some((l) => parts.includes(l)) ? parts : [String(d.chosen ?? '')]; });
+  for (const raw of chosen) {
+    const item = raw.trim().replace(/\s*\((?:recommended|recomendad[ao])\)\s*$/i, ''); // the marker is the window's, not the user's choice
+    if (!item || /^(?:otra cosa|other)$/i.test(item) || out.items.includes(item)) continue;
+    out.items.push(item);
+    if (TWO_ACTIONS.test(item)) out.twoActions.push(item);
+    const words = [...new Set(plain(item).split(' ').filter((w) => w.length >= 4))].slice(0, 8);
+    if (!words.length) continue; // nothing to look for: not judged
+    const named = (t) => words.filter((w) => t.includes(w)).length >= Math.ceil(words.length * 0.6);
+    const line = lines.find((l) => named(plain(l)) && /[✔✓✘✗✕]/.test(l));
+    if (line && /[✘✗✕]/.test(line) && !/[✔✓]/.test(line)) out.failed.push(item);
+  }
+  return out;
+}
+
 // The first choice window of an L2+ task judged on what it says of each option: its risk, its files or its cost, and exactly one option marked
 // (Recommended). `decisions` are the task's answered questions (decisionsIn: each carries its options). A window of one option, or a question
 // whose options are not known (asked in the chat), is not judged. → { options, missing: [...] } or null.
-const RISK = /riesgo|risk/i, FILES = /archivos?|files?/i, COST = /cost[eo]?\b|coste|tokens?|esfuerzo|effort|minutos?|minutes?/i, REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
+const REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
 export function optionsLint(decisions, level) {
   if (!(Number(level) >= 2)) return null;
   const first = (decisions || []).find((d) => d.optionList?.length >= 2);
@@ -109,10 +137,8 @@ export function optionsLint(decisions, level) {
   const missing = [];
   for (const d of window) {
     const q = String(d.question || '').slice(0, 30);
-    for (const o of d.optionList) {
-      const text = String(o.description || ''), lacks = [!RISK.test(text) && 'risk', !(FILES.test(text) || COST.test(text)) && 'files or cost'].filter(Boolean);
-      if (lacks.length) missing.push(`${q} / ${String(o.label || '').slice(0, 30)}: ${lacks.join(', ')}`);
-    }
+    // only the mark is asked: risk, files and cost are kept as fields when an option says them (optionAttrs), never asked of it; asking them fired on 368
+    // of 398 real windows and said nothing about the decision
     const marked = d.optionList.filter((o) => REC.test(String(o.label || ''))).length;
     if (marked !== 1) missing.push(`${q}: ${marked ? 'more than one' : 'no'} option marked (Recommended)`);
   }

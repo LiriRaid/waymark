@@ -1,5 +1,6 @@
 // Waymark 2.0.18 · point 3: the replay bench (bench/replay.mjs, docs/adr/0031). Run: node --test tests/*.test.mjs
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+process.env.WAYMARK_SIZE_PINNED = '1'; // the reminder is measured with a typical task and git line, not this working tree's (size.mjs)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

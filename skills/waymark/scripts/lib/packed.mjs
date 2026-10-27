@@ -16,3 +16,8 @@ export function procDelivered(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];
   return new Set(st && st.since === since ? st.procs || [] : []);
 }
+// → Set of those handed over only when the department was loaded after the task's first change: read, but too late to guide it.
+export function procLate(session, since = 0, file = PACKED()) {
+  const st = readPacked(file)[session || 'unknown'];
+  return new Set(st && st.since === since ? st.late || [] : []);
+}

@@ -4,7 +4,7 @@
 Signals the agent checks (waymark `references/project-detection.md`): `angular.json` or `@angular/core` in `dependencies` of `package.json`. Version comes from `@angular/core`. Optional layers from dependencies: `@angular/ssr` (SSR), `tailwindcss`, `primeng`, `@lucide/angular` or `lucide-angular`, `gsap`, `@analogjs/vitest-angular`, `angular-eslint` / `@angular-eslint/*`.
 
 ## Commands
-Default commands the agent runs in the Exit protocol; verify each once, then record it in project memory. `<pm>` = package manager from the lockfile. Owner rule: Angular projects use pnpm, even if no lockfile exists yet.
+Default commands the agent runs in the Exit protocol; verify each once, then record it in project memory. `<pm>` = package manager from the lockfile: the repo's lockfile and versions win (`package-lock.json` npm, `yarn.lock` yarn, `pnpm-lock.yaml` pnpm). Only a repo with no lockfile at all defaults to pnpm, marked "profile default".
 
 | Gate | Command | Notes |
 |---|---|---|
@@ -26,6 +26,13 @@ Project memory example (Quality gates, verified commands):
 | build | `pnpm run build` | <date> |
 
 With `@analogjs/vitest-angular`, use `pnpm exec vitest run`; with Angular's builder, `pnpm exec ng test --no-watch`.
+
+## Legacy repos (Angular before 14)
+The rule for any stack is `generic.md` → Legacy repos (the `runtime` row, the testigos); what follows is only Angular's. The repo's own versions, scripts and lockfile win over everything above, which assumes v17 and later.
+- **Runtime.** Angular 8 runs on Node 10, 9 on Node 12, 10–13 on Node 14, 14–15 on Node 16, 16–17 on Node 18: the row is `node <folder>` when this machine's Node is not one of them; never `nvm use`, which switches the machine's Node. `engines`, `volta.node` and `.nvmrc` of the repo's `package.json` come before the table.
+- **Karma, one spec.** `<pm> exec ng test --watch=false --browsers=ChromeHeadless --include=<spec file>` with `CHROME_BIN` set to the machine's Chrome; the whole suite once at the end. `ng test` without `--watch=false` never ends.
+- **A slow build.** `node --max_old_space_size=4096 node_modules/@angular/cli/bin/ng build` (or `NODE_OPTIONS=--max_old_space_size=4096` before `<pm> exec ng build`) when the default heap runs out.
+- **Conventions are the repo's.** `NgModule`, `*ngIf`/`*ngFor` and Zone-based code are how it is written: follow them; the Frontend rules below are for v17 and later.
 
 ## Conventions by department
 Only what is specific to Angular. General rules live in the `dept-*` department skills (`dept-frontend`, `dept-ux-ui`, `dept-qa`, `dept-security`, `dept-data`).
@@ -57,7 +64,7 @@ Only what is specific to Angular. General rules live in the `dept-*` department 
 - Vitest is the default (v4 era) with `@analogjs/vitest-angular` or Angular's `@angular/build:unit-test` builder; JSDOM environment, setup in `src/test-setup.ts`, specs co-located as `<file>.spec.ts`. Older projects may still use Karma/Jasmine: keep their runner, do not migrate unasked.
 - TDD for services and logic: failing spec first, minimal implementation, refactor green.
 - Prefer `TestBed` with real providers; mock only HTTP (`provideHttpClientTesting`) and true boundaries. Zoneless tests use `await fixture.whenStable()` instead of `fixture.detectChanges()` loops.
-- Prove UI behavior with component specs and the build; the browser (`test.browser`, `app.run`) only when the user asks.
+- Prove UI behavior with component specs and the build; the eyes (`browser-verify`) at the end of a seen change; `app.run` only when the user asks.
 
 ### Data & state
 - Signals first; services `providedIn: 'root'` when singleton. `localStorage` only for UI preferences, never tokens, always SSR-guarded.

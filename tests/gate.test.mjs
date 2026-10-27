@@ -65,3 +65,44 @@ test('ci: verify.yml runs the gate and verify on push, pull request and tag, in 
   for (const u of uses) assert.match(u, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, `${u} is pinned to a commit`);
   assert.match(y, /permissions:\s*\n\s+contents: read/, 'a read-only token');
 });
+
+// 2.0.19 point 9a: the faster CI. A branch is checked by its pull request; Windows runs one pass there, the release tag keeps three on both systems.
+test('ci: push runs only on main and on tags; exactly one gate step runs per system and event, and the release tag runs the three passes everywhere', () => {
+  const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verify.yml'), 'utf8');
+  assert.match(y, /push:\s*\n\s+branches: \[main\]\s*\n\s+tags: \['v\*'\]/, 'a branch is checked by its pull request, not twice');
+  assert.match(y, /^\s+pull_request:/m);
+  const steps = y.split(/\n\s+- name: /).slice(1).filter((s) => /node scripts\/gate-tests\.mjs/.test(s));
+  const once = steps.find((s) => /gate-tests\.mjs --once/.test(s)), full = steps.find((s) => !/--once/.test(s));
+  assert.ok(once && full && steps.length === 2, 'one step with --once and one without');
+  const cond = (s) => s.match(/\n\s+if: (.+)/)?.[1];
+  const runs = (step, os, tag) => new Function('os', 'tag', `return ${cond(step).replace(/runner\.os/g, 'os').replace(/startsWith\(github\.ref, 'refs\/tags\/v'\)/g, 'tag').replace(/==/g, '===').replace(/!=/g, '!==')};`)(os, tag);
+  for (const [os, tag, expected] of [['Linux', false, 'full'], ['Linux', true, 'full'], ['Windows', false, 'once'], ['Windows', true, 'full']]) {
+    const ran = [['full', full], ['once', once]].filter(([, s]) => runs(s, os, tag)).map(([n]) => n);
+    assert.deepEqual(ran, [expected], `${os} ${tag ? 'tag' : 'branch or pull request'}`);
+  }
+});
+
+test('gate-tests: the runs are bounded to a few files at once, so a busy machine does not time out', () => {
+  assert.equal(G.CONCURRENCY, 4);
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'gate-tests.mjs'), 'utf8');
+  assert.equal([...src.matchAll(/--test-concurrency=\$\{CONCURRENCY\}/g)].length, 2, 'the default run and the copy are bounded');
+  assert.match(src, /'--test-concurrency=1'/, 'the one-at-a-time run is unchanged');
+});
+
+test('gate-tests: the third run copies what git holds — a tracked file as it is now, never an untracked one (notes or plans of the author)', async () => {
+  const os = await import('node:os'), { spawnSync } = await import('node:child_process');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-gatecopy-'));
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
+  git('init', '-q');
+  fs.writeFileSync(path.join(repo, 'a.mjs'), 'export const a = 1;\n'); fs.writeFileSync(path.join(repo, 'app.css'), '.a{}\n');
+  git('add', '.'); git('commit', '-q', '-m', 'one');
+  fs.writeFileSync(path.join(repo, 'a.mjs'), 'export const a = 2;\n'); // logic: an uncommitted change of a tracked file
+  fs.writeFileSync(path.join(repo, 'app.css'), '.b{}\n'); // CSS/HTML: the same for a stylesheet
+  fs.mkdirSync(path.join(repo, 'docs', 'plans'), { recursive: true }); fs.writeFileSync(path.join(repo, 'docs', 'plans', 'next.md'), 'draft\n');
+  const copy = G.copyOfTree(repo);
+  try {
+    assert.equal(fs.readFileSync(path.join(copy, 'a.mjs'), 'utf8'), 'export const a = 2;\n');
+    assert.equal(fs.readFileSync(path.join(copy, 'app.css'), 'utf8'), '.b{}\n');
+    assert.equal(fs.existsSync(path.join(copy, 'docs', 'plans', 'next.md')), false, 'counter-example: an untracked file stays out of the copy');
+  } finally { fs.rmSync(copy, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); }
+});

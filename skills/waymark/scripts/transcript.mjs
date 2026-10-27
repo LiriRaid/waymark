@@ -70,16 +70,21 @@ const turnStart = (lines, since = 0) => {
 // naming the tool-use id). The turn is not over: the agent
 // waits for it and closes in the notification's turn, so a task is never judged while its code-review runs.
 // Background shell commands are not waited for: a dev server never notifies.
-export function pendingBackground(lines, since = 0) {
+// The notification names the agent by its <task-id> (the launch's agentId) and, sometimes, the launch's <tool-use-id>:
+// either releases it (a notification may carry no tool-use-id). A launch older than
+// BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
+export const BACKGROUND_WAIT_MS = 30 * 60000;
+export function pendingBackground(lines, since = 0, now = Date.now()) {
   const { from } = turnStart(lines, since);
   const launched = [];
   for (const d of lines.slice(from)) {
     if (d.type !== 'user' || d.isSidechain || !(d.toolUseResult?.background || d.toolUseResult?.isAsync)) continue;
-    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push(c.tool_use_id);
+    const at = Date.parse(d.timestamp || '') || 0;
+    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
   }
   if (!launched.length) return [];
   const notified = lines.filter((d) => d.type === 'user' && /<task-notification>/.test(promptText(d))).map(promptText).join('\n');
-  return launched.filter((id) => !notified.includes(`<tool-use-id>${id}</tool-use-id>`));
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > BACKGROUND_WAIT_MS)).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own
@@ -91,23 +96,24 @@ export const toolInput = (c) => (c.name === 'Skill' && PLUGIN.test(String(c.inpu
 // (main agent only).
 export function currentTurn(lines, since = 0) {
   const { i, from } = turnStart(lines, since);
-  const texts = [], tools = [], results = {};
+  const texts = [], textAt = [], tools = [], results = {};
   for (const d of lines.slice(from)) {
-    const cmd = d.type === 'user' && promptText(d).match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
+    const cmd =d.type === 'user' && promptText(d).match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
     if (cmd) tools.push({ name: 'Skill', input: { skill: cmd, slash: true } }); // a slash command typed in the turn
     const at = Date.parse(d.timestamp || '') || 0;
     if (d.type === 'user' && !d.isSidechain && Array.isArray(d.message?.content)) {
-      // raw: the first 20,000 characters, where the Evidencia testigo looks up what the Cierre cites (text is clipped)
-      for (const c of d.message.content) if (c.type === 'tool_result') { const s = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || ''); results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(s), raw: s.slice(0, 20000) }; }
+      // raw: the first 20,000 characters and the last 4,000 (a test runner prints its summary at the end), where the Evidencia testigo looks up
+      // what the Cierre cites (text is clipped)
+      for (const c of d.message.content) if (c.type === 'tool_result') { const s = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || ''); results[c.tool_use_id] = { at, error: !!c.is_error, text: clipOutput(s), raw: s.length > 24000 ? `${s.slice(0, 20000)}\n…\n${s.slice(-4000)}` : s }; }
     }
     if (d.type !== 'assistant' || d.isSidechain) continue;
     for (const c of d.message?.content || []) {
-      if (c.type === 'text' && c.text.trim()) texts.push(c.text);
+      if (c.type === 'text' && c.text.trim()) { texts.push(c.text); textAt.push([tools.length, c.text]); } // the index of the next tool call: what was said before it
       if (c.type === 'tool_use') tools.push({ name: c.name, input: toolInput(c), id: c.id, at });
     }
   }
   const promptAt = i >= 0 ? Date.parse(lines[i].timestamp || '') || 0 : 0;
-  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: Math.max(promptAt, since > promptAt ? since : 0), texts, tools, results };
+  return { found: i >= 0, prompt: i >= 0 ? promptText(lines[i]) : '', uuid: i >= 0 ? lines[i].uuid || '' : '', startedAt: Math.max(promptAt, since > promptAt ? since : 0), texts, textAt, tools, results };
 }
 
 // Every tool call of the main agent in the readable part of the session (for reads done in an earlier turn), with the
@@ -140,6 +146,18 @@ export function turnUsage(lines, since = 0) {
   return { total: fresh + s.cacheRead, fresh, ...s, responses: seen.size };
 }
 
+// The models the turn's own responses came from, in order, each once: a session that changed model in the middle (`/model`) lists two. A synthetic message and a
+// subagent's response are not the session's model.
+export function modelsOf(lines, since = 0) {
+  const { from } = turnStart(lines, since);
+  const out = [];
+  for (const d of lines.slice(from)) {
+    const m = d.type === 'assistant' && !d.isSidechain ? d.message?.model : null;
+    if (m && m !== '<synthetic>' && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
 // Tokens of the subagents a turn launched (Claude Code writes each one to <session>/subagents/*.jsonl, next to the
 // session's transcript): every file with a response at or after `since`. Another agent's layout → zeros.
 export const subagentDir = (transcriptPath) => transcriptPath.replace(/\.jsonl$/i, '') + '/subagents';
@@ -166,7 +184,8 @@ export function subagentUsage(transcriptPath, since = 0) {
 // Cost per link (schema v1): each main-agent response of the turn goes to the step its tool calls served.
 // routine = a department/waymark/review/docs skill, a waymark.mjs command, a read of a procedures file, the project's
 // memory or the waymark references, the choice window; reply = a response with no tool call (the Cierre); work = the
-// rest. A response with calls of several kinds takes routine. Subagent tokens stay apart (withSubagents). Messages are
+// rest. A response with calls of several kinds is split by its calls (its routine part, its work part) and counted as a work
+// response. Subagent tokens stay apart (withSubagents). Messages are
 // counted once, like turnUsage.
 const ROUTINE_CALL = (c) => {
   const i = c.input || {};
@@ -187,9 +206,14 @@ export function turnLinks(lines, since = 0) {
   }
   const zero = () => ({ responses: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });
   const links = { v: 1, routine: zero(), work: zero(), reply: zero() };
+  const add = (l, u, part) => { l.input += Math.round((u.input_tokens || 0) * part); l.cacheWrite += Math.round((u.cache_creation_input_tokens || 0) * part); l.cacheRead += Math.round((u.cache_read_input_tokens || 0) * part); l.output += Math.round((u.output_tokens || 0) * part); };
   for (const { u, calls } of byId.values()) {
-    const l = links[!calls.length ? 'reply' : calls.some(ROUTINE_CALL) ? 'routine' : 'work'];
-    l.responses++; l.input += u.input_tokens || 0; l.cacheWrite += u.cache_creation_input_tokens || 0; l.cacheRead += u.cache_read_input_tokens || 0; l.output += u.output_tokens || 0;
+    if (!calls.length) { links.reply.responses++; add(links.reply, u, 1); continue; }
+    // a response that loads a department beside the task's first read is split by its calls, as costByCall splits it: the work it does is work
+    const routine = calls.filter(ROUTINE_CALL).length / calls.length;
+    links[routine === 1 ? 'routine' : 'work'].responses++;
+    if (routine) add(links.routine, u, routine);
+    if (routine < 1) add(links.work, u, 1 - routine);
   }
   return links;
 }
@@ -201,10 +225,14 @@ export function turnLinks(lines, since = 0) {
 export function costByCall(lines, since = 0) {
   const { from } = turnStart(lines, since);
   const byId = new Map();
+  let model = null;
   for (const d of lines.slice(from)) {
     const u = d.type === 'assistant' && !d.isSidechain ? d.message?.usage : null;
     if (!u) continue;
-    const e = byId.get(d.message.id) || { u, calls: [] };
+    // the first response after a model change re-writes the whole cache: that is the change's cost, not the cost of the call it carries
+    const changed = model && d.message?.model && d.message.model !== '<synthetic>' && d.message.model !== model && !byId.has(d.message.id);
+    if (d.message?.model && d.message.model !== '<synthetic>') model = d.message.model;
+    const e = byId.get(d.message.id) || { u: changed ? { ...u, cache_creation_input_tokens: 0 } : u, calls: [] };
     for (const c of d.message.content || []) if (c.type === 'tool_use') e.calls.push(c);
     byId.set(d.message.id, e);
   }
@@ -223,6 +251,27 @@ export function withSubagents(usage, sub) {
   const fresh = sub.input + sub.cacheWrite + sub.output, total = fresh + sub.cacheRead;
   if (!total) return usage;
   return { ...usage, input: usage.input + sub.input, cacheWrite: usage.cacheWrite + sub.cacheWrite, cacheRead: usage.cacheRead + sub.cacheRead, output: usage.output + sub.output, fresh: usage.fresh + fresh, total: usage.total + total, subagents: total };
+}
+
+// The harness cut the turn (docs/adr/0048): its last message is a synthetic one no model wrote, with error `rate_limit` (the quota: session, spend or weekly
+// limit) or `server_error` (the provider: a dropped connection, an overload). → { cause: 'usage limit' | 'provider', text } or null. Only the last message of
+// the turn counts: a notice from an earlier turn, or the same words in a model's reply, excuse nothing.
+// The quota also warns in the middle of the turn: a meta user message (usageLimitNote, "[Usage limit reached; a short grace allowance remains…") after
+// which the model goes on for a short grace and ends as it can. → { cause: 'usage limit', text, grace: true }: the hook never blocks such a turn.
+const GRACE = /^\s*\[Usage limit reached/i;
+export const graceNotice = (d) => d.type === 'user' && !!d.isMeta && !d.isSidechain && (!!d.usageLimitNote || GRACE.test(promptText(d)));
+export function externalStop(lines) {
+  let last = null, grace = null;
+  for (const d of lines) {
+    if (isPrompt(d)) { last = null; grace = null; continue; }
+    if (graceNotice(d)) grace = d;
+    if (d.type === 'assistant' && !d.isSidechain) last = d;
+  }
+  if (grace && last?.message?.model !== '<synthetic>') return { cause: 'usage limit', text: promptText(grace).replace(/\s+/g, ' ').trim().slice(0, 160), grace: true };
+  if (!last || last.message?.model !== '<synthetic>') return null;
+  const text = (last.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(' ').replace(/\s+/g, ' ').trim();
+  const cause = last.error === 'rate_limit' ? 'usage limit' : last.error === 'server_error' ? 'provider' : null;
+  return cause ? { cause, text: text.slice(0, 160) } : null;
 }
 
 // Context size and time of the last main-agent response, and whether the last answered turn opened with "Waymark →".
@@ -254,6 +303,7 @@ export function sessionState(lines) {
 // The department may come without its prefix ("· frontend"): only the ten department names count as one.
 const ROUTE = /^[ \t]*Waymark →\s*(L([0-3])(?:\s*(?:\||or)\s*Q)?|Q)\b(?:\s*·\s*((?:dept-)?(?:architecture|backend|data|devex|devops|frontend|product|qa|security|ux-ui))\b(?!-))?/gm;
 const routes = (texts) => [...texts.join('\n').matchAll(ROUTE)];
+const isQ = (m) => m[1] === 'Q' || /^L0\s*(?:\||or)\s*Q$/.test(m[1]);
 const reroute = (tools = []) => {
   const r = tools.map((t) => ({ ...t, input: toolInput(t) })).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*(L[0-3])\b/i.test(String(t.input.args || '')));
   return r.length ? { level: Number(String(r[r.length - 1].input.args).trim()[1]), dept: String(r[r.length - 1].input.skill) } : null;
@@ -262,7 +312,10 @@ export function routedLevel(texts, tools) {
   const t = reroute(tools);
   if (t) return t.level;
   const all = routes(texts), m = all[all.length - 1];
-  return !m ? 0 : m[1] === 'Q' || /^L0\s*(?:\||or)\s*Q$/.test(m[1]) ? 'Q' : Number(m[2]);
+  // a Q line after an L1-L3 route of the same turn is a note, not a re-route: it never lowers the level
+  const numeric = all.filter((r) => !isQ(r));
+  if (m && isQ(m) && numeric.length) return Number(numeric[numeric.length - 1][2]);
+  return !m ? 0 : isQ(m) ? 'Q' : Number(m[2]);
 }
 
 // The Cierre heading: "## Cierre" at the start of a line. A mention inside a sentence ("until it writes its `## Cierre`")
@@ -294,8 +347,8 @@ export function inheritedRoute(lines, prompts = 2) {
 export function routedDept(texts, tools) {
   const t = reroute(tools);
   if (t) return t.dept;
-  const all = routes(texts);
-  const dept = all.length ? all[all.length - 1][3] : null;
+  const all = routes(texts), real = all.filter((r) => !isQ(r)), pool = real.length ? real : all; // a Q line does not change the department of the route before it
+  const dept = pool.length ? pool[pool.length - 1][3] : null;
   return dept ? (dept.startsWith('dept-') ? dept : `dept-${dept}`) : null;
 }
 

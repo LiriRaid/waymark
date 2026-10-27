@@ -50,10 +50,17 @@ test('protocol by level: the block points at parts that exist, an L2 reads one p
   assert.doesNotMatch(read(path.join(CORE, 'SKILL.md')), /`references\/protocol\.md`/, 'SKILL.md points at the parts');
 });
 
+test('context card: the open IDs say a date once and show at most six; the rest are counted for W tasks', async () => {
+  const { openList } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const ids = ['2026-10-24 · T7', ...[8, 9, 11, 12, 14, 15, 16, 17, 19].map((n) => `2026-10-26 · T${n}`)];
+  assert.equal(openList(ids), '2026-10-24 · T7, 2026-10-26 · T8, T9, T11, T12, T14 +4 (W tasks)');
+  assert.equal(openList(['2026-10-04 · T3', '2026-10-05 · T1', '2026-10-04 · T5']), '2026-10-04 · T3, 2026-10-05 · T1, 2026-10-04 · T5', 'counter-example: another date is said again, and six or fewer add no count');
+});
+
 test('context card: open tasks listed without a question (check asks), the waymark.mjs path and the project root said once', async () => {
   const repo = memRepo('card', '- ▶ [2026-10-04 · T3] waiting for the user\n- ▶ [2026-10-04 · T5] another one\n- Gotcha: a note\n');
   const text = card(repo);
-  assert.match(text, /Open tasks \(▶\): 2026-10-04 · T3, 2026-10-04 · T5 \(W check asks the user which already work\)\./);
+  assert.match(text, /Open tasks \(▶\): 2026-10-04 · T3, T5 \(W check asks the user which already work\)\./);
   assert.doesNotMatch(text, /In your first reply/, 'the card asks nothing');
   assert.equal(count(text, 'waymark.mjs"'), 1, 'W is defined once and used by name');
   assert.match(text, /W = node "[^"]+\/waymark\.mjs"/);

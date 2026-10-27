@@ -54,3 +54,24 @@ export const exemptPath = (file, root = '') => {
   const r = norm(root), R = realOf(root), isTmp = (x) => x === tmp || x === TMP || x === '/tmp';
   return !(!isTmp(r) && !isTmp(R) && (f.startsWith(`${r}/`) || F.startsWith(`${R}/`)));
 };
+
+// The repository a path belongs to: the nearest folder up from it that holds a `.git` (a folder, or the file a worktree or submodule has),
+// with no git call; null outside any. A repository nested in another is its own (docs/adr/0046).
+export function repoOf(p) {
+  let dir = path.resolve(String(p));
+  try { if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir); } catch { dir = path.dirname(dir); }
+  for (let i = 0; i < 64; i++) {
+    const git = path.join(dir, '.git');
+    // a submodule's `.git` file points into the parent's modules folder: it is part of the project the session runs in, so the search goes on
+    let submodule = false;
+    try { submodule = fs.statSync(git).isFile() && /^gitdir:.*[\\/]modules[\\/]/m.test(fs.readFileSync(git, 'utf8')); } catch {}
+    if (fs.existsSync(git) && !submodule) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+  return null;
+}
+
+// A repo's name as a whole word of a text ("api" is not in "api-gateway").
+export const nameIn = (name, text) => new RegExp(`(?<![\\w-])${String(name).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(String(text).toLowerCase());

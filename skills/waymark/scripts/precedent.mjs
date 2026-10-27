@@ -76,10 +76,20 @@ export function handover(r) {
   return text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 1)}…`;
 }
 
-// What to hand over for an ask, or null: the best earlier task above the minimum. { task, score, files, text, chars }
-export function precedentFor(prompt, records, minScore = minScoreFor(records.filter((r) => r.id && r.prompt && !r.kind).length)) {
-  if (process.env.WAYMARK_PRECEDENT === '0' || tokens(prompt).length < 2) return null;
-  const [top] = search(prompt, records, 1);
+// A short ask ("sigue con H4 del plan") names little: it is searched with the session's previous task beside it (its ask, its Aprendido and the
+// names of its files). The session's own tasks are never what is found: the agent has them in its context already.
+export const SHORT_ASK = 10;
+export function queryOf(prompt, records, session) {
+  const prev = session && tokens(prompt).length < SHORT_ASK ? records.filter((r) => r.id && !r.kind && r.session === session).pop() : null;
+  return prev ? `${prompt} ${prev.prompt || ''} ${aprendidoOf(String(prev.cierre || ''))} ${names(prev).join(' ')}` : prompt;
+}
+const othersOf = (records, session) => (session ? records.filter((r) => r.session !== session) : records);
+
+// What to hand over for an ask, or null: the best earlier task of another session above the minimum. { task, score, files, text, chars }
+export function precedentFor(prompt, records, minScore = minScoreFor(records.filter((r) => r.id && r.prompt && !r.kind).length), session = null) {
+  const query = queryOf(prompt, records, session); // "sigue con el punto 2" alone is one word; with its session's task it says what it continues
+  if (process.env.WAYMARK_PRECEDENT === '0' || !tokens(prompt).length || tokens(query).length < 2) return null; // a bare "sí" or "ok" asks for nothing
+  const [top] = search(query, othersOf(records, session), 1);
   if (!top || top.score < minScore || top.matched < MIN_MATCHES) return null; // one rare word in common is a coincidence, not a precedent
   const text = handover(top.record);
   return { task: top.record.id, score: Math.round(top.score * 10) / 10, files: names(top.record), text, chars: text.length };
@@ -115,7 +125,8 @@ export function evaluate(records, { k = 3, minScore = null, root = '' } = {}) {
   for (let i = 1; i < rs.length; i++) {
     const t = rs[i], mine = new Set((t.files || []).map((f) => norm(f, r0)));
     const earlier = rs.slice(0, i);
-    const top = search(t.prompt, earlier, k), first = precedentFor(t.prompt, earlier, minScore ?? undefined);
+    // measured as it is handed: the ask with its session's context, among the tasks of other sessions
+    const top = search(queryOf(t.prompt, earlier, t.session), othersOf(earlier, t.session), k), first = precedentFor(t.prompt, earlier, minScore ?? undefined, t.session);
     if (first) maxChars = Math.max(maxChars, first.chars);
     if (!mine.size) continue;
     const relevant = earlier.filter((e) => (e.files || []).some((f) => mine.has(norm(f, r0))));
@@ -164,7 +175,7 @@ export async function savings(records, { root = '', projectsDir } = {}) {
   let total = 0;
   for (let i = 1; i < rs.length; i++) {
     const t = rs[i], mine = new Set((t.files || []).map((f) => norm(f, r0)));
-    const first = precedentFor(t.prompt, rs.slice(0, i));
+    const first = precedentFor(t.prompt, rs.slice(0, i), undefined, t.session);
     const match = first && rs.slice(0, i).find((e) => e.id === first.task);
     if (!match || !(match.files || []).some((f) => mine.has(norm(f, r0)))) continue;
     out.tasks++;

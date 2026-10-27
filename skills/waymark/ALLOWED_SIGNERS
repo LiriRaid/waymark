@@ -1,2 +1,2 @@
 # Public keys the release is signed with: git allowed-signers format (<principal> <type> <key>), or `gpg <fingerprint>`.
-gabrielleonardocruzflores@gmail.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAo3KoBECnHHZ+ABw+5PnB0xfs0DbLsxKsKCNfXVcUEb
+* ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAo3KoBECnHHZ+ABw+5PnB0xfs0DbLsxKsKCNfXVcUEb

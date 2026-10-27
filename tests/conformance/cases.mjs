@@ -277,7 +277,8 @@ export const CASES = {
     await w.stop(CIERRE());
     const r = await w.prompt('agrega un límite de reintentos');
     const text = w.agent.caps.reminder === 'post' ? (await w.tool('shell', { command: 'ls src' })).context : r.context; // where the reminder rides on the first result
-    assert.match(text, new RegExp(`ID: new ${day} · T2; follow-up ${day} · T1b`));
+    if (w.agent.caps.prompt === false) assert.match(text, new RegExp(`ID: new ${day} · T2; follow-up ${day} · T1b`), 'the ask cannot be read: both IDs offered');
+    else assert.match(text, new RegExp(`ID: new ${day} · T2\\.`), 'a different ask, even on the same files, is a new task: no follow-up offered');
   },
   // ---- the adapter against its own claims ----
   async 'adapter.capabilities-are-what-the-adapter-says'(w) {
@@ -286,6 +287,7 @@ export const CASES = {
     assert.equal(caps.reply, !a.lacks.includes('cierre'), 'a reply that no hook carries is a lack the adapter declares');
     assert.equal(caps.brake, !!a.out.blockPrompt, 'a prompt brake exists only where the agent lets a hook stop a prompt');
     assert.equal(caps.packAt === 'pre', !!a.preContext, 'the pack goes before the tool only where a pre-tool hook can add context');
+    assert.equal(caps.prompt === false, !!a.promptless, 'an agent whose hooks do not carry the ask says so (both task IDs are offered)');
     for (const f of ['context', 'deny', 'block', 'notice']) assert.equal(typeof a.out[f], 'function', `out.${f}`);
     assert.equal(typeof a.call, 'function');
     assert.equal(typeof a.read, 'function');

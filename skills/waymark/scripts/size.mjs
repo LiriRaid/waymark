@@ -43,6 +43,8 @@ export function sizes(cwd) {
   const descriptions = dirs.map((d) => (read(path.join(SKILLS, d, 'SKILL.md')).match(/^description:.*$/m) || [''])[0].length).reduce((a, b) => a + b, 0);
   const real = () => {
     const repo = stackLine(home.root);
+    // WAYMARK_SIZE_PINNED: the tests measure the reminder with a typical task line and git line, not this working tree's (the number of changed files and the length of their names moved it by a few characters between runs)
+    if (process.env.WAYMARK_SIZE_PINNED) return REMINDER.full + ' ID: new 2026-01-01 · T1.' + (repo ? ` Repo: ${repo}.` : '') + ' Git: main · 2 changed: M a-file.ts, M b-file.ts, ….';
     return REMINDER.full + taskLine(cwd) + (repo ? ` Repo: ${repo}.` : '') + gitLine(home.root);
   };
   const protocol = (part) => read(path.join(CORE, 'references', 'protocol', part)).length;

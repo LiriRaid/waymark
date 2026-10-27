@@ -10,14 +10,18 @@
 // update check are `waymark.mjs check` (docs/adr/0008): this hook only adds one line pointing to it when the last
 // check is older than a week (at most once a week). It never blocks. Remove it from the agent's settings to disable it.
 import fs from 'node:fs';
+import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, logHookError, gitError, PROBE_OK } from './provenance.mjs';
-import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes } from './notes.mjs';
+import { projectHome, readTaskRecords, readRecords, aprendidoOf, workspaceSiblings, expireOpen, refreshTasks, rebuildFromGit, readRelay, RELAY_MARK, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { repairNotes, noteLateCommits, hasFetchSpec, mergeNotes, ensureFetchSpec, hasRemote, fetchNotes, defaultRemote } from './notes.mjs';
 import { learnedLines } from './engram.mjs';
+import { census, fillMemory } from './convention.mjs';
+import { fillRuntime, runtimeDir } from './runtime.mjs';
+import { fillEyes, cleanEyes } from './eyes.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins, gateCell } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations, fillRelated, syncIdentity, PM_PLACEHOLDER } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -48,7 +52,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 
-export const CARD_HEAD = 'Waymark context card (already recalled). Pointers, not facts: verify in the code; the code wins, fix the entry.\n';
+export const CARD_HEAD = 'Waymark context card. Pointers, not facts: the code wins; fix the entry.\n';
 // The commands script, defined once in the card as W; a line added after the card says W only when the card defined it.
 export const W_CMD = `node "${path.join(SCRIPTS, 'waymark.mjs').replace(/\\/g, '/')}"`;
 const wIn = (text) => (text.includes(` W = ${W_CMD}`) ? 'W' : W_CMD);
@@ -61,6 +65,13 @@ export const EXTRA = {
 };
 // The open tasks of Work in progress lines: a task line not closed (✔), whether "▶ [<id>]" or an older pending "[<id>]".
 export const openIds = (lines) => lines.map((l) => l.match(/^-\s*(?:▶\s*)?\[([^\]]*· T\d+[a-z]?)\]/)?.[1]).filter(Boolean);
+// The open IDs as the card lists them: a date said once for the IDs that follow it, at most OPEN_MAX, the rest counted (W tasks lists them).
+const OPEN_MAX = 6;
+export const openList = (ids) => {
+  let day = null;
+  const shown = ids.slice(0, OPEN_MAX).map((id) => { const [d, t] = id.split(' · '); if (t && d === day) return t; day = t ? d : null; return id; });
+  return shown.join(', ') + (ids.length > OPEN_MAX ? ` +${ids.length - OPEN_MAX} (W tasks)` : '');
+};
 export const HELD_MAX = 520; // characters of the held message the card carries; a longer one is kept whole in held-full.md
 export const HELD_MORE = ' … (the rest: .waymark/held-full.md)';
 export function digest(cwd, agentName = 'claude') {
@@ -75,18 +86,51 @@ export function digest(cwd, agentName = 'claude') {
     out.push(`Project memory: none for ${cwd}. Create ${where} now with the Minimal bootstrap (waymark/references/project-detection.md) before the first edit${home.dir ? '; the end-of-turn hook keeps .waymark/ out of git' : ''}.`);
     return out.join('\n');
   }
+  // the template's Architecture placeholder becomes what the repo itself shows (docs/adr/0043), never over a line somebody wrote
+  if (!home.legacy && /^- Architecture:\s*<slug/m.test(best.text)) {
+    try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
+  }
+  // the template's Package manager placeholder becomes the repo's own (lockfile or packageManager), marked to confirm
+  if (!home.legacy && PM_PLACEHOLDER.test(best.text)) {
+    try { if (syncIdentity(home.memory, stackOf(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook identity', e); }
+  }
   out.push(home.legacy ? `Project memory: ${where} (old location; read; full file there; W check offers the move). W = ${W_CMD}.` : `Project memory: ${where} (read; full file there) and tasks.md next to it (where the work stands). W = ${W_CMD}.`);
+  // the Node the stack needs, when this machine's is not it (a legacy Angular on Node 24): a `runtime` row in Quality gates the first time, never over a line somebody wrote
+  if (!home.legacy) { try { if (fillRuntime(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook runtime', e); } }
+  // the dev server the eyes look at (docs/adr/0047): proposed from package.json, "to confirm" until the user's first seen change; the captures of a week ago go
+  if (!home.legacy) { try { if (fillEyes(home.memory, home.root)) best.text = read(home.memory); cleanEyes(); } catch (e) { logHookError('session-hook eyes', e); } }
+  // the project's own migration command (docs/adr/0046): "to confirm" in Conventions, so a migration written by hand is asked about first
+  if (!home.legacy) { try { if (fillMigrations(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook migrations', e); } }
+  // the tests of the touched files from the repo's runner (Vitest related, Jest --findRelatedTests), "to confirm", when the row is empty: seconds, not the suite
+  if (!home.legacy) { try { if (fillRelated(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook related', e); } }
+  // every runtime row, one language each: the folders go first on the PATH together, a "none (…)" says what is missing, a command the user wrote is their prefix
+  const runtimes = [...best.text.matchAll(/^\|\s*runtime\s*\|\s*([^|]+)\|/gim)].map((m) => m[1].trim().replace(/`/g, ''));
+  const dirs = runtimes.map(runtimeDir).filter(Boolean), posix = (p) => String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
+  const legacyRule = 'stacks/generic.md → Legacy repos';
+  for (const r of runtimes.filter((c) => /^none\b/i.test(c))) out.push(`Runtime: ${r}. ${legacyRule}.`);
+  if (dirs.length) out.push(`Runtime: this machine's runtime is not the one this repo needs (memory.md → Quality gates, the runtime rows): run every gate with ${dirs.join(' and ')} first on the PATH, never \`nvm use\`, \`rbenv global\`, \`pyenv global\` or \`sdk default\` (they switch the machine's runtime) — bash: PATH="${dirs.map(posix).join(':')}:$PATH" <gate> · PowerShell: $env:PATH="${dirs.join(';')};$env:PATH"; <gate>. ${legacyRule}.`);
+  for (const r of runtimes.filter((c) => !/^none\b/i.test(c) && !runtimeDir(c))) out.push(`Runtime: this machine's runtime is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${r}".`);
+  const toConfirm = best.text.match(/^- Architecture:[^\n]*\(to confirm\)\s*$/m);
+  if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.
   const all = readTaskRecords(home), last = all.filter((r) => r.id).pop(); // read once: the last close and the incidents
+  const relay = home.legacy ? '' : readRelay(home); // what the last task left for whoever starts next (.waymark/next-prompt.md), any agent
   if (last) {
-    const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
+    // the Handoff of the same task carries its Aprendido whole: the line does not repeat it
+    const learned = relay.startsWith(`Relevo de ${last.id} `) ? '' : aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 110)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 90)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
   // listed, not asked: `W check` asks which already work, so the first reply of a session is the user's task
-  if (open.length) out.push(`Open tasks (▶): ${open.join(', ')} (W check asks the user which already work).`);
+  if (open.length) out.push(`Open tasks (▶): ${openList(open)} (W check asks the user which already work).`);
+  // the card's line is bounded: the head clipped, the Aprendido's tail kept (its next step and the plan's ✔1 · ▶2 are there), the whole in the file
+  if (relay) {
+    const [head, ...rest] = relay.split(/\n+/), tail = [...rest.join(' · ')]; // by code point: a cut never splits an emoji
+    const short = `${clip(head, 110)}${tail.length ? ` · ${tail.length > 150 ? `…${tail.slice(-149).join('').trimStart()}` : tail.join('')}` : ''}`;
+    out.push(`Handoff (the user's request comes first): ${short}${short.length < relay.length ? ' (whole: .waymark/next-prompt.md)' : ''}`);
+  }
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
   const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
   if (notes.length) out.push('Notes:\n' + notes.join('\n'));
@@ -95,14 +139,14 @@ export function digest(cwd, agentName = 'claude') {
   const line = stackLine(home.root, { direct });
   if (line) out.push(`Repo (read now): ${line}`);
   const gates = section('\n' + best.text, 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
-    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).filter(([g, c]) => g && c && !rowProblem(c, home.root)).map(([g, c]) => `${g}: ${translate(gateCell(c), stack, { root: home.root, direct })}`);
   if (gates.length) out.push('Gates: ' + gates.join(' · '));
-  try { const inc = incidentsLine(incidents(all)); if (inc) out.push(inc); } catch {}
+  try { const inc = incidentsLine(incidents(all), 'W'); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 2, 110, last?.id); } catch {} // the last closed is already above
+  try { if (!home.legacy) learned = learnedLines(home, 2, 90, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at your first edit of each file (never run it yourself); on demand: W memory <section> (Conventions · Identity), W tasks.`);
+  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); on demand: W memory <section> (Conventions · Identity), W tasks.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -121,7 +165,13 @@ export function digest(cwd, agentName = 'claude') {
 export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
   let text = '';
-  try { if (now - fs.statSync(file).mtimeMs < 86400000) text = fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '').trim(); fs.rmSync(file, { force: true }); } catch {}
+  try {
+    const content = fs.readFileSync(file, 'utf8');
+    if (content.startsWith(RELAY_MARK)) return ''; // a handoff is no held message: the card shows it and it stays
+    const cut = content.indexOf('\n' + RELAY_MARK), whole = cut < 0 ? content : content.slice(0, cut + 1); // a handoff after the message stays
+    if (now - fs.statSync(file).mtimeMs < 86400000) text = whole.replace(/^<!--[^\n]*-->\n/, '').trim();
+    if (cut < 0) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, content.slice(cut + 1));
+  } catch {}
   if (text.length <= HELD_MAX) return text;
   // the user's words are never lost to the cap: the whole message stays in a file the agent reads on demand
   try { fs.writeFileSync(path.join(home.dir, 'held-full.md'), text + '\n'); } catch {}
@@ -178,7 +228,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const bare = !!home.dir && !home.legacy && !fs.existsSync(home.dir);
       if (bare && hasRemote(root)) {
         added = ensureFetchSpec(root);
-        if ((added || fetchDue(root)) && hasFetchSpec(root)) { const f = fetchNotes(root, 'origin', FETCH_MS); if (!f.ok) failed = gitError(f.output); }
+        if ((added || fetchDue(root)) && hasFetchSpec(root)) { const f = fetchNotes(root, defaultRemote(root), FETCH_MS); if (!f.ok) failed = gitError(f.output); }
       } else added = !!home.dir && !home.legacy && fs.existsSync(home.dir) && ensureFetchSpec(root);
       joined = hasFetchSpec(root) && mergeNotes(root);
       if (bare) rebuilt = rebuildFromGit(home);
@@ -226,8 +276,5 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try { if (agent.ruleInCard && !guest) text = instructionsBlock() + (text ? '\n\n' + text : ''); } catch {}
     if (text) answer(agent, agent.out.context('SessionStart', text));
   };
-  process.stdin.on('data', (d) => { input += d; });
-  process.stdin.on('end', emit);
-  process.stdin.resume();
-  setTimeout(emit, 1500).unref();
+  readStdin((text) => { input = text; emit(); }, { idle: 1500 });
 }

@@ -70,6 +70,15 @@ test('tasksOf and groups: one row per version and level, with the means, the sha
   assert.equal(g[0].shares.responses.routine, 2);
 });
 
+test('tasksOf: records the caller already read give the same rows without reading the log again', () => {
+  const ev = evaluation(link(2, 10, 100, 1000, 50), link(10, 20, 200, 4000, 500), link(1, 5, 0, 1000, 10));
+  const d = project([{ level: 2, evaluation: ev }, { level: 1, evaluation: ev }]);
+  const { projectHome, readTaskRecords } = P, records = readTaskRecords(projectHome(d));
+  assert.deepEqual(C.tasksOf(d, records), C.tasksOf(d), 'the same rows');
+  assert.deepEqual(C.tasksOf(d, records.slice(0, 1)).map((t) => t.level), [2], 'counter-example: it reads the records it is given, not the log');
+  assert.deepEqual(C.tasksOf(d, []), [], 'no records given is none, not a read of the log');
+});
+
 test('routineShare: a rolling window of the last tasks of one level, so history does not hold a lever back', () => {
   const old = evaluation(link(10, 0, 0, 1000, 0), link(10, 0, 0, 1000, 0), link(0, 0, 0, 0, 0));
   const lean = evaluation(link(1, 0, 0, 1000, 0), link(19, 0, 0, 19000, 0), link(0, 0, 0, 0, 0));
@@ -113,7 +122,7 @@ test('report and render: the fixed context, the table by version and level, and 
   assert.ok(r.fixed.chars > 5000 && r.fixed.perPromptChars > 100, 'what Waymark injects, from size.mjs');
   const text = C.render(r);
   assert.match(text, /^Waymark cost · waymark\.cost\/v1 · 1 recorded task/);
-  assert.match(text, /2\.0\.16 · L2 · 1 ·/);
+  assert.match(text, /2\.0\.16 · [\w.-]+ · L2 · 1 ·/); // the model is a column (docs/adr/0049)
   assert.match(text, /Q and L0 write no evaluation/);
 });
 

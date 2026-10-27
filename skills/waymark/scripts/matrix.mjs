@@ -40,7 +40,7 @@ export async function agentMatrix() {
     const has = (x) => (x ? 'enforced' : 'advisory');
     const guarded = (prevented) => (prevented ? 'prevent' : ev.Stop ? 'detect' : 'none'); // the transcript is read at the end of the turn wherever a Stop hook runs
     rows.push({
-      key: a.key, name: a.name || a.key, adapter: a.adapter || null, events: ev,
+      key: a.key, name: a.name || a.key, adapter: a.adapter || null, soon: a.soon || null, events: ev,
       cells: a.adapter ? {
         stop: has(ev.Stop && out.block), gate: has(ev.PreToolUse && out.deny), brake: has(ev.UserPromptSubmit && out.blockPrompt), hand: ev.PreToolUse && preContext ? 'enforced' : ev.PostToolUse ? 'enforced' : 'advisory',
         guard: guarded(ev.PreToolUse && out.deny), reads: guarded(ev.PreToolUse && out.deny && readsGuarded), secrets: guarded(false),
@@ -60,7 +60,8 @@ export function matrixMarkdown(rows) {
   return [
     '**Hook events Waymark registers, per agent** (from `agents/agents.json`):', '', ...t1, '',
     '**What each agent enforces.** *enforced*: a hook runs and can stop the turn or hand the agent the text. *advisory*: the agent is told in its instructions and nothing blocks it. For what the guard protects, *prevent*: a hook before the tool refuses the call; *detect*: nothing refuses it, and the end-of-turn hook reads the transcript of the agent and records what got through in the record of the task, where it cannot be removed. No guarded action is left with neither.', '', ...t2, '',
-    `Agents Waymark knows with no adapter yet (nothing is recorded or checked there): ${without.map((r) => r.name).join(', ') || 'none'}.`,
+    // coming soon: the agent cannot technically carry the chain yet (agents.json `soon`, its reason); outside the count of the scorecard's check 9.1 (docs/adr/0048)
+    `Coming soon, no adapter yet (nothing is recorded or checked there): ${without.filter((r) => r.soon).map((r) => `${r.name} (${r.soon})`).join('; ') || 'none'}.${without.some((r) => !r.soon) ? ` Known with no adapter and no reason to wait: ${without.filter((r) => !r.soon).map((r) => r.name).join(', ')}.` : ''}`,
   ].join('\n');
 }
 

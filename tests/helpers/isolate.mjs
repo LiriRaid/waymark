@@ -7,14 +7,37 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const REAL_HOME = process.env.WAYMARK_TEST_REAL_HOME || os.homedir(); // kept for the one test that checks the isolation
+
+// The sandboxes of suites whose process is gone (a crash, a kill: their exit handler never ran), older than an hour, are removed when a new suite starts.
+// `alive(pid)` says whether a process runs. → the paths removed.
+const running = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+export function sweepDead(tmp = os.tmpdir(), alive = running, now = Date.now()) {
+  const gone = [];
+  let names = [];
+  try { names = fs.readdirSync(tmp); } catch { return gone; }
+  for (const name of names) {
+    const pid = Number(name.match(/^wm-test-(\d+)-/)?.[1]);
+    if (!pid || alive(pid)) continue;
+    const p = path.join(tmp, name);
+    try { if (now - fs.statSync(p).mtimeMs < 3600000) continue; fs.rmSync(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); gone.push(p); } catch {}
+  }
+  return gone;
+}
+
 if (!process.env.WAYMARK_TEST_SANDBOX) {
+  sweepDead();
   const INHERITED = /^(WAYMARK_(?!CONFORMANCE_)|CLAUDE|CODEX_|GEMINI_|CURSOR_|COPILOT_|OPENCODE_|ANTIGRAVITY_|KIRO_|XDG_|USER_PROMPT$)/i;
   for (const k of Object.keys(process.env)) if (INHERITED.test(k)) delete process.env[k];
-  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'waymark-sandbox-'));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), `wm-test-${process.pid}-`));
   process.env.WAYMARK_TEST_SANDBOX = sandbox;
   process.env.WAYMARK_TEST_REAL_HOME = REAL_HOME;
   process.env.USERPROFILE = process.env.HOME = sandbox;
   process.env.WAYMARK_HOME = path.join(sandbox, '.waymark');
-  process.on('exit', () => { try { fs.rmSync(sandbox, { recursive: true, force: true }); } catch {} });
+  // one root for everything a test makes: os.tmpdir() answers a folder inside the sandbox (and so does every process the test spawns), so no test leaves a folder
+  // of its own in the machine's temp, whether it removes its own or not; the root is removed when the process ends.
+  const tmp = path.join(sandbox, 'tmp');
+  fs.mkdirSync(tmp);
+  process.env.TMPDIR = process.env.TMP = process.env.TEMP = tmp;
+  process.on('exit', () => { try { fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch {} });
 }
 export const SANDBOX = process.env.WAYMARK_TEST_SANDBOX;

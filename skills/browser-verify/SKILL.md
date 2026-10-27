@@ -12,13 +12,13 @@ A passing test suite says the code compiles and the units behave; only a rendere
 - **Look before you touch.** Every interaction starts with a fresh view of the page (accessibility tree, text or screenshot). Selectors and coordinates come from what is rendered now, never from guessing at the source.
 - **Wait for readiness, not for time.** Wait for the server to answer and for the page to settle (network quiet, target element present). Fixed sleeps are a last resort and always short.
 - **Use what the session already has.** Prefer browser tools already wired into the session over installing anything.
-- **Local only, fake data only.** Verify against `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` or `*.test`. Use seed/fixture or generated test accounts, never the user's real credentials, never a production URL.
+- **Local only, never credentials.** Verify against `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` or `*.test`, under the user already logged in on the platform: Waymark creates no test users or profiles and signs in nowhere. The one other host is a design-reference URL the user writes in the request, read-only. Never a production URL.
 - **Every criterion gets a verdict.** Pass, fail, or not verified with a reason. Silence is not a pass.
 
 ### Guardrails
 - **MUST** recon before every interaction sequence; re-read after navigation or a re-render.
 - **MUST** stay on local development hosts; refuse production or third-party URLs for interaction.
-- **MUST NOT** type real passwords, tokens, card or ID numbers; use test values from the project's seeds/fixtures or generated ones recorded there.
+- **MUST NOT** type passwords, tokens, card or ID numbers anywhere: the user's own open session is the only login, and a screen that needs another is `Ojos: no (<why>)`.
 - **MUST NOT** install browsers or packages without an explicit yes.
 - **MUST** stop servers you started and leave the user's running.
 - **SHOULD** keep scripts throwaway in the scratchpad; promote to a committed e2e test only when `dept-qa` asks for one.
@@ -28,11 +28,12 @@ Decide once per session, top to bottom; stop at the first that works. Say which 
 
 | # | Provider | How to detect | Notes |
 |---|---|---|---|
-| 1 | Built-in browser pane / preview tools | Tool list or `ToolSearch` shows tools such as `preview_start`, `navigate`, `read_page`, `find`, `computer` (screenshot), `read_console_messages`, `read_network_requests`, `resize_window` | Best option: no install, the user can watch. `resize_window` takes presets (mobile 375, tablet 768, desktop) and a `colorScheme` for light/dark. Screenshots come back inline, not as files. |
-| 2 | Browser extension MCP (e.g. a Chrome extension server) | Deferred tools named like `mcp__<chrome-server>__navigate`; load the whole set in ONE `ToolSearch` call | Runs in the user's real browser profile: never read their other tabs, history or saved credentials. |
-| 3 | Playwright via Node | `@playwright/test` or `playwright` in `package.json` | `pnpm exec playwright ...` (or the project's package manager). Saves screenshots to disk. |
-| 4 | Playwright via Python | `playwright` in `pyproject.toml` / `requirements*.txt` | Use the project's environment (`uv run`, `poetry run`, venv). |
-| 5 | Nothing available | — | Ask before installing anything (`pnpm add -D @playwright/test` + `pnpm exec playwright install chromium`). If the user declines, report every criterion as *not verified* and give manual steps. |
+| 1 | ego-browser (the eyes' first provider) | `ego-browser` on PATH (or `~/.local/share/ego/active_version_dir`) | Run `ego-browser skill` first and follow it. Scripts run in Node, not in the page: `page.cdp("Emulation.setDeviceMetricsOverride", …)` sets the viewport, `page.evaluate` measures, `page.click` clicks, `page.screenshot({ path })` needs an absolute path; PowerShell: write a `.mjs` file. One task space per task, closed with `finish({ keep: [] })`. A version before 0.6.1 timed out on screenshots: upgrade, with the user's yes. Never a command that clears the profile. |
+| 2 | Built-in browser pane / preview tools | Tool list or `ToolSearch` shows tools such as `preview_start`, `navigate`, `read_page`, `find`, `computer` (screenshot), `read_console_messages`, `read_network_requests`, `resize_window` | Best option: no install, the user can watch. `resize_window` takes presets (mobile 375, tablet 768, desktop) and a `colorScheme` for light/dark. Screenshots come back inline, not as files. |
+| 3 | Browser extension MCP (e.g. a Chrome extension server) | Deferred tools named like `mcp__<chrome-server>__navigate`; load the whole set in ONE `ToolSearch` call | Runs in the user's real browser profile: never read their other tabs, history or saved credentials. |
+| 4 | Playwright via Node | `@playwright/test` or `playwright` in `package.json` | `pnpm exec playwright ...` (or the project's package manager). Saves screenshots to disk. |
+| 5 | Playwright via Python | `playwright` in `pyproject.toml` / `requirements*.txt` | Use the project's environment (`uv run`, `poetry run`, venv). |
+| 6 | Nothing available | — | Ask before installing anything (`pnpm add -D @playwright/test` + `pnpm exec playwright install chromium`). If the user declines, report every criterion as *not verified* and give manual steps. |
 
 ### Server lifecycle
 Starting, reusing or stopping the dev server → `references/server-lifecycle.md`.
@@ -49,7 +50,7 @@ Starting, reusing or stopping the dev server → `references/server-lifecycle.md
 Always return to the department:
 
 ```
-Browser verify · provider: <built-in pane | chrome MCP | playwright-node | playwright-python> · url: <local url> · server: <started by me / reused>
+Browser verify · provider: <ego-browser | built-in pane | chrome MCP | playwright-node | playwright-python> · url: <local url> · server: <started by me / reused>
 Criteria
 - ✔ <criterion> — <what was observed>
 - ✘ <criterion> — <observed vs expected> — <screenshot ref>
@@ -72,6 +73,7 @@ Pick the smallest mode that proves the brief. `dept-qa` browser verification for
 - **states** — new or restyled components, screens with async data, responsive or theming work. → `modes/states.md`
 - **regression** — a previously reported bug was fixed, or a change touches code near a known bug. → `modes/regression.md`
 - **evidence** — closing an L1+ UI task, or the user asks for screenshots or console output. → `modes/evidence.md`
+- **eyes** — the end of every L2/L3 task that changes something seen, and of an L1 CSS/HTML change with no spec: automatic, the hook blocks the Cierre without it (ADR 0047). → `modes/eyes.md`
 
 ## Stack adapters
 Stack-specific notes → `references/stack-adapters.md` (read only the project's stack row).

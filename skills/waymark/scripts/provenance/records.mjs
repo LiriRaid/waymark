@@ -1,6 +1,5 @@
 // Every task record, from the log and from what only git holds (notes, waymark-log lines, trailer commits).
-import { spawnSync } from 'node:child_process';
-import { readNotes, readAnchors, readLogLines } from '../notes.mjs';
+import { readNotes, readAnchors, readLogLines, noteTips, headSha, headLog, NOTES_REF } from '../notes.mjs';
 import { ID } from './ids.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { projectHome } from './project.mjs';
@@ -25,9 +24,9 @@ function noteOnly(notes, records) {
 
 // The lines rewrite anchors removed: by their key (with the session, so another machine's task with the same ID stays),
 // or by name for an anchor that has no keys.
-const forgotten = (root) => {
+const forgotten = (root, tips) => {
   const keys = new Set(), names = new Set();
-  for (const a of readAnchors(root).filter((x) => x.kind === 'rewrite')) for (const k of a.keys || a.removed || []) (a.keys ? keys : names).add(k);
+  for (const a of readAnchors(root, tips).filter((x) => x.kind === 'rewrite')) for (const k of a.keys || a.removed || []) (a.keys ? keys : names).add(k);
   return (r) => keys.has(lineKey(r)) || names.has(recordName(r));
 };
 
@@ -36,15 +35,12 @@ const forgotten = (root) => {
 // read the records several times a turn). → records
 const trailerCache = new Map();
 function trailerRecords(root, known) {
-  const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 1500 });
-  if (head.status !== 0) return [];
-  const key = `${root}|${head.stdout.trim()}`;
+  const head = headSha(root); // from .git's files: no process
+  if (!head) return [];
+  const key = `${root}|${head}`;
   if (!trailerCache.has(key)) {
-    const log = spawnSync('git', ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, maxBuffer: 16 * 1024 * 1024 });
     const byTask = new Map();
-    for (const entry of log.status === 0 ? log.stdout.split('\x1e') : []) {
-      const [commit, at, body = ''] = entry.trim().split('\x00');
-      if (!commit) continue;
+    for (const { commit, at, body } of headLog(root) || []) { // one git log per HEAD, shared with repairNotes and noteLateCommits
       for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) {
         const id = m[1];
         if (!ID.test(id)) continue;
@@ -59,10 +55,10 @@ function trailerRecords(root, known) {
 
 // What git holds that the log lacks: records that are only notes, log lines kept in git (not those forget removed), and
 // the trailer IDs no record holds. Not chained: git hashes them.
-function gitOnly(root, records, notes) {
+function gitOnly(root, records, notes, tips) {
   const only = noteOnly(notes, records);
-  const seen = new Set([...records, ...only].map(lineKey)), gone = forgotten(root);
-  const logged = readLogLines(root).filter((r) => !gone(r) && !seen.has(lineKey(r)) && seen.add(lineKey(r)));
+  const seen = new Set([...records, ...only].map(lineKey)), gone = forgotten(root, tips);
+  const logged = readLogLines(root, tips).filter((r) => !gone(r) && !seen.has(lineKey(r)) && seen.add(lineKey(r)));
   const known = new Set([...records, ...only, ...logged].flatMap((r) => [r.id, r.claimed]).filter(Boolean)); // claimed: an ID the hook replaced
   return [...only, ...logged, ...trailerRecords(root, known)];
 }
@@ -71,7 +67,8 @@ function gitOnly(root, records, notes) {
 // becomes the whole record (note fields, then the stub's); a whole log line that a later commit also carries as a note
 // (same close) takes the note's fields; what only git holds joins.
 export function readTaskRecords(home) {
-  const records = readRecords(home.log), notes = readNotes(home.root);
+  const tips = noteTips(home.root); // one read of the three refs: their tips asked once
+  const records = readRecords(home.log), notes = readNotes(home.root, null, NOTES_REF, tips);
   const byClose = new Map();
   for (const [, text] of notes) { try { const r = JSON.parse(text); if (r?.id && !byClose.has(closeKey(r))) byClose.set(closeKey(r), r); } catch {} }
   const merged = records.map((r) => {
@@ -80,7 +77,7 @@ export function readTaskRecords(home) {
     const n = r.id && byClose.get(closeKey(r));
     return n ? { ...r, ...n, prev: r.prev, hash: r.hash } : r;
   });
-  const only = gitOnly(home.root, records, notes);
+  const only = gitOnly(home.root, records, notes, tips);
   return only.length ? byDate([...merged, ...only]) : merged;
 }
 
@@ -88,5 +85,5 @@ export function readTaskRecords(home) {
 // The log's records plus those only git holds (their IDs are taken too: a clone never reuses one).
 export const knownRecords = (cwd) => {
   const records = readLog(cwd);
-  try { const root = projectHome(cwd).root, only = gitOnly(root, records, readNotes(root)); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
+  try { const root = projectHome(cwd).root, tips = noteTips(root), only = gitOnly(root, records, readNotes(root, null, NOTES_REF, tips), tips); return only.length ? byDate([...records, ...only]) : records; } catch { return records; }
 };

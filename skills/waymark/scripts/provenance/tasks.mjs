@@ -4,8 +4,27 @@ import path from 'node:path';
 import { isPrompt } from '../transcript.mjs';
 import { waymarkHome as HOME } from '../lib/paths.mjs';
 import { ID, base, localDay } from './ids.mjs';
-import { readLog } from './chain.mjs';
 import { knownRecords } from './records.mjs';
+import { projectHome } from './project.mjs';
+
+// Turns that started and never reached the end-of-turn hook: .waymark/open.json, one entry per session, written by the
+// per-prompt hook and removed when the turn ends (taskmd.mjs).
+export const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
+export const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
+
+// The turn this session left open (it never reached the end-of-turn hook: interrupted, or waiting on a background agent)
+// when its next prompt arrives, or null. Older than SESSION_OPEN_MS it is another day's: not carried over.
+const SESSION_OPEN_MS = 6 * 3600000;
+export function openTurn(cwd, session, now = new Date()) {
+  const o = readOpen(projectHome(cwd))[session || 'unknown'];
+  return o && now - Date.parse(o.at || 0) < SESSION_OPEN_MS ? o : null;
+}
+
+// Turns that other sessions have open in this project, started within `maxAge` (two hours: an older one was interrupted):
+// two sessions on one repo. → [{ session, ...entry }]
+export function otherOpen(cwd, session, now = new Date(), maxAge = 2 * 3600000) {
+  return Object.entries(readOpen(projectHome(cwd))).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) < maxAge).map(([k, o]) => ({ session: k, ...o }));
+}
 
 // The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded, `committed` the IDs
 // only a commit's trailer holds (taken for a new task, yet still free to close: a task commits before its Cierre).
@@ -81,17 +100,35 @@ export function markTaskStart(session, now = Date.now()) {
   writeStarts(all);
   return now;
 }
+// The follow-up the task's first prompt was offered (null: none; ~/.waymark/.task-offers.json), so a later prompt of the
+// same task (an answer mid-task) keeps it. Read: taskOffer(session) → the offer, or undefined when none was kept. It lives as
+// long as the task's start mark: clearTaskStart drops it, so a mark that was never cleared is the only way one outlives its task.
+const offersFile = () => path.join(HOME(), '.task-offers.json');
+const readOffers = () => { try { return JSON.parse(fs.readFileSync(offersFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeOffers = (all) => {
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(offersFile(), JSON.stringify(all));
+};
+export function taskOffer(session, offer) {
+  const all = readOffers(), id = session || 'unknown';
+  if (offer === undefined) return all[id] ? all[id].offer : undefined;
+  if (all[id] && all[id].offer === offer && Date.now() - all[id].at < 86400000) return offer; // the same offer is already kept: no write
+  all[id] = { offer, at: Date.now() };
+  for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > 7 * 86400000) delete all[k];
+  writeOffers(all);
+  return offer;
+}
 export function clearTaskStart(session) {
   const all = readStarts(), id = session || 'unknown';
+  const offers = readOffers();
+  if (id in offers) { delete offers[id]; writeOffers(offers); }
   if (!all[id]) return;
   delete all[id];
   writeStarts(all);
 }
 
-// A task of this session is not done: it started and has no Cierre yet (a turn the quota cut, a reply waiting on the
-// user), or its last Cierre says Resultado parcial or bloqueado. The context brakes wait for it (docs/adr/0016).
+// A task of this session is in progress from its first prompt until its close: the size brake only advises while it lasts
+// (rule0-hook.mjs). A task closed parcial or bloqueado is closed: the brake holds between tasks (docs/adr/0016, 0044).
 export function taskInProgress(cwd, session) {
-  if (taskStartMark(session)) return true;
-  const last = readLog(cwd).filter((r) => r.session === (session || 'unknown') && r.cierre).pop();
-  return !!last && /^[ \t]*Resultado:\s*\**\s*(parcial|bloqueado)/im.test(last.cierre);
+  return !!taskStartMark(session);
 }

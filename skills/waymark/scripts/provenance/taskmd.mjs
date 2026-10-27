@@ -8,19 +8,16 @@ import { maskSecrets } from './secrets.mjs';
 import { ensureLocal, projectHome } from './project.mjs';
 import { appendRecord, gitNote } from './chain.mjs';
 import { readTaskRecords } from './records.mjs';
-import { taskIds } from './tasks.mjs';
+import { taskIds, openFile, readOpen } from './tasks.mjs';
 import { followUps } from './derive.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
-// entry per session, written by the per-prompt hook and removed when the turn ends.
-const openFile = (home) => (home?.dir && !home.legacy ? path.join(home.dir, 'open.json') : null);
-const readOpen = (home) => { try { return JSON.parse(fs.readFileSync(openFile(home), 'utf8')) || {}; } catch { return {}; } };
-
-export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
+// entry per session (read by tasks.mjs), written by the per-prompt hook and removed when the turn ends.
+export function markOpen(cwd, session, prompt, now = new Date(), agent = null, followUp = undefined) { // followUp: the one the per-prompt hook offered (null: none)
   const home = projectHome(cwd), file = openFile(home);
   if (!file || !fs.existsSync(home.memory)) return false; // tasks.md exists only with memory in the project
   const ids = taskIds(cwd, now), open = readOpen(home);
-  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex"
+  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: (followUp === undefined ? ids.followUp : followUp) || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex"
   ensureLocal(home);
   fs.writeFileSync(file, JSON.stringify(open, null, 1));
   refreshTasks(home, true);
@@ -52,6 +49,40 @@ export function expireOpen(home, session, now = new Date(), maxAge = INTERRUPTED
   }
   if (Object.keys(open).length) fs.writeFileSync(file, JSON.stringify(open, null, 1)); else fs.rmSync(file, { force: true });
   return gone.map(([, o]) => o);
+}
+
+// The handoff: .waymark/next-prompt.md carries what a task left for whoever starts next (the ✔/▶ steps of its Aprendido, what a parcial is missing), so any
+// agent or account finds it in the card, in place of a long note in one agent's own memory. The context brake keeps the user's held message in the same file:
+// that one is never overwritten. A close with nothing to hand over takes a stale handoff away. → 'written' | 'removed' | 'kept' | ''.
+const RELAY_FILE = 'next-prompt.md', RELAY_CHARS = 600, RELAY_DAYS = 7;
+export const RELAY_MARK = '<!-- handoff ';
+const STEPS = /[✔▶]\s*\d/;
+export function writeRelay(home, rec) {
+  if (!home?.dir || home.legacy || !rec?.id) return '';
+  const file = path.join(home.dir, RELAY_FILE);
+  let current = '';
+  try { current = fs.readFileSync(file, 'utf8'); } catch {}
+  if (current && !current.startsWith(RELAY_MARK)) return 'kept'; // the user's own words, held by the brake
+  const cierre = String(rec.cierre || '').replace(/\*\*|__/g, ''), learned = aprendidoOf(cierre);
+  const result = cierre.match(/Resultado:[ \t]*([^\n]*)/i)?.[1]?.trim() || rec.outcome?.result || '';
+  if (!(/^(?:parcial|bloqueado)/i.test(result) || STEPS.test(learned))) {
+    // only the close of the task the handoff is about takes it away: another task's (or another session's) clean close leaves the steps for whoever starts next
+    if (!current || base(current.match(/^<!-- handoff · (\d{4}-\d\d-\d\d · T\d+[a-z]?) ·/)?.[1] || '') !== base(rec.id)) return '';
+    fs.rmSync(file, { force: true });
+    return 'removed';
+  }
+  const body = clip(`Relevo de ${rec.id} · ${clip(result, 160)}\nAprendido: ${learned}`, RELAY_CHARS);
+  fs.writeFileSync(file, `${RELAY_MARK}· ${rec.id} · ${rec.at || new Date().toISOString()} -->\n${body}\n`);
+  return 'written';
+}
+// The handoff text, or '' when there is none or it is over RELAY_DAYS old; reading it removes nothing (the next session, whichever agent, finds it too).
+export function readRelay(home, now = Date.now()) {
+  if (!home?.dir || home.legacy) return '';
+  try {
+    const file = path.join(home.dir, RELAY_FILE), text = fs.readFileSync(file, 'utf8');
+    if (!text.startsWith(RELAY_MARK) || now - fs.statSync(file).mtimeMs > RELAY_DAYS * 86400000) return '';
+    return text.replace(/^<!--[^\n]*-->\n/, '').trim();
+  } catch { return ''; }
 }
 
 const TASK_CHARS = 300, TASKS_CHARS = 3000; // per task line and whole file: the detail stays in memory.md and the records
@@ -114,48 +145,56 @@ const STALE_DAYS = 14; // an open (▶) line whose task ID is older leaves Work 
 export function writeTaskLine(home, rec, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || !fs.existsSync(home.memory)) return false;
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
-  const learned = aprendidoOf(cierre);
+  const learned = maskSecrets(aprendidoOf(cierre)); // the memory line is written here: masked here too (docs/adr/0045)
   if (!learned || /^ninguno/i.test(learned)) return false;
-  // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
-  // unresolved, keeps its line
-  const done = /^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') && !rec.unresolved?.length;
+  // the line says what the record says: a task the record calls hecho leaves Work in progress (its Aprendido and any testigo left unresolved stay in
+  // the record and in W check), one it calls parcial or bloqueado keeps its line; the Cierre's word only when the record has no result
+  const result = rec.outcome?.result || cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '';
+  const done = /^hecho\b/i.test(result) || !!rec.outcome?.userOwned; // a step the user owns is not left undone
   return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
 // The user confirmed that these tasks work (`waymark.mjs done <ID…>`): their lines leave Work in progress (a task done
 // lives in its record), and a short chained record {kind: "confirm"} keeps the IDs and the note. → the IDs that had a
 // line (others are ignored).
-export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null } = {}) {
+// `always`: the user's "sí" at a close (the per-prompt hook): a task that said hecho has no line to remove, and its
+// confirmation is still recorded.
+export function confirmTasks(home, ids, { note = '', now = new Date(), agent = null, session = null, always = false } = {}) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return [];
   const text = fs.readFileSync(home.memory, 'utf8'), m = ('\n' + text).match(WIP);
-  if (!m) return [];
+  if (!m && !always) return [];
   const wanted = new Map((ids || []).map((id) => [base(id), id]).filter(([b]) => b));
   const done = [];
   const say = maskSecrets(String(note || '').replace(/\s+/g, ' ').trim());
-  const body = m[2].split('\n').map((l) => {
+  const body = (m ? m[2].split('\n') : []).map((l) => {
     const hid = /^\s*-/.test(l) ? headId(l) : null;
     if (!hid || !wanted.has(base(hid))) return l;
     done.push(hid);
     return null;
   }).filter((l) => l !== null);
-  if (!done.length) return [];
-  fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
-  rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
-  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed: done, ...(say ? { said: say.slice(0, 300) } : {}) });
-  return done;
+  const confirmed = always ? [...new Set([...done, ...(ids || [])])] : done;
+  if (!confirmed.length) return [];
+  if (done.length) {
+    fs.writeFileSync(home.memory, ('\n' + text).replace(WIP, (_, head) => head + body.join('\n')).slice(1));
+    rewriteWip(home, { now, label: `confirmed ${done.join(', ')}` });
+  }
+  appendRecord(home.root, { kind: 'confirm', agent, at: now.toISOString(), session, confirmed, ...(say ? { said: say.slice(0, 300) } : {}) });
+  return confirmed;
 }
 
-// Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). → true when it changed.
-export function tidyWip(home, now = new Date()) {
+// Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). An open line whose task's newest record says hecho
+// leaves too, as writeTaskLine would leave it today: `records` are read only when asked (the hand-run tidy), never on a close. → true when it changed.
+export function tidyWip(home, now = new Date(), { records = null } = {}) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return false;
-  return rewriteWip(home, { now, label: 'tidy' });
+  const last = new Map((records || []).filter((r) => r?.id && r.outcome).map((r) => [r.id, r])); // the newest record of each ID wins
+  return rewriteWip(home, { now, label: 'tidy', done: new Set([...last].filter(([, r]) => r.outcome.result === 'hecho' || r.outcome.userOwned).map(([id]) => id)) });
 }
 
 // The section, rewritten: the task's line (when given) in place of its task's lines, then every line moved whole to
 // history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
 // that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
 // every closed (✔) line (DONE_KEPT: a task done lives in its record). A note (no ID at its head) is never moved except when over 200 characters.
-function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
+function rewriteWip(home, { id = null, line = null, now = new Date(), label, done = new Set() }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
   if (!m && !line) return false;
@@ -186,6 +225,7 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const newest = new Map();
   for (const l of tasks) { const b = base(headId(l)); if (!newest.has(b) || idOrder(headId(l)) > idOrder(headId(newest.get(b)))) newest.set(b, l); }
   for (const l of tasks) if (newest.get(base(headId(l))) !== l) drop(l);
+  for (const l of kept.filter((x) => x !== line && /^\s*-\s*▶/.test(x) && done.has(headId(x)))) drop(l); // its record says hecho
   const cutoff = now.getTime() - STALE_DAYS * 86400000;
   for (const l of kept.filter((x) => x !== line && /^\s*-/.test(x) && headId(x) && !/^\s*-\s*✔/.test(x))) {
     const day = Date.parse(`${headId(l).match(ID)[1]}T00:00:00`);
@@ -219,7 +259,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
   const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
-  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
+  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : r.outcome?.userOwned ? `hecho (${r.outcome.userOwned.join(', ')}: tuyo)` : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
@@ -229,6 +269,8 @@ export function tasksMarkdown(home, now = new Date()) {
   const today = now.toLocaleDateString('sv');
   const when = (at) => { const t = new Date(at).toLocaleString('sv'); return t.slice(0, 10) === today ? t.slice(11, 16) : t.slice(5, 16); };
   const qRows = asked.slice(-QUESTIONS_SHOWN).map((r) => clip(`- ${[when(r.at), r.department, r.skills?.join(', ')].filter(Boolean).map(cell).join(' · ')} · "${clip(cell(r.prompt), 80)}"${r.answer ? ` → ${cell(r.answer)}` : ''}`, TASK_CHARS));
+  // changes another project's task made in this one (kind "touched"): who, under which task, and which files
+  const touched = all.filter((r) => r.kind === 'touched').slice(-3).reverse().map((r) => clip(`- ${cell(r.task)} from ${cell(r.from)} · ${new Date(r.at).toLocaleString('sv').slice(0, 16)} · ${(r.files || []).slice(0, 3).map((f) => path.basename(f)).join(', ')}${(r.files || []).length > 3 ? ` (+${r.files.length - 3})` : ''}${r.learned ? ` · ${cell(r.learned)}` : ''}`, 160));
   const who = (r) => (r.agent ? ` · ${cell(r.agent)}` : ''); // the agent that closed it (docs/adr/0008)
   const source = (r) => (gitNote(r) || r.fromNote ? `git notes --ref=waymark show ${String(r.note?.commit || r.fromNote).slice(0, 8)}` : r.fromCommit ? `git show ${r.fromCommit.slice(0, 8)} (no record: its commit only)` : 'last line of provenance.jsonl');
   // The last closed task with what another agent needs to continue: ~220 ch per field.
@@ -256,6 +298,7 @@ export function tasksMarkdown(home, now = new Date()) {
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
     ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash)', ...started, ''] : []),
     ...(questions ? [`## Preguntas (Q) desde el último cierre: ${questions} (${qRows.length < questions ? `las últimas ${qRows.length}; ` : ''}provenance.jsonl, kind "Q")`, ...qRows, ''] : []),
+    ...(touched.length ? ['## Touched from another project (its task is recorded there; kind "touched")', ...touched, ''] : []),
     ...lastClosed,
     `## Done (last ${rows.length}, newest first)`,
     '| Task | Result | Routine | Backed | Request |', '|---|---|---|---|---|', ...rows, '',
@@ -263,7 +306,8 @@ export function tasksMarkdown(home, now = new Date()) {
   // Over budget: the oldest done rows go first down to DONE_MIN, then the in-progress lines with the oldest task IDs
   // (counted as "+n more"), then the remaining done rows.
   let out = render();
-  while (out.length > TASKS_CHARS && redone.length) { redone.pop(); out = render(); } // the rework lines first: they only point at rows
+  while (out.length > TASKS_CHARS && touched.length) { touched.pop(); out = render(); } // the touched lines first: they point at another project
+  while (out.length > TASKS_CHARS && redone.length) { redone.pop(); out = render(); } // the rework lines next: they only point at rows
   while (out.length > TASKS_CHARS && rows.length > DONE_MIN) { rows.pop(); out = render(); }
   while (out.length > TASKS_CHARS && qRows.length > 1) { qRows.shift(); out = render(); } // the oldest questions
   const order = withId.length ? withId.map((l) => idOrder(headId(l))) : tasks.map((_, i) => String(i).padStart(6, '0'));

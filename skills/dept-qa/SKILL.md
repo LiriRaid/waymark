@@ -8,7 +8,7 @@ description: "QA. FIRST, before code-review, for tests and verification: \"escri
 ## Quick ref
 **Mission:** Prove every change works, keeps working and meets the Definition of Done before anyone says "done".
 **Rules:** failing test before the fix or feature (TDD) · every bug fix ships a regression test · deterministic tests of public behavior · never weaken tests or lint to get green
-**Skills by default:** `code-review` · `simplify` (L3) · `library-docs` (`run` / `browser-verify` only when the user asks)
+**Skills by default:** `code-review` · `simplify` (L3) · `library-docs` (`browser-verify` = the eyes at the end of a seen change; `run` only when the user asks)
 **DoD:** tests cover the change, edge and error paths included, review findings resolved or justified.
 
 ## Entry
@@ -22,11 +22,11 @@ Guest (no Waymark block in context) → `../waymark/references/coexistence.md` �
 3. **Where** do the tests live — which pyramid level (unit, integration, e2e) and which files?
 4. **How** is it reproduced or exercised — exact steps, inputs, data, viewport?
 5. Which **gate commands** apply (from project memory) and are any already red before the change?
-6. Is UI affected? Prove it with specs and the build; the browser only if the user asks for it.
+6. Is UI affected? Prove it with specs and the build, then the eyes (`browser-verify`): a measurement or a real click on the local dev server after the last change.
 7. **What does done look like** — which tests must pass and what must be observed running?
 
 ## Scope
-- Owns: test strategy and pyramid, TDD, regression tests, running and interpreting quality gates, browser verification (only when the user asks), code review of the diff, the quality score, the Definition of Done every department inherits.
+- Owns: test strategy and pyramid, TDD, regression tests, running and interpreting quality gates, browser verification (the eyes automatic at a seen change; wider only when the user asks), code review of the diff, the quality score, the Definition of Done every department inherits.
 - Does not own: what to build → `dept-product` · layer rules → `dept-architecture` · CI pipelines and release → `dept-devops` · security testing depth → `dept-security` · accessibility design decisions → `dept-ux-ui`.
 
 ## Procedures
@@ -37,7 +37,7 @@ In `procedures.md` (same folder), one section per task; a reported bug → **Qui
 - New feature or behavior (TDD: red / green / refactor)
 - Bug fix
 - Run the quality gates yourself
-- Browser verification (only when the user asks)
+- Browser verification (the eyes: automatic at a seen change; wider only when the user asks)
 - Code review (L2+, before done or a PR)
 - Quality score (L3 or explicit request only)
 
@@ -52,7 +52,7 @@ In `procedures.md` (same folder), one section per task; a reported bug → **Qui
 ## Tools
 | Capability | Skill / MCP / Agent | When | Level |
 |---|---|---|---|
-| test.browser | `browser-verify` | e2e journeys or visual checks, only when the user asks | — |
+| test.browser | `browser-verify` | The eyes at the end of a seen change; e2e journeys when the user asks | — |
 | app.run | `run` | Reproduce a bug or observe the change running | L2 |
 | review.diff | `code-review` | Before done or opening a PR | L2 |
 | review.simplify | `simplify` | Clean-up after green, behavior-preserving | L3 |

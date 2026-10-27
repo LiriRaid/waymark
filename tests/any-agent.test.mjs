@@ -55,7 +55,9 @@ test('agents as data: agents.json lists every known agent with its docs; the ada
   assert.equal(ih.settingsFile('windsurf'), null, 'no adapter: no hooks written');
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'windsurf'], { encoding: 'utf8' });
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /no adapter yet[\s\S]*Add an agent/, r.stdout);
+  assert.match(r.stdout, /coming soon, no adapter yet: no session start/, r.stdout); // ADR 0048: Windsurf cannot carry the chain yet, so it is told why and no adapter is offered
+  const other = spawnSync(process.execPath, [path.join(SCRIPTS, 'install-hooks.mjs'), '--agent', 'foo'], { encoding: 'utf8' });
+  assert.match(other.stdout, /no adapter yet[\s\S]*Add an agent/, 'counter-example: an agent with no reason to wait is still offered the procedure');
 });
 
 test('a known agent whose hooks are not installed (Kiro): found, the pointer goes into its own instructions file, the plan says where it reads skills', async () => {

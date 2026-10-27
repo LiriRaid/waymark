@@ -18,6 +18,13 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.waymark', '.engram']);
 
 export const readScorecard = (root) => JSON.parse(fs.readFileSync(path.join(root, 'docs', 'scorecard.json'), 'utf8'));
 
+// Check 9.1: the share of the agents that can technically carry the chain that have an adapter. An agent marked `soon` in agents.json (with its reason)
+// is outside the count and listed apart (docs/adr/0048); with none able, there is no share, never 100 %.
+export function adapterShare(agents) {
+  const able = (agents || []).filter((a) => !a.soon || a.adapter); // one that gained an adapter counts again, whatever its field says
+  return able.length ? able.filter((a) => a.adapter).length / able.length : null;
+}
+
 // The lock covers everything but the ADR name and the prose of `about`: a weight, a criterion, a check or a threshold
 // cannot change without a new lock in an ADR.
 export function lockOf(card) {
@@ -57,14 +64,59 @@ const text = (files) => files.filter((f) => TEXT.test(f)).map((f) => { try { ret
 const as = (v) => (Array.isArray(v) ? v : [v]);
 
 // ---- measures: a number computed from the project's records or sources; null when it cannot be measured here ----
-// The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields.
+// The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields. Only the records the
+// measured version's hooks wrote count: one another version wrote (inputs.waymark) is not this version's to answer for.
+// A pre-release is the version it leads to: what an installed 2.0.19-dev writes is measured as 2.0.19.
+const release = (v) => String(v || '').replace(/-[0-9A-Za-z.-]+$/, '');
+const VERSION = (() => { try { return release(fs.readFileSync(path.join(HERE, '..', 'VERSION'), 'utf8').trim()) || null; } catch { return null; } })();
+// The writer version of each record, in date order. One with no version (a task only a commit's trailer holds, or one from before records
+// named it) is the version that ran at its date: the last record before it that names one, else the first after it; with none named, null.
+const writers = (rs) => {
+  let v = null;
+  const at = rs.map((r) => (r.inputs?.waymark ? (v = release(r.inputs.waymark)) : v));
+  const first = at.find(Boolean) || null;
+  return at.map((x) => x || first);
+};
+// What the records give, read once per scorecard run (run: the run's cache; a single measure reads fresh).
+let run = null;
+const once = (key, f) => {
+  if (!run) return f();
+  if (!run.has(key)) run.set(key, f());
+  return run.get(key);
+};
+const provenance = () => import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
+const rawTasks = (root) => once(`raw:${root}`, async () => {
+  const { projectHome, readTaskRecords } = await provenance(), h = projectHome(root);
+  return { h, records: h.dir ? readTaskRecords(h) : [] };
+});
+const versionTasks = (root) => once(`tasks:${root}`, async () => {
+  const tasks = (await rawTasks(root)).records.filter((r) => r.id && !r.kind), by = writers(tasks);
+  return tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION);
+});
 const recent = async (root, n = 30, full = true) => {
-  const { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
-  const h = projectHome(root);
-  const last = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind).slice(-n) : [];
+  const last = (await versionTasks(root)).slice(-n);
   return full ? last.filter((r) => r.schema) : last;
 };
+// The cost rows of the tasks the measured version wrote (docs/adr/0049), for the routine shares of every level.
+const versionCost = (root) => once(`cost:${root}`, async () => {
+  const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await versionTasks(root)).map((r) => r.id));
+  return { C, tasks: C.tasksOf(root, (await rawTasks(root)).records).filter((t) => mine.has(t.id)) };
+});
+// The precedent's held-out evaluation, once per run: precision@3 and the hand-over's size come from the same one.
+const precedentEval = (root) => once(`precedent:${root}`, async () => {
+  const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { h, records } = await rawTasks(root);
+  return h.dir ? P.evaluate(records, { root: h.root }) : null;
+});
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);
+// The tasks the parcial share judges: a record from before the log carried an outcome says nothing either way, and a parcial for an
+// external cause (the quota, the provider cut the turn) says nothing of the work, so neither is counted on either side.
+const judged = (rs) => rs.filter((r) => r.outcome?.result && r.outcome.cause !== 'external');
+const parcialOf = (rs) => share(judged(rs), (r) => r.outcome.result === 'parcial');
+// The share that closed with testigos still unresolved: shown beside parcial in the real-use report, not a check (no lock of its own).
+const unresolvedOf = (rs) => share(judged(rs), (r) => (r.unresolved || []).length > 0);
+const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+// A check's score from its value: ge scores value over threshold, le scores 1 within it and threshold over value above it.
+const scoreOf = (op, value, threshold) => (op === 'ge' ? Math.min(1, value / threshold) : value <= threshold ? 1 : Math.min(1, threshold / value));
 const MEASURES = {
   async 'chain.intact'(root) {
     const { chainReport } = await import(pathToFileURL(path.join(HERE, 'verify.mjs')).href);
@@ -75,11 +127,15 @@ const MEASURES = {
     return share(await recent(root), (r) => r.prompt && r.cierre && Array.isArray(r.decisions) && r.evaluation && r.inputs && r.pinned && r.observed);
   },
   async 'records.detailShare'(root) { return share(await recent(root, 30, false), (r) => r.schema); },
+  // Real use (docs/adr/0049): the share of the last 30 tasks that closed parcial, the agents that closed them, and the median tokens of a task.
+  async 'records.parcialShare'(root) { return parcialOf(await recent(root, 30, false)); },
+  async 'records.agentSpread'(root) { const rs = await recent(root, 30, false); const named = new Set(rs.map((r) => r.agent).filter(Boolean)); return named.size || null; }, // a record with no agent is no second agent
+  async 'records.medianTokens'(root) { return median((await recent(root, 30, true)).map((r) => r.evaluation?.tokens).filter((t) => t > 0)); },
   async 'records.pinnedShare'(root) { return share(await recent(root, 20), (r) => r.pinned); },
   async 'records.tokenShare'(root) { return share(await recent(root), (r) => r.evaluation?.tokens > 0 && r.evaluation?.links); },
   async 'records.cierreShare'(root) { return share(await recent(root), (r) => /Resultado:/.test(r.cierre || '') && /Evidencia:/.test(r.cierre || '') && /Aprendido:/.test(r.cierre || '')); },
-  async 'records.decisionShare'(root) {
-    const rs = (await recent(root)).filter((r) => r.level >= 2);
+  async 'records.decisionShare'(root) { // the L2+ tasks that changed something: a file of the repo, or one outside it the window testigo judged
+    const rs = (await recent(root)).filter((r) => r.level >= 2 && ((r.files || []).length > 0 || 'Decision' in (r.evaluation?.steps || {})));
     return share(rs, (r) => (r.decisions || []).some((d) => d.position === 'before'));
   },
   async 'records.testigoRatio'(root) {
@@ -111,8 +167,7 @@ const MEASURES = {
     return pushPref(projectHome(root).slug) === 'yes' ? unpushedNotes(root) : 0;
   },
   async 'agents.adapterShare'() {
-    const a = JSON.parse(fs.readFileSync(path.join(HERE, 'agents', 'agents.json'), 'utf8')).agents;
-    return a.length ? a.filter((x) => x.adapter).length / a.length : null;
+    return adapterShare(JSON.parse(fs.readFileSync(path.join(HERE, 'agents', 'agents.json'), 'utf8')).agents);
   },
   async 'size.fixedContext'(root) {
     const rows = (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root);
@@ -120,10 +175,10 @@ const MEASURES = {
     return n('instructions block') + n('context card') + n('skill descriptions');
   },
   async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
-  async 'cost.routineShareL2'(root) { const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href); return C.routineShare(C.tasksOf(root), 2, 10)?.share ?? null; },
-  async 'cost.routineShareL1'(root) { const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href); return C.routineShare(C.tasksOf(root), 1, 5)?.share ?? null; },
-  async 'precedent.precisionAt3'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).precisionAtK : null; },
-  async 'precedent.maxChars'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).maxChars : null; },
+  async 'cost.routineShareL2'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 2, 10)?.share ?? null; },
+  async 'cost.routineShareL1'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 1, 5)?.share ?? null; },
+  async 'precedent.precisionAt3'(root) { return (await precedentEval(root))?.precisionAtK ?? null; },
+  async 'precedent.maxChars'(root) { return (await precedentEval(root))?.maxChars ?? null; },
   async 'conformance.cases'(root) {
     const f = path.join(root, 'tests', 'conformance', 'cases.json');
     return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')).cases?.length ?? null : null;
@@ -133,7 +188,7 @@ const MEASURES = {
 export const MEASURE_NAMES = Object.keys(MEASURES);
 
 // ---- one check → { score 0..1, status: pass | fail | pending | unmeasured, detail } ----
-async function runCheck(root, c) {
+async function runCheck(root, c, lastPoint = Infinity) {
   if (c.kind === 'exists') {
     const missing = as(c.files).filter((f) => !expand(root, f).exists);
     return missing.length ? { score: 0, status: 'fail', detail: `missing: ${missing.join(', ')}` } : { score: 1, status: 'pass' };
@@ -158,8 +213,8 @@ async function runCheck(root, c) {
     let value = null;
     try { value = fn ? await fn(root) : null; } catch { value = null; }
     if (value === null || value === undefined) return { score: 0, status: 'unmeasured', detail: `${c.measure} cannot be measured here yet` };
-    if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in point ${c.frozenIn}` };
-    const score = c.op === 'ge' ? Math.min(1, value / c.threshold) : value <= c.threshold ? 1 : Math.min(1, c.threshold / value);
+    if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in ${c.frozenIn > lastPoint ? 'the next release' : `point ${c.frozenIn}`}` };
+    const score = scoreOf(c.op, value, c.threshold);
     return { score, status: score >= 1 ? 'pass' : 'fail', value, detail: `${c.measure} = ${fmt(value)} (${c.op === 'ge' ? '≥' : '≤'} ${c.threshold})` };
   }
   return { score: 0, status: 'fail', detail: `unknown kind ${c.kind}` };
@@ -168,11 +223,15 @@ const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(3));
 const floor1 = (x) => Math.floor(x * 10 + 1e-9) / 10;
 
 export async function scorecard(root) {
+  run = new Map();
+  try { return await scoreAll(root); } finally { run = null; }
+}
+async function scoreAll(root) {
   const card = readScorecard(root);
-  const criteria = [];
+  const criteria = [], lastPoint = Math.max(...card.criteria.flatMap((k) => k.checks.map((c) => c.point || 0)));
   for (const k of card.criteria) {
     const results = [];
-    for (const c of k.checks) results.push({ id: c.id, what: c.what, point: c.point, ...(await runCheck(root, c)) });
+    for (const c of k.checks) results.push({ id: c.id, what: c.what, point: c.point, ...(await runCheck(root, c, lastPoint)) });
     criteria.push({ id: k.id, name: k.name, weight: k.weight, target: k.target, percent: (results.reduce((a, r) => a + r.score, 0) / results.length) * 100, checks: results });
   }
   const total = criteria.reduce((a, k) => a + (k.weight * k.percent) / 100, 0);
@@ -191,7 +250,58 @@ export function render(s) {
   return out.join('\n');
 }
 
+// A measure by name, for the tests and for callers that read one number.
+export const measure = (name, root) => MEASURES[name](root);
+
+// ---- the projects the user names (docs/adr/0049): real use pooled across them, not the score of one repository ----
+// The Path column of ~/.waymark/projects.md; a placeholder row in a comment names nothing.
+export function namedProjects(file = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'projects.md')) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  return text.split('\n').filter((l) => l.trim().startsWith('|') && !/^\|\s*(Project|-{3})/.test(l.trim())).map((l) => l.split('|')[2]?.trim()).filter((p) => p && !p.startsWith('<'));
+}
+const DIR_CHECKS = { '13.6': 'records.parcialShare', '9.9': 'records.agentSpread', '8.9': 'records.medianTokens' };
+export async function projectsReport(roots = namedProjects()) {
+  // the thresholds are the card's; an installed copy has no docs/scorecard.json, so the frozen ones stand in
+  let card = null;
+  try { card = readScorecard(path.resolve(HERE, '..', '..', '..')); } catch {}
+  const FROZEN = { '13.6': { op: 'le', threshold: 0.2 }, '9.9': { op: 'ge', threshold: 2 }, '8.9': { op: 'ge', threshold: null } };
+  const checkOf = (id) => card?.criteria.flatMap((k) => k.checks).find((c) => c.id === id) || FROZEN[id];
+  const projects = [], pooled = [], full = [];
+  for (const root of roots) {
+    const name = path.basename(path.resolve(root));
+    if (!fs.existsSync(root)) { projects.push({ name, missing: true }); continue; }
+    const rs = await recent(root, 30, false);
+    pooled.push(...rs); full.push(...await recent(root, 30, true));
+    projects.push({ name, tasks: rs.length, parcialShare: parcialOf(rs), unresolvedShare: unresolvedOf(rs), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
+  }
+  const agents = countBy(pooled.filter((r) => r.agent), (r) => r.agent);
+  const total = { tasks: pooled.length, parcialShare: parcialOf(pooled), unresolvedShare: unresolvedOf(pooled), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
+  const values = { '13.6': total.parcialShare, '9.9': Object.keys(agents).length || null, '8.9': total.medianTokens };
+  const checks = Object.entries(DIR_CHECKS).map(([id, m]) => {
+    const c = checkOf(id), value = values[id];
+    return { id, measure: m, value, ...(value === null || !c ? { score: 0, status: 'unmeasured' } : c.threshold === null ? { score: 0, status: 'pending' } : { score: scoreOf(c.op, value, c.threshold), status: scoreOf(c.op, value, c.threshold) >= 1 ? 'pass' : 'fail' }) };
+  });
+  return { projects, total, checks };
+}
+const countBy = (rs, f) => rs.reduce((o, r) => { const k = f(r); o[k] = (o[k] || 0) + 1; return o; }, {});
+export function renderProjects(r) {
+  const pc = (v) => (v === null || v === undefined ? '—' : `${Math.round(v * 1000) / 10} %`);
+  const out = ['Waymark real use · the last 30 tasks of each project named', ''];
+  for (const p of r.projects) out.push(p.missing ? `  ${p.name}: path not found` : `  ${p.name}: ${p.tasks} tasks · parcial ${pc(p.parcialShare)} · unresolved ${pc(p.unresolvedShare)} · agents ${Object.entries(p.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`);
+  out.push('', `  Together: ${r.total.tasks} tasks · parcial ${pc(r.total.parcialShare)} · unresolved ${pc(r.total.unresolvedShare)} · median ${r.total.medianTokens === null ? '—' : `${Math.round(r.total.medianTokens / 1000)}k`} tokens per task · ${r.total.oneAgent ? `one agent (${Object.keys(r.total.agents)[0]}): nothing here shows the other agents work` : `agents ${Object.entries(r.total.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`}`);
+  for (const c of r.checks) out.push(`  ${c.id} ${c.measure}: ${c.status}${c.value === null || c.value === undefined ? '' : ` (${Number.isInteger(c.value) ? c.value : c.value.toFixed(3)})`}`);
+  return out.join('\n');
+}
+
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
+  const at = process.argv.indexOf('--projects');
+  if (at >= 0) {
+    const paths = process.argv.slice(at + 1).filter((a) => !a.startsWith('--'));
+    const r = await projectsReport(paths.length ? paths : namedProjects());
+    console.log(process.argv.includes('--json') ? JSON.stringify(r, null, 1) : r.projects.length ? renderProjects(r) : 'scorecard --projects: name the projects (paths after the flag) or list them once in ~/.waymark/projects.md.');
+    process.exit(0);
+  }
   const root = process.cwd();
   if (!fs.existsSync(path.join(root, 'docs', 'scorecard.json'))) { console.log('scorecard: run it from the root of the Waymark repository (docs/scorecard.json is there).'); process.exit(1); }
   const s = await scorecard(root);

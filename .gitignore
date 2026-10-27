@@ -11,3 +11,6 @@ Thumbs.db
 .agents/
 # Claude Code's links to .agents/skills, local only
 .claude/skills/
+
+# a test leftover never lands in the repository
+tests/.tmp-*

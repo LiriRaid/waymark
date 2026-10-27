@@ -7,7 +7,7 @@ import { signAnchor } from '../sign.mjs';
 import { norm } from '../lib/paths.mjs';
 import { sha } from '../lib/hash.mjs';
 import { ID } from './ids.mjs';
-import { maskSecrets } from './secrets.mjs';
+import { maskSecrets, deepMask } from './secrets.mjs';
 import { logFile, logHookError } from './project.mjs';
 
 // The git note a log line points to ({ commit, sha }), or null: only an object with a commit counts.
@@ -35,6 +35,7 @@ export function readRecords(file) {
 // same note goes on the newest commit of each other repo in `repos` ([{ root, commits }], newest first). A line with no
 // note, as chained, is appended to refs/notes/waymark-log on HEAD as well, so it is in git.
 export function appendRecord(cwd, record) {
+  record = deepMask(record); // the one writer of the chain masks every string: the strong formats and the values of the project's .env files (docs/adr/0045)
   const file = logFile(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let prev = null, count = 0;
@@ -43,8 +44,8 @@ export function appendRecord(cwd, record) {
   const commit = record.id && record.commits?.[0];
   const text = JSON.stringify(record);
   if (commit && addNote(cwd, commit, text)) {
-    const { id, kind, agent, at, session, cwd: where, files, commits, repos, department } = record; // department: what the session loaded (docs/adr/0015)
-    line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, repos, department }).filter(([, v]) => v !== undefined));
+    const { id, kind, agent, at, session, cwd: where, files, commits, repos, department, outcome } = record; // department: what the session loaded (docs/adr/0015); outcome: what the per-prompt hook reads without the notes (docs/adr/0044)
+    line = Object.fromEntries(Object.entries({ id, kind, agent, at, session, cwd: where, files, commits, repos, department, outcome }).filter(([, v]) => v !== undefined));
     line.note = { commit, sha: noteSha(text) };
   }
   if (record.id) for (const r of record.repos || []) { try { if (r.commits?.[0]) addNote(r.root, r.commits[0], text); } catch (e) { logHookError('note in another repo', e); } }

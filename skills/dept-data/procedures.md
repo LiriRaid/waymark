@@ -5,7 +5,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### Schema migration
 1. Describe the change in one line and classify it: additive (new table/column/index) or destructive (rename, drop, type change, NOT NULL on existing data).
 2. Destructive changes MUST use expand/contract: (a) add new structure, (b) dual-write or backfill, (c) switch reads, (d) drop old structure in a later release.
-3. Generate the migration with the command from the stack profile. Never edit a migration merged or applied in a shared environment; write a new one.
+3. Generate the migration with the project's own command first: `memory.md` → Conventions → `Migrations:` (detected from the repo and marked "to confirm" until the user confirms it; it may back up the database first). Only with none, the stack profile's. A migration file written by hand is asked about first. Never edit a migration merged or applied in a shared environment; write a new one.
 4. Add constraints: NOT NULL, foreign keys, unique, check. Index foreign keys and columns used in WHERE/ORDER BY/JOIN.
 5. Large tables: create indexes concurrently/online if the engine supports it; batch backfills; avoid long locks.
 6. User or tenant data: define row-level access (database policy or enforced query scope) and hand off to `dept-security` for review.

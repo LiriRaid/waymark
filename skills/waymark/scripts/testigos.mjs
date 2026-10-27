@@ -10,14 +10,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
-import { stackOf, translate, gateCell } from './stack.mjs';
+import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
+import { runtimeCells, runtimeDir, runtimeEnv } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
-import { git as gitIn } from './lib/git.mjs';
+import { git as gitIn, topOf } from './lib/git.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => gitIn(cwd, a, { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
-const top = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? path.resolve(r.stdout.trim()) : null; };
+const top = (dir) => { const t = topOf(dir); return t ? path.resolve(t) : null; };
 const same = (a, b) => String(a || '').replace(/\\/g, '/').toLowerCase() === String(b || '').replace(/\\/g, '/').toLowerCase();
 
 // The rows of memory.md's "Quality gates" table → [gate, command] (backticks dropped). Only lines that start with "|":
@@ -35,15 +36,25 @@ export function buildNone(memoryFile) {
   return null;
 }
 
+// A project whose tests were already failing when Waymark arrived declares it in the same table: `| test (full) | broken at HEAD (<why>) | <date> |`. → the why,
+// or null. The Previos testigo then takes a failing test run as the baseline's, not the task's, with no clean copy to prove it.
+export function testsBroken(memoryFile) {
+  for (const [gate, cmd] of gateRows(memoryFile)) {
+    const why = /^test/i.test(gate || '') && String(cmd || '').match(/^broken(?:\s+at\s+HEAD)?\s*\(([^<>]{3,})\)\s*$/i)?.[1].trim();
+    if (why) return why;
+  }
+  return null;
+}
+
 // The repo's typecheck, in this order: the verified typecheck/syntax row of memory.md's
 // "Quality gates" table (project root only) → package.json's typecheck script → `tsc --noEmit` when TypeScript is
 // installed, each run with the repo's own package manager (stack.mjs: a memory row written for npm runs with pnpm in a
 // pnpm repo). → { cmd, from } or null. Never the full build.
-export function gateCommand(root, memoryFile) {
+function rawGateCommand(root, memoryFile) {
   const stack = stackOf(root);
   for (const [gate, cmd] of gateRows(memoryFile)) {
     // the cell as it runs: a closing note such as "(not verified)" dropped (gateCell)
-    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd)) return { cmd: translate(gateCell(cmd), stack), from: 'memory.md' };
+    if (gate && cmd && /^(typecheck|type-check|types?|tsc|syntax)\b/i.test(gate) && !/[<>]/.test(cmd) && !rowProblem(cmd, root)) return { cmd: translate(gateCell(cmd), stack), from: 'memory.md' };
   }
   let pkg = null;
   try { pkg = JSON.parse(read(path.join(root, 'package.json'))); } catch {}
@@ -55,6 +66,16 @@ export function gateCommand(root, memoryFile) {
   const project = ['tsconfig.app.json', 'tsconfig.json'].find((f) => fs.existsSync(path.join(root, f))); // a solution tsconfig.json checks nothing
   const exec = !stack?.pm || stack.pm === 'npm' ? 'npx --no-install' : stack.exec;
   return tsc && project ? { cmd: `${exec} tsc --noEmit -p ${project}`, from: 'tsconfig' } : null;
+}
+
+// The gate as it runs on this machine: a repo that needs another runtime than the machine's (memory.md → Quality gates, a `runtime` row per language,
+// `<lang> <dir>`) runs with those folders first on the PATH, so the hook's own re-run fails for the code and not for the runtime, and a chained command
+// (`cd web && npx tsc`) is left as it is. A command the user wrote in a row stays their prefix.
+export function gateCommand(root, memoryFile) {
+  const gate = rawGateCommand(root, memoryFile), cells = memoryFile ? runtimeCells(read(memoryFile)) : [];
+  if (!gate || !cells.length) return gate;
+  const dirs = cells.map(runtimeDir).filter(Boolean), prefixes = cells.filter((c) => !runtimeDir(c));
+  return { ...gate, ...(dirs.length ? { env: runtimeEnv(dirs) } : {}), ...(prefixes.length ? { cmd: `${prefixes.join(' ')} ${gate.cmd}` } : {}), runtime: cells.join(' · ') };
 }
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills
@@ -72,14 +93,14 @@ const programOf = (cmd) => {
   const first = String(cmd).trim().replace(/^(?:cd\s+\S+\s*&&\s*)/, '').split(/\s+/)[0] || '';
   return /^[A-Za-z][\w.+-]*$/.test(first) && !/^(node|npm|npx|pnpm|yarn|bun|deno|cd|echo|true|test)$/i.test(first) ? first : null;
 };
-export const onPath = (program) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true }).status === 0;
+export const onPath = (program, env) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true, ...(env ? { env } : {}) }).status === 0;
 
 export function runGate(gate, cwd, ms = GATE_MS) {
   const t0 = Date.now();
   // a toolchain that is not installed here cannot fail the code: the gate did not run, and the result says so
   const program = programOf(gate.cmd);
-  if (program && !onPath(program)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
-  const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true });
+  if (program && !onPath(program, gate.env)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
+  const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true, ...(gate.env ? { env: gate.env } : {}) }); // the runtime row's Node first on the PATH
   const timedOut = r.status === 124 || r.error?.code === 'ETIMEDOUT';
   return { cmd: gate.cmd, from: gate.from, ok: !timedOut && r.status === 0, s: Math.round((Date.now() - t0) / 1000), timedOut };
 }
@@ -150,6 +171,6 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const run = gate ? runGate(gate, top(cwd) || cwd) : null;
   console.log(run ? `${mark(run.ok)} typecheck now (${run.from}): ${run.cmd} · ${run.timedOut ? `over ${GATE_MS / 1000} s` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
   const rec = readTaskRecords(home).find((r) => r.id === id);
-  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
+  if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'na' ? 'n/a' : v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
   process.exit(chain.ok && !hits.length && (!run || run.ok) ? 0 : 1);
 }

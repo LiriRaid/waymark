@@ -14,6 +14,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 2. Rebase or merge the latest default branch; resolve conflicts preserving both intents.
 3. Title in Conventional Commits. Body: what, why, how verified, risks, rollback.
 4. Small and single-purpose; split diffs that mix refactor and behavior change.
+5. The account is the user's: never `gh auth switch|login|logout|refresh|setup-git` (the hook denies them), and never open or merge a PR the request does not ask for. Read the active account with `git config user.email` and `gh auth status` when you need to know whose it is; never write an account or an address in the project, its memory or Waymark.
 
 ### Git: destructive operations
 1. `reset --hard`, `clean -f`, `push --force`, branch deletion, history rewrite: confirm with the user and state what will be lost.
@@ -42,7 +43,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### SSR / prerender deploy concerns
 1. Server-rendered routes must not touch browser-only globals; guard them per the stack profile.
 2. Decide per route: static prerender, server render on request, or client-only. Record it in project memory; do not change it at deploy time.
-3. Verify hydration with the build's prerender/SSR output and the server-render tests (in the browser with `browser-verify` only when the user asks): no mismatch warnings, no content flash, no duplicate requests.
+3. Verify hydration with the build's prerender/SSR output and the server-render tests (in the browser with `browser-verify`, the eyes, on the local dev server): no mismatch warnings, no content flash, no duplicate requests.
 4. Caching headers and CDN rules consistent with the rendering mode.
 5. Never disable SSR or hydration to hide an error; find the root cause.
 
@@ -50,7 +51,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 1. Deploy only artifacts that passed CI. Tag releases with semantic versions when the project versions releases.
 2. Prefer progressive strategies (blue/green, canary, feature flags) for risky changes.
 3. Migrations backward-compatible first (expand → migrate → contract) with `dept-data`.
-4. Smoke test after deploy with a health endpoint (`browser-verify` only when the user asks).
+4. Smoke test after deploy with a health endpoint; a look at the deployed host in a browser only when the user asks (it is beyond the eyes, which look at localhost).
 5. Know the rollback before deploying: previous artifact, revert commit or flag off.
 
 ### Observability

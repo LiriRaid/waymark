@@ -239,7 +239,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   }
   if (!SETTINGS[agent]) {
     const a = known(agent);
-    console.log(`Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), ...PLUGINS].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
+    console.log(a?.soon ? `Agent "${agent}" (${a.name}): coming soon, no adapter yet: ${a.soon}. Supported: ${[...Object.keys(SETTINGS), ...PLUGINS].join(', ')}. Its hooks: ${a.docs}.`
+      : `Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), ...PLUGINS].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
     process.exit(1);
   }
   const mode = coexistMode();

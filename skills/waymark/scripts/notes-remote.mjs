@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { git } from './lib/git.mjs';
 import { waymarkHome as HOME } from './lib/paths.mjs';
-import { ANCHOR_REF, pushNotes, shouldPushNotes, hasRemote, readNotes } from './notes.mjs';
+import { ANCHOR_REF, pushNotes, shouldPushNotes, hasRemote, readNotes, defaultRemote } from './notes.mjs';
 
 const prefsFile = () => path.join(HOME(), 'preferences.md');
 const LIST = (key) => new RegExp(`${key}:[ \\t]*([^—\\n]*)`, 'i');
@@ -24,11 +24,19 @@ export function pushPref(slug, file = prefsFile()) {
 }
 
 // Adds the project to the `Notes push:` (or `Notes push never:`) line of the preferences, creating the line when there is none.
+// The contrary line loses the project and keeps `(expired <date> for <slug>: <the new rule>)`, or the older answer would still win;
+// the note never repeats a key, or the key's regex would read it as the line.
 export function savePushPref(slug, kind = 'yes', { file = prefsFile(), now = new Date() } = {}) {
   const key = kind === 'never' ? 'Notes push never' : 'Notes push';
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
-  const re = kind === 'never' ? /^(.*Notes push never:[ \t]*)([^—\n]*)(.*)$/im : /^(.*Notes push:[ \t]*)([^—\n]*)(.*)$/im;
+  const NEVER = /^(.*Notes push never:[ \t]*)([^—\n]*)(.*)$/im, YES = /^(.*Notes push:[ \t]*)([^—\n]*)(.*)$/im;
+  const other = kind === 'never' ? YES : NEVER, old = text.match(other);
+  if (old && names(old[2]).includes(slug)) {
+    const rest = names(old[2]).filter((n) => n !== slug).join(', ');
+    text = text.replace(other, (_, a, b, c) => `${a}${rest}${rest ? ' ' : ''}${c.trim() ? c.trim() : '—'} (expired ${now.toLocaleDateString('sv')} for ${slug}: the user now said ${kind === 'never' ? 'never push' : 'push at each close'})`);
+  }
+  const re = kind === 'never' ? NEVER : YES;
   const hit = text.match(re);
   if (hit) {
     const list = names(hit[2]);
@@ -43,7 +51,7 @@ export function savePushPref(slug, kind = 'yes', { file = prefsFile(), now = new
 
 // The push at a task's close, once the user said yes for this project. It never prompts, waits at most 15 s and never blocks:
 // the next close tries again. → { state: 'off' | 'nothing' | 'pushed' | 'failed', remote, output? }
-export function autoPushNotes(cwd, slug, remote = 'origin') {
+export function autoPushNotes(cwd, slug, remote = defaultRemote(cwd)) {
   if (pushPref(slug) !== 'yes' || !hasRemote(cwd, remote)) return { state: 'off', remote };
   if (!shouldPushNotes(cwd, remote)) return { state: 'nothing', remote };
   const r = pushNotes(cwd, remote, { timeout: 15000, quiet: true });
@@ -52,7 +60,7 @@ export function autoPushNotes(cwd, slug, remote = 'origin') {
 
 // The anchors the remote holds, fetched into a temporary ref (the local notes are never touched) and read.
 // → { state: 'none' (no such remote) | 'unreachable' | 'empty' (the remote has no anchors yet) | 'ok', anchors, output }
-export function remoteAnchors(cwd, remote = 'origin') {
+export function remoteAnchors(cwd, remote = defaultRemote(cwd)) {
   if (!hasRemote(cwd, remote)) return { state: 'none', anchors: [] };
   const tmp = `refs/notes/waymark-verify-${process.pid}`;
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };

@@ -31,7 +31,7 @@ test('0: the real scorecard has weights adding to 100, unique check ids and ever
   const checks = card.criteria.flatMap((k) => k.checks);
   assert.equal(new Set(checks.map((c) => c.id)).size, checks.length, 'a check id is used once');
   for (const c of checks) {
-    assert.ok(Number.isInteger(c.point) && c.point >= 0 && c.point <= 12, `${c.id}: the plan point that makes it pass`);
+    assert.ok(Number.isInteger(c.point) && c.point >= 0 && c.point <= 13, `${c.id}: the plan point that makes it pass`);
     assert.ok(['exists', 'contains', 'absent', 'run', 'measure'].includes(c.kind), `${c.id}: kind`);
     if (c.kind === 'measure') {
       assert.ok(S.MEASURE_NAMES.includes(c.measure), `${c.id}: measure ${c.measure} exists`);
@@ -81,6 +81,7 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
     { id: '4', what: 'le over', point: 0, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: 0.25 },
     { id: '5', what: 'pending', point: 4, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: null, frozenIn: 3 },
     { id: '6', what: 'not built', point: 11, kind: 'measure', measure: 'conformance.cases', op: 'ge', threshold: 30 },
+    { id: '7', what: 'pending past the plan', point: 4, kind: 'measure', measure: 'agents.adapterShare', op: 'le', threshold: null, frozenIn: 14 },
   ]));
   const r = (await S.scorecard(root)).criteria[0].checks;
   const share = r[0].value;
@@ -91,6 +92,7 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
   assert.equal(r[3].score, 0.25 / share);
   assert.deepEqual([r[4].status, r[4].score, r[5].status, r[5].score], ['pending', 0, 'unmeasured', 0]);
   assert.match(r[4].detail, /frozen in point 3/);
+  assert.match(r[6].detail, /frozen in the next release$/, 'a point past the last one of the card is no point of this plan');
 });
 
 test('0: the total is a weighted sum and the rendered figure is cut, never rounded up', async () => {
@@ -112,9 +114,12 @@ test('0: on this repository the scorecard runs, its lock holds and the plan poin
   assert.ok(r.total > 0 && r.total < 100);
   const failing = r.criteria.flatMap((k) => k.checks).filter((c) => c.status !== 'pass');
   assert.ok(failing.every((c) => c.point >= 0), 'every failing check names its point');
-  // a check that holds today (point 0) is allowed to fail only by a real finding the ADR lists, never by a wrong pattern
+  // a check that holds today (point 0) is allowed to fail only by a real finding the ADR lists, never by a wrong pattern. A measure read from the
+  // project's task records is real use, which every task changes: the scorecard judges it against its threshold, this test does not.
   const known = new Set(['1.10', '9.1', '7.1']); // ADR 0028: records that lost their note; agents with hooks and no adapter; 7.1 is whether this machine has pushed its notes
-  for (const c of failing.filter((x) => x.point === 0 && x.status === 'fail')) assert.ok(known.has(c.id), `${c.id} fails today and is not a recorded finding: ${c.detail}`);
+  const realUse = new Set(S.readScorecard(REPO).criteria.flatMap((k) => k.checks).filter((c) => /^records\./.test(c.measure || '')).map((c) => c.id));
+  for (const c of failing.filter((x) => x.point === 0 && x.status === 'fail' && !realUse.has(x.id))) assert.ok(known.has(c.id), `${c.id} fails today and is not a recorded finding: ${c.detail}`);
+  assert.ok(realUse.has('1.2') && realUse.has('5.1') && !realUse.has('2.1'), 'the real-use measures are the records ones; a pattern check is still judged');
 });
 
 test('7.1 notes.unpushed: a note waits to be pushed only in a project that said yes (Notes push:); with no yes or never the records stay local and nothing waits (ADR 0042)', async () => {

@@ -9,7 +9,7 @@ Read first at Recall. **One line per task, written by the end-of-turn hook from 
 
 ## Identity
 - Stack: <slug from stacks/> (<framework + version>)
-- Architecture: <slug from architectures/> — <how it maps here, e.g. features/<f>/{components,services,entities,routes}>
+- Architecture: <slug from architectures/> — <how it maps here, e.g. features/<f>/{components,services,entities,routes}> — evidence: <where the pieces live, first structure commit, docs> (to confirm | confirmed <date> | profile default)
 - Package manager / build tool: <pnpm | bundle | uv | gradle | …>
 - Related projects: <e.g. backend API at ../api>
 
@@ -37,6 +37,7 @@ Filled by the minimal project scan (waymark `references/project-detection.md`); 
 | test (related) | | |
 | test (full) | | |
 | build | | |
+<!-- Tests that were already failing when Waymark arrived: `| test (full) | broken at HEAD (<why>) | <date> |`; a failing test run is then the baseline's, not the task's. A repo that needs another Node than the machine's gets a `runtime` row (`node <folder>` of that Node) from the session hook; run every gate with that folder first on the PATH, never `nvm use`. -->
 <!-- A project with no build step: write its row as `| build | none (<why>) | <date> |`; the Build testigo then does not apply. The end-of-turn hook dates a row whose command passed after the last change, and fills an empty row with the gate that passed; it never replaces a command. -->
 
 ## Design system
@@ -51,6 +52,9 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 
 ## Conventions specific to this project
 - …
+<!-- A step that is yours, in your words and dated: "- Deploys: the user (2026-10-25: «yo despliego»)", "- PRs: the user". A task whose only missing step is one of those closes hecho. -->
+<!-- A project that migrates with its own script: "- Migrations: bin/migrate new <name>". A migration file written by hand is asked about first. -->
+
 
 ## Repeated procedures
 The end-of-turn hook counts the same run of 3 to 5 action commands across tasks (docs/adr/0023). At 2 → the session card proposes a project skill; write its name in *Project skill* once it exists.

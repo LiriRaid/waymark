@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { sha } from './lib/hash.mjs';
+import { identityOf } from './sign.mjs';
 
 export const SKILLS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const MANIFEST_FILE = path.join(SKILLS, 'waymark', 'MANIFEST.json');
@@ -144,7 +145,7 @@ export function manifestSignature(manifestFile = MANIFEST_FILE, allowedFile = pa
   try { text = fs.readFileSync(allowedFile, 'utf8'); } catch {}
   const principals = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !/^gpg\s/i.test(l)).map((l) => l.split(/\s+/)[0]);
   for (const who of new Set(principals)) {
-    const r = keygen(['-Y', 'verify', '-f', allowedFile, '-I', who, '-n', NAMESPACE, '-s', sig], data);
+    const r = keygen(['-Y', 'verify', '-f', allowedFile, '-I', identityOf(who), '-n', NAMESPACE, '-s', sig], data);
     if (r.error) return { state: 'unchecked' };
     if (r.status === 0) return { state: 'signed', by: who };
   }

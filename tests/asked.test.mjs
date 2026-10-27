@@ -72,12 +72,15 @@ const answer = (id, questions, picks) => ({ type: 'user', message: { content: [{
 const win = (questions, picks) => P.decisionsIn([call('q1', questions), answer('q1', questions, picks)]);
 const opt = (label, description) => ({ label, description });
 
-test('optionsLint: each option states its risk and its files or cost, and exactly one is marked; the first window of an L2+ task only', () => {
+test('optionsLint: exactly one option is marked (Recommended); risk, files and cost are recorded when said, never asked; the first window of an L2+ task only', () => {
   const good = [{ question: '¿Cómo?', options: [opt('Backoff (Recommended)', 'Reintentos con espera. Archivos: 2, riesgo bajo.'), opt('Cola', 'Una cola aparte. Cost: alto, riesgo medio, 5 files.')] }];
   assert.deepEqual(P.optionsLint(win(good, { '¿Cómo?': 'Backoff (Recommended)' }), 2), { questions: 1, missing: [] });
+  const plain = [{ question: '¿Cómo?', options: [opt('Backoff (Recommended)', 'Reintentos con espera.'), opt('Cola', 'Una cola aparte.')] }];
+  assert.deepEqual(P.optionsLint(win(plain, { '¿Cómo?': 'Backoff (Recommended)' }), 2).missing, [], 'counter-example of the old finding: no risk, files or cost words is no gap');
+  assert.deepEqual(P.optionAttrs(opt('Backoff (Recommended)', 'Archivos: 2, riesgo bajo.')), { label: 'Backoff (Recommended)', recommended: true, files: 2, risk: 'bajo', estCost: null }, 'the attributes said are kept as fields');
   const bad = [{ question: '¿Cómo?', options: [opt('Backoff', 'Reintentos con espera.'), opt('Cola', 'Una cola aparte. Riesgo medio.')] }];
   const lint = P.optionsLint(win(bad, { '¿Cómo?': 'Backoff' }), 2);
-  assert.deepEqual(lint.missing, ['¿Cómo? / Backoff: risk, files or cost', '¿Cómo? / Cola: files or cost', '¿Cómo?: no option marked (Recommended)']);
+  assert.deepEqual(lint.missing, ['¿Cómo?: no option marked (Recommended)']);
   const two = [{ question: 'a', options: [opt('X (Recommended)', 'riesgo bajo, 1 archivo'), opt('Y (Recommended)', 'riesgo bajo, 1 archivo')] }];
   assert.match(P.optionsLint(win(two, { a: 'X (Recommended)' }), 3).missing[0], /more than one option marked/);
   assert.equal(P.optionsLint(win(bad, { '¿Cómo?': 'Backoff' }), 1), null, 'L1 is not judged');
@@ -146,7 +149,7 @@ test('stop hook: every item answered, the last one ✘ under parcial, is recorde
   assert.deepEqual(rec.unresolved.filter((u) => /numbered item|hecho while/.test(u)), []);
 });
 
-test('stop hook: a Pedido that is not a list asks nothing of the Cierre, and the options without attributes are a finding that does not block', () => {
+test('stop hook: a Pedido that is not a list asks nothing of the Cierre, and a window with no option marked is a finding that does not block', () => {
   const cwd = cwdOf('plain'), id = `${day} · T1`;
   const bare = [{ question: '¿Cómo?', options: [opt('Backoff', 'Reintentos con espera.'), opt('Cola', 'Una cola aparte.')] }];
   const out = runStop(cwd, turn('Pedido: agregar reintentos · Captura: sin captura', bare), cierre(id, 'Resultado: hecho'));
@@ -154,8 +157,8 @@ test('stop hook: a Pedido that is not a list asks nothing of the Cierre, and the
   const rec = P.readLog(cwd).pop();
   assert.equal(rec.answered, undefined);
   assert.equal(rec.outcome.result, 'hecho');
-  assert.ok(rec.findings.some((f) => /first choice window's options lack their attributes \(recorded, not blocked\)/.test(f)), JSON.stringify(rec.findings));
-  assert.equal(rec.observed.options.missing.length, 3, 'two options lack risk and files or cost, and none is marked');
+  assert.ok(rec.findings.some((f) => /first choice window does not mark exactly one option \(Recommended\) \(recorded, not blocked\)/.test(f)), JSON.stringify(rec.findings));
+  assert.deepEqual(rec.observed.options.missing, ['¿Cómo?: no option marked (Recommended)'], 'only the mark; the options saying no risk or files is no gap');
 });
 
 test('stop hook: the options with their attributes leave no finding, and L1 is not judged', () => {
@@ -205,6 +208,6 @@ test('scorecard: the thresholds of 11.2 and 13.5 are frozen from the baseline, a
   const card = S.readScorecard(repo), check = (id) => card.criteria.flatMap((k) => k.checks).find((c) => c.id === id);
   assert.deepEqual([check('11.2').op, check('11.2').threshold], ['ge', 0.95]);
   assert.deepEqual([check('13.5').op, check('13.5').threshold], ['le', 0.2]);
-  assert.equal(card.adr, '0038');
+  assert.equal(card.adr, '0049');
   assert.equal(S.adrLock(repo, card), S.lockOf(card));
 });

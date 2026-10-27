@@ -14,7 +14,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ### Test pyramid — choose the level
 1. **Unit** (most): pure logic, services, state, mappers. No network, DB or browser.
 2. **Integration** (fewer): component + template, endpoint + DB, repository + real store. Test the seam.
-3. **End-to-end** (fewest): critical journeys only (login, checkout, main CRUD), with `browser-verify` only when the user asks.
+3. **End-to-end** (fewest): critical journeys only (login, checkout, main CRUD), with `browser-verify` when the user asks.
 4. Put each assertion at the lowest level that can prove it.
 
 ### New feature or behavior (TDD: red / green / refactor)
@@ -26,7 +26,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 6. Run the gates for the level (below).
 
 ### Bug fix
-1. **Reproduce:** exact steps, input, observed vs expected. UI: reproduce with a failing spec (`run` / `browser-verify` only when the user asks).
+1. **Reproduce:** exact steps, input, observed vs expected. UI: reproduce with a failing spec (or the eyes of `browser-verify` for what only a screen shows).
 2. **Root cause:** hypothesis, confirm with logs, debugger or a minimal test. Do not patch the symptom.
 3. **Failing regression test** at the lowest pyramid level. Run it; it MUST fail.
 4. **Fix:** smallest change that addresses the root cause. The regression test MUST now pass.
@@ -44,12 +44,12 @@ Commands come from project memory → *Quality gates* (`<project>/.waymark/memor
 
 1. Run non-interactively (no watch mode). Read the first error; fix top-down: typecheck → lint → test → build.
 2. Erroring file in your diff → it is yours, fix it.
-3. Not in your diff → prove it is pre-existing in a clean copy of HEAD that never touches the user's changes: `git worktree add <tmp> HEAD` → install if needed → rerun the exact failing command there → `git worktree remove <tmp>`. Fails there too = pre-existing; quote command and error ("comprobado en copia limpia de HEAD: falla igual"). Never `git stash` the user's work (staged state and new files can be lost). The command is not allowed (permission denied, no git) → do not retry: write "previo: no comprobado (sin permiso para <command>)".
+3. Not in your diff → prove it is pre-existing in a clean copy of HEAD that never touches the user's changes: `W copy HEAD` (a short folder Waymark owns; it prints the install step for a Node repo, from the store, never a link to the repo's `node_modules`) → rerun the exact failing command there → `W copy --remove <path>`. Fails there too = pre-existing; quote command and error ("comprobado en copia limpia de HEAD: falla igual"). Never `git stash` the user's work (staged state and new files can be lost). The command is not allowed (permission denied, no git) → do not retry: write "previo: no comprobado (sin permiso para <command>)".
 4. Never skip, comment out or loosen a test or lint rule to get green.
 5. After 3 honest attempts, stop and report the remaining failures verbatim; do not claim done.
 
-### Browser verification (only when the user asks)
-Never offer or recommend it, and never choose it on your own: it spends many tokens and misreads screens. When the user asks:
+### Browser verification (the eyes: automatic at the end of a seen change; anything wider only when the user asks)
+The eyes run by themselves at the end of an L2/L3 task that changes something seen, and of an L1 CSS/HTML change with no spec: `browser-verify` → `modes/eyes.md` (localhost only, the user already logged in, never credentials; ego-browser first, the agent's panel next, Playwright where the project declares it). Beyond them it is never offered; when the user asks:
 1. Start the app with `run` (dev command from project memory or the stack profile).
 2. With `browser-verify`: golden path, then at least two edge cases (empty, error, long content, slow network).
 3. Console and network: no new errors or failed requests.

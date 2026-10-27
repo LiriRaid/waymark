@@ -86,6 +86,9 @@ export function trust(skillDir = SKILL) {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   return { allowed, revoked, principals: [...new Set(allowed.map((l) => l.split(/\s+/)[0]))] };
 }
+// ssh-keygen -Y verify takes an identity, not a pattern: a principal with a wildcard is checked with a name it matches (`*` → waymark), since
+// the ssh-keygen of Git for Windows expands a bare `*` argument as a file glob and then finds no principal. A list takes its first pattern.
+export const identityOf = (principal) => (String(principal).split(',').find((p) => p && !p.startsWith('!')) || '').replace(/\*/g, 'waymark').replace(/\?/g, 'w');
 const stamp = (ms) => new Date(ms).toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z';
 
 // The state of a signature over `data`: { state: 'signed' | 'revoked' | 'outside' | 'untrusted' | 'bad' | 'unchecked', by?, fingerprint? }.
@@ -103,7 +106,7 @@ export function verifySignature(data, sigText, ns, { at = Date.now(), t = trust(
     if (fingerprint && t.revoked.has(fingerprint)) return { state: 'revoked', fingerprint };
     let outside = false;
     for (const who of t.principals) {
-      const v = keygen(['-Y', 'verify', '-f', allowedFile, '-I', who, '-n', ns, '-s', sigFile, `-Overify-time=${stamp(at)}`], { input: data });
+      const v = keygen(['-Y', 'verify', '-f', allowedFile, '-I', identityOf(who), '-n', ns, '-s', sigFile, `-Overify-time=${stamp(at)}`], { input: data });
       if (v.status === 0) return { state: 'signed', by: who, fingerprint };
       if (/expired|not yet valid/i.test(`${v.stderr}`)) outside = true;
     }

@@ -19,6 +19,10 @@
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
 //   node waymark.mjs memory [<section>]     one section of the project memory (Conventions, Identity, Quality gates…); none → the section names
 //   node waymark.mjs stack-new <path>       draft a stack profile for a repository with none, from its manifests, scripts and CI (docs/adr/0039)
+//   node waymark.mjs gates [--apply]        empty the Quality gates rows that cannot be right (a cut command); the plan without --apply
+//   node waymark.mjs copy [<ref>] | --remove <path> | --clean [--apply]  a clean copy of the repo in a short folder Waymark owns (~/.waymark/tmp), its removal, and the folders nobody removed (docs/adr/0046)
+//   node waymark.mjs localize [--apply]     move Waymark's lines out of the project's versioned .gitignore into .git/info/exclude (docs/adr/0043); the plan without --apply
+//   node waymark.mjs convention [<path>] [--move <from> <to>]  where each kind of piece lives in the repo, the commit that set it, and the verdict of a proposed move (docs/adr/0043)
 //   node waymark.mjs adapter-new <agent> [flags] [--install]  draft the adapter of a known agent with none and run the conformance suite on it (docs/adr/0039)
 //   node waymark.mjs incidents              open incidents (a testigo ✘ not yet ✔ in a later task) and suggested rules (3 failures or more)
 // `check` reports, one line each, only what is pending: a newer Waymark VERSION, skills added or removed since the last
@@ -33,21 +37,24 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, readRecords, readNotes, gitNote, aprendidoOf, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
-import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes } from './notes.mjs';
+import { pushNotes, notesSetup, hasRemote, hasFetchSpec, unpushedNotes, hasNotes, defaultRemote, unsetFetchSpecCmd } from './notes.mjs';
 import { pushPref, savePushPref } from './notes-remote.mjs';
-import { stackOf } from './stack.mjs';
+import { stackOf, rowProblem } from './stack.mjs';
 import { found } from './connect-agents.mjs';
 import { registered } from './install-hooks.mjs';
 import { agentFrom } from './agents/index.mjs';
 import { claudeDir } from './agents/paths.mjs';
 import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
+import { pack } from './pack.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
+import { makeCopy, removeCopy, orphans, cleanOrphans, copyRoot } from './copy.mjs';
+import { eyesLine } from './eyes.mjs';
 import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -58,7 +65,7 @@ const section = (text, title) => {
   return m ? m[1].split('\n').filter((l) => l.trim() && !l.trim().startsWith('<!--')) : [];
 };
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
-export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', uninstall: 'uninstall.mjs' };
+export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', report: 'report.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
 
 export const newer = (a, b) => {
   const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
@@ -154,7 +161,7 @@ export function hooksHealth(list = registered()) {
       if (!/^\s*node\s/.test(c)) continue;
       // the launcher and the hook script it runs are both quoted paths: everything after `node` is the argument list
       const args = [...c.replace(/^\s*node\s+/, '').matchAll(/"([^"]*)"|(\S+)/g)].map((t) => t[1] ?? t[2]);
-      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 15000 });
+      const r = spawnSync(process.execPath, args, { input: '{"waymark_probe":true}', cwd: os.tmpdir(), encoding: 'utf8', timeout: 50000 });
       if (!String(r.stdout || '').includes('"waymark_probe":"ok"')) dead.push(`${agent} ${path.basename(args.find((t) => /-hook\.mjs$/.test(t)) || args[0])}`);
     }
   }
@@ -167,7 +174,7 @@ export function mergeMethods(cwd) {
   if (process.env.WAYMARK_NO_GH) return '';
   const root = projectHome(cwd).root;
   if (spawnSync('git', ['show-ref', '--verify', '--quiet', 'refs/notes/waymark'], { cwd: root, timeout: 3000 }).status !== 0) return '';
-  const url = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '';
+  const url = spawnSync('git', ['remote', 'get-url', defaultRemote(root)], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '';
   const repo = url.trim().match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1];
   if (!repo) return '';
   const r = spawnSync('gh', ['api', `repos/${repo}`, '--jq', '[.allow_squash_merge, .allow_rebase_merge] | @json'], { encoding: 'utf8', timeout: 8000 });
@@ -201,7 +208,11 @@ export function adapterless(all = found()) {
   const list = all.filter((a) => !a.adapter && (a.unknown || a.hooks));
   if (!list.length) return '';
   const label = (a) => (a.unknown ? `${a.name} (unknown: ${a.signals.join(', ')})` : `${a.name} (${a.dir.replace(/\\/g, '/')})`);
-  return `agents: ${list.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
+  // an agent that cannot technically carry the chain yet (agents.json `soon`) is told with its reason; there is no adapter to draft for it (docs/adr/0048)
+  const soon = list.filter((a) => a.soon), able = list.filter((a) => !a.soon);
+  const waiting = soon.length ? `agents: ${soon.map((a) => `${a.name} (${a.dir.replace(/\\/g, '/')})`).join(', ')} on this machine ${soon.length > 1 ? 'are' : 'is'} coming soon: ${soon.map((a) => `${a.name} ${a.soon}`).join('; ')}. Their tasks are neither recorded nor checked yet (the pointer still shows where the work stands).` : '';
+  if (!able.length) return waiting;
+  return `${waiting ? waiting + ' Also ' : 'agents: '}${able.map(label).join(', ')} on this machine with no Waymark adapter: their tasks are neither recorded nor checked (the pointer still shows where the work stands). Offer, one agent at a time, to draft its adapter with the user's yes: node "${script('waymark.mjs')}" adapter-new <agent> (from templates/agent-adapter.template.mjs and its documentation; it runs the conformance suite on the draft and installs only what passes). By hand: dept-devex procedures → Add an agent.`;
 }
 
 // Project skills versioned in git under .claude/skills: the session hook leaves them there (moving them would change
@@ -255,6 +266,77 @@ function session(cwd, agent) {
   return `session: the latest session here holds ~${Math.round(st.context / 1000)}k tokens of context${idle >= CACHE_MINUTES ? ` and was idle ${idle} min: resuming it re-writes all of it (the prompt cache expired)` : ': each response re-reads all of it'}. A new task is cheaper in a new session (project memory carries over).`;
 }
 
+// Waymark's own ignore lines in the project's versioned .gitignore: before 2.0.19 it wrote them there (docs/adr/0043 moves them to
+// .git/info/exclude, which is never part of the repo). → { home, file, text, found } or null.
+const ignoreBlock = ([dir, what]) => new RegExp(`^# ${what.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, local only\\r?\\n${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?`, 'm');
+export function ignoreLines(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return null;
+  const file = path.join(home.root, '.gitignore'), text = read(file);
+  const found = LOCAL_DIRS.filter((d) => ignoreBlock(d).test(text));
+  return found.length ? { home, file, text, found } : null;
+}
+// What Waymark wrote in the user's repo that the user did not ask for. → the line, or ''.
+export function footprint(cwd) {
+  const at = ignoreLines(cwd);
+  if (!at) return '';
+  const remote = defaultRemote(at.home.root);
+  const spec = hasFetchSpec(at.home.root, remote) ? ` Also in .git/config: the notes fetch refspec (local to this clone, never versioned; it brings the remote's task notes back). It may stay; to take it out, after the user's yes: ${unsetFetchSpecCmd(remote)}` : '';
+  return `repo: Waymark wrote ${at.found.length} ignore block${at.found.length > 1 ? 's' : ''} (${at.found.map(([d]) => d).join(' ')}) into this project's versioned .gitignore, so they show as a change of the project's own files. Offer, with the choice window: ${W} localize shows the plan and --apply moves them to .git/info/exclude (this clone only); the .gitignore change that leaves is the user's to commit or discard.${spec}`;
+}
+// Moves those blocks out of the versioned .gitignore into .git/info/exclude. A .gitignore Waymark created and nothing else holds is removed.
+export function localize(cwd, { apply = false } = {}) {
+  const at = ignoreLines(cwd);
+  if (!at) return { moved: [] };
+  if (!apply) return { moved: at.found.map(([d]) => d), plan: true };
+  let text = at.text;
+  for (const d of at.found) text = text.replace(ignoreBlock(d), '');
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '.gitignore'], { cwd: at.home.root, encoding: 'utf8' }).status === 0;
+  if (!text.trim() && !tracked) fs.rmSync(at.file, { force: true }); else fs.writeFileSync(at.file, text);
+  ensureLocal(at.home); // after the lines left .gitignore, or they would count as already ignored there
+  return { moved: at.found.map(([d]) => d) };
+}
+
+// The Quality gates rows that cannot be right in this repo (stack.mjs rowProblem: a cut command such as `tsc -p ts`). → [{ gate, cmd, why }]
+export function brokenGates(cwd) {
+  const home = projectHome(cwd);
+  if (!home.dir || home.legacy) return [];
+  return section('\n' + read(home.memory), 'Quality gates').filter((l) => l.startsWith('|') && !/^\|\s*(Gate|---)/.test(l))
+    .map((l) => l.split('|').slice(1, 3).map((s) => s.replace(/`/g, '').trim())).map(([gate, cmd]) => ({ gate, cmd, why: rowProblem(cmd, home.root) })).filter((r) => r.why);
+}
+// Windows stops a path at 260 characters unless git is told otherwise: a deep node_modules or a long worktree fails with "Filename too long". The setting is the repo's own config, so it
+// is offered, never written: git config core.longpaths true, after the user's yes. → the line, or '' (not Windows, already set, not a git repo, or nothing that deep).
+export function longpathsLine(cwd, { platform = process.platform } = {}) {
+  if (platform !== 'win32') return '';
+  const home = projectHome(cwd), root = home.root;
+  if (!root || spawnSync('git', ['rev-parse', '--git-dir'], { cwd: root, timeout: 3000 }).status !== 0) return '';
+  if (String(spawnSync('git', ['config', '--get', 'core.longpaths'], { cwd: root, encoding: 'utf8', timeout: 3000 }).stdout || '').trim() === 'true') return '';
+  const files = String(spawnSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 32 * 1024 * 1024 }).stdout || '').split('\n');
+  const deep = files.some((f) => root.length + 1 + f.length > 200);
+  if (!deep && !stackOf(root)?.pm) return ''; // a Node repo grows a deep node_modules; another stack with short paths needs nothing
+  return `git: core.longpaths is not on in this repo and this is Windows${deep ? ' (a tracked path is over 200 characters)' : ' (a Node repo\'s node_modules and a clean copy go past 260)'}: a path that long fails with "Filename too long". Offer, with the choice window: git config core.longpaths true (this repo's config only), and run it after the user's yes.`;
+}
+// Folders nobody removed: copies in Waymark's root and the improvised or test ones in the temp folder and at the top of the disk (docs/adr/0046).
+export function copiesLine(list = orphans()) {
+  if (!list.length) return '';
+  const own = list.filter((o) => path.resolve(o.path).startsWith(path.resolve(copyRoot()))).length;
+  return `copies: ${list.length} folder${list.length > 1 ? 's' : ''} left behind (${own} in Waymark's copy root, ${list.length - own} improvised or from a test run: ${list.slice(0, 3).map((o) => path.basename(o.path)).join(', ')}${list.length > 3 ? '…' : ''}). Offer, with the choice window: ${W} copy --clean shows them and --apply removes them (they hold no learning: the result went to the task's record).`;
+}
+export function gatesLine(cwd) {
+  const bad = brokenGates(cwd);
+  return bad.length ? `gates: ${bad.length} Quality gates row${bad.length > 1 ? 's' : ''} in memory.md cannot be right (${bad.map((r) => `${r.gate}: \`${r.cmd}\` ${r.why}`).join('; ')}). The hook ignores them already. Offer, with the choice window: ${W} gates shows the plan and --apply empties each cell, so the next gate that passes fills it.` : '';
+}
+// Empties the Command and Verified cells of those rows (the learning step fills an empty row with the gate that passes next).
+export function repairGates(cwd, { apply = false } = {}) {
+  const bad = brokenGates(cwd);
+  if (!bad.length || !apply) return { rows: bad, applied: false };
+  const home = projectHome(cwd);
+  let text = read(home.memory);
+  for (const r of bad) text = text.replace(new RegExp(`^\\|\\s*${r.gate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\|[^\\n]*$`, 'm'), (row) => (row.split('|')[2]?.replace(/`/g, '').trim() === r.cmd ? `| ${r.gate} | | |` : row));
+  fs.writeFileSync(home.memory, text);
+  return { rows: bad, applied: true };
+}
+
 // → the pending items, one line each ([] when nothing is pending). Records the time of the check.
 export async function check(cwd = process.cwd(), agent = agentFrom()) {
   const items = [];
@@ -277,8 +359,14 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => projectSkills(cwd));
   await add(() => hooksHealth());
   await add(() => hookErrors());
+  await add(() => latencyLine());
   await add(() => mergeMethods(cwd));
   await add(() => notesState(cwd));
+  await add(() => footprint(cwd));
+  await add(() => gatesLine(cwd));
+  await add(() => copiesLine());
+  await add(() => eyesLine());
+  await add(() => longpathsLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
   try {
@@ -307,6 +395,22 @@ export function hookErrors(now = Date.now()) {
   const recent = lines.filter((l) => now - (Date.parse(l.split(' ')[0]) || 0) < 7 * 86400000);
   if (!recent.length) return '';
   return `hooks: ${recent.length} error${recent.length > 1 ? 's' : ''} in the last 7 days (${hookErrorsFile().replace(/\\/g, '/')}); newest: ${recent[recent.length - 1].slice(0, 200)}`;
+}
+
+// Each hook's cap in milliseconds, the event it serves, and the runs of the last 7 days that hook-run.cjs wrote to latency.log:
+// an event whose p95 passes its cap (with 10 runs or more) is named. The caps are 1.5 x the median measured on a real repo and
+// transcript on Windows (2026-10-26); tests/latency.test.mjs holds the git processes each event may start.
+export const LATENCY_CAPS = { 'session-hook': ['SessionStart', 2500], 'rule0-hook': ['UserPromptSubmit', 1600], 'tool-hook': ['PreToolUse', 300], 'stop-hook': ['Stop', 2300] };
+export function latencyLine(now = Date.now()) {
+  let rows = [];
+  try { rows = fs.readFileSync(path.join(HOME(), 'latency.log'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return ''; }
+  const slow = [];
+  for (const [hook, [event, cap]] of Object.entries(LATENCY_CAPS)) {
+    const ms = rows.filter(([at, h]) => h === hook && now - (Date.parse(at) || 0) < 7 * 86400000).map((r) => Number(r[2])).filter((x) => x >= 0).sort((a, b) => a - b);
+    const p95 = ms.length >= 10 ? ms[Math.ceil(0.95 * ms.length) - 1] : null;
+    if (p95 > cap) slow.push(`${event} p95 ${(p95 / 1000).toFixed(1)} s > ${(cap / 1000).toFixed(1)} s (${ms.length} runs)`);
+  }
+  return slow.length ? `hooks slower than their cap in the last 7 days: ${slow.join(' · ')}. Tell the user; the usual cause is git calls repeated in one run (tests/latency.test.mjs counts them).` : '';
 }
 
 // The package manager memory.md names (Identity, Quality gates) against the repo's own: package.json `packageManager`,
@@ -349,47 +453,8 @@ export function openTasks(cwd) {
   return open.length ? `open: ${open.join(', ')} in Work in progress. Ask the user once, in the choice window (multi-select), which already work; close those with node "${script('waymark.mjs')}" done "<ID>"… --note "<their words>".` : '';
 }
 
-// Per file, the last tasks that changed it, newest first: from `git log -- <file>` and the records of those commits (a
-// note, read even with no local log, a stub's commits, or the recorded task the commit's trailer names), plus the
-// records of tasks without a commit that list the file. A commit no task recorded is shown too (a change made by hand).
-// → text.
-export function pack(cwd, files, per = 3) {
-  const home = projectHome(cwd), root = home.root;
-  const git = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8', timeout: 5000 });
-  const records = readRecords(home.log).filter((r) => r.id);
-  const out = [];
-  for (const file of files) {
-    const abs = path.resolve(cwd, file), rel = path.relative(root, abs).replace(/\\/g, '/');
-    const log = git('log', '-n', '20', '--format=%H%x1f%ct%x1f%s%x1f%B%x1e', '--', rel).stdout.split('\x1e').map((l) => l.trim()).filter(Boolean).map((l) => l.split('\x1f'));
-    const notes = readNotes(root, log.map(([h]) => h));
-    const byCommit = new Map(records.flatMap((r) => (r.commits || []).map((c) => [c, r])));
-    const byId = new Map(records.map((r) => [r.id, r]));
-    const seen = new Set(), rows = [];
-    const learnedOf = (r) => clipTo(aprendidoOf(String(r.cierre || '').replace(/\*\*|__/g, '')) || r.prompt || '', 120);
-    for (const [h, ct, subject, body = ''] of log) {
-      // the commit's record: its stub here; else its note alone (a clone without this machine's log); else the
-      // recorded task its trailer names (committed later by another task)
-      const stub = byCommit.get(h), trailer = body.match(/^\s*Waymark-Task:\s*(.+?)\s*$/im)?.[1];
-      let rec = stub;
-      const n = notes.get(gitNote(stub)?.commit || h);
-      if (n) { try { rec = { ...JSON.parse(n), ...stub }; } catch {} }
-      else if (gitNote(stub)) rec = { ...stub, prompt: '(its git note is missing: a rebase or amend?)' };
-      else if (!stub && trailer && byId.has(trailer)) rec = byId.get(trailer);
-      if (rec && seen.has(rec.id)) continue;
-      if (rec) seen.add(rec.id);
-      rows.push({ at: Number(ct) * 1000, text: rec ? `${rec.id} · ${rec.agent || '?'} · ${learnedOf(rec)} · ${h.slice(0, 8)}` : `${h.slice(0, 8)} · ${clipTo(subject, 100)} (no task record)` });
-    }
-    // tasks with no commit that changed this file
-    for (const r of records.filter((x) => !x.commits?.length && !seen.has(x.id) && (x.files || []).some((p) => path.resolve(p).toLowerCase() === abs.toLowerCase()))) {
-      seen.add(r.id);
-      rows.push({ at: Date.parse(r.at) || 0, text: `${r.id} · ${r.agent || '?'} · ${learnedOf(r)} · (no commit)` });
-    }
-    const shown = rows.sort((x, y) => y.at - x.at).slice(0, per).map((x) => x.text);
-    out.push(`${rel}:${shown.length ? shown.map((x) => `\n  - ${x}`).join('') : ' no earlier task or commit'}`);
-  }
-  return out.join('\n');
-}
-const clipTo = (s, n) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+// The memory a file carries into an edit lives in pack.mjs (the tool hook loads only it); the CLI command stays here.
+export { pack };
 
 // The review where the agent has no code-review skill (Codex, Gemini CLI, OpenCode): the diff of the task's files
 // against HEAD (a file git does not track yet: its first lines) and the checklist to review it with. Running it after
@@ -464,7 +529,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     process.exitCode = r.code;
   } else if (sub === 'tidy') {
     const home = projectHome(process.cwd());
-    const changed = tidyWip(home);
+    const changed = tidyWip(home, new Date(), { records: readTaskRecords(home) }); // an open line whose record says hecho leaves too
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'pack') {
@@ -494,12 +559,40 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
     process.exitCode = r.error ? 1 : 0;
+  } else if (sub === 'gates') {
+    const r = repairGates(process.cwd(), { apply: rest.includes('--apply') });
+    console.log(!r.rows.length ? 'gates: every Quality gates row can be right here' : r.applied ? `gates: emptied ${r.rows.map((x) => x.gate).join(', ')}; the next gate that passes fills them` : `gates (plan, nothing written): empties ${r.rows.map((x) => `${x.gate} (\`${x.cmd}\`: ${x.why})`).join('; ')}. Ask the user, then re-run with --apply.`);
+  } else if (sub === 'copy') {
+    if (rest[0] === '--remove') {
+      const r = rest[1] ? removeCopy(rest[1]) : { error: 'name the copy to remove' };
+      console.log(r.error ? `copy: ${r.error}
+Usage: ${W} copy --remove <path of the copy>` : r.removed ? `copy: removed ${rest[1]}` : `copy: ${rest[1]} could not be removed (something holds a file there); ${W} copy --clean lists it`);
+      process.exitCode = r.removed ? 0 : 1;
+    } else if (rest[0] === '--clean') {
+      const list = orphans();
+      if (!list.length) console.log('copy: no folder left behind');
+      else if (!rest.includes('--apply')) console.log(`copy --clean (plan, nothing removed): ${list.length} folder${list.length > 1 ? 's' : ''}, among them ${list.slice(0, 8).map((o) => `${o.path} (${o.ageH} h)`).join('; ')}${list.length > 8 ? `; +${list.length - 8} more` : ''}. Ask the user, then re-run with --apply.`);
+      else { const r = cleanOrphans(list); console.log(`copy: removed ${r.removed}${r.left.length ? `; could not remove ${r.left.join(', ')} (in use)` : ''}`); }
+    } else {
+      const { copyInstall } = await import('./stack.mjs');
+      const home = projectHome(process.cwd());
+      let install = null;
+      try { install = copyInstall(stackOf(home.root)); } catch {}
+      const r = makeCopy(process.cwd(), rest[0] || 'HEAD', { install });
+      console.log(r.error ? `copy: ${r.error}
+Usage: ${W} copy [<ref>] | copy --remove <path> | copy --clean [--apply]` : `${r.path}
+A clean copy of ${rest[0] || 'HEAD'} (a short folder Waymark owns).${r.install ? ` In it: ${r.install}, with CI=true in its environment (from the store, no network; never a junction to the repo's node_modules).` : ''} Run what must show its result there, then remove it: ${W} copy --remove "${r.path}" (the task's close removes it too).`);
+      process.exitCode = r.error ? 1 : 0;
+    }
+  } else if (sub === 'localize') {
+    const r = localize(process.cwd(), { apply: rest.includes('--apply') });
+    console.log(!r.moved.length ? 'localize: nothing of Waymark\'s in this project\'s .gitignore' : r.plan ? `localize (plan, nothing written): moves ${r.moved.join(' ')} from the versioned .gitignore to .git/info/exclude. Ask the user, then re-run with --apply.` : `localize: ${r.moved.join(' ')} now ignored through .git/info/exclude; the .gitignore change is the user's to commit or discard`);
   } else if (sub === 'notes' && rest[0] === 'setup') {
-    const r = notesSetup(projectHome(process.cwd()).root, rest[1] || 'origin');
+    const r = notesSetup(projectHome(process.cwd()).root, rest[1]);
     console.log(r.ok ? `notes: ${r.added ? 'fetch refspec added, ' : 'fetch refspec already there, '}${r.merged ? 'the remote records merged' : 'nothing new to merge'}` : `notes setup failed: ${r.output}`);
     process.exitCode = r.ok ? 0 : 1;
   } else if (sub === 'notes' && rest[0] === 'push') {
-    const flag = rest.find((a) => a === '--always' || a === '--never'), slug = projectHome(process.cwd()).slug, remote = rest.slice(1).find((a) => !a.startsWith('--')) || 'origin';
+    const flag = rest.find((a) => a === '--always' || a === '--never'), slug = projectHome(process.cwd()).slug, remote = rest.slice(1).find((a) => !a.startsWith('--')) || defaultRemote(process.cwd());
     if (flag === '--never') { savePushPref(slug, 'never'); console.log(`notes: ${slug} will not be offered the push again (Notes push never: in ~/.waymark/preferences.md)`); }
     else {
       const r = pushNotes(process.cwd(), remote);
@@ -516,7 +609,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     }
     process.exitCode = r.status ?? 1;
   } else {
-    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | ${Object.keys(COMMANDS).join(' | ')}] [args]`);
+    console.log(`Usage: ${W} [check | tasks [<task ID>] | verify [--install] [--require-signature | --require-signed] [--remote [<remote>]] [--manifest <file>] [--attestation <file>] [<task ID>] | attest <task ID> [--out <file>] | notes push [--always|--never] | notes setup [<remote>] | tidy | done <task ID…> | forget <task ID> --reason "…" [--apply] | pack <file…> | review <file…> | memory [<section>] | incidents | localize [--apply] | gates [--apply] | copy [<ref>] [--remove <path> | --clean [--apply]] |${Object.keys(COMMANDS).join(' | ')}] [args]`);
     process.exitCode = 1;
   }
 }

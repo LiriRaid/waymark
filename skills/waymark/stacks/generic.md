@@ -34,7 +34,7 @@ Common command shapes, to be verified against the project before use, never assu
 | Java/Kotlin | `./gradlew test` or `mvn test` | `./gradlew check` | `./gradlew build` |
 | .NET | `dotnet test` | `dotnet format --verify-no-changes` | `dotnet build` |
 
-Package manager rule for the owner: Rails projects use Bundler (`bundle`), never pnpm. Respect lockfiles (`Gemfile.lock`, `poetry.lock`, `uv.lock`, `Cargo.lock`, `go.sum`).
+Package manager: Rails projects use Bundler (`bundle`), whatever `package.json` exists for assets. The repo's lockfile wins everywhere: respect lockfiles (`Gemfile.lock`, `poetry.lock`, `uv.lock`, `Cargo.lock`, `go.sum`).
 
 ### Record the commands in project memory
 Once each command has run successfully, write it into the "Quality gates (verified commands)" table of the project memory file so future sessions skip discovery. Project memory is the agent's private layer, so no user approval is needed; ask the user only when a command is ambiguous. Example:
@@ -47,6 +47,12 @@ Once each command has run successfully, write it into the "Quality gates (verifi
 | build | `bin/rails assets:precompile` | <date> |
 
 Omit any gate that does not exist; use `{files}` only for tools that accept file arguments. Commands must be non-interactive and non-watch, and must exit non-zero on failure.
+
+## Legacy repos (any stack)
+A repo is legacy when its framework is under its legacy major (Angular before 14, React Scripts or Vue CLI before 5, Nuxt 2, Next before 12, NestJS before 8, Rails before 6, Django before 3, Laravel before 8, Spring Boot before 2) or when it needs an older runtime than this machine's. The repo's own versions, scripts and lockfile win over every profile, which assume current versions.
+- **Runtime.** The version comes first from what the repo declares (`.nvmrc`, `.node-version`, `volta`, `engines`, `.ruby-version`, Gemfile `ruby`, `.python-version`, `requires-python`, `runtime.txt`, composer `php`, `.java-version`, `.sdkmanrc`, a Gradle toolchain, `.go-version`, `.tool-versions`, `mise.toml`), else from the framework's support table, else from a compile target read as a floor (`java.version`, go.mod `go`). When this machine's runtime is outside it, the session hook writes a `runtime` row per language in memory.md → Quality gates: `<lang> <folder>`, the folder of that version in nvm, Volta, fnm, rbenv, rvm, pyenv, uv, SDKMAN, asdf, mise or the system JDKs, or `none (needs …)` when this machine has none. The hook's own re-run of a gate puts the folders first on the PATH. Run every gate that way (the session card gives the bash and PowerShell form); never `nvm use`, `rbenv global`, `pyenv global` or `sdk default`, which switch the machine's runtime.
+- **Conventions are the repo's.** The patterns of its version are how it is written: follow them; the department rules for current versions apply to new code only where the repo already does.
+- **What the testigos accept here.** A temp config a command makes and removes (`tsconfig.spec.tmp.json`) is no change. A build run in the background counts once its output shows success (read it before closing); a build that takes minutes may instead be declared `Build: no (<time>)`, and `Tests: no (<why>)` likewise. A styles-only change owes no full build. When the tests were already failing, write `| test (full) | broken at HEAD (<why>) | <date> |` in Quality gates: a failing test run is then the baseline's, with no clean copy to prove it.
 
 ## Conventions by department
 Only what is specific to working in an unknown stack. General rules live in the `dept-*` department skills.

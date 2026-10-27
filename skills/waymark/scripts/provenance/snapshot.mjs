@@ -33,7 +33,7 @@ export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir()
   for (const d of lines) {
     if (d.version) agent = d.version;
     if (d.type !== 'assistant' || d.isSidechain) continue;
-    if (d.message?.model) model = d.message.model;
+    if (d.message?.model && d.message.model !== '<synthetic>') model = d.message.model; // the harness's cut notice is no model's answer
     for (const c of d.message?.content || []) if (c.type === 'tool_use' && /^mcp__/.test(c.name)) mcp.add(c.name.split('__')[1]);
   }
   let waymark = null;
@@ -47,7 +47,7 @@ export function turnInputs(lines, cwd, userInstructions = path.join(os.homedir()
 // in the last paragraph, so git does not read it as a trailer.
 export function commitsFor(cwd, id) {
   if (!id) return [];
-  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%B%x1e'], { cwd, encoding: 'utf8', timeout: 1500 });
+  const r = spawnSync('git', ['log', '-30', '--format=%H%x1f%B%x1e'], { cwd, encoding: 'utf8', timeout: 5000 });
   if (r.status !== 0) return [];
   return r.stdout.split('\x1e').map((c) => c.replace(/^\s+/, '').split('\x1f'))
     .filter(([h, msg]) => h && String(msg || '').split(/\r?\n/).some((l) => l.match(/^\s*Waymark-Task:\s*(.+?)\s*$/i)?.[1] === id)).map(([h]) => h);
@@ -58,7 +58,7 @@ export function commitsFor(cwd, id) {
 // files the turn really changed, whatever tool changed them (`git checkout`, a script, a formatter), not only the
 // files written with Edit/Write.
 export function gitSnapshot(cwd) {
-  const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 1500, maxBuffer: 8 * 1024 * 1024 });
+  const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
   const top = git('rev-parse', '--show-toplevel');
   if (top.status !== 0) return null;
   const root = top.stdout.trim(), head = git('rev-parse', 'HEAD').stdout.trim() || null;
@@ -97,9 +97,12 @@ const writeSnaps = (all) => {
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(snapFile(), JSON.stringify(all));
 };
-export function saveSnapshot(session, cwd) {
+// `keep`: the session's last turn never closed (the user interrupted it, a background agent was still running): its
+// snapshot stays, so the files it changed are judged with the turn that follows, not lost with the prompt.
+export function saveSnapshot(session, cwd, { keep = false } = {}) {
   const all = readSnaps(), id = session || 'unknown';
   if (all[id]?.paused) { all[id].paused = false; writeSnaps(all); return all[id].snap; }
+  if (keep && all[id]?.snap) return all[id].snap;
   const snap = gitSnapshot(cwd);
   all[id] = { at: Date.now(), cwd, snap };
   writeSnaps(all);

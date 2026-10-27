@@ -23,7 +23,7 @@ export function incidents(records) {
     const steps = r.evaluation.steps;
     for (const [label, ok] of Object.entries(steps)) {
       if (LABELS && !LABELS.has(label)) continue;
-      if (ok === 'exception') continue; // declared, not proven: it neither opens nor closes an incident
+      if (ok === 'exception' || ok === 'na') continue; // declared, not proven, or a cut turn that judged nothing: it neither opens nor closes an incident
       if (ok) { open.delete(label); continue; }
       const cause = clip(String([...(r.unresolved || []), ...(r.findings || [])][0] || '').replace(/\s+/g, ' '), 120);
       const o = open.get(label) || { label, since: r.id, count: 0 };
@@ -40,9 +40,9 @@ export function incidents(records) {
 export const incidentsAt = (cwd) => incidents(readTaskRecords(projectHome(cwd)));
 
 // One line for the context card, or ''.
-export function incidentsLine(found) {
+export function incidentsLine(found, w = WAYMARK_CMD) { // w: the command as the text around it names it (the card defines W)
   if (!found.open.length && !found.rules.length) return '';
   const open = found.open.map((o) => `${o.label} ✘${o.count > 1 ? `×${o.count}` : ''} (${o.last})`).join(', ');
   const rules = found.rules.map((r) => `${r.label} failed ${r.failures}×`).join(', ');
-  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (${WAYMARK_CMD} incidents)`;
+  return `Incidents: ${open ? `open ${open}` : 'none open'}${rules ? `; suggested rule: ${rules}` : ''} (${w} incidents)`;
 }

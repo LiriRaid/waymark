@@ -3,7 +3,7 @@
   "agents": [
     {
       "key": "claude", "name": "Claude Code", "primary": true, "dir": "~/.claude", "env": "CLAUDE_CONFIG_DIR", "instructions": "CLAUDE.md", "skills": "~/.claude/skills",
-      "hooks": { "file": "settings.json", "override": "WAYMARK_CLAUDE_SETTINGS", "format": "nested", "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit|Read" },
+      "hooks": { "file": "settings.json", "override": "WAYMARK_CLAUDE_SETTINGS", "format": "nested", "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill|mcp__engram__mem_save|mcp__engram__mem_update" },
       "adapter": "claude", "docs": "https://code.claude.com/docs/en/hooks", "checked": "2026-10-12"
     },
     {
@@ -50,7 +50,8 @@
     {
       "key": "windsurf", "name": "Windsurf", "dir": "~/.codeium/windsurf", "instructions": "memories/global_rules.md", "skills": true,
       "hooks": { "file": "hooks.json", "format": "flat" },
-      "adapter": null, "docs": "https://docs.devin.ai/desktop/cascade/hooks", "checked": "2026-10-12"
+      "adapter": null, "soon": "no session start and no documented way to hand the model context (a pre-hook can only exit 2 with stderr), so it cannot carry a card, a task ID, a record or a Cierre",
+      "docs": "https://docs.devin.ai/desktop/cascade/hooks", "checked": "2026-10-12"
     },
     {
       "key": "qwen", "name": "Qwen Code", "dir": "~/.qwen", "env": "QWEN_HOME", "instructions": "QWEN.md", "skills": "~/.qwen/skills",
@@ -70,7 +71,8 @@
     {
       "key": "crush", "name": "Crush", "dir": "$XDG/crush", "instructions": "CRUSH.md", "skills": true,
       "hooks": { "file": "crush.json", "format": "flat" },
-      "adapter": null, "docs": "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md", "checked": "2026-10-12"
+      "adapter": null, "soon": "one event only (PreToolUse), so it cannot carry a card, a task ID, a record or a Cierre",
+      "docs": "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md", "checked": "2026-10-12"
     }
   ]
 }

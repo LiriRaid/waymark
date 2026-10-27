@@ -63,10 +63,23 @@ function findNode() {
   return null;
 }
 
+// Each run's milliseconds (from the process start, as the agent waits for it) go to <WAYMARK_HOME>/latency.log, one tab-separated
+// line: when, the hook, ms. `waymark.mjs check` names an event whose p95 passes its cap. The log keeps its last 2,000 lines.
+function logLatency() {
+  try {
+    var file = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'latency.log');
+    var line = new Date().toISOString() + '\t' + path.basename(script).replace(/\.[cm]?js$/, '') + '\t' + Math.round(process.uptime() * 1000) + '\n';
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (isFile(file) && fs.statSync(file).size > 256 * 1024) fs.writeFileSync(file, fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(-2000).join('\n') + '\n');
+    fs.appendFileSync(file, line);
+  } catch (e) { /* the hook's work matters more than its timing */ }
+}
+
 if (!script) {
   tell('Waymark: hook-run.cjs was started with no hook script to run.');
   process.exit(0);
 } else if (major(active) >= MIN) {
+  process.on('exit', logLatency);
   process.argv.splice(1, 1); // the hook sees itself as the script: [node, <hook>, ...args], as when it is started directly
   import(url.pathToFileURL(path.resolve(script)).href).catch(function (e) {
     process.stderr.write('Waymark: ' + path.basename(script) + ' failed to load: ' + (e && e.stack || e) + '\n');
@@ -80,6 +93,7 @@ if (!script) {
       ' did not run: this task is not recorded and its Cierre is not checked. Switch to a newer Node (nvm use <version>), or set WAYMARK_NODE to a node executable, or run install-hooks with a newer Node to pin one.');
     process.exit(0);
   }
+  process.on('exit', logLatency);
   var r = cp.spawnSync(other, [path.resolve(script)].concat(rest), { stdio: 'inherit' });
   if (r.error) {
     tell('Waymark: ' + name + ' could not run with ' + other + ' (' + r.error.message + ').');

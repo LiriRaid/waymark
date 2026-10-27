@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { waymarkHome as HOME, norm, real } from '../lib/paths.mjs';
+import { topOf } from '../lib/git.mjs';
 
 // A hook's own failure never reaches the agent (a hook must not break the turn): it is appended to
 // ~/.waymark/hook-errors.log (the newest 200 lines) and `waymark.mjs check` reports it.
@@ -39,8 +40,8 @@ export function legacyMemory(cwd) {
 // as an 8.3 short name (C:\Users\RUNNER~1\...) or through a link, and every caller compares the root with paths spelled
 // like cwd. The root is cwd's own ancestor at the depth git's root lies above it.
 const gitTop = (cwd) => {
-  let top;
-  try { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 1500 }); if (r.status !== 0) return null; top = r.stdout.trim(); } catch { return null; }
+  const top = topOf(cwd); // asked once per folder in a run (lib/git.mjs)
+  if (!top) return null;
   const here = path.resolve(String(cwd || '.')), rel = path.relative(real(top), real(here)), up = rel.split(path.sep);
   if (up[0] === '..' || path.isAbsolute(rel)) return top;
   return (rel ? path.resolve(here, ...up.map(() => '..')) : here).replace(/\\/g, '/'); // forward slashes, as git writes it
@@ -99,20 +100,34 @@ export const LOCAL_DIRS = [
   ['.agents/', 'project skills, every agent'],
   ['.claude/skills/', "Claude Code's links to .agents/skills"],
 ];
-// Keeps the LOCAL_DIRS out of git through the project's .gitignore (created if missing) and writes .waymark's README
-// once. → true when the ignore lines are in place.
+// The file git reads this clone's own ignores from (a worktree shares its repository's): `git rev-parse --git-path`, or null outside git.
+const EXCLUDES = new Map(); // kept for the run, found ones only (as TOPS)
+function excludeFile(root) {
+  if (EXCLUDES.has(String(root))) return EXCLUDES.get(String(root));
+  try {
+    const r = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: root, encoding: 'utf8', timeout: 5000 });
+    const file = r.status === 0 && r.stdout.trim() ? path.resolve(root, r.stdout.trim()) : null;
+    if (file) EXCLUDES.set(String(root), file);
+    return file;
+  } catch { return null; }
+}
+// Keeps the LOCAL_DIRS out of git through .git/info/exclude, never through the project's versioned .gitignore (docs/adr/0043), and
+// writes .waymark's README once. A line the project's own .gitignore already has is kept. Outside git there is nothing to ignore yet:
+// the next call, once git exists, writes the lines. → true when the ignore lines are in place.
 export function ensureLocal(home) {
   if (!home?.dir) return false;
   fs.mkdirSync(home.dir, { recursive: true });
   const readme = path.join(home.dir, 'README.md');
   if (!fs.existsSync(readme)) fs.writeFileSync(readme, README);
-  // the project's .gitignore, so every clone and every agent keeps them out of git
-  const file = path.join(home.root, '.gitignore');
-  let text = '';
+  const file = excludeFile(home.root);
+  if (!file) return false;
+  const has = (text, dir) => new RegExp(`^/?${dir.replace(/[.]/g, '\\.').replace(/\/$/, '')}/?\\s*$`, 'm').test(text);
+  let own = '', text = '';
+  try { own = fs.readFileSync(path.join(home.root, '.gitignore'), 'utf8'); } catch {}
   try { text = fs.readFileSync(file, 'utf8'); } catch {}
-  const has = (dir) => new RegExp(`^/?${dir.replace(/[.]/g, '\\.').replace(/\/$/, '')}/?\\s*$`, 'm').test(text);
-  const missing = LOCAL_DIRS.filter(([dir]) => !has(dir));
+  const missing = LOCAL_DIRS.filter(([dir]) => !has(own, dir) && !has(text, dir));
   if (!missing.length) return true;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${missing.map(([dir, what]) => `# ${what}, local only\n${dir}\n`).join('')}`);
   return true;
 }
@@ -127,5 +142,5 @@ Any agent (Claude Code, Codex, Cursor, a new session) resumes the work from this
 - \`open.json\`: turns that started and have not ended (one per session); shown in tasks.md under *Started, not closed*.
 - \`history.md\` (when present): *Work in progress* lines moved out of memory.md whole (older closed lines, or over 200 characters), never deleted. Read it only for the past.
 
-Kept out of git through the project's \`.gitignore\`.
+Kept out of git through \`.git/info/exclude\` (this clone only); the project's own \`.gitignore\` is never touched.
 `;

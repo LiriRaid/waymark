@@ -45,6 +45,9 @@ function buildLabel(root) {
   return null;
 }
 
+// The Rails version Gemfile.lock pins, or null.
+export const railsVersion = (root) => read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] || null;
+
 // → { pm, pmVersion, from, exec, run, deps: [[name, version]] } for a Node project; { pm: null, other } for a Ruby, Python or
 // Go project; null when the folder has no manifest.
 export function stackOf(root) {
@@ -58,7 +61,7 @@ export function stackOf(root) {
       || (cBuild(root) ? ['CMakeLists.txt', cBuild(root)] : null)
       || buildLabel(root);
     if (!other) return null;
-    const rails = other[0] === 'Gemfile' ? read(path.join(root, 'Gemfile.lock')).match(/^\s{4}rails \(([\d.]+)\)/m)?.[1] : null;
+    const rails = other[0] === 'Gemfile' ? railsVersion(root) : null;
     return { pm: null, other: other[1], deps: rails ? [['rails', rails]] : [] };
   }
   const declared = String(pkg.packageManager || '').match(/^(pnpm|yarn|bun|npm)@([\d.]+)/);
@@ -81,6 +84,34 @@ export const copyInstall = (stack) => COPY_INSTALL[stack?.pm] || null;
 // "(sin verificar)") is dropped; one after an operator (`cd api && (npm test)`) is a subshell and stays, and so does the
 // reason of a `none (<why>)` row, which runs nothing.
 export const gateCell = (cmd) => (/^\s*none\b/i.test(String(cmd || '')) ? String(cmd).trim() : String(cmd || '').replace(/(?<![&|;(]\s*)\s+\([\p{L} ]+\)\s*$/u, '').trim());
+
+// Why a Quality gates command cannot be right in this repo, or '': a -p/--project file that does not exist, a package script that is not in
+// package.json, a test runner's filter that names no path (a command cut short once became `tsc -p ts` and `vitest run s`, and failed on every
+// later task). A placeholder (<file>) or a glob is never judged. A row with a problem is read as if it were empty: the hook falls back to the
+// repo's own scripts, and `waymark.mjs check` lists it.
+const TESTER = /^(vitest|jest|mocha|karma|pytest|rspec|phpunit|ava|tap)$/;
+export function rowProblem(cmd, root) {
+  const c = gateCell(cmd);
+  if (!c || /^none\b/i.test(c) || /[<>]/.test(c)) return '';
+  const w = [...c.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const there = (p) => fs.existsSync(path.resolve(root, p));
+  for (let i = 0; i < w.length; i++) {
+    if (/^(-p|--project)$/.test(w[i]) && w[i + 1] && !/[*<>]/.test(w[i + 1]) && !there(w[i + 1])) return `${w[i]} ${w[i + 1]} names a file that does not exist`;
+    if (/^--project=/.test(w[i]) && !there(w[i].slice(10))) return `${w[i]} names a file that does not exist`;
+  }
+  const pm = w.findIndex((x) => /^(npm|pnpm|yarn|bun)$/.test(x));
+  if (pm >= 0) {
+    const script = /^(run|run-script)$/.test(w[pm + 1] || '') ? w[pm + 2] : null, scripts = json(path.join(root, 'package.json'))?.scripts;
+    if (script && scripts && !scripts[script]) return `script "${script}" is not in package.json`;
+  }
+  const tester = w.findIndex((x) => TESTER.test(path.basename(x)));
+  if (tester >= 0) {
+    const rest = w.slice(tester + 1), flag = rest.findIndex((x) => x.startsWith('-')); // after a flag a word may be its value (-k expr, -t name)
+    const filter = (flag < 0 ? rest : rest.slice(0, flag)).find((x) => !/^(run|watch|test)$/.test(x) && !/[:=]/.test(x));
+    if (filter && !/[*<>]/.test(filter) && !there(filter)) return `"${filter}" is a filter that names no file or folder here`;
+  }
+  return '';
+}
 
 // Codex's Windows sandbox does not resolve the .CMD launchers in node_modules/.bin, so `pnpm exec` / `npx` fail there
 // ("not recognized") while `pnpm run` works: for that agent a package binary runs with node.
@@ -110,11 +141,15 @@ export function stackLine(root, { direct = false } = {}) {
   return [`${s.pm}${s.pmVersion ? ` ${s.pmVersion}` : ''}`, ...deps].join(' · ') + run;
 }
 
-// memory.md's Identity line "Package manager…: <name>" set to the repo's manager when it names another. → true when
-// rewritten.
+// memory.md's Identity line "Package manager…: <name>" set to the repo's manager when it names another, and the template's
+// `<pnpm | bundle | …>` placeholder filled with it, marked to confirm (another stack: its own tool). → true when rewritten.
+export const PM_PLACEHOLDER = /^(- Package manager[^:\n]*:\s*)<[^>\n]*>[ \t]*$/m;
 export function syncIdentity(memoryFile, stack) {
-  if (!stack?.pm) return false;
-  const text = read(memoryFile);
+  if (!stack) return false;
+  const text = read(memoryFile), hole = text.match(PM_PLACEHOLDER);
+  const said = stack.pm ? `${stack.pm} (read from the repo: ${stack.from}; to confirm)` : stack.other ? `${stack.other} (read from the repo; to confirm)` : '';
+  if (hole && said) { fs.writeFileSync(memoryFile, text.replace(hole[0], () => `${hole[1]}${said}`)); return true; }
+  if (!stack.pm) return false;
   const m = text.match(/^(- Package manager[^:\n]*:\s*)([A-Za-z]+)([^\n]*)$/m);
   if (!m || m[2].toLowerCase() === stack.pm) return false;
   fs.writeFileSync(memoryFile, text.replace(m[0], () => `${m[1]}${stack.pm} (read from the repo: ${stack.from})`));
@@ -156,4 +191,69 @@ export function profileOf(root) {
   // An ecosystem read from a build file with no profile of its own: a profile dropped in stacks/ under its name (`stack-new` drafts one) applies at once
   if (slug === 'generic' && s?.other) { const own = String(s.other).split(' ')[0].replace(/^[.]/, ''); if (own && fs.existsSync(path.join(stacks, `${own}.md`))) slug = own; }
   return { slug, exists: fs.existsSync(path.join(stacks, `${slug}.md`)) };
+}
+
+// ---- the project's own migration command (docs/adr/0046): read from the repo, written once to Conventions, preferred over a handwritten file ----
+const MAKES = /generate|create|new|make|\bdev\b|migrate$/i, APPLIES_ONLY = /deploy|status|reset|revert|rollback|down|resolve|seed|studio|backup/i;
+// → the command that makes a migration in this repo, or null: a package.json script (the one that makes one before one that only applies),
+// Prisma with no script, Rails, Django, Alembic, Laravel.
+export function migrationCommand(root) {
+  const has = (f) => fs.existsSync(path.join(root, f));
+  const pkg = json(path.join(root, 'package.json'));
+  if (pkg) {
+    const pm = has('pnpm-lock.yaml') ? 'pnpm' : has('yarn.lock') ? 'yarn' : has('bun.lockb') || has('bun.lock') ? 'bun' : 'npm';
+    const names = Object.entries(pkg.scripts || {}).filter(([k, v]) => /migrat/i.test(k) && !APPLIES_ONLY.test(k) && !/migrate (deploy|status|reset)/.test(v));
+    const pick = names.find(([k]) => /generate|create|new|make/i.test(k)) || names.find(([, v]) => /migrate dev|migration:generate|makemigrations|make:migration/.test(v)) || names.find(([k]) => MAKES.test(k));
+    if (pick) return `${RUNNERS[pm].run} ${pick[0]}`;
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps.prisma || deps['@prisma/client']) return 'npx prisma migrate dev --name <name>';
+  }
+  if (has('bin/rails') && has('Gemfile')) return 'bin/rails generate migration <Name>';
+  if (has('manage.py')) return 'python manage.py makemigrations';
+  if (has('alembic.ini')) return 'alembic revision --autogenerate -m "<message>"';
+  if (has('artisan')) return 'php artisan make:migration <name>';
+  return null;
+}
+// The tests of the files a task touched, from the repo's own runner: a whole suite takes minutes where these take seconds (a real project
+// spent 468 minutes in ten days on full Vitest runs mid-task). → the command with <files>, or null (a runner with no related mode is not invented).
+export function relatedCommand(root) {
+  const s = stackOf(root), has = (n) => s?.deps?.some(([d]) => d === n);
+  if (!s?.pm) return null;
+  return has('vitest') ? `${s.exec} vitest related <files> --run` : has('jest') ? `${s.exec} jest --findRelatedTests <files>` : null;
+}
+const RELATED_ROW = /^\|\s*test \(related\)\s*\|([^|\n]*)\|[^\n]*$/m;
+// An empty `test (related)` row of Quality gates takes relatedCommand, "to confirm"; a row with a command is never touched. → the command written, or null.
+export function fillRelated(memoryFile, root) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  const m = text.match(RELATED_ROW);
+  if (!m || m[1].trim()) return null;
+  const cmd = relatedCommand(root);
+  if (!cmd) return null;
+  fs.writeFileSync(memoryFile, text.replace(RELATED_ROW, `| test (related) | \`${cmd}\` | to confirm |`));
+  return cmd;
+}
+// The related row's command for these files (<files> or <file> replaced), or null with no row.
+export function relatedRun(memoryFile, root, files) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  const cmd = text.match(RELATED_ROW)?.[1].replace(/`/g, '').trim();
+  return cmd && !rowProblem(cmd, root) ? gateCell(cmd).replace(/<files?>/g, files.join(' ')) : null;
+}
+
+// Writes "- Migrations: `<command>` (to confirm: detected from the repo)" under Conventions when the repo has one and no line says so yet.
+// → the line written, or null.
+export function fillMigrations(memoryFile, root) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  if (/^[ \t]*[-*]?[ \t]*Migrations?:/im.test(text.replace(/<!--[\s\S]*?-->/g, ''))) return null;
+  const cmd = migrationCommand(root);
+  if (!cmd) return null;
+  const line = `- Migrations: \`${cmd}\` (to confirm: detected from the repo)`;
+  const at = text.match(/^## Conventions[^\n]*\n/m);
+  if (!at) return null;
+  const head = at.index + at[0].length, rest = text.slice(head);
+  const out = /^- …\n/.test(rest) ? text.slice(0, head) + line + '\n' + rest.slice(4) : text.slice(0, head) + line + '\n' + rest;
+  fs.writeFileSync(memoryFile, out);
+  return line;
 }

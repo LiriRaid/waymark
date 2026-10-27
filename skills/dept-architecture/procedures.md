@@ -3,17 +3,24 @@
 Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the task needs.
 
 ### Identify the architecture (always first)
-1. Read project memory → architecture. If present, load `../waymark/architectures/<slug>.md`. Available: `screaming`, `hexagonal`, `clean`, `layered`, `feature-sliced`, `modular-monolith`.
-2. If absent, detect it with the folder signals of `waymark` `../waymark/references/project-detection.md` and each profile's *Detect* line.
-3. Signals mixed or absent → state the best match and its confidence in the brief; ask the user before an L3 change and record the answer in project memory.
-4. Search the learned memory (`engram search "<words>"` or mem_search) for prior architecture decisions on this project.
+1. Read project memory → Architecture. A profile is a reference, never a rule: the repo's own structure wins. Run `node "<skills-dir>/waymark/scripts/waymark.mjs" convention` (read-only): it reports where components, modals, services and styles live, the commit that set the structure, and the project's docs. Its evidence is what `memory.md` → Architecture holds, marked "to confirm" until the user confirms it once.
+2. If present and confirmed, load `../waymark/architectures/<slug>.md` for its *Variants* and read the line that matches the repo's convention. Available: `screaming`, `hexagonal`, `clean`, `layered`, `feature-sliced`, `modular-monolith`.
+3. If absent, detect it with the folder signals of `waymark` `../waymark/references/project-detection.md` and each profile's *Detect* line.
+4. Signals mixed or absent → state the best match and its confidence in the brief; ask the user before an L3 change and record the answer in project memory.
+5. Search the learned memory (`engram search "<words>"` or mem_search) for prior architecture decisions on this project.
 
 ### Place new code (L1/L2)
-1. Apply the decision list in the architecture profile → *Placement rules*.
-2. Default scope rule: used by one module → stays inside it; used by two or more → promoted to the shared layer; cross-cutting infrastructure → the core/infrastructure layer.
+1. Apply the decision list in the architecture profile → *Placement rules*, through the variant the repo follows.
+2. Where the census shows where this kind of piece already lives, put the new one there. The scope rule (used by one module → inside it; two or more → the shared layer; infrastructure → the core layer) applies only when the repo shows no convention of its own, and is then written as "profile default".
 3. Check the import direction against *Dependency rules* before writing the import.
 4. Name folders and files after the domain concept, not the technical type, unless the profile says otherwise.
 5. Follow the stack's naming and file conventions (stack profile → *Conventions by department*).
+
+### Structural change (always L3; own window)
+Moving files between layers, splitting or merging files, a new kind of folder.
+1. Run `W convention` first. Never start from a profile's rule.
+2. Ask it in its own choice window, apart from any other question and even when the user chose "recommended on everything" for the task. The window shows what moves (from where to where, how many files), the convention detected (where components, modals and services live and the commit that set it), and one line: "follows the convention" or "CONTRADICTS the project's convention". When it contradicts, the recommended option is not to move.
+3. Never write into the project's own docs (ADR, AGENTS.md, README) a convention that contradicts its history without the user's explicit decision in that window.
 
 ### Refactor (L2/L3)
 1. Write down current behavior and public API; they are invariants.
@@ -43,7 +50,7 @@ Loaded on demand from `SKILL.md` → *Procedures*. Read only the section the tas
 ## Anti-patterns
 - Cross-module deep imports that bypass the public contract.
 - Generic `utils`/`helpers` dumping grounds in the core layer.
-- Promoting code to shared when only one module uses it.
+- Moving code to a layer because a profile says so when the repo's own structure says otherwise.
 - Interfaces with a single implementation and no boundary reason.
 - Big-bang rewrites instead of incremental migration.
 - Mixing a refactor and a behavior change in the same step.

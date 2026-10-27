@@ -53,3 +53,7 @@ Two more gaps showed in that reading. A task's cost depends on the model (Opus a
 | 13 Task done completely and as asked | 86.6 | 93 | 13.6: the four 2.0.19 tasks closed parcial (≤ 0.2): their Cierre did not answer the options chosen in the window |
 
 Criteria 8, 9 and 13 are below their targets and the README says so. The scorecard test no longer judges the measures read from the task records (real use, which every task changes): the scorecard does, against their thresholds. `scorecard --projects` over the other projects is the author's to run, since the list is private.
+
+## Result before the tag, after the fixes on the same version
+
+That close was tagged and not merged; real use of it was fixed on 2.0.19 (CHANGELOG, *Fixed before main*). Measured on 2026-10-27 with the code of the fixes (lock ok): **96.5 %**. 8.2, 8.3 and 8.9 pass (the fixed context and the reminder were over only with the old installed copy; 8.9 is frozen at 15 M). Still below, read from records closed before the fixes: 5.1 0.922, 8.7 0.199, 11.2 0.804, 13.5 0.462, 13.6 0.615; left for 2.0.20: 9.9 (one agent) and 10.3 (0.763 against 0.85). The score is measured again on the tasks run with the reinstalled 2.0.19 before the tag is cut.

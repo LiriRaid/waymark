@@ -2,7 +2,7 @@
 
 **Status:** accepted (2.0.19, point 13). Amends ADR 0028 (three checks and a pooled view of real use; the scorecard now names this ADR, whose lock replaces the one in 0048), ADR 0027 (the record fields it listed as missing are derived where a hook or a reader can see them) and ADR 0031 (`cost` knows the model).
 
-Scorecard-Lock: dbebabae73cc15a030ceb5884852be7b44026170cea5af4eb5c5466e58091137
+Scorecard-Lock: 1f9f93d81771931cce400cbad4a9986cc833d4bca646bc2ffbfe5fddd23491af
 
 ## Context
 
@@ -12,7 +12,7 @@ Two more gaps showed in that reading. A task's cost depends on the model (Opus a
 
 ## Decision
 
-- **Three checks see real use.** `13.6` the share of the last 30 tasks that closed `parcial`, at most 20 %; `9.9` the number of different agents that closed them, at least 2 (one agent shows its count, never 100 %); `8.9` the median tokens of a task, **pending**: its threshold is frozen in the next release from this release's baseline, as ADR 0031 did for the others. The weights do not move. Nothing outside these checks changed, so the card carries a new lock (above).
+- **Three checks see real use.** `13.6` the share of the last 30 tasks that closed `parcial`, at most 20 %; `9.9` the number of different agents that closed them, at least 2 (one agent shows its count, never 100 %); `8.9` the median tokens of a task, at most **15 M**: first planned as pending until the next release, it is frozen in this one (the user, 2026-10-27) from its baseline, the 14.3 M median of the 2.0.19 tasks, with a margin, so the release can be measured whole. `10.3` keeps its frozen 0.85 although the honest measure is 0.761 (the user, 2026-10-27): the precedent algorithm improves in 2.0.20. The weights do not move. Nothing outside these checks changed, so the card carries a new lock (above).
 - **A version answers for the records it wrote.** The checks read from the records (field share, parcial share, agents, tokens…) count only the tasks whose writer version (`inputs.waymark`) is the version measured; a record with no version stays. During the build of 2.0.19 the hooks that ran were the installed 2.0.18, whose notification turns left records with no Cierre (point 3i). Those records keep failing 1.2 until the version is raised at the Close, and then the check reads "unmeasured" until 2.0.19 has closed real tasks. No record is edited and no threshold moves.
 - **`scorecard --projects [paths]`** pools the last 30 tasks of each project the user names: the share of `parcial`, the agents, the median tokens, the three checks over the pool. With no paths it reads the Path column of `~/.waymark/projects.md`, which is private; nothing of a project goes into the repository. A project with no task is not measured (never 0 % or 100 %), a path that does not exist is named, one agent is said as one agent. The parcial share leaves out a `parcial` for an external cause (the quota or the provider cut the turn: it says nothing of the work), on both sides; the report shows beside it the share that closed with testigos unresolved, as a line, not a check (no lock of its own).
 - **The model is in the record and in `cost`.** The record keeps the models the turn's responses came from, in order (`models`) and whether they changed (`modelChanged`), read from the transcript. `cost` groups by model as well as by version and level; tasks with a model change are shown apart and are left out of the routine share, because the cache rewrite after the change is not the routine's.

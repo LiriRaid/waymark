@@ -93,7 +93,7 @@
         { "id": "8.6", "what": "the routine share of the last 10 L2 tasks (cost units) is within its frozen threshold", "point": 4, "kind": "measure", "measure": "cost.routineShareL2", "op": "le", "threshold": 0.09, "frozenIn": 3 },
         { "id": "8.7", "what": "the routine share of the last 5 L1 tasks (cost units) is within its frozen threshold", "point": 4, "kind": "measure", "measure": "cost.routineShareL1", "op": "le", "threshold": 0.065, "frozenIn": 3 },
         { "id": "8.8", "what": "each lever kept has a regression check on the replay", "point": 4, "kind": "exists", "files": ["tests/replay.test.mjs"] },
-        { "id": "8.9", "what": "the median tokens of a recent task: pending, frozen in the next release from the baseline of this one", "point": 13, "kind": "measure", "measure": "records.medianTokens", "op": "le", "threshold": null, "frozenIn": 14 }
+        { "id": "8.9", "what": "the median tokens of a recent task is within its frozen threshold (the 2.0.19 baseline, 14.3 M, and a margin)", "point": 13, "kind": "measure", "measure": "records.medianTokens", "op": "le", "threshold": 15000000, "frozenIn": 13 }
       ]
     },
     {

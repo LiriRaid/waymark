@@ -114,13 +114,13 @@ test('13: with no paths the projects are the Path column of ~/.waymark/projects.
   assert.deepEqual(SC.namedProjects(), [], 'counter-example: an empty index names nothing');
 });
 
-test('13: the card has the three checks, one pending, and its lock names ADR 0049', async () => {
+test('13: the card has the three checks, 8.9 frozen in 2.0.19 from its baseline, and its lock names ADR 0049', async () => {
   const card = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'scorecard.json'), 'utf8'));
   const check = (id) => card.criteria.flatMap((c) => c.checks).find((c) => c.id === id);
   assert.deepEqual([check('13.6').measure, check('13.6').op, check('13.6').threshold], ['records.parcialShare', 'le', 0.2]);
   assert.deepEqual([check('9.9').measure, check('9.9').op, check('9.9').threshold], ['records.agentSpread', 'ge', 2]);
-  assert.equal(check('8.9').threshold, null, 'the median tokens are pending: frozen from this release\'s baseline');
-  assert.ok(Number.isInteger(check('8.9').frozenIn));
+  assert.deepEqual([check('8.9').op, check('8.9').threshold, check('8.9').frozenIn], ['le', 15_000_000, 13], 'the median tokens: 15 M, the 2.0.19 baseline (14.3 M) and a margin, frozen in this release (the user, 2026-10-27)');
+  assert.deepEqual([check('10.3').threshold], [0.85], 'counter-example: 10.3 keeps its frozen threshold (the user, 2026-10-27)');
   assert.equal(card.adr, '0049');
   assert.equal(SC.adrLock(ROOT, card), SC.lockOf(card));
   assert.equal(card.criteria.reduce((a, k) => a + k.weight, 0), 100, 'the weights did not move');

@@ -11,7 +11,7 @@ Pedido: <the ask, one line> · Captura: <what each image shows + the element it 
 Reutiliza: <piece + path from Project map → Reusables | ninguno → patrón de <file>>
 ```
 Two readings that change the result → ask once first. A layer the user named, evidence pointing elsewhere → ask before leaving it.
-**The user decides, never you.** First the owner's `procedures.md` section (handed by the hook); then one choice-window call: the approach with its optimal options (files, risk, cost; recommended marked) and every decision that shapes the work you can foresee. One way: L1 → `Camino: <it>` first, no window; else (or chosen) confirm it there. Later questions only confirm; a new work decision is asked before applying it. The branch is the user's, never a decision. A user rule exists only where it is written (their message, memory.md, preferences.md): cite it; none → ask. Eyes: localhost, no credentials.
+**The user decides, never you.** First the owner's `procedures.md` section (handed by the hook); then one choice-window call: the approach with its optimal options (files, risk, cost; recommended marked) and every decision that shapes the work you can foresee. One way: L1 → `Camino: <it>` first, no window; L2+ or chosen → confirm it there. Later questions only confirm; a new work decision is asked before applying it. The branch is the user's, never a decision. A user rule exists only where it is written (their message, memory.md, preferences.md): cite it; none → ask. Eyes: localhost, no credentials.
 **Close every change with** (task ID from the per-prompt hook):
 ```
 ## Cierre · <YYYY-MM-DD · T<n>[a-z]>

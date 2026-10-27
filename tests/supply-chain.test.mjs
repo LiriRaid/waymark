@@ -201,6 +201,7 @@ test('Evidencia: n/n is backed by a filtered summary that failed nothing and by 
   assert.deepEqual(said('ℹ pass 275\nℹ fail 0', 'la suite da 275/275'), [], 'logic: "pass 275 · fail 0" says 275/275');
   assert.deepEqual(said('ℹ tests 235\nℹ pass 233\nℹ fail 2', 'la suite da 233/233'), ['233/233'], 'counter-example: 233 passed of 235, two failed');
   assert.deepEqual(said('ℹ pass 12\nℹ fail 0', 'los estilos dan 12/14'), ['12/14'], 'counter-example: a total no output shows');
+  assert.deepEqual(said('ℹ pass 270\nℹ fail 0\nℹ cancelled 5', 'la suite da 270/270'), ['270/270'], 'counter-example: five cancelled did not pass');
   const long = `${'✔ a test of the stylesheet tokens (1.2ms)\n'.repeat(900)}ℹ tests 900\nℹ pass 900\nℹ fail 0`;
   assert.ok(long.length > 24000);
   const lines = [...opening(), ...run('Bash', { command: 'node --test tests/styles.test.mjs' }, { out: long })];

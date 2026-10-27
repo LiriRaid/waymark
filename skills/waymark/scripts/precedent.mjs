@@ -88,7 +88,7 @@ const othersOf = (records, session) => (session ? records.filter((r) => r.sessio
 // What to hand over for an ask, or null: the best earlier task of another session above the minimum. { task, score, files, text, chars }
 export function precedentFor(prompt, records, minScore = minScoreFor(records.filter((r) => r.id && r.prompt && !r.kind).length), session = null) {
   const query = queryOf(prompt, records, session); // "sigue con el punto 2" alone is one word; with its session's task it says what it continues
-  if (process.env.WAYMARK_PRECEDENT === '0' || tokens(query).length < 2) return null;
+  if (process.env.WAYMARK_PRECEDENT === '0' || !tokens(prompt).length || tokens(query).length < 2) return null; // a bare "sí" or "ok" asks for nothing
   const [top] = search(query, othersOf(records, session), 1);
   if (!top || top.score < minScore || top.matched < MIN_MATCHES) return null; // one rare word in common is a coincidence, not a precedent
   const text = handover(top.record);

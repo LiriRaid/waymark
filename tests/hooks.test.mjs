@@ -384,6 +384,9 @@ test('3e-1: an L1 with one real way says it in a Camino line before its first ch
   assert.equal(dec(l1(camino, call('Edit', { file_path: path.join(cwd, 'src', 'app.component.css') }))).pass, true, 'CSS/HTML: the same for a stylesheet');
   assert.equal(dec(l1(call('Edit', { file_path: FILE }))).pass, false, 'counter-example: an L1 with neither a window nor a Camino line');
   assert.equal(dec(l1(call('Edit', { file_path: FILE }), camino)).pass, false, 'counter-example: a Camino written after the change');
+  const later = [...l1(call('Edit', { file_path: FILE })), prompt('¿y el subtítulo?'), camino, call('Edit', { file_path: FILE })];
+  const inTask = cierreGaps(currentTurn(later), cierre(id), undefined, ['corrige el typo del título'], { ...ctxFor(cwd, []), stretchTools: sessionTools(later) }).steps.find((s) => s.id === 'decision');
+  assert.equal(inTask.pass, false, 'counter-example: a Camino in a later turn, after the task\'s first change');
   const l2 = [prompt('agrega el reintento'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), PACK(), camino, call('Edit', { file_path: FILE })];
   assert.equal(dec(l2).pass, false, 'counter-example: an L2 asks in the window, whatever it says');
 });

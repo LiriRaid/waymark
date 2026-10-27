@@ -181,6 +181,7 @@ test('a short ask is searched with its session\'s previous task, and the session
   ];
   const short = 'sigue con el punto 2';
   assert.equal(P.queryOf(short, c, 'other'), short, 'no task of this session: the ask alone');
+  assert.equal(P.precedentFor('sí', c, 0, 'live'), null, 'counter-example: a bare "sí" asks for nothing, whatever its session did');
   assert.match(P.queryOf(short, c, 'live'), /reintentos .*tope va en la config .*orders\.service\.mjs/, 'logic: the previous task of the session beside it');
   const p = P.precedentFor(short, c, 0, 'live');
   assert.equal(p?.task, c[0].id, 'found through the session\'s context, in another session');

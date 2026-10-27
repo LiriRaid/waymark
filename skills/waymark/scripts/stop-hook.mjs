@@ -690,6 +690,8 @@ function observeEvidence(S) {
     const m = f.match(/^(\d+)\/(\d+)$/);
     if (m && calls.some((c) => new RegExp(`Executed\\s+${m[1]}\\s+of\\s+${m[2]}\\b`, 'i').test(c.out))) return true; // Karma: "Executed 5 of 5 SUCCESS"
     if (m && m[1] === m[2] && calls.some((c) => new RegExp(`\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out))) return true; // all of them passed: "8 passed" says 8/8
+    // a filtered summary (`| grep "^ℹ (pass|fail)"`) shows "pass 275 · fail 0" with no total: 275/275 when nothing failed; "pass 233 · fail 2" is no 233/233
+    if (m && m[1] === m[2] && calls.some((c) => new RegExp(`\\bpass(?:ed)?\\D{0,8}${m[1]}\\b`, 'i').test(c.out) && /\bfail(?:ed|ures?)?\D{0,8}0\b/i.test(c.out) && !/\bfail(?:ed|ures?)?\D{0,8}[1-9]/i.test(c.out))) return true;
     return !!m && calls.some((c) => new RegExp(`(?:pass(?:ed)?|✓|ok)\\D{0,8}${m[1]}\\b|\\b${m[1]}\\s+(?:pass(?:ed)?|✓)`, 'i').test(c.out) && new RegExp(`(?:tests?|total)\\D{0,8}${m[2]}\\b|\\b${m[2]}\\s+(?:tests?|total)`, 'i').test(c.out));
   };
   const stemShown = (f) => { const m = flat(f).match(/^(?:.*\/)?([\w-]{7,})\.\w{1,6}$/); return !!m && hay.includes(m[1]); };

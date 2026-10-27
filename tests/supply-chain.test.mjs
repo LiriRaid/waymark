@@ -196,6 +196,17 @@ test('Evidencia: cited facts are looked up in the turn\'s tool calls; an unbacke
   assert.match(summaryLine('2026-10-14 · T1', ev), new RegExp(`${step(unbacked, 'evidence').label} ⚠`));
 });
 
+test('Evidencia: n/n is backed by a filtered summary that failed nothing and by a summary at the end of a long run; n/n over failures is not', () => {
+  const said = (out, text) => judge([...opening(), ...run('Bash', { command: 'node --test tests/guide.test.mjs 2>&1 | grep -E "^ℹ (pass|fail)"' }, { out })], `observada ${text}`).observed.evidence.unbacked;
+  assert.deepEqual(said('ℹ pass 275\nℹ fail 0', 'la suite da 275/275'), [], 'logic: "pass 275 · fail 0" says 275/275');
+  assert.deepEqual(said('ℹ tests 235\nℹ pass 233\nℹ fail 2', 'la suite da 233/233'), ['233/233'], 'counter-example: 233 passed of 235, two failed');
+  assert.deepEqual(said('ℹ pass 12\nℹ fail 0', 'los estilos dan 12/14'), ['12/14'], 'counter-example: a total no output shows');
+  const long = `${'✔ a test of the stylesheet tokens (1.2ms)\n'.repeat(900)}ℹ tests 900\nℹ pass 900\nℹ fail 0`;
+  assert.ok(long.length > 24000);
+  const lines = [...opening(), ...run('Bash', { command: 'node --test tests/styles.test.mjs' }, { out: long })];
+  assert.deepEqual(judge(lines, 'observada la suite de estilos da 900/900').observed.evidence.unbacked, [], 'CSS/HTML: the summary at the end of a long run is kept');
+});
+
 test('Evidencia: file:line is backed by a call that named the file and showed that line (grep -n of one file, Read)', () => {
   const FILE = '/work/proj/src/app/features/login/auth-callback/auth-callback.ts';
   const grep = [...opening(), ...run('Bash', { command: `grep -n "link" ${FILE} | head` }, { out: '21: *  También recibe el regreso\n45:    const isLink = sso === \'link\';\n47:    const codeVerifier = x;' })];

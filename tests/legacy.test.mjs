@@ -223,7 +223,7 @@ test('6: logic — Windows is told once to turn core.longpaths on where paths go
 test('6: CSS/HTML — a tracked stylesheet buried under a long path asks for it on any stack', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-deep-')); temps.push(d); g(d, 'init', '-q');
   fs.mkdirSync(path.join(d, '.waymark')); fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), '# P\n');
-  const deep = path.join('src', 'a'.repeat(70), 'b'.repeat(70));
+  const deep = path.join('src', 'a'.repeat(78), 'b'.repeat(78)); // 171 inside the repo: over 200 under the suite's short Linux temp folder, and under the 260 git writes on Windows without core.longpaths (the suite's temp folder is ~80 there)
   fs.mkdirSync(path.join(d, deep), { recursive: true }); fs.writeFileSync(path.join(d, deep, 'theme.css'), 'a{}\n');
   g(d, 'add', '-A'); g(d, 'commit', '-q', '-m', 'base');
   assert.match(W.longpathsLine(d, { platform: 'win32' }), /a tracked path is over 200 characters/);

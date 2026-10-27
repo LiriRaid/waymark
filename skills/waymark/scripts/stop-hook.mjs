@@ -393,7 +393,8 @@ export function touchedRepos(files, root, rec, slug) {
   for (const dir of [...new Set(files.map((f) => path.dirname(f)))]) {
     const top = fs.existsSync(dir) && gitRoot(dir);
     if (!top || sameDir(top, root) || out.some((r) => sameDir(r.root, top)) || (rec.repos || []).some((r) => sameDir(r.root, top)) || !fs.existsSync(projectHome(top).memory)) continue;
-    const mine = files.filter((f) => !path.relative(top, f).startsWith('..') && !path.isAbsolute(path.relative(top, f))).map((f) => path.relative(top, f).replace(/\\/g, '/'));
+    const base = real(top); // git gives the root as the filesystem spells it; a file may be typed with an 8.3 short name (Windows)
+    const mine = files.map((f) => path.relative(base, real(f))).filter((r) => !r.startsWith('..') && !path.isAbsolute(r)).map((r) => r.replace(/\\/g, '/'));
     out.push({ root: top, record: { kind: 'touched', task: rec.id, from: slug, agent: rec.agent || null, at: rec.at, session: rec.session, cwd: top, files: mine.slice(0, 30), ...(aprendidoOf(rec.cierre || '') ? { learned: aprendidoOf(rec.cierre).slice(0, 300) } : {}) } });
   }
   return out;

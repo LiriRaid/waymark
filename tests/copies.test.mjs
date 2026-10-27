@@ -15,6 +15,7 @@ const SCRIPTS = path.join(ROOT, 'skills', 'waymark', 'scripts');
 const home = process.env.WAYMARK_HOME; // the sandbox's
 const { SANDBOX } = await import('./helpers/isolate.mjs');
 const C = await import(`file://${SCRIPTS}/copy.mjs`);
+const { real } = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 const R = await import(`file://${SCRIPTS}/runs.mjs`);
 const { checkLink } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
 const W = await import(`file://${SCRIPTS}/waymark.mjs`);
@@ -46,7 +47,7 @@ test('5: logic — a copy lands in a short folder of Waymark\'s root, is a regis
   assert.ok(!c.error, c.error);
   assert.equal(path.dirname(c.path), C.copyRoot(), 'a numbered folder of the root, not one the agent invents');
   assert.ok(path.basename(c.path).length <= 3);
-  assert.match(gitT(d, 'worktree', 'list').stdout.replace(/\\/g, '/'), new RegExp(c.path.replace(/\\/g, '/').replace(/[.*+?^${}()|[\]]/g, '\\$&')));
+  assert.match(gitT(d, 'worktree', 'list').stdout.replace(/\\/g, '/'), new RegExp(real(c.path).replace(/\\/g, '/').replace(/[.*+?^${}()|[\]]/g, '\\$&')), 'git lists the copy as the filesystem spells it (an 8.3 short name expanded on Windows)');
   assert.ok(fs.existsSync(path.join(c.path, 'src', 'a.mjs')), 'a copy of HEAD');
   let deep = c.path;
   try { for (let i = 0; i < 30; i++) deep = path.join(deep, 'node_modules_like_folder_' + i); fs.mkdirSync(deep, { recursive: true }); } catch {} // past the 260 characters of a Windows path
@@ -69,6 +70,20 @@ test('5: CSS/HTML — a copy of a styles-only fixture leaves no folder once remo
   assert.ok(refused.error && !refused.removed && fs.existsSync(path.join(other, 'precious.txt')), 'counter-example: only the root\'s own children are removed');
   assert.ok(!C.inRoot(path.join(C.copyRoot(), '..', 'x')) && C.inRoot(path.join(C.copyRoot(), '7')) && !C.inRoot(C.copyRoot()));
 });
+
+for (const [kind, file] of [['logic', 'src/a.mjs'], ['CSS/HTML', 'src/app.css']]) {
+  test(`5: ${kind} — the copy the close looks for is the same folder spelled through a link; a link inside the root that leads out is not the root's child`, () => {
+    const d = repo({ [file]: 'a\n' }), c = C.makeCopy(d, 'HEAD'), alias = path.join(os.tmpdir(), `wm-alias-${process.pid}-${kind.length}`);
+    temps.push(alias);
+    try { fs.symlinkSync(C.copyRoot(), alias, 'junction'); } catch { C.removeCopy(c.path, { cwd: d }); return; } // no right to make a link here: nothing to show
+    assert.ok(C.inRoot(path.join(alias, path.basename(c.path))), 'the root reached through a link holds its own copy');
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-out-')); temps.push(out);
+    const leads = path.join(C.copyRoot(), '9'); fs.symlinkSync(out, leads, 'junction');
+    assert.ok(!C.inRoot(leads), 'counter-example: a link inside the root that points outside is not a copy of the root');
+    fs.rmSync(leads, { recursive: true, force: true });
+    assert.ok(C.removeCopy(path.join(alias, path.basename(c.path)), { cwd: d }).removed, 'and the copy goes, spelled either way');
+  });
+}
 
 // ---- the close removes the copies its task made ----
 for (const [kind, file] of [['logic', 'src/a.mjs'], ['CSS/HTML', 'src/app.css']]) {

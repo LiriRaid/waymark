@@ -5,15 +5,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { waymarkHome } from './lib/paths.mjs';
+import { waymarkHome, real } from './lib/paths.mjs';
 
 export const copyRoot = () => path.join(waymarkHome(), 'tmp');
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 60000 });
 const gitRoot = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? r.stdout.trim() : null; };
 
-// A path is the root's own child: a delete never reaches anything else.
+// A path is the root's own child: a delete never reaches anything else. Both sides as the filesystem spells them, so an 8.3 short name or a link
+// to the root is the root, and a link inside it that points elsewhere is not.
 export const inRoot = (p, root = copyRoot()) => {
-  const rel = path.relative(path.resolve(root), path.resolve(p));
+  const rel = path.relative(real(root), real(p));
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 };
 
@@ -86,10 +87,10 @@ export function closeCopies(since, cwd = process.cwd()) {
   let names = [];
   try { names = fs.readdirSync(copyRoot()); } catch { return { removed, left }; }
   // only the copies of this repository's own worktree list: another session's copy of another repo is not this task's to remove
-  const top = gitRoot(cwd), mine = new Set(top ? git(top, 'worktree', 'list', '--porcelain').stdout.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => path.resolve(l.slice(9)).toLowerCase()) : []);
+  const top = gitRoot(cwd), mine = new Set(top ? git(top, 'worktree', 'list', '--porcelain').stdout.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => real(l.slice(9)).toLowerCase()) : []);
   for (const name of names) {
     const p = path.join(copyRoot(), name);
-    try { if (!fs.statSync(p).isDirectory() || name.startsWith('.') || fs.statSync(p).birthtimeMs < since || !mine.has(path.resolve(p).toLowerCase())) continue; } catch { continue; }
+    try { if (!fs.statSync(p).isDirectory() || name.startsWith('.') || fs.statSync(p).birthtimeMs < since || !mine.has(real(p).toLowerCase())) continue; } catch { continue; }
     (removeCopy(p, { cwd }).left ? left : removed).push(p);
   }
   return { removed, left };

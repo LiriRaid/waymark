@@ -20,16 +20,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const { units } = await import(new URL(`file:///${path.join(ROOT, 'skills', 'waymark', 'scripts', 'cost.mjs').replace(/\\/g, '/')}`).href);
 export const SCHEMA = 'waymark.ab/v1';
+// A module is cached by its URL: each check reads the file as it is now only when the URL is new, and two reads in one millisecond (Linux) shared a Date.now().
+let loads = 0;
+const fresh = () => `${Date.now()}-${++loads}`;
 export const PROBE_PHRASE = 'Waymark on every request'; // the heading of the instructions block, in no hook's text
 
 // Two logic tasks and two of CSS/HTML, each a seed repository, a prompt and the check that it was done.
 export const TASKS = [
   { id: 'logic-discount', kind: 'logic', prompt: 'Add an optional discount to total() in src/price.mjs: total(items, { percent }) takes percent off the sum, rounded to 2 decimals. Calls without the option must keep working.',
     files: { 'src/price.mjs': 'export function total(items) {\n  return items.reduce((s, i) => s + i.price * i.qty, 0);\n}\n', 'src/price.test.mjs': "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { total } from './price.mjs';\ntest('sum', () => assert.equal(total([{ price: 2, qty: 3 }]), 6));\n" },
-    check: async (dir) => { const { total } = await import(`${fileUrl(path.join(dir, 'src', 'price.mjs'))}?${Date.now()}`); return total([{ price: 10, qty: 3 }]) === 30 && total([{ price: 10, qty: 3 }], { percent: 15 }) === 25.5 && total([{ price: 1.11, qty: 3 }], { percent: 10 }) === 3; } },
+    check: async (dir) => { const { total } = await import(`${fileUrl(path.join(dir, 'src', 'price.mjs'))}?${fresh()}`); return total([{ price: 10, qty: 3 }]) === 30 && total([{ price: 10, qty: 3 }], { percent: 15 }) === 25.5 && total([{ price: 1.11, qty: 3 }], { percent: 10 }) === 3; } },
   { id: 'logic-slug', kind: 'logic', prompt: 'slugify() in src/slug.mjs must also drop accents (á → a, ñ → n) and never leave two hyphens in a row or one at either end.',
     files: { 'src/slug.mjs': "export function slugify(s) {\n  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-');\n}\n" },
-    check: async (dir) => { const { slugify } = await import(`${fileUrl(path.join(dir, 'src', 'slug.mjs'))}?${Date.now()}`); return slugify('Año  Nuevo!') === 'ano-nuevo' && slugify('--Café con leche--') === 'cafe-con-leche'; } },
+    check: async (dir) => { const { slugify } = await import(`${fileUrl(path.join(dir, 'src', 'slug.mjs'))}?${fresh()}`); return slugify('Año  Nuevo!') === 'ano-nuevo' && slugify('--Café con leche--') === 'cafe-con-leche'; } },
   { id: 'css-button', kind: 'css/html', prompt: 'The primary button in src/app/button.css must be at least 44px tall and show a visible 2px focus ring only for keyboard focus. Change only the stylesheet.',
     files: { 'src/app/button.css': '.btn-primary {\n  padding: 4px 12px;\n  background: #0a58ca;\n  color: #fff;\n  border: 0;\n}\n', 'src/app/button.html': '<button class="btn-primary" type="button">Guardar</button>\n' },
     check: async (dir) => { const css = read(path.join(dir, 'src', 'app', 'button.css')); return /\.btn-primary\s*\{[^}]*min-height:\s*(4[4-9]|[5-9]\d)px/.test(css) && /\.btn-primary:focus-visible\s*\{[^}]*outline:\s*2px/.test(css) && read(path.join(dir, 'src', 'app', 'button.html')).includes('class="btn-primary"'); } },

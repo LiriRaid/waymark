@@ -20,6 +20,7 @@ const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 const { cierreGaps, touchedRepos } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+const { real } = await import(`file://${SCRIPTS}/lib/paths.mjs`);
 const { currentTurn, pendingBackground, BACKGROUND_WAIT_MS } = await import(`file://${SCRIPTS}/transcript.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
@@ -126,7 +127,7 @@ for (const [kind, file] of [['logic', 'src/b.service.mjs'], ['CSS/HTML', 'src/b.
     const a = tmpRepo({ 'src/a.mjs': 'a\n' }), b = tmpRepo({ [file]: 'a\n' }), plain = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-rec-')); temps.push(plain); gitT(plain, 'init', '-q');
     const rec = { id: '2026-10-25 · T1', agent: 'claude', at: new Date().toISOString(), session: 's-two', cierre: '## Cierre · x\nAprendido: el estilo vive en b' };
     const got = touchedRepos([path.join(a, 'src/a.mjs'), path.join(b, file), path.join(plain, 'x.css')], a, rec, 'a');
-    assert.deepEqual(got.map((g) => g.root.replace(/\\/g, '/')), [b.replace(/\\/g, '/')], 'only the project with Waymark memory, never the one the task ran in');
+    assert.deepEqual(got.map((g) => g.root.replace(/\\/g, '/')), [real(b).replace(/\\/g, '/')], 'only the project with Waymark memory, never the one the task ran in (git spells its root as the filesystem does: 8.3 short names expanded)');
     assert.equal(got[0].record.kind, 'touched');
     assert.deepEqual(got[0].record.files, [file], 'the path relative to that project');
     const before = P.taskIds(b).next;
@@ -134,6 +135,18 @@ for (const [kind, file] of [['logic', 'src/b.service.mjs'], ['CSS/HTML', 'src/b.
     assert.equal(P.taskIds(b).next, before, 'no ID taken there');
     assert.match(P.tasksMarkdown(P.projectHome(b)), new RegExp(`Touched from another project[\\s\\S]*2026-10-25 · T1 from a[\\s\\S]*${path.basename(file)}`));
     assert.deepEqual(touchedRepos([path.join(b, file)], a, { ...rec, repos: [{ root: b, commits: ['x'] }] }, 'a'), [], 'counter-example: a project the task committed in already holds it as a note');
+  });
+}
+
+for (const [kind, file] of [['logic', 'src/b.service.mjs'], ['CSS/HTML', 'src/b.css']]) {
+  test(`2d: ${kind} — a file typed through a link to the sibling (an 8.3 short name on Windows) is still that project's file`, () => {
+    const a = tmpRepo({ 'src/a.mjs': 'a\n' }), b = tmpRepo({ [file]: 'a\n' }), alias = path.join(os.tmpdir(), `wm-alias-${process.pid}-${kind.length}`);
+    temps.push(alias);
+    try { fs.symlinkSync(b, alias, 'junction'); } catch { return; } // no right to make a link here: nothing to show
+    const rec = { id: '2026-10-25 · T1', agent: 'claude', at: new Date().toISOString(), session: 's-alias', cierre: '## Cierre · x\nAprendido: x' };
+    assert.deepEqual(touchedRepos([path.join(alias, file)], a, rec, 'a').map((g) => g.record.files), [[file]], 'the path relative to that project, whichever way it was spelled');
+    const outside = tmpRepo({ 'src/c.mjs': 'a\n' });
+    assert.deepEqual(touchedRepos([path.join(outside, 'src/c.mjs'), path.join(alias, file)], a, rec, 'a').find((g) => real(g.root) === real(b)).record.files, [file], 'counter-example: a file of another project stays out of this one');
   });
 }
 

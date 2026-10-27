@@ -211,6 +211,33 @@ export function migrationCommand(root) {
   if (has('artisan')) return 'php artisan make:migration <name>';
   return null;
 }
+// The tests of the files a task touched, from the repo's own runner: a whole suite takes minutes where these take seconds (a real project
+// spent 468 minutes in ten days on full Vitest runs mid-task). → the command with <files>, or null (a runner with no related mode is not invented).
+export function relatedCommand(root) {
+  const s = stackOf(root), has = (n) => s?.deps?.some(([d]) => d === n);
+  if (!s?.pm) return null;
+  return has('vitest') ? `${s.exec} vitest related <files> --run` : has('jest') ? `${s.exec} jest --findRelatedTests <files>` : null;
+}
+const RELATED_ROW = /^\|\s*test \(related\)\s*\|([^|\n]*)\|[^\n]*$/m;
+// An empty `test (related)` row of Quality gates takes relatedCommand, "to confirm"; a row with a command is never touched. → the command written, or null.
+export function fillRelated(memoryFile, root) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  const m = text.match(RELATED_ROW);
+  if (!m || m[1].trim()) return null;
+  const cmd = relatedCommand(root);
+  if (!cmd) return null;
+  fs.writeFileSync(memoryFile, text.replace(RELATED_ROW, `| test (related) | \`${cmd}\` | to confirm |`));
+  return cmd;
+}
+// The related row's command for these files (<files> or <file> replaced), or null with no row.
+export function relatedRun(memoryFile, root, files) {
+  let text = '';
+  try { text = fs.readFileSync(memoryFile, 'utf8'); } catch { return null; }
+  const cmd = text.match(RELATED_ROW)?.[1].replace(/`/g, '').trim();
+  return cmd && !rowProblem(cmd, root) ? gateCell(cmd).replace(/<files?>/g, files.join(' ')) : null;
+}
+
 // Writes "- Migrations: `<command>` (to confirm: detected from the repo)" under Conventions when the repo has one and no line says so yet.
 // → the line written, or null.
 export function fillMigrations(memoryFile, root) {

@@ -36,7 +36,7 @@ import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
-import { stackOf, syncIdentity, copyInstall } from './stack.mjs';
+import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
 import { legacyStack } from './runtime.mjs';
 import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes, defaultRemote } from './notes.mjs';
@@ -900,7 +900,10 @@ const WITNESS = {
   },
   red: (S) => {
     const { copyStep, excepted, observed, testsNo } = S;
-    return observed.tests.red ? [] : testsNo ? (excepted.red = testsNo, []) : [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (${WAYMARK_CMD} copy HEAD${copyStep} → copy the changed spec there → run it; it must fail → ${WAYMARK_CMD} copy --remove <path>), or write "Tests: no (<why it cannot fail first>)"`];
+    if (observed.tests.red) return [];
+    if (testsNo) return (excepted.red = testsNo, []);
+    const only = S.ctx.related?.(observed.tests.notRed.slice(0, 4));
+    return [`a spec that adds cases (${observed.tests.notRed.slice(0, 4).join(', ')}) never ran before the code it tests: show it red now in a clean copy (${WAYMARK_CMD} copy HEAD${copyStep} → copy the changed spec there → run only it${only ? `: ${only}` : ''}; it must fail → ${WAYMARK_CMD} copy --remove <path>), or write "Tests: no (<why it cannot fail first>)"`];
   },
   preexisting: (S) => {
     const { copyStep, ctx, excepted, noComp, observed, redTests } = S;
@@ -1279,6 +1282,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.legacy = legacyStack(home.root); } catch {}
       try { ctx.owned = ownedSteps([home.memory, path.join(waymarkHome(), 'preferences.md')].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n')); } catch {} // the user's own steps: their words, written in Conventions
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
+      ctx.related = (files) => { try { return relatedRun(home.memory, home.root, files); } catch { return null; } }; // the run of only these specs, from memory.md
       ctx.root = home.root;
       try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)

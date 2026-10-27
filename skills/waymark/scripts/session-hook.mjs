@@ -21,7 +21,7 @@ import { census, fillMemory } from './convention.mjs';
 import { fillRuntime, runtimeDir } from './runtime.mjs';
 import { fillEyes, cleanEyes } from './eyes.mjs';
 import { linkProjectSkills } from './skill-links.mjs';
-import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations, syncIdentity, PM_PLACEHOLDER } from './stack.mjs';
+import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMigrations, fillRelated, syncIdentity, PM_PLACEHOLDER } from './stack.mjs';
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
@@ -101,6 +101,8 @@ export function digest(cwd, agentName = 'claude') {
   if (!home.legacy) { try { if (fillEyes(home.memory, home.root)) best.text = read(home.memory); cleanEyes(); } catch (e) { logHookError('session-hook eyes', e); } }
   // the project's own migration command (docs/adr/0046): "to confirm" in Conventions, so a migration written by hand is asked about first
   if (!home.legacy) { try { if (fillMigrations(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook migrations', e); } }
+  // the tests of the touched files from the repo's runner (Vitest related, Jest --findRelatedTests), "to confirm", when the row is empty: seconds, not the suite
+  if (!home.legacy) { try { if (fillRelated(home.memory, home.root)) best.text = read(home.memory); } catch (e) { logHookError('session-hook related', e); } }
   const runtime = best.text.match(/^\|\s*runtime\s*\|\s*([^|]+)\|/im)?.[1]?.trim().replace(/`/g, '');
   const nodeAt = runtimeDir(runtime), posix = (p) => String(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
   if (runtime) out.push(/^none\b/i.test(runtime) ? `Runtime: ${runtime}.` : nodeAt ? `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): run every gate with ${nodeAt} first on the PATH, never \`nvm use\` (it switches the machine's Node) — bash: PATH="${posix(nodeAt)}:$PATH" <gate> · PowerShell: $env:PATH="${nodeAt};$env:PATH"; <gate>.` : `Runtime: this machine's Node is not the one this repo needs (memory.md → Quality gates, the runtime row): start every gate with "${runtime}".`);

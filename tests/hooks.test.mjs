@@ -2721,6 +2721,19 @@ test('a task that changed no project file (a push the user asked for): the user\
   assert.match(blockReason({ level: 2, changed: ['a.ts'], missing: ['x'] }), /^Waymark: this L2 turn changed files/);
 });
 
+test('re-close 11.1: an L2 that changes files outside the repo (a reinstall) answers the window first; an L1 with the same copy does not', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd);
+  const copy = call('Bash', { command: 'D="$HOME/.agents/skills/waymark"; for f in VERSION scripts/notes.mjs; do cp "skills/waymark/$f" "$D/$f"; done' });
+  const turn = (lvl) => [prompt('reinstala la versión de develop'), say(`Waymark → L${lvl} · dept-devex`), call('Skill', { skill: 'dept-devex' }), PROC('dept-devex'), copy];
+  const gaps = (lines) => cierreGaps(currentTurn(lines), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(lines), taskTools: sessionTools(lines), outside: true });
+  const l2 = gaps(turn(2));
+  assert.deepEqual(l2.changed, [], 'no file of the repo changed');
+  assert.ok(l2.missing.some((m) => /no choice-window answer in this task/.test(m)), 'the window is owed');
+  const l1 = gaps(turn(1));
+  assert.deepEqual([l1.steps.find((s) => s.id === 'decision').applies], [false], 'counter-example: an L1 copy is the user\'s order');
+});
+
 test('context brake: a message to a session at 300k is stopped before the model once, kept for the next session, and brought by its card', async () => {
   const { brake, BRAKE_TOKENS, BRAKE_STEP } = await import(`file://${SCRIPTS}/rule0-hook.mjs`);
   const { heldPrompt } = await import(`file://${SCRIPTS}/session-hook.mjs`);

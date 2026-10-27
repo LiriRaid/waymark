@@ -7,7 +7,7 @@ import path from 'node:path';
 // to /dev/null, $null, NUL or a temp/scratch folder.
 // Temp/scratch locations: a whole path segment, so project paths such as src/templates/ are not mistaken for temp.
 const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|%TEMP%|\$T\b|mktemp/i;
-const MUTATING = /(?:^|[;&|(]\s*)(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|perl\s+(?:-\w+\s+)*-\w*i\w*(?:\s|$)|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
+const MUTATING = /(?:^|[;&|(]\s*)(?:(?:do|then|else)\s+)?(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|perl\s+(?:-\w+\s+)*-\w*i\w*(?:\s|$)|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
 // The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
 // in it is an index in the command): a ">" there is code or text, not a redirect (`node -e "…x=>{…}"`).
 // quotes: false keeps the quoted text — `bash -c "npm test"` still runs a test — and blanks only the bodies (a spec

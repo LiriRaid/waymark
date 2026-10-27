@@ -77,12 +77,25 @@ const writers = (rs) => {
   const first = at.find(Boolean) || null;
   return at.map((x) => x || first);
 };
-const recent = async (root, n = 30, full = true) => {
+// The tasks the measured version wrote, read once per scorecard run (run: the run's cache; a single measure reads fresh).
+let run = null;
+const versionTasks = async (root) => {
+  if (run?.has(root)) return run.get(root);
   const { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
   const h = projectHome(root);
   const tasks = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind) : [], by = writers(tasks);
-  const last = tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION).slice(-n);
+  const mine = tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION);
+  run?.set(root, mine);
+  return mine;
+};
+const recent = async (root, n = 30, full = true) => {
+  const last = (await versionTasks(root)).slice(-n);
   return full ? last.filter((r) => r.schema) : last;
+};
+// The cost rows of the tasks the measured version wrote (docs/adr/0049), for the routine shares of every level.
+const versionCost = async (root) => {
+  const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await versionTasks(root)).map((r) => r.id));
+  return { C, tasks: C.tasksOf(root).filter((t) => mine.has(t.id)) };
 };
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);
 // The tasks the parcial share judges: a record from before the log carried an outcome says nothing either way, and a parcial for an
@@ -111,8 +124,8 @@ const MEASURES = {
   async 'records.pinnedShare'(root) { return share(await recent(root, 20), (r) => r.pinned); },
   async 'records.tokenShare'(root) { return share(await recent(root), (r) => r.evaluation?.tokens > 0 && r.evaluation?.links); },
   async 'records.cierreShare'(root) { return share(await recent(root), (r) => /Resultado:/.test(r.cierre || '') && /Evidencia:/.test(r.cierre || '') && /Aprendido:/.test(r.cierre || '')); },
-  async 'records.decisionShare'(root) {
-    const rs = (await recent(root)).filter((r) => r.level >= 2);
+  async 'records.decisionShare'(root) { // the L2+ tasks that changed something: a file of the repo, or one outside it the window testigo judged
+    const rs = (await recent(root)).filter((r) => r.level >= 2 && ((r.files || []).length > 0 || 'Decision' in (r.evaluation?.steps || {})));
     return share(rs, (r) => (r.decisions || []).some((d) => d.position === 'before'));
   },
   async 'records.testigoRatio'(root) {
@@ -152,11 +165,8 @@ const MEASURES = {
     return n('instructions block') + n('context card') + n('skill descriptions');
   },
   async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
-  async 'cost.routineShareL2'(root) { const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href); return C.routineShare(C.tasksOf(root), 2, 10)?.share ?? null; },
-  async 'cost.routineShareL1'(root) { // the tasks the measured version wrote, as the other checks of records (docs/adr/0049)
-    const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await recent(root, Infinity)).map((r) => r.id));
-    return C.routineShare(C.tasksOf(root).filter((t) => mine.has(t.id)), 1, 5)?.share ?? null;
-  },
+  async 'cost.routineShareL2'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 2, 10)?.share ?? null; },
+  async 'cost.routineShareL1'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 1, 5)?.share ?? null; },
   async 'precedent.precisionAt3'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).precisionAtK : null; },
   async 'precedent.maxChars'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).maxChars : null; },
   async 'conformance.cases'(root) {
@@ -203,6 +213,10 @@ const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(3));
 const floor1 = (x) => Math.floor(x * 10 + 1e-9) / 10;
 
 export async function scorecard(root) {
+  run = new Map();
+  try { return await scoreAll(root); } finally { run = null; }
+}
+async function scoreAll(root) {
   const card = readScorecard(root);
   const criteria = [], lastPoint = Math.max(...card.criteria.flatMap((k) => k.checks.map((c) => c.point || 0)));
   for (const k of card.criteria) {

@@ -940,12 +940,14 @@ function failsOf(S) {
 // The steps of the routine contract (waymark/routine.json): does each apply, did it pass, why not.
 function composeSteps(S) {
   const { askedRepos, changed, ctx, dept, excepted, extras, fails, firstRealChange, lateDecision, level, observed, outsideRepos, renamed, reply, retried, risk, when, win } = S;
+  // an L2+ that changes files outside the repo (a reinstall, a copy into the agent's folder) still answers the window first; an L1 or a push does not
+  const outsideL2 = Number(level) >= 2 && (S.turn?.tools || []).some((t) => shell(t) && !t.error && changesProject(t.input.command));
   const steps = ROUTINE.testigos.map((s) => {
     const lacked = (ctx.lacks || []).includes(s.id); // the agent has no capability for it (docs/adr/0009): not applicable
     // a task that changed no project file (a push, a commit, an install the user asked for): the user's order is the
     // decision, so the choice window does not apply, and with no first edit there is no pack to hand over (docs/adr/0017);
     // the pre-tool gate still stops file changes first
-    const ordered = (s.id === 'decision' || s.id === 'memory' || s.id === 'procedure') && !changed.length; // nothing was changed: the procedure guides no change, so none is owed (a task with no file never got one handed)
+    const ordered = (s.id === 'decision' || s.id === 'memory' || s.id === 'procedure') && !changed.length && !(s.id === 'decision' && outsideL2); // nothing was changed: the procedure guides no change, so none is owed (a task with no file never got one handed)
     const applies = s.levels.includes(level) && (!s.when || when[s.when]) && !lacked && !ordered;
     const why = applies ? fails[s.id] || [] : [];
     return { id: s.id, label: s.label, enforce: s.enforce, applies, pass: applies ? !why.length : null, why, ...(applies && !why.length && excepted[s.id] ? { exception: excepted[s.id] } : {}), ...(lacked ? { na: ctx.agent || 'agent' } : {}) };
@@ -1105,9 +1107,9 @@ export const RECORD_SCHEMA = RECORD_V2; // v1 records stay valid and are read as
 // A step the user owns (their deploy, their PR) never leaves a task parcial: when the Cierre's only gap is that step, and the
 // project's Conventions say it is the user's, the result is hecho with the step named (`userOwned`). A parcial for a cause
 // outside the work (the quota, a provider) carries `cause: 'external'`: the next ask is a new task unless the user says it continues.
-const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i };
+const STEP_WORDS = { deploy: /despleg|desplieg|deploy|release|publica|publish/i, pr: /\bPRs?\b|pull requests?/i, merge: /merge|fusi[oó]n|fusionar/i, push: /\bpush(?:es)?\b|subir al remoto/i, sign: /(?<!\p{L})(?:firm(?:a|e|ad[oa])s?|signatures?|sign(?:ed|ing|s)?|tags?)(?!\p{L})/iu };
 const EXTERNAL = /usage limit|l[ií]mite de uso|se agot[oó] la cuota|cuota (?:agotada|del plan|de uso)|quota (?:exceeded|reached)|rate.?limit|sin conexi[oó]n|connection (?:lost|refused)|proveedor (?:ca[ií]do|no responde)|servicio (?:externo|ca[ií]do)/i;
-const STEP_KEY = /^(?:the )?(?:deploys?|despliegues?|releases?|prs?|pull requests?|merges?|push(?:es)?)$/i;
+const STEP_KEY = /^(?:the )?(?:deploys?|despliegues?|releases?|prs?|pull requests?|merges?|push(?:es)?|firmas?|signatures?|signing|tags?)$/i;
 export function ownedSteps(text) {
   const owned = new Set();
   for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if (re.test(m[1]) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
@@ -1120,7 +1122,10 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
   if (said === 'hecho' && win?.failed.length) return { result: 'parcial', said, why: 'the Cierre marks ✘ a choice of the window' };
   if (said === 'parcial') {
     const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
-    const mine = [...owned].filter((s) => STEP_WORDS[s].test(line));
+    // every gap the parcial lists must be a step of the user's; one gap of the work keeps it parcial
+    const parts = (line.match(/\((.*)\)/)?.[1] || line.replace(/^[ \t]*Resultado:[ \t]*\p{L}+/iu, '')).split(/\s*[,;]\s*|\s+(?:y|and|e)\s+/i).filter((p) => p.trim());
+    const ownedPart = (p) => [...owned].some((s) => STEP_WORDS[s].test(p));
+    const mine = parts.length && parts.every(ownedPart) ? [...owned].filter((s) => STEP_WORDS[s].test(line)) : [];
     const undone = (answers || []).filter((a) => !a.ok && ![...owned].some((s) => STEP_WORDS[s].test(a.note || ''))); // an item ✘ for another reason keeps it parcial
     if (mine.length && !gaps.length && !undone.length) return { result: 'hecho', said, userOwned: mine, why: `the only step left is the user's (${mine.join(', ')})` };
     if (EXTERNAL.test(line)) return { result: said, cause: 'external' };

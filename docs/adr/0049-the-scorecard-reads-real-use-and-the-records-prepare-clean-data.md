@@ -31,3 +31,25 @@ Two more gaps showed in that reading. A task's cost depends on the model (Opus a
 - Criterion 9 reads below its target while every task is closed by one agent, and criterion 13 reads the share of `parcial` as it is: both say what the 2.0.18 numbers hid. The README lists every criterion below its target as it is.
 - The median-tokens check is `pending` until 2.0.20 freezes it.
 - A session that changes model keeps its cost in the record but out of the routine share, so a lever on the routine is not judged by a model switch.
+
+## Result at the close of 2.0.19
+
+`waymark.mjs scorecard` on the finished work (2026-10-26, lock ok, VERSION 2.0.19): **95.2 %**, against the 98.1 % of 2.0.18 and the release target of 95. The checks read from the records count only the tasks the 2.0.19 hooks wrote (four so far, all run on the installed 2.0.19-dev), so the drop is the new checks reading what the old ones hid, not a regression of what was built.
+
+| Criterion | % | Target | What is below |
+|---|---|---|---|
+| 1 Provenance of each task | 100 | 98 | |
+| 2 Tamper evidence | 100 | 96 | |
+| 3 Authenticity | 100 | 95 | |
+| 4 Independent verification | 100 | 98 | |
+| 5 Enforcement | 98.6 | 93 | 5.1: the recent tasks passed 0.875 of their testigos (≥ 0.95) |
+| 6 Inputs and dependencies pinned | 100 | 95 | |
+| 7 Distribution of the records | 100 | 95 | |
+| 8 Token efficiency | 81.3 | 96 | 8.7: the routine share of the last 5 L1 tasks is 0.188 (≤ 0.065); 8.9: the median tokens, 18.2 M, pending; 8.2 and 8.3: 11,005 and 225 characters (≤ 11,000 and ≤ 220) with the work in progress on the card |
+| 9 Agnostic and adaptive | 94.4 | 96 | 9.9: one agent closed the recent tasks (≥ 2) |
+| 10 Reuse of earlier evidence | 97.4 | 93 | 10.3: precision@3 0.722 (≥ 0.85) |
+| 11 No hallucination, good decisions | 97.1 | 95 | 11.2: 0.813 of cited facts backed (≥ 0.95) |
+| 12 Self-generating | 100 | 93 | |
+| 13 Task done completely and as asked | 86.6 | 93 | 13.6: the four 2.0.19 tasks closed parcial (≤ 0.2): their Cierre did not answer the options chosen in the window |
+
+Criteria 8, 9 and 13 are below their targets and the README says so. The scorecard test no longer judges the measures read from the task records (real use, which every task changes): the scorecard does, against their thresholds. `scorecard --projects` over the other projects is the author's to run, since the list is private.

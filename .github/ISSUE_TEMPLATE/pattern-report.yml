@@ -12,7 +12,7 @@ body:
     attributes:
       label: Waymark version
       description: The content of `<skills-dir>/waymark/VERSION`.
-      placeholder: 2.0.18
+      placeholder: 2.0.19
     validations:
       required: true
   - type: input

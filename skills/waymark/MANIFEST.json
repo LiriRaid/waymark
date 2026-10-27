@@ -1,6 +1,6 @@
 {
  "schema": "waymark.manifest/v1",
- "version": "2.0.18",
+ "version": "2.0.19",
  "algorithm": "sha256",
  "files": {
   "browser-verify/SKILL.md": "1a22a1ec538433cdc8cae1b9dcabeebdedf31b2e37a6e1b346b3a0f413bed6e7",
@@ -87,7 +87,7 @@
   "ui-system/references/type-scale.md": "6b70142a9f1214b07956987e5c3b22bf27e5d7b0ad1c3b88be1dd1cde9477d0c",
   "waymark/ALLOWED_SIGNERS": "7bd3258a705cd9061727e743eb455de2d2a7d31a03a72444964d8b38cf40293b",
   "waymark/SKILL.md": "560213c95953452b41e1ae7caa65ca776a4ea2d89347fe7b464ea1511e88421f",
-  "waymark/VERSION": "037bd0fa7c54acd8c08ce797dfbd93d243f9c3428d5ebeaa1b9114c06dd57c08",
+  "waymark/VERSION": "8ea2f7f97683e51bbf410e5000f7606733e3785a620b07ab9cc991bd5689ae6b",
   "waymark/architectures/clean.md": "5b95b060efc5e894da76d28a6f307aa67cdcd7c7689f6ba7eca2f4f26bfed87f",
   "waymark/architectures/feature-sliced.md": "b0bdaca10ad4cd5390f4b9f1c2c74fdbc7ecce243f6792a2c7a16ac7152e6b4e",
   "waymark/architectures/hexagonal.md": "bc360422487278765b6218bc1854783a2ffc3f965683ffdb0e8ff7c481e14c49",

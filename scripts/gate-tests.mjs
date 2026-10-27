@@ -52,10 +52,11 @@ function run(root, extra = []) {
 // Why a run is not clean: its tests, and the temp folders it left behind (a green run that leaves one is a failed run). '' when clean.
 export const verdict = (r, left) => [r.why, left > 0 ? `the run left ${left} temp folder${left > 1 ? 's' : ''} behind (wm-* or waymark-*)` : ''].filter(Boolean).join('; ');
 
-// A copy of what the repository holds now (tracked and untracked files, not ignored ones), as its own git repository.
-function copyOfTree(root) {
+// A copy of what git holds (the tracked files, as they are in the working tree now), as its own git repository. An untracked file
+// (the author's notes or plans) stays out: CI never sees one, and a stray file there failed the third run of a release.
+export function copyOfTree(root) {
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-gate-'));
-  const files = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout.split('\0').filter(Boolean);
+  const files = spawnSync('git', ['ls-files', '-z', '--cached'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout.split('\0').filter(Boolean);
   for (const f of files) {
     if (!fs.existsSync(path.join(root, f))) continue; // deleted in the working tree
     fs.mkdirSync(path.dirname(path.join(dest, f)), { recursive: true });

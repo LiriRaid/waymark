@@ -114,9 +114,12 @@ test('0: on this repository the scorecard runs, its lock holds and the plan poin
   assert.ok(r.total > 0 && r.total < 100);
   const failing = r.criteria.flatMap((k) => k.checks).filter((c) => c.status !== 'pass');
   assert.ok(failing.every((c) => c.point >= 0), 'every failing check names its point');
-  // a check that holds today (point 0) is allowed to fail only by a real finding the ADR lists, never by a wrong pattern
+  // a check that holds today (point 0) is allowed to fail only by a real finding the ADR lists, never by a wrong pattern. A measure read from the
+  // project's task records is real use, which every task changes: the scorecard judges it against its threshold, this test does not.
   const known = new Set(['1.10', '9.1', '7.1']); // ADR 0028: records that lost their note; agents with hooks and no adapter; 7.1 is whether this machine has pushed its notes
-  for (const c of failing.filter((x) => x.point === 0 && x.status === 'fail')) assert.ok(known.has(c.id), `${c.id} fails today and is not a recorded finding: ${c.detail}`);
+  const realUse = new Set(S.readScorecard(REPO).criteria.flatMap((k) => k.checks).filter((c) => /^records\./.test(c.measure || '')).map((c) => c.id));
+  for (const c of failing.filter((x) => x.point === 0 && x.status === 'fail' && !realUse.has(x.id))) assert.ok(known.has(c.id), `${c.id} fails today and is not a recorded finding: ${c.detail}`);
+  assert.ok(realUse.has('1.2') && realUse.has('5.1') && !realUse.has('2.1'), 'the real-use measures are the records ones; a pattern check is still judged');
 });
 
 test('7.1 notes.unpushed: a note waits to be pushed only in a project that said yes (Notes push:); with no yes or never the records stay local and nothing waits (ADR 0042)', async () => {

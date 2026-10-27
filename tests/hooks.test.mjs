@@ -647,7 +647,8 @@ test('per-prompt line: new task and follow-up IDs', () => {
   const { cwd } = fresh();
   assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T1\\.$`));
   record(cwd, `${DAY} · T1`);
-  assert.match(taskLine(cwd, NOW), new RegExp(`ID: new ${DAY} · T2; follow-up ${DAY} · T1b\\.$`));
+  assert.match(taskLine(cwd, NOW, { prompt: 'sigue' }), new RegExp(`ID: new ${DAY} · T2; follow-up ${DAY} · T1b\\.$`));
+  assert.match(taskLine(cwd, NOW, { prompt: 'agrega un botón de exportar' }), new RegExp(`ID: new ${DAY} · T2\\.$`), 'a new ask: no follow-up');
 });
 
 // End to end: the Stop hook as Claude Code runs it (stdin JSON, transcript file).
@@ -1527,13 +1528,17 @@ test('3e-1b follow-up: its ID holds only when it changes a file of its task; its
   // Codex re-test wrote its Cierre twice for it)
   assert.doesNotMatch(checkCierre(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx) || '', /follow-up|T4b/, 'not blocked');
   const moved = cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx);
-  assert.deepEqual(moved.renamed, { from: `${D} · T4b`, to: `${D} · T5` });
+  assert.deepEqual(moved.renamed, { from: `${D} · T4b`, to: `${D} · T5`, why: 'files' });
   const rec = provenanceRecord(l2(), moved, ctx, {});
   assert.deepEqual([rec.id, rec.idBy, rec.claimed], [`${D} · T5`, 'hook', `${D} · T4b`], 'the record keeps what the agent wrote');
   assert.equal(cierreGaps(l2(), cierre(`${D} · T5`), undefined, undefined, ctx).renamed, null, 'a new task ID passes as is');
   records.push({ id: `${D} · T4`, files: [FILE] });
   const shared = cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, ctx);
   assert.deepEqual([shared.renamed, provenanceRecord(l2(), shared, ctx, {}).id], [null, `${D} · T4b`], 'sharing a file of its task, it is a follow-up');
+  // re-close step 2: a follow-up the per-prompt hook did not offer (the ask neither continued nor redid T4) is a new task, even on T4's files
+  const unoffered = cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, { ...ctx, offered: null });
+  assert.deepEqual([unoffered.renamed?.to, unoffered.renamed?.why, provenanceRecord(l2(), unoffered, { ...ctx, offered: null }, {}).id], [`${D} · T5`, 'offer', `${D} · T5`]);
+  assert.equal(cierreGaps(l2(), cierre(`${D} · T4b`), undefined, undefined, { ...ctx, offered: `${D} · T4b` }).renamed, null, 'counter-example: offered and on its files');
   // the stretch: T4b asked, edited and closed; T4c asks before its own first edit
   const before = [call('AskUserQuestion'), answered('¿Cómo?', ['A', 'B'], 'A'), call('Edit', { file_path: FILE })];
   const ask = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }] } };

@@ -13,11 +13,11 @@ import { followUps } from './derive.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
 // entry per session (read by tasks.mjs), written by the per-prompt hook and removed when the turn ends.
-export function markOpen(cwd, session, prompt, now = new Date(), agent = null) {
+export function markOpen(cwd, session, prompt, now = new Date(), agent = null, followUp = undefined) { // followUp: the one the per-prompt hook offered (null: none)
   const home = projectHome(cwd), file = openFile(home);
   if (!file || !fs.existsSync(home.memory)) return false; // tasks.md exists only with memory in the project
   const ids = taskIds(cwd, now), open = readOpen(home);
-  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: ids.followUp || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex"
+  open[session || 'unknown'] = { at: now.toISOString(), next: ids.next, followUp: (followUp === undefined ? ids.followUp : followUp) || null, ...(agent ? { agent } : {}), prompt: maskSecrets(String(prompt || '').replace(/\s+/g, ' ').trim().slice(0, 120)) }; // the agent: "started in codex"
   ensureLocal(home);
   fs.writeFileSync(file, JSON.stringify(open, null, 1));
   refreshTasks(home, true);

@@ -103,6 +103,7 @@ export {
   taskIds,
   taskInProgress,
   taskLines,
+  taskOffer,
   taskStart,
   taskStartMark,
   validId,

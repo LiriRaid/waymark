@@ -130,9 +130,36 @@ for (const [kind, file] of [['logic', 'src/orders.service.mjs'], ['CSS/HTML', 's
     assert.match(line('termina T1 por favor'), /follow-up 2026-10-25 · T1b/, 'the user names it');
     const own = tmpRepo();
     closed(own, 's-own', { result: 'parcial', file });
-    assert.match(taskLine(own, new Date(), { session: 's-own', prompt: 'cambia el color' }), /follow-up 2026-10-25 · T1b/, 'counter-example: a parcial of the work still offers its follow-up');
+    assert.match(taskLine(own, new Date(), { session: 's-own', prompt: 'sí, agrégalo', reply: 'Falta el filtro. ¿Lo agrego?' }), /follow-up 2026-10-25 · T1b/, 'counter-example: a parcial of the work still offers its follow-up to the answer');
+    assert.match(taskLine(dir, new Date(), { session: 's-ext', prompt: 'sí, agrégalo', reply: '¿Lo agrego?' }), /parcial for a cause outside the work/, 'a cut reply is no question the user answers');
   });
 }
+
+// ---- re-close step 2 · a follow-up only for the same request or one that redoes it ----
+for (const [kind, file, other, redo] of [['logic', 'src/orders.service.mjs', 'agrega el filtro por fecha a los pedidos', 'no funciona, sigue fallando el total'], ['CSS/HTML', 'src/app.css', 'cambia el color del título', 'no se ve el cambio en móvil']]) {
+  test(`step 2: ${kind} — a different ask on the same files is a new task; continuing, redoing or answering the last reply is its follow-up`, () => {
+    const dir = tmpRepo(), session = `s-follow-${kind}`;
+    closed(dir, session, { file });
+    const line = (prompt, reply = 'Listo.') => taskLine(dir, new Date(), { session, prompt, reply });
+    assert.doesNotMatch(line(other), /follow-up/, 'a different subject: only the new ID');
+    assert.doesNotMatch(line('Sigue con H4 del plan 2.0.19'), /follow-up/, '"sigue con" a new item is a new ask');
+    for (const p of ['sigue', 'continúa por donde quedaste', 'disculpa se interrumpió, termina', redo, 'T1 otra vez']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, p);
+    assert.match(line('hazlo', 'Faltan los tests de borde. ¿Los agrego?'), /follow-up 2026-10-25 · T1b/, 'it answers the question the last reply ended with');
+    assert.doesNotMatch(line('hazlo', 'Listo, quedó aplicado.'), /follow-up/, 'counter-example: the same words with no question to answer');
+    assert.doesNotMatch(taskLine(dir, new Date(), { session: 's-other', prompt: 'hazlo', reply: '¿Los agrego?' }), /follow-up/, 'counter-example: the reply of another session answers no task of this one');
+  });
+}
+test('step 2: the per-prompt hook keeps the follow-up it offered (null when none) for the end-of-turn hook', async () => {
+  const dir = tmpRepo(), session = 's-offer';
+  closed(dir, session, { file: 'src/a.mjs' });
+  await ask(dir, session, 'agrega un endpoint de reportes');
+  assert.equal(P.openTurn(dir, session).followUp, null, 'nothing offered');
+  P.clearTaskStart(session); // that turn ended with no task
+  await ask(dir, session, 'sigue');
+  assert.equal(P.openTurn(dir, session).followUp, '2026-10-25 · T1b', 'counter-example: offered');
+  await ask(dir, session, 'la segunda opción, sin el campo extra');
+  assert.equal(P.openTurn(dir, session).followUp, '2026-10-25 · T1b', 'a later prompt of the task in progress keeps its offer');
+});
 
 // ---- the review of point 2: what the first build got too wide ----
 test('2e: go-ahead words and an offer are no confirmation; "Push notifications: the user" is no rule; "cuota" alone is no external cause', async () => {

@@ -100,6 +100,20 @@ export function markTaskStart(session, now = Date.now()) {
   writeStarts(all);
   return now;
 }
+// The follow-up the task's first prompt was offered (null: none; ~/.waymark/.task-offers.json), so a later prompt of the
+// same task (an answer mid-task) keeps it. Read: taskOffer(session) → the offer, or undefined when none was kept.
+const offersFile = () => path.join(HOME(), '.task-offers.json');
+export function taskOffer(session, offer) {
+  let all = {};
+  try { all = JSON.parse(fs.readFileSync(offersFile(), 'utf8')) || {}; } catch {}
+  const id = session || 'unknown';
+  if (offer === undefined) return all[id] ? all[id].offer : undefined;
+  all[id] = { offer, at: Date.now() };
+  for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > 7 * 86400000) delete all[k];
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(offersFile(), JSON.stringify(all));
+  return offer;
+}
 export function clearTaskStart(session) {
   const all = readStarts(), id = session || 'unknown';
   if (!all[id]) return;

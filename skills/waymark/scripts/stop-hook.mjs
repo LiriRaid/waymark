@@ -34,7 +34,7 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -246,6 +246,9 @@ const bare = (t) => shellSkeleton(cmdOf(t), { quotes: false });
 // A follow-up ID (with a letter) holds only when the turn changes a file its task already changed, so an unrelated task
 // never inherits another task's answers. Not checked without records or without changes.
 const followUpShares = (id, changed, ctx) => !/[a-z]$/.test(id) || !ctx.taskFiles || !changed.length || (() => { const own = ctx.taskFiles(id); return changed.some((f) => own.has(norm(f))); })();
+// …and only when the per-prompt hook offered it (ctx.offered, from open.json; undefined: not known): an ask that neither continued
+// nor redid the task is a new task, even on its files. → why it is not a follow-up ('offer' | 'files'), or null when it is one.
+const followUpFails = (id, changed, ctx) => /[a-z]$/.test(id) && ctx.offered !== undefined && (!ctx.offered || ctx.offered.replace(/[a-z]$/, '') !== id.replace(/[a-z]$/, '')) ? 'offer' : !followUpShares(id, changed, ctx) ? 'files' : null;
 const skillCalled = (tools, re) => tools.some((t) => t.name === 'Skill' && re.test(String(t.input.skill || '')));
 // Variables assigned in the same command, in place: `W=…/waymark.mjs; node $W review a.ts` (sh) or `$W = "…"; node $W …`
 // (PowerShell) reads as `node …/waymark.mjs review a.ts`. A variable not assigned there stays as written.
@@ -824,11 +827,12 @@ function cierreWitness(S) {
     if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
     if (ctx.ids) {
       const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-      const offer = `${ctx.ids.next} for a new task${ctx.ids.followUp ? `, ${ctx.ids.followUp} for a follow-up of ${ctx.ids.last}` : ''}`;
+      const follow = ctx.offered === undefined ? ctx.ids.followUp : ctx.offered;
+      const offer = `${ctx.ids.next} for a new task${follow ? `, ${follow} for a follow-up of ${follow.replace(/[a-z]$/, '')}` : ''}`;
       if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
       else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
-      // a follow-up ID whose task's files this turn never touches is a new task: recorded under the new ID, not blocked
-      else if (!followUpShares(id, changed, ctx)) renamed = { from: id, to: ctx.ids.next };
+      // a follow-up ID the ask did not earn, or whose task's files this turn never touches, is a new task: recorded under the new ID, not blocked
+      else { const why = followUpFails(id, changed, ctx); if (why) renamed = { from: id, to: ctx.ids.next, why }; }
     }
     // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
     if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
@@ -1126,7 +1130,7 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const answers = Number(gaps.level) >= 2 && ctx.pedido?.length >= 2 ? pedidoAnswers(gaps.reply).filter((a) => a.n >= 1 && a.n <= ctx.pedido.length).slice(0, 12) : [];
   const claimed =gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-  const ok = claimed && validId(claimed, ctx.ids) && followUpShares(claimed, gaps.changed, ctx);
+  const ok = claimed && validId(claimed, ctx.ids) && !followUpFails(claimed, gaps.changed, ctx);
   return deepMask({ // every string: the strong secret formats masked (testigo "sin secretos")
     schema: RECORD_SCHEMA, // the shape of this record: a later reader (a verifier, a model trained on the records) knows which fields to expect
     id: ok ? claimed : ctx.ids.next, ...(ok ? {} : { idBy: 'hook', ...(claimed ? { claimed } : {}) }), agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd,
@@ -1263,6 +1267,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
       const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), resumed: since > 0 && turn.startedAt <= since, decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      try { const o = openTurn(cwd, h.session_id); if (o && 'followUp' in o) ctx.offered = o.followUp || null; } catch {} // the follow-up the per-prompt hook offered this ask
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
       try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
@@ -1400,7 +1405,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { refreshTasks(home, true); } catch (e) { logHookError('stop-hook tasks', e); } // tasks.md: where the work stands, for any agent (docs/adr/0007)
       let context = 0;
       try { context = sessionState(lines).context; } catch {}
-      const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}` : '';
+      const moved = gaps.renamed ? ` · registrada como ${rec.id}: ${gaps.renamed.why === 'offer' ? `el pedido no sigue ni rehace ${gaps.renamed.from.replace(/[a-z]$/, '')}` : `${gaps.renamed.from} no toca archivos de ${gaps.renamed.from.replace(/[a-z]$/, '')}`}` : '';
       let ask = true; // a Claude session the status line watches is measured: the close never asks its %
       try { ask = !(agent.name === 'claude' && watched(h.session_id)); } catch {}
       answer(agent, notesStop ? agent.out.block(notesStop) : agent.out.notice(summaryLine(rec.id, evaluation, context, { ask }) + moved + (gaps.external ? ` · turno cortado por ${gaps.external.cause}: ningún testigo evaluado` : '') + relay + pushed + nativeMemoryNote(nativeMemoryWrites(turn.tools)) + copiesNote + capNote + confirmAsk(rec)));

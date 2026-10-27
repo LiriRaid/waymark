@@ -19,7 +19,7 @@ import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
-import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
@@ -110,7 +110,9 @@ export function missingTrailer(command, session = 'unknown', cwd = process.cwd()
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
-  return `Waymark: this commit has no "Waymark-Task: <task ID>" in its message, so the task's record and the commit stay unlinked. Add it as the message's last paragraph, next to Co-Authored-By: "Waymark-Task: ${ids.next}"${ids.followUp ? ` (or "${ids.followUp}" when it continues ${ids.last})` : ''}, and use the same ID in the Cierre heading. Sent again without it, the commit goes through.`;
+  let follow = ids.followUp;
+  try { const o = openTurn(cwd, session); if (o && 'followUp' in o) follow = o.followUp; } catch {} // the follow-up this ask was offered, if any
+  return `Waymark: this commit has no "Waymark-Task: <task ID>" in its message, so the task's record and the commit stay unlinked. Add it as the message's last paragraph, next to Co-Authored-By: "Waymark-Task: ${ids.next}"${follow ? ` (or "${follow}" when it continues ${follow.replace(/[a-z]$/, '')})` : ''}, and use the same ID in the Cierre heading. Sent again without it, the commit goes through.`;
 }
 
 // Sensitive-path guard (docs/adr/0027): a read or an edit of a secret-bearing path (routine.json `risk.sensitive`: .env*, ~/.ssh,

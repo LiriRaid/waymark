@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
 import { commandFiles } from './tool-hook.mjs';
@@ -52,16 +52,38 @@ function lastOfSession(cwd, session) {
   const home = projectHome(cwd);
   return !home.dir || home.legacy || !fs.existsSync(home.memory) ? null : readRecords(home.log).filter((r) => r.session === session).pop() || null;
 }
-// The user says the ask continues: a verb for it, or the last task's own number.
-export const CONTINUES = /^\s*(?:sigue|contin[uú]a|continua|retoma|seguimos|reanuda|dale|continue|resume|go on)\b/i;
-export function taskLine(cwd, now = new Date(), { session = null, prompt = '' } = {}) {
-  const ids = taskIds(cwd, now);
-  let follow = ids.followUp, why = '';
-  try { // a parcial for a cause outside the work (the quota, a provider) does not chain: the next ask is new unless the user says it continues
-    const last = follow && session ? lastOfSession(cwd, session) : null;
-    if (last?.id && last.outcome?.cause === 'external' && !CONTINUES.test(String(prompt)) && !new RegExp(`\\b${String(last.id).match(/T\d+/)?.[0]}[a-z]?\\b`).test(String(prompt))) { follow = null; why = ` The last task (${last.id}) is parcial for a cause outside the work: this ask is a new task unless the user says it continues.`; }
-  } catch {}
-  return ` ID: new ${ids.next}${follow ? `; follow-up ${follow}` : ''}.${why}`;
+// A follow-up is only the same request or one that redoes it; a different subject is a new task even on the same files. The
+// signs, read from the ask (`\b` sees no edge after «í», so the edges are \p{L}): a verb that continues with no new item after
+// it ("sigue", "sigue con lo que quedó"; not "sigue con H4 del plan"), where it stopped or that it was cut, a task's number,
+// that what was done is wrong, or the answer to the question this session's last reply ended with.
+const END = '(?=$|[^\\p{L}\\p{N}_])';
+export const CONTINUES = new RegExp(`^\\s*(?:sigue|contin[uú]a|retoma|seguimos|reanuda|dale|termina|acaba|continue|resume|go on|finish)${END}(?!\\s+(?:con|with|el|la|los|las|the|to)\\s+(?!(?:eso|esto|ello|lo|it|that|this)${END}))`, 'iu');
+const STOPPED = /(?:se\s+(?:interrumpi[oó]|cort[oó])|por\s+donde\s+(?:qued|ibas|iba)|donde\s+(?:te\s+)?qued|where\s+(?:you|we)\s+left\s+off|(?:was|got)\s+(?:interrupted|cut))/iu;
+export const REDO = /(?<![\p{L}\p{N}])(?:no\s+funciona|no\s+sirve|no\s+(?:se\s+)?(?:ve|aplic[oó]|cambi[oó]|guard[oó]|carga)|no\s+(?:era|es)\s+eso|no\s+qued[oó]|sigue\s+(?:fallando|igual|sin|mal|apareciendo|saliendo)|(?:todav[ií]a|a[uú]n)\s+(?:falla|sale|aparece|no\s+(?:funciona|se\s+ve|sale|aparece|cambia))|otra\s+vez|de\s+nuevo|rehaz|deshaz|revi[eé]rte|vuelve\s+a\s+(?:hacer|intentar)|still\s+(?:fails|broken|not)|does\s*n[o']?t\s+work|not\s+working|try\s+again|redo|undo)(?![\p{L}\p{N}])/iu;
+const replyText = (lines) => {
+  const reply = [...(lines || [])].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
+  return (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+};
+const endsAsking = (text) => !!text && (closingQuestions(text).length > 0 || OFFER.test(text.split('\n').slice(-4).join('\n')));
+// The IDs this turn offers: `followUp` only when the ask continues or redoes a task (null otherwise); `reply` is the session's last reply.
+export function taskTurn(cwd, now = new Date(), { session = null, prompt = '', reply = '' } = {}) {
+  const ids = taskIds(cwd, now), text = String(prompt || ''), bare = (id) => String(id || '').replace(/[a-z]$/, '');
+  const n = text.match(/(?<![\p{L}\p{N}])T(\d+)[a-z]?(?![\p{L}\p{N}])/u)?.[1];
+  const named = n ? [...ids.known].filter((k) => bare(k).endsWith(` · T${n}`)).sort().pop() : null;
+  if (named) return { next: ids.next, followUp: ids.follow(named), why: '' };
+  if (!ids.followUp) return { next: ids.next, followUp: null, why: '' };
+  let last = null;
+  try { last = session ? lastOfSession(cwd, session) : null; } catch {}
+  const mine = !!last?.id && bare(last.id) === ids.last, external = mine && last.outcome?.cause === 'external';
+  const says = CONTINUES.test(text) || STOPPED.test(text) || REDO.test(text) || NO.test(text);
+  const unread = !text.trim() && !external; // an agent whose hook does not carry the ask (Antigravity): nothing to judge, both IDs offered
+  if (says || unread || (mine && !external && endsAsking(reply))) return { next: ids.next, followUp: ids.followUp, why: '' };
+  // a parcial for a cause outside the work (the quota, a provider) is said, so the model knows why no follow-up is offered
+  return { next: ids.next, followUp: null, why: external ? ` The last task (${last.id}) is parcial for a cause outside the work: this ask is a new task unless the user says it continues.` : '' };
+}
+export function taskLine(cwd, now = new Date(), opts = {}) {
+  const t = taskTurn(cwd, now, opts);
+  return ` ID: new ${t.next}${t.followUp ? `; follow-up ${t.followUp}` : ''}.${t.why}`;
 }
 // A bare "sí" after a task that said hecho confirms it: the hook runs `done`, so the model never reads it (0 tokens). Not when the
 // last reply ended asking something else (the "sí" answers that), nor when the task is not the session's last thing.
@@ -83,9 +105,7 @@ export function confirmation(hook, agent, cwd) {
   if (!home.dir || home.legacy || !fs.existsSync(home.memory)) return null;
   const all = readRecords(home.log).filter((r) => r.session === session), last = all.pop();
   if (!named && !many && (!last?.id || last.kind || last.outcome?.result !== 'hecho')) return null;
-  const lines = agent.read(hook), reply = [...lines].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
-  const text = (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-  if (closingQuestions(text).length || OFFER.test(text.split('\n').slice(-4).join('\n'))) return null; // the reply ended offering or asking: the yes or the no answers that
+  if (endsAsking(replyText(agent.read(hook)))) return null; // the reply ended offering or asking: the yes or the no answers that
   if (no) {
     appendRecord(home.root, { kind: 'confirm', agent: agent.name, at: new Date().toISOString(), session, refuted: [last.id], said: 'no' });
     return { no: last.id };
@@ -286,8 +306,13 @@ export function reminder(hook, agent) {
   try { held = brake(hook, agent, st); } catch {}
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
   const session = hook.session_id || 'unknown';
-  let ids = '', other = '', unclosed = false;
-  try { ids = taskLine(cwd, new Date(), { session, prompt: hook.prompt }); } catch {}
+  let ids = '', other = '', unclosed = false, offered;
+  try {
+    const t = taskTurn(cwd, new Date(), { session, prompt: agent.promptless ? '' : hook.prompt, reply: replyText(lines) });
+    const kept = taskStartMark(session) ? taskOffer(session) : undefined; // a later prompt of a task in progress keeps its first prompt's offer
+    if (kept !== undefined) { t.followUp = kept; t.why = ''; } else taskOffer(session, t.followUp);
+    offered = t.followUp; ids = ` ID: new ${t.next}${t.followUp ? `; follow-up ${t.followUp}` : ''}.${t.why}`;
+  } catch {}
   try { other = otherSessionLine(cwd, session); } catch {}
   try { other += siblingsLine(cwd, session); } catch (e) { logHookError('rule0-hook siblings', e); }
   try { // this session's last turn never closed (interrupted, or a background agent still running): its open entry is newer than anything the session recorded
@@ -296,7 +321,7 @@ export function reminder(hook, agent) {
   } catch {}
   try { const home = projectHome(cwd); if (home.dir && !home.legacy && fs.existsSync(home.dir)) ensureLocal(home); } catch {} // Waymark's own .gitignore lines land before the snapshot, so they never read as the turn's change
   try { saveSnapshot(hook.session_id, cwd, { keep: unclosed }); } catch {} // the end-of-turn hook diffs against it; an unclosed turn's changes stay in it
-  try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name); } catch {} // a turn that never ends still shows in tasks.md, with its agent
+  try { markOpen(cwd, hook.session_id, hook.prompt, new Date(), agent.name, offered); } catch {} // a turn that never ends still shows in tasks.md, with its agent; the end-of-turn hook reads the follow-up offered
   try { if (agent.name === 'claude') markStart(hook.session_id); } catch {} // the quota reading the task's % is measured from
   // the earlier task that resembles the ask, handed over once, at the task's first prompt (docs/adr/0033); null clears a stale one
   let prec = '';

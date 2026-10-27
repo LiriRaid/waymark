@@ -146,11 +146,32 @@ for (const [kind, file, other, redo] of [['logic', 'src/orders.service.mjs', 'ag
     for (const p of ['dale un margen de 8px al botón', 'termina el formulario de contacto', 'acaba la tabla de pedidos']) assert.doesNotMatch(line(p), /follow-up/, `review: "${p}" names a new item`);
     for (const p of ['dale', 'dale, hazlo', 'termina lo que estabas haciendo', 'termina eso', 'acaba T1']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, `counter-example: "${p}" continues`);
     for (const p of ['sigue', 'continúa por donde quedaste', 'disculpa se interrumpió, termina', redo, 'T1 otra vez']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, p);
+    for (const p of ['haz lo mismo que en T1 pero para los pedidos', 'según T1, agrega el filtro', 'mira T1 y cambia el color del título', 'el prefix T1 va antes del build', 'el script persigue T1 en el log', 't1 es un ejemplo de id']) assert.doesNotMatch(line(p), /follow-up/, `review: "${p}" only cites the task`);
+    for (const p of ['sigue con T1', 'corrige T1', 'retoma la tarea T1', 'T1: faltó el borde']) assert.match(line(p), /follow-up 2026-10-25 · T1b/, `counter-example: "${p}" names it as the subject`);
+    assert.match(line('según T2, corrige T1'), /follow-up 2026-10-25 · T1b/, 'counter-example: the task the verb names is the subject, not the first one cited');
+    assert.match(line('según T1, no funciona'), /follow-up 2026-10-25 · T1b/, 'counter-example: a cited task that the ask says does not work is redone');
     assert.match(line('hazlo', 'Faltan los tests de borde. ¿Los agrego?'), /follow-up 2026-10-25 · T1b/, 'it answers the question the last reply ended with');
     assert.doesNotMatch(line('hazlo', 'Listo, quedó aplicado.'), /follow-up/, 'counter-example: the same words with no question to answer');
     assert.doesNotMatch(taskLine(dir, new Date(), { session: 's-other', prompt: 'hazlo', reply: '¿Los agrego?' }), /follow-up/, 'counter-example: the reply of another session answers no task of this one');
   });
 }
+test('review: a kept offer lives as long as its task\'s start mark, and an unchanged offer is not written again', () => {
+  const file = path.join(home, '.task-offers.json'), read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+  P.taskOffer('s-keep', '2026-10-25 · T1b');
+  P.taskOffer('s-other-keep', null);
+  const aged = read(); aged['s-keep'].at -= 5000; fs.writeFileSync(file, JSON.stringify(aged));
+  const at = read()['s-keep'].at;
+  P.taskOffer('s-keep', '2026-10-25 · T1b');
+  assert.equal(read()['s-keep'].at, at, 'the same offer: the file is not written');
+  P.taskOffer('s-keep', null);
+  assert.ok(read()['s-keep'].at > at && read()['s-keep'].offer === null, 'counter-example: another offer is written');
+  P.markTaskStart('s-keep');
+  P.clearTaskStart('s-keep');
+  assert.equal(P.taskOffer('s-keep'), undefined, 'the task closed: its offer goes with the mark');
+  assert.equal(P.taskOffer('s-other-keep'), null, 'counter-example: another session keeps its own');
+  P.clearTaskStart('s-never-marked');
+  assert.equal(P.taskOffer('s-other-keep'), null, 'a close with no mark touches no other offer');
+});
 test('step 2: the per-prompt hook keeps the follow-up it offered (null when none) for the end-of-turn hook', async () => {
   const dir = tmpRepo(), session = 's-offer';
   closed(dir, session, { file: 'src/a.mjs' });

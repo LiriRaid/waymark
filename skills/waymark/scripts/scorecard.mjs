@@ -77,26 +77,36 @@ const writers = (rs) => {
   const first = at.find(Boolean) || null;
   return at.map((x) => x || first);
 };
-// The tasks the measured version wrote, read once per scorecard run (run: the run's cache; a single measure reads fresh).
+// What the records give, read once per scorecard run (run: the run's cache; a single measure reads fresh).
 let run = null;
-const versionTasks = async (root) => {
-  if (run?.has(root)) return run.get(root);
-  const { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
-  const h = projectHome(root);
-  const tasks = h.dir ? readTaskRecords(h).filter((r) => r.id && !r.kind) : [], by = writers(tasks);
-  const mine = tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION);
-  run?.set(root, mine);
-  return mine;
+const once = (key, f) => {
+  if (!run) return f();
+  if (!run.has(key)) run.set(key, f());
+  return run.get(key);
 };
+const provenance = () => import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
+const rawTasks = (root) => once(`raw:${root}`, async () => {
+  const { projectHome, readTaskRecords } = await provenance(), h = projectHome(root);
+  return { h, records: h.dir ? readTaskRecords(h) : [] };
+});
+const versionTasks = (root) => once(`tasks:${root}`, async () => {
+  const tasks = (await rawTasks(root)).records.filter((r) => r.id && !r.kind), by = writers(tasks);
+  return tasks.filter((r, i) => !VERSION || !by[i] || by[i] === VERSION);
+});
 const recent = async (root, n = 30, full = true) => {
   const last = (await versionTasks(root)).slice(-n);
   return full ? last.filter((r) => r.schema) : last;
 };
 // The cost rows of the tasks the measured version wrote (docs/adr/0049), for the routine shares of every level.
-const versionCost = async (root) => {
+const versionCost = (root) => once(`cost:${root}`, async () => {
   const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await versionTasks(root)).map((r) => r.id));
-  return { C, tasks: C.tasksOf(root).filter((t) => mine.has(t.id)) };
-};
+  return { C, tasks: C.tasksOf(root, (await rawTasks(root)).records).filter((t) => mine.has(t.id)) };
+});
+// The precedent's held-out evaluation, once per run: precision@3 and the hand-over's size come from the same one.
+const precedentEval = (root) => once(`precedent:${root}`, async () => {
+  const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { h, records } = await rawTasks(root);
+  return h.dir ? P.evaluate(records, { root: h.root }) : null;
+});
 const share = (rs, f) => (rs.length ? rs.filter(f).length / rs.length : null);
 // The tasks the parcial share judges: a record from before the log carried an outcome says nothing either way, and a parcial for an
 // external cause (the quota, the provider cut the turn) says nothing of the work, so neither is counted on either side.
@@ -167,8 +177,8 @@ const MEASURES = {
   async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
   async 'cost.routineShareL2'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 2, 10)?.share ?? null; },
   async 'cost.routineShareL1'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 1, 5)?.share ?? null; },
-  async 'precedent.precisionAt3'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).precisionAtK : null; },
-  async 'precedent.maxChars'(root) { const P = await import(pathToFileURL(path.join(HERE, 'precedent.mjs')).href), { projectHome, readTaskRecords } = await import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href), h = projectHome(root); return h.dir ? P.evaluate(readTaskRecords(h), { root: h.root }).maxChars : null; },
+  async 'precedent.precisionAt3'(root) { return (await precedentEval(root))?.precisionAtK ?? null; },
+  async 'precedent.maxChars'(root) { return (await precedentEval(root))?.maxChars ?? null; },
   async 'conformance.cases'(root) {
     const f = path.join(root, 'tests', 'conformance', 'cases.json');
     return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')).cases?.length ?? null : null;

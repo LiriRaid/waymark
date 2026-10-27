@@ -101,21 +101,27 @@ export function markTaskStart(session, now = Date.now()) {
   return now;
 }
 // The follow-up the task's first prompt was offered (null: none; ~/.waymark/.task-offers.json), so a later prompt of the
-// same task (an answer mid-task) keeps it. Read: taskOffer(session) → the offer, or undefined when none was kept.
+// same task (an answer mid-task) keeps it. Read: taskOffer(session) → the offer, or undefined when none was kept. It lives as
+// long as the task's start mark: clearTaskStart drops it, so a mark that was never cleared is the only way one outlives its task.
 const offersFile = () => path.join(HOME(), '.task-offers.json');
-export function taskOffer(session, offer) {
-  let all = {};
-  try { all = JSON.parse(fs.readFileSync(offersFile(), 'utf8')) || {}; } catch {}
-  const id = session || 'unknown';
-  if (offer === undefined) return all[id] ? all[id].offer : undefined;
-  all[id] = { offer, at: Date.now() };
-  for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > 7 * 86400000) delete all[k];
+const readOffers = () => { try { return JSON.parse(fs.readFileSync(offersFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeOffers = (all) => {
   fs.mkdirSync(HOME(), { recursive: true });
   fs.writeFileSync(offersFile(), JSON.stringify(all));
+};
+export function taskOffer(session, offer) {
+  const all = readOffers(), id = session || 'unknown';
+  if (offer === undefined) return all[id] ? all[id].offer : undefined;
+  if (all[id] && all[id].offer === offer && Date.now() - all[id].at < 86400000) return offer; // the same offer is already kept: no write
+  all[id] = { offer, at: Date.now() };
+  for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > 7 * 86400000) delete all[k];
+  writeOffers(all);
   return offer;
 }
 export function clearTaskStart(session) {
   const all = readStarts(), id = session || 'unknown';
+  const offers = readOffers();
+  if (id in offers) { delete offers[id]; writeOffers(offers); }
   if (!all[id]) return;
   delete all[id];
   writeStarts(all);

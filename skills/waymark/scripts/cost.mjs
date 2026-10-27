@@ -23,10 +23,10 @@ const round = (x, d = 1) => (x === null || x === undefined ? null : Math.round(x
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
-// The recorded tasks with an evaluation, oldest first: one row per task.
-export function tasksOf(cwd) {
-  const home = projectHome(cwd);
-  return (home.dir ? readTaskRecords(home) : []).filter((r) => r.id && r.schema && r.evaluation?.tokens > 0).map((r) => {
+// The recorded tasks with an evaluation, oldest first: one row per task. `records` are the project's task records when the caller has read them.
+export function tasksOf(cwd, records) {
+  const home = records ? null : projectHome(cwd);
+  return (records || (home.dir ? readTaskRecords(home) : [])).filter((r) => r.id && r.schema && r.evaluation?.tokens > 0).map((r) => {
     const links = r.evaluation.links || null;
     const u = r.evaluation.usage || {};
     return {

@@ -381,12 +381,14 @@ export function commandFiles(command, cwd = process.cwd()) {
 // other than the session's. → their folders.
 export function commandRepos(command, cwd = process.cwd()) {
   const top = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); return r.status === 0 ? norm(r.stdout.trim()) : null; };
-  const own = top(cwd), dirs = new Set();
+  const dirs = new Set();
   for (const p of shellRuns(command)) {
     if (p.cd) dirs.add(path.resolve(cwd, String(p.cd).replace(/^["']|["']$/g, '').replace(/^\/([a-z])\//i, '$1:/')));
     const c = String(p.text).match(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
     if (c) dirs.add(path.resolve(cwd, c[1] ?? c[2] ?? c[3]));
   }
+  if (!dirs.size) return []; // the common command names no other folder: no git process to ask which repo this one is
+  const own = top(cwd);
   return [...dirs].filter((d) => { try { if (!fs.statSync(d).isDirectory()) return false; } catch { return false; } const t = top(d); return t && t !== own; });
 }
 
@@ -467,7 +469,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
   if (!fresh.length && !procText) return null;
-  const { pack } = await import('./waymark.mjs');
+  const { pack } = await import('./pack.mjs');
   const byRepo = new Map();
   for (const f of fresh) { const r = repoOf(f); byRepo.set(r, [...(byRepo.get(r) || []), f]); }
   const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';

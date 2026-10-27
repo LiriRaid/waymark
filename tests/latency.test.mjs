@@ -146,6 +146,23 @@ test('latency: CSS/HTML — an Edit of a stylesheet starts no more git processes
   assert.ok(spawnsOf('PreToolUse', 'tool-hook.mjs', { tool_name: 'Edit', tool_input: { file_path: path.join(p.d, 'app.css'), old_string: '.a', new_string: '.b' } }, p) <= BUDGET.PreToolUse);
 });
 
+// The folders a command names are asked to git only when there are some (tests/false-fails.test.mjs holds the cases that name one).
+test('latency: logic + CSS/HTML — a shell command that writes a file of the project and names no other folder starts no git process', () => {
+  const p = project('shell-write');
+  const bash = (command) => spawnsOf('PreToolUse', 'tool-hook.mjs', { tool_name: 'Bash', tool_input: { command } }, p);
+  assert.equal(bash('node build.mjs > out.txt'), 0, 'logic: a redirect inside the project');
+  assert.equal(bash('sed -i s/a/b/ app.css'), 0, 'CSS/HTML: an edit of a stylesheet');
+});
+
+test('latency: the memory an edit carries loads from pack.mjs, not from the whole CLI, and the CLI command is the same function', async () => {
+  const hook = fs.readFileSync(path.join(SCRIPTS, 'tool-hook.mjs'), 'utf8');
+  assert.doesNotMatch(hook, /import\(\s*['"]\.\/waymark\.mjs['"]\s*\)/, 'the tool hook loads no CLI');
+  const [cli, light] = await Promise.all([import(`file://${SCRIPTS}/waymark.mjs`), import(`file://${SCRIPTS}/pack.mjs`)]);
+  assert.equal(cli.pack, light.pack, 'one function, two doors');
+  const d = repoWithNotes('pack-file');
+  assert.match(light.pack(d, ['app.css']), /^app\.css:/, 'a file with a commit and no task record is listed');
+});
+
 // ---- the milliseconds of real use: hook-run.cjs writes each run, `check` names an event over its cap ----
 test('latency: hook-run.cjs writes the hook and its milliseconds; check warns only for an event whose p95 passes its cap', async () => {
   const p = project('log');

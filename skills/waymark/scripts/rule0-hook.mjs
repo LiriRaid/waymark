@@ -66,11 +66,24 @@ const replyText = (lines) => {
   const reply = [...(lines || [])].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
   return (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
 };
+// A task's number names it as the ask's subject only when it opens the ask, follows a verb that continues or corrects, or the ask
+// already redoes it; "como en T3" or "según T3" cites it and starts a new task.
+const TASK_NO = '(T)(\\d+)[a-z]?(?![\\p{L}\\p{N}])';
+const OPENS_WITH_TASK = new RegExp(`^\\s*${TASK_NO}`, 'u');
+const VERB_THEN_TASK = new RegExp(`(?<![\\p{L}\\p{N}])(?:sigue|contin[uú]a|retoma|reanuda|termina|acaba|finaliza|completa|dale|corrige|arregla|repara|rehaz|reabre|continue|resume|finish|fix|redo|reopen)\\s+(?:(?:con|en|a|de|la|el|lo\\s+de|tarea|task)\\s+)*${TASK_NO}`, 'iu');
+// The number of the task the ask is about, or undefined: the one that opens it or follows the verb (a capital T: "t3" is no task), else, when the ask says
+// something is not done, the first one cited.
+export function subjectTask(text) {
+  const opens = text.match(OPENS_WITH_TASK), after = text.match(VERB_THEN_TASK);
+  if (opens) return opens[2];
+  if (after && after[1] === 'T') return after[2];
+  return REDO.test(text) || STOPPED.test(text) ? text.match(/(?<![\p{L}\p{N}])T(\d+)[a-z]?(?![\p{L}\p{N}])/u)?.[1] : undefined;
+}
 const endsAsking = (text) => !!text && (closingQuestions(text).length > 0 || OFFER.test(text.split('\n').slice(-4).join('\n')));
 // The IDs this turn offers: `followUp` only when the ask continues or redoes a task (null otherwise); `reply` is the session's last reply.
 export function taskTurn(cwd, now = new Date(), { session = null, prompt = '', reply = '' } = {}) {
   const ids = taskIds(cwd, now), text = String(prompt || ''), bare = (id) => String(id || '').replace(/[a-z]$/, '');
-  const n = text.match(/(?<![\p{L}\p{N}])T(\d+)[a-z]?(?![\p{L}\p{N}])/u)?.[1];
+  const n = subjectTask(text);
   const named = n ? [...ids.known].filter((k) => bare(k).endsWith(` · T${n}`)).sort().pop() : null;
   if (named) return { next: ids.next, followUp: ids.follow(named), why: '' };
   if (!ids.followUp) return { next: ids.next, followUp: null, why: '' };
@@ -309,9 +322,10 @@ export function reminder(hook, agent) {
   if (held?.block) return held.block; // stopped before the model: no snapshot, no open turn
   const session = hook.session_id || 'unknown';
   let ids = '', other = '', unclosed = false, offered;
+  const started = taskStartMark(session); // read once: a later prompt of a task in progress has it, the task's first has none
   try {
     const t = taskTurn(cwd, new Date(), { session, prompt: agent.promptless ? '' : hook.prompt, reply: replyText(lines) });
-    const kept = taskStartMark(session) ? taskOffer(session) : undefined; // a later prompt of a task in progress keeps its first prompt's offer
+    const kept = started ? taskOffer(session) : undefined; // a later prompt of a task in progress keeps its first prompt's offer
     if (kept !== undefined) { t.followUp = kept; t.why = ''; } else taskOffer(session, t.followUp);
     offered = t.followUp; ids = ` ID: new ${t.next}${t.followUp ? `; follow-up ${t.followUp}` : ''}.${t.why}`;
   } catch {}
@@ -328,19 +342,20 @@ export function reminder(hook, agent) {
   // the earlier task that resembles the ask, handed over once, at the task's first prompt (docs/adr/0033); null clears a stale one
   let prec = '';
   try {
-    if (!taskStartMark(hook.session_id)) {
+    if (!started) {
       const home = projectHome(cwd), p = home.dir && !home.legacy ? precedentFor(hook.prompt, readTaskRecords(home), undefined, hook.session_id) : null;
       keepPrecedent(hook.session_id, p);
       if (p) prec = ` ${p.text}`;
     }
   } catch {}
-  try { markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
+  let mark = started;
+  try { mark = markTaskStart(hook.session_id); } catch {} // the task's first prompt: where the hooks read its decisions from
   // the stack as the repo has it now (package manager, versions): never from memory, which can be stale
   let repo = '';
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   let cap = '';
-  try { cap = softCapLine(hook, agent, cwd, taskStartMark(hook.session_id), Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
+  try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
   let owned = '';
   try { owned = ownedOffer(hook.prompt, fs.readFileSync(projectHome(cwd).memory, 'utf8')); } catch {}
   const text = (st.openedWithWaymark ? short : full) + ids + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);

@@ -168,13 +168,15 @@ test('secrets: every commit of the turn is read, with or without trailer, in any
   assert.deepEqual(hits.map((h) => h.kind), ['GitHub token']);
 });
 
-test('Aprendido: unresolved testigos keep the Work in progress line open and go to engram as "sin verificar"', async () => {
+test('Aprendido: the Work in progress line says what the record says; unresolved testigos stay in the record and go to engram as "sin verificar"', async () => {
   const repo = tmpRepo(), h = projectHome(repo);
   fs.mkdirSync(path.join(repo, '.waymark'), { recursive: true });
   fs.writeFileSync(h.memory, '# Project: x\n\n## Work in progress\n\n## Identity\n');
-  const rec = { id: '2026-10-12 · T1', prompt: 'x', cierre: '## Cierre · x\nResultado: hecho\nAprendido: backoff ← timeouts', unresolved: ['the gate after the last code change failed'], evaluation: { steps: { Verificar: false, Cierre: true } } };
+  const rec = { id: '2026-10-12 · T1', prompt: 'x', cierre: '## Cierre · x\nResultado: hecho\nAprendido: backoff ← timeouts', outcome: { result: 'hecho' }, unresolved: ['the gate after the last code change failed'], evaluation: { steps: { Verificar: false, Cierre: true } } };
   writeTaskLine(h, rec);
-  assert.match(fs.readFileSync(h.memory, 'utf8'), /- ▶ \[2026-10-12 · T1\] backoff ← timeouts/);
+  assert.doesNotMatch(fs.readFileSync(h.memory, 'utf8'), /2026-10-12 · T1/, 'the record says hecho: the task leaves Work in progress');
+  writeTaskLine(h, { ...rec, id: '2026-10-12 · T2', outcome: { result: 'parcial', said: 'hecho', why: 'the Cierre marks ✘ a choice of the window' } });
+  assert.match(fs.readFileSync(h.memory, 'utf8'), /- ▶ \[2026-10-12 · T2\] backoff ← timeouts/, 'counter-example: a record the hook lowered to parcial keeps its line');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-engram-')); temps.push(dir);
   const log = path.join(dir, 'calls.jsonl'), bin = path.join(dir, 'engram.mjs');
   fs.writeFileSync(bin, `import fs from 'node:fs';\nconst a = process.argv.slice(2);\nfs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + '\\n');\nif (a[0] === 'version') console.log('engram 3.1.0');\n`);
@@ -186,6 +188,21 @@ test('Aprendido: unresolved testigos keep the Work in progress line open and go 
   const save = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).find((c) => c[0] === 'save');
   assert.match(save[1], /^2026-10-12 · T1 · sin verificar · /);
   assert.match(save[2], /^Sin verificar: Verificar\nAprendido: backoff ← timeouts/);
+});
+
+test('tidy: an open line whose task\'s newest record says hecho leaves, moved whole to history.md; a parcial one, a note and a follow-up still open stay', async () => {
+  const { tidyWip } = await import(`file://${SCRIPTS}/provenance.mjs`);
+  const repo = tmpRepo(), h = projectHome(repo);
+  fs.mkdirSync(path.join(repo, '.waymark'), { recursive: true });
+  const day = new Date().toISOString().slice(0, 10), id = (n) => `${day} · T${n}`;
+  fs.writeFileSync(h.memory, `# Project: x\n\n## Work in progress\n- ▶ [${id(1)}] hecho con un testigo suelto\n- ▶ [${id(2)}] parcial de verdad\n- ▶ [${id(3)}b] su seguimiento sigue abierto\n- una nota sin ID\n\n## Identity\n`);
+  const records = [{ id: id(1), outcome: { result: 'hecho' }, unresolved: ['a test failed'] }, { id: id(2), outcome: { result: 'parcial' } }, { id: id(3), outcome: { result: 'hecho' } }, { id: id(3) + 'b', outcome: { result: 'parcial' } }];
+  assert.equal(tidyWip(h, new Date(), { records }), true);
+  const text = fs.readFileSync(h.memory, 'utf8');
+  assert.doesNotMatch(text, new RegExp(`\\[${id(1)}\\]`), 'its record says hecho');
+  for (const keep of [`[${id(2)}] parcial`, `[${id(3)}b]`, 'una nota sin ID']) assert.ok(text.includes(keep), keep);
+  assert.match(fs.readFileSync(path.join(h.dir, 'history.md'), 'utf8'), /hecho con un testigo suelto/, 'moved whole, not deleted');
+  assert.equal(tidyWip(h, new Date()), false, 'counter-example: without records (a close) nothing is read and nothing moves');
 });
 
 test('quota: a turn that ended without a task does not leave its start behind; a routed task that stopped keeps it', async () => {

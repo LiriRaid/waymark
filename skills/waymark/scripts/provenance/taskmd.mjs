@@ -147,9 +147,10 @@ export function writeTaskLine(home, rec, now = new Date()) {
   const cierre = String(rec.cierre || '').replace(/\*\*|__/g, '');
   const learned = maskSecrets(aprendidoOf(cierre)); // the memory line is written here: masked here too (docs/adr/0045)
   if (!learned || /^ninguno/i.test(learned)) return false;
-  // a task done leaves Work in progress (its Aprendido is in its record); one still open, or "hecho" with a testigo left
-  // unresolved, keeps its line
-  const done = (/^hecho\b/i.test(cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '') || !!rec.outcome?.userOwned) && !rec.unresolved?.length; // a step the user owns is not left undone
+  // the line says what the record says: a task the record calls hecho leaves Work in progress (its Aprendido and any testigo left unresolved stay in
+  // the record and in W check), one it calls parcial or bloqueado keeps its line; the Cierre's word only when the record has no result
+  const result = rec.outcome?.result || cierre.match(/Resultado:[ \t]*([^\n·]*)/i)?.[1]?.trim() || '';
+  const done = /^hecho\b/i.test(result) || !!rec.outcome?.userOwned; // a step the user owns is not left undone
   return rewriteWip(home, { id: rec.id, line: done ? null : clip(`- ▶ [${rec.id}] ${learned}`, LINE_CHARS), now, label: `closing ${rec.id}` });
 }
 
@@ -181,17 +182,19 @@ export function confirmTasks(home, ids, { note = '', now = new Date(), agent = n
   return confirmed;
 }
 
-// Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). → true when it changed.
-export function tidyWip(home, now = new Date()) {
+// Tidies Work in progress without writing a task line (also run by hand: `waymark.mjs tidy`). An open line whose task's newest record says hecho
+// leaves too, as writeTaskLine would leave it today: `records` are read only when asked (the hand-run tidy), never on a close. → true when it changed.
+export function tidyWip(home, now = new Date(), { records = null } = {}) {
   if (!home?.dir || home.legacy || !fs.existsSync(home.memory)) return false;
-  return rewriteWip(home, { now, label: 'tidy' });
+  const last = new Map((records || []).filter((r) => r?.id && r.outcome).map((r) => [r.id, r])); // the newest record of each ID wins
+  return rewriteWip(home, { now, label: 'tidy', done: new Set([...last].filter(([, r]) => r.outcome.result === 'hecho' || r.outcome.userOwned).map(([id]) => id)) });
 }
 
 // The section, rewritten: the task's line (when given) in place of its task's lines, then every line moved whole to
 // history.md that is over 200 characters (a task line stays as "- ▶ [<id>] <its next step>"), an older line of a task
 // that has a newer one (a task and its follow-ups keep only the newest), an open (▶) or pending line whose task ID is older than 14 days, and the
 // every closed (✔) line (DONE_KEPT: a task done lives in its record). A note (no ID at its head) is never moved except when over 200 characters.
-function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
+function rewriteWip(home, { id = null, line = null, now = new Date(), label, done = new Set() }) {
   const text = fs.readFileSync(home.memory, 'utf8');
   const m = ('\n' + text).match(WIP);
   if (!m && !line) return false;
@@ -222,6 +225,7 @@ function rewriteWip(home, { id = null, line = null, now = new Date(), label }) {
   const newest = new Map();
   for (const l of tasks) { const b = base(headId(l)); if (!newest.has(b) || idOrder(headId(l)) > idOrder(headId(newest.get(b)))) newest.set(b, l); }
   for (const l of tasks) if (newest.get(base(headId(l))) !== l) drop(l);
+  for (const l of kept.filter((x) => x !== line && /^\s*-\s*▶/.test(x) && done.has(headId(x)))) drop(l); // its record says hecho
   const cutoff = now.getTime() - STALE_DAYS * 86400000;
   for (const l of kept.filter((x) => x !== line && /^\s*-/.test(x) && headId(x) && !/^\s*-\s*✔/.test(x))) {
     const day = Date.parse(`${headId(l).match(ID)[1]}T00:00:00`);

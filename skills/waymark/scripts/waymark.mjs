@@ -567,7 +567,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     process.exitCode = r.code;
   } else if (sub === 'tidy') {
     const home = projectHome(process.cwd());
-    const changed = tidyWip(home);
+    const changed = tidyWip(home, new Date(), { records: readTaskRecords(home) }); // an open line whose record says hecho leaves too
     if (changed) refreshTasks(home, true);
     console.log(changed ? `Work in progress tidied (${home.memory}); moved lines: ${home.dir}/history.md` : 'Work in progress: nothing to tidy');
   } else if (sub === 'pack') {

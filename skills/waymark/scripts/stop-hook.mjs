@@ -969,7 +969,6 @@ function composeSteps(S) {
     const why = 'the owner\'s procedures.md section was read after the task\'s first change';
     proc.pass = false; proc.why = [why]; findings.push(why);
   }
-  if (win?.unanswered.length) findings.push(`the Cierre does not answer what the user chose in the window (recorded, not blocked): ${win.unanswered.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (win?.failed.length) findings.push(`the Cierre marks ✘ what the user chose in the window: ${win.failed.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (win?.twoActions.length) findings.push(`a label the user chose holds two actions (apply and run, delete and deploy…): the Cierre must say which of them was done: ${win.twoActions.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (outsideRepos.length) findings.push(`changed a repository the Pedido does not name (Repos:): ${outsideRepos.slice(0, 3).join(', ')}`);
@@ -1108,7 +1107,7 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
   const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
   const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
   if (said === 'hecho' && gaps.length) return { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' };
-  if (said === 'hecho' && (win?.unanswered.length || win?.failed.length)) return { result: 'parcial', said, why: 'a choice of the window is not answered in the Cierre or is marked ✘' };
+  if (said === 'hecho' && win?.failed.length) return { result: 'parcial', said, why: 'the Cierre marks ✘ a choice of the window' };
   if (said === 'parcial') {
     const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
     const mine = [...owned].filter((s) => STEP_WORDS[s].test(line));
@@ -1141,7 +1140,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     inputs: ctx.inputs, commits: ctx.commits || [],
     cierre: maskSecrets((gaps.reply.match(/^[ \t]*##\s*Cierre[\s\S]*/m)?.[0] || '').slice(0, 2000)),
     outcome: gaps.external ? { result: 'parcial', cause: 'external', why: gaps.external.cause } : outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned, gaps.win), // hecho | parcial | bloqueado, as a label
-    ...(gaps.win && (gaps.win.unanswered.length || gaps.win.failed.length || gaps.win.twoActions.length) ? { window: gaps.win } : {}), // what the user chose in the window and the Cierre left out (docs/adr/0046)
+    ...(gaps.win?.items.length ? { window: { chosen: gaps.win.items, ...(gaps.win.failed.length ? { failed: gaps.win.failed } : {}), ...(gaps.win.twoActions.length ? { twoActions: gaps.win.twoActions } : {}) } } : {}), // what the user chose in the window, written by the hook, and what the Cierre marked ✘ (docs/adr/0046)
     ...(gaps.askedRepos?.length ? { askedRepos: gaps.askedRepos.slice(0, 6) } : {}),
     unresolved: gaps.missing.map(maskSecrets),
     findings: gaps.findings.map(maskSecrets),

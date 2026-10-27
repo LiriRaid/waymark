@@ -189,39 +189,41 @@ test('11: CSS/HTML — a styles file under a folder with "migrate" in a path is 
   assert.match(r.out, /migrates with its own script/);
 });
 
-// ---- what the user chose in the window is answered in the Cierre ----
+// ---- what the user chose in the window: the hook writes it, the Cierre only marks ✘ what it did not keep ----
 const DEC = (...chosen) => chosen.map((c) => ({ question: '¿Cómo?', chosen: c, discarded: [] }));
-test('11: logic — a chosen option the Cierre does not name, or marks ✘, keeps hecho from standing; a label with two actions is flagged', () => {
+test('11: logic — a chosen option the Cierre does not repeat still stands; one it marks ✘ keeps hecho from standing; a label with two actions is flagged', () => {
   const ok = P.windowCheck(DEC('Backoff exponencial con tope'), '## Cierre · x\nResultado: hecho\nDecisión: ✔ backoff exponencial, con tope de 5 intentos');
-  assert.deepEqual([ok.unanswered, ok.failed, ok.twoActions], [[], [], []]);
-  const missing = P.windowCheck(DEC('Backoff exponencial con tope', 'Aplicar y ejecutar la migración'), '## Cierre · x\nResultado: hecho\nEvidencia: observada el log\nDecisión: ✔ backoff exponencial con tope');
-  assert.deepEqual(missing.unanswered, ['Aplicar y ejecutar la migración']);
-  assert.deepEqual(missing.twoActions, ['Aplicar y ejecutar la migración']);
+  assert.deepEqual([ok.items, ok.failed, ok.twoActions], [['Backoff exponencial con tope'], [], []]);
+  const silent = P.windowCheck(DEC('Backoff exponencial con tope', 'Aplicar y ejecutar la migración'), '## Cierre · x\nResultado: hecho\nEvidencia: observada el log\nAprendido: x ← y');
+  assert.deepEqual([silent.items.length, silent.failed], [2, []], 'not repeated is not missing: the hook has the choices');
+  assert.deepEqual(silent.twoActions, ['Aplicar y ejecutar la migración']);
+  assert.equal('unanswered' in silent, false, 'counter-example of the old rule: no "unanswered" any more');
   const failed = P.windowCheck(DEC('Aplicar la migración en producción'), '## Cierre · x\nResultado: hecho\n✘ aplicar la migración en producción: no hubo acceso');
   assert.deepEqual(failed.failed, ['Aplicar la migración en producción']);
-  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), missing).result, 'parcial');
-  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), failed).result, 'parcial');
-  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), ok).result, 'hecho', 'counter-example: every choice answered');
-  assert.equal(outcome('Resultado: parcial (falta)', [], [], 2, new Set(), missing).result, 'parcial');
-  assert.deepEqual(P.windowCheck(DEC('Otra cosa', 'Sí'), 'sin nada').unanswered, [], 'counter-example: "otra cosa" and an item with no word to look for are not judged');
-  assert.deepEqual(P.windowCheck(DEC('Backoff (Recommended)', 'Cola (Recomendado)'), 'Aprendido: backoff y cola').unanswered, [], 'the window\'s own marker is not part of the choice');
+  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), silent).result, 'hecho', 'a Cierre that does not repeat the choices is not lowered');
+  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), failed).result, 'parcial', 'counter-example: a choice marked ✘');
+  assert.equal(outcome('Resultado: hecho', [], [], 2, new Set(), ok).result, 'hecho');
+  assert.equal(outcome('Resultado: parcial (falta)', [], [], 2, new Set(), silent).result, 'parcial', 'a parcial stays parcial');
+  assert.deepEqual(P.windowCheck(DEC('Otra cosa', 'Sí'), 'sin nada').items, ['Sí'], 'counter-example: "otra cosa" is not a choice');
+  assert.deepEqual(P.windowCheck(DEC('Backoff (Recommended)', 'Cola (Recomendado)'), 'Aprendido: backoff y cola').items, ['Backoff', 'Cola'], 'the window\'s own marker is not part of the choice');
 });
 test('11: a multi-select answer is one item per option picked', () => {
   const d = [{ question: '¿Qué?', chosen: 'Tests unitarios, Documentación del límite', discarded: [] }];
   Object.defineProperty(d[0], 'labels', { value: ['Tests unitarios', 'Documentación del límite', 'Otra cosa'], enumerable: false });
-  const w = P.windowCheck(d, '## Cierre · x\nResultado: hecho\nAprendido: tests unitarios del servicio ← pedido');
+  const w = P.windowCheck(d, '## Cierre · x\nResultado: hecho\nAprendido: tests unitarios del servicio ← pedido\n✘ documentación del límite: queda para después');
   assert.deepEqual(w.items, ['Tests unitarios', 'Documentación del límite']);
-  assert.deepEqual(w.unanswered, ['Documentación del límite'], 'only the option the Cierre left out');
+  assert.deepEqual(w.failed, ['Documentación del límite'], 'only the option the Cierre marks ✘');
 });
-test('11: CSS/HTML — the same through the end-of-turn judgment: the finding is recorded, the task is not blocked for it', () => {
+test('11: CSS/HTML — the same through the end-of-turn judgment: a Cierre that does not repeat the choice has no finding and is never blocked', () => {
   const lines = [prompt('ajusta el botón'), say('Waymark → L2 · dept-frontend'), ...call('Skill', { skill: 'dept-frontend' }), ...call('Read', { file_path: '/skills/dept-frontend/procedures.md' }), ...call('Bash', { command: 'node "/s/waymark/scripts/waymark.mjs" pack src/app.css' }),
     ...call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Ancho fijo de 40 px', 'Ancho automático'], 'Ancho fijo de 40 px'), ...call('Edit', { file_path: '/work/proj/src/app.css' })];
   const cierre = '## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: inferida de la lectura (check: ver el botón)\nAprendido: x ← y';
   const g = cierreGaps(currentTurn(lines), cierre, undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: P.decisionsIn(lines), cwd: '/work/proj' });
-  assert.ok(g.findings.some((f) => /does not answer what the user chose in the window.*Ancho fijo de 40 px/.test(f)));
-  assert.ok(!g.missing.some((m) => /window|choice/.test(m)), 'recorded, never blocked');
-  const named = cierreGaps(currentTurn(lines), cierre.replace('Resultado: hecho', 'Resultado: hecho\nDecisión: ✔ ancho fijo de 40 px'), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: P.decisionsIn(lines), cwd: '/work/proj' });
-  assert.ok(!named.findings.some((f) => /does not answer what the user chose/.test(f)), 'counter-example: named in the Cierre');
+  assert.ok(!g.findings.some((f) => /chose in the window/.test(f)), 'no finding for a choice the Cierre does not repeat');
+  assert.ok(!g.missing.some((m) => /window|choice/.test(m)), 'never blocked');
+  assert.deepEqual(g.win.items, ['Ancho fijo de 40 px'], 'the hook has the choice for the record');
+  const marked = cierreGaps(currentTurn(lines), cierre.replace('Resultado: hecho', 'Resultado: hecho\n✘ ancho fijo de 40 px: rompía el móvil, quedó automático'), undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: P.decisionsIn(lines), cwd: '/work/proj' });
+  assert.ok(marked.findings.some((f) => /marks ✘ what the user chose in the window.*Ancho fijo de 40 px/.test(f)), 'counter-example: a choice marked ✘ is recorded');
 });
 
 // ---- the public signers carry no address, and the release still verifies ----

@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { topOf } from './lib/git.mjs';
 import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
@@ -170,7 +171,7 @@ function gitRuns(tools, cwd, verb) {
 }
 // The repos the turn's commit commands ran in.
 const commitRepos = (tools, cwd) => new Set(gitRuns(tools, cwd, 'commit').map((r) => r.dir));
-const gitRoot = (dir) => { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); return r.status === 0 ? r.stdout.trim() : null; };
+const gitRoot = (dir) => topOf(dir); // asked once per folder in a run (lib/git.mjs)
 // one folder however it is spelled: git's long name, an 8.3 short name or a link (lib/paths real)
 const sameDir = (a, b) => norm(real(a)) === norm(real(b));
 
@@ -272,7 +273,7 @@ function unreviewed(tools, codeFiles, failed = (t) => !!t.error) {
 const repos = new Map();
 function repoOf(dir) {
   if (!dir || !fs.existsSync(dir)) return null;
-  if (!repos.has(norm(dir))) { const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8', timeout: 5000 }); repos.set(norm(dir), r.status === 0 ? norm(r.stdout.trim()) : null); }
+  if (!repos.has(norm(dir))) { const top = topOf(dir); repos.set(norm(dir), top ? norm(top) : null); }
   return repos.get(norm(dir));
 }
 // A Git Bash path (/c/Users/…) as Windows reads it; others unchanged.

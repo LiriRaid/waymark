@@ -14,11 +14,11 @@ import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
 import { runtimePrefix, runtimeDir, runtimeEnv } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
 import { real } from './lib/paths.mjs';
-import { git as gitIn } from './lib/git.mjs';
+import { git as gitIn, topOf } from './lib/git.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
 const git = (cwd, ...a) => gitIn(cwd, a, { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
-const top = (dir) => { const r = git(dir, 'rev-parse', '--show-toplevel'); return r.status === 0 ? path.resolve(r.stdout.trim()) : null; };
+const top = (dir) => { const t = topOf(dir); return t ? path.resolve(t) : null; };
 const same = (a, b) => String(a || '').replace(/\\/g, '/').toLowerCase() === String(b || '').replace(/\\/g, '/').toLowerCase();
 
 // The rows of memory.md's "Quality gates" table → [gate, command] (backticks dropped). Only lines that start with "|":

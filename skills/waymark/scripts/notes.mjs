@@ -35,14 +35,34 @@ export function addNote(cwd, commit, text) {
   return /identity|who you are|empty ident/i.test(r.stderr || '') && add(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']).status === 0;
 }
 
-// The notes of the ref → Map(commit sha → note text), in two git calls (list + one cat-file batch); with `commits`,
-// only theirs.
-export function readNotes(cwd, commits = null, ref = NOTES_REF) {
+// A hook asks for the same notes several times (the records, the incidents, the chain), and each git call costs 40-60 ms on
+// Windows. So each read asks only for the ref's tip (one for-each-ref) and reads its notes (list + cat-file) once per tip: a
+// note written by anyone, this process or another, moves the tip and is read. A caller that reads several refs as one read (the
+// task records: notes, log lines, anchors) asks the tips once with noteTips and hands them on.
+const cache = new Map(); // `${cwd}\0${ref}\0${tip}` → Map(commit → note text)
+// The tips of refs/notes/* → Map(ref → sha), or null when git cannot say.
+export function noteTips(cwd) {
+  const r = git(cwd, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/notes/'], { encoding: 'utf8' });
+  return r.status === 0 ? new Map(r.stdout.trim().split('\n').filter(Boolean).map((l) => l.split(' ').reverse())) : null;
+}
+
+// The notes of the ref → Map(commit sha → note text); with `commits`, only theirs. Read once per tip (above), in two git
+// calls (list + one cat-file batch).
+export function readNotes(cwd, commits = null, ref = NOTES_REF, tips = undefined) {
+  if (String(ref).startsWith('refs/notes/') && tips === undefined) tips = noteTips(cwd); // only refs/notes/* are in the tips
+  const tip = tips ? tips.get(ref) || '' : null; // '' = no such ref; null = not known: read it whole
+  if (tip === '') return new Map();
+  const key = `${cwd}\0${ref}\0${tip}`;
+  if (tip && !cache.has(key)) cache.set(key, listNotes(cwd, ref));
+  const all = tip ? cache.get(key) : listNotes(cwd, ref);
+  return commits ? new Map(commits.filter((c) => all.has(c)).map((c) => [c, all.get(c)])) : new Map(all);
+}
+
+function listNotes(cwd, ref) {
   const out = new Map();
   const list = git(cwd, ['notes', `--ref=${ref}`, 'list'], { encoding: 'utf8' });
   if (list.status !== 0 || !list.stdout.trim()) return out;
-  const want = commits && new Set(commits);
-  const pairs = list.stdout.trim().split('\n').map((l) => l.trim().split(/\s+/)).filter(([, c]) => !want || want.has(c)); // "<note blob> <commit>"
+  const pairs = list.stdout.trim().split('\n').map((l) => l.trim().split(/\s+/)); // "<note blob> <commit>"
   if (!pairs.length) return out;
   const batch = git(cwd, ['cat-file', '--batch'], { input: pairs.map(([blob]) => blob).join('\n') + '\n' });
   if (batch.status !== 0) return out;
@@ -69,17 +89,17 @@ function appendLine(cwd, ref, entry) {
 }
 // Every JSON line of the ref's notes, each with the commit that holds it (the blank lines `notes append` puts between
 // them skipped).
-function readLines(cwd, ref) {
+function readLines(cwd, ref, tips) {
   const out = [];
-  for (const [commit, text] of readNotes(cwd, null, ref)) for (const line of text.split('\n')) { try { const a = JSON.parse(line); if (a && typeof a === 'object') out.push({ ...a, commit }); } catch {} }
+  for (const [commit, text] of readNotes(cwd, null, ref, tips)) for (const line of text.split('\n')) { try { const a = JSON.parse(line); if (a && typeof a === 'object') out.push({ ...a, commit }); } catch {} }
   return out;
 }
 export const addAnchor = (cwd, entry) => appendLine(cwd, ANCHOR_REF, entry);
-export const readAnchors = (cwd) => readLines(cwd, ANCHOR_REF);
+export const readAnchors = (cwd, tips) => readLines(cwd, ANCHOR_REF, tips);
 // A log line with no commit of its own, on HEAD under LOG_REF. → true when written.
 export const addLogLine = (cwd, line) => appendLine(cwd, LOG_REF, line);
 // Every log line kept in git, without the commit that holds it (the log line as it was chained).
-export const readLogLines = (cwd) => readLines(cwd, LOG_REF).map(({ commit, ...line }) => line);
+export const readLogLines = (cwd, tips) => readLines(cwd, LOG_REF, tips).map(({ commit, ...line }) => line);
 
 // Removes the LOG_REF lines `drop` matches from every note that holds one (a note left empty is removed). → how many
 // lines were removed.

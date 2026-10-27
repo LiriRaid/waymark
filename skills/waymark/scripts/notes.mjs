@@ -17,7 +17,10 @@
 // the same way to a note on HEAD under refs/notes/waymark-log, so a clone or a cleaned project still has it. The same
 // refspec, push and line-by-line merge carry it; `waymark.mjs forget` removes its lines (dropLogLines).
 import crypto from 'node:crypto';
-import { git } from './lib/git.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { git, gitDirs, refTip, noteTipsOf } from './lib/git.mjs';
+import { waymarkHome } from './lib/paths.mjs';
 
 export const NOTES_REF = 'refs/notes/waymark';
 export const ANCHOR_REF = 'refs/notes/waymark-anchor';
@@ -35,25 +38,47 @@ export function addNote(cwd, commit, text) {
   return /identity|who you are|empty ident/i.test(r.stderr || '') && add(['-c', 'user.name=waymark', '-c', 'user.email=waymark@localhost']).status === 0;
 }
 
-// A hook asks for the same notes several times (the records, the incidents, the chain), and each git call costs 40-60 ms on
-// Windows. So each read asks only for the ref's tip (one for-each-ref) and reads its notes (list + cat-file) once per tip: a
-// note written by anyone, this process or another, moves the tip and is read. A caller that reads several refs as one read (the
-// task records: notes, log lines, anchors) asks the tips once with noteTips and hands them on.
+// A hook asks for the same notes several times (the records, the incidents, the chain), and each git call costs 30-60 ms on
+// Windows. So the ref's tip is read from .git's own files (lib/git.mjs; git only where they cannot say), and its notes are read
+// (list + cat-file) once per tip: a note written by anyone, this process or another, moves the tip and is read. A tip names a
+// notes commit, which never changes, so its notes are also kept on disk (<WAYMARK_HOME>/cache/notes, one file per repo and
+// ref, replaced when the tip moves) and the next hook reads none of them again. A caller that reads several refs as one read
+// (the task records: notes, log lines, anchors) asks the tips once with noteTips and hands them on.
 const cache = new Map(); // `${cwd}\0${ref}\0${tip}` → Map(commit → note text)
 // The tips of refs/notes/* → Map(ref → sha), or null when git cannot say.
 export function noteTips(cwd) {
+  const fromFiles = noteTipsOf(gitDirs(cwd));
+  if (fromFiles) return fromFiles;
   const r = git(cwd, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/notes/'], { encoding: 'utf8' });
   return r.status === 0 ? new Map(r.stdout.trim().split('\n').filter(Boolean).map((l) => l.split(' ').reverse())) : null;
 }
+// The commit HEAD names, or null when there is none (a repo with no commit yet, no repo).
+export const headSha = (cwd) => refSha(cwd, 'HEAD');
+
+const diskFile = (cwd, ref) => { const d = gitDirs(cwd); return d ? path.join(waymarkHome(), 'cache', 'notes', `${crypto.createHash('sha1').update(`${path.resolve(d.common)}\0${ref}`).digest('hex').slice(0, 16)}.json`) : null; };
+function diskNotes(cwd, ref, tip) {
+  const file = diskFile(cwd, ref);
+  if (file) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); if (j.tip === tip && Array.isArray(j.notes)) return new Map(j.notes); } catch {} }
+  const all = listNotes(cwd, ref);
+  if (file && all.size && !all.partial) { // a read git cut short stays in this process only
+    try {
+      const dir = path.dirname(file), old = Date.now() - 30 * 86400000;
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify({ tip, notes: [...all] })); fs.renameSync(`${file}.tmp`, file);
+      for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (fs.statSync(p).mtimeMs < old) fs.rmSync(p, { force: true }); } // a repo not read for 30 days
+    } catch {}
+  }
+  return all;
+}
 
 // The notes of the ref → Map(commit sha → note text); with `commits`, only theirs. Read once per tip (above), in two git
-// calls (list + one cat-file batch).
+// calls (list + one cat-file batch), and none while the tip on disk is the same.
 export function readNotes(cwd, commits = null, ref = NOTES_REF, tips = undefined) {
   if (String(ref).startsWith('refs/notes/') && tips === undefined) tips = noteTips(cwd); // only refs/notes/* are in the tips
   const tip = tips ? tips.get(ref) || '' : null; // '' = no such ref; null = not known: read it whole
   if (tip === '') return new Map();
   const key = `${cwd}\0${ref}\0${tip}`;
-  if (tip && !cache.has(key)) cache.set(key, listNotes(cwd, ref));
+  if (tip && !cache.has(key)) cache.set(key, diskNotes(cwd, ref, tip));
   const all = tip ? cache.get(key) : listNotes(cwd, ref);
   return commits ? new Map(commits.filter((c) => all.has(c)).map((c) => [c, all.get(c)])) : new Map(all);
 }
@@ -70,9 +95,9 @@ function listNotes(cwd, ref) {
   let at = 0;
   for (const [, commit] of pairs) {
     const nl = buf.indexOf(10, at);
-    if (nl < 0) break;
+    if (nl < 0) { out.partial = true; break; }
     const size = Number(buf.subarray(at, nl).toString('utf8').split(' ')[2]); // "<sha> blob <bytes>"
-    if (!(size >= 0)) break;
+    if (!(size >= 0)) { out.partial = true; break; }
     out.set(commit, buf.subarray(nl + 1, nl + 1 + size).toString('utf8').replace(/\n$/, ''));
     at = nl + 1 + size + 1;
   }
@@ -81,7 +106,7 @@ function listNotes(cwd, ref) {
 
 // Appends one JSON line to HEAD's note under `ref`. A repo with no commit yet has nothing to hold it. → true when written.
 function appendLine(cwd, ref, entry) {
-  if (git(cwd, ['rev-parse', '-q', '--verify', 'HEAD']).status !== 0) return false;
+  if (!headSha(cwd)) return false;
   const add = (ident = []) => git(cwd, [...ident, 'notes', `--ref=${ref}`, 'append', '-F', '-', 'HEAD'], { input: JSON.stringify(entry), encoding: 'utf8' });
   const r = add();
   if (r.status === 0) return true;
@@ -119,18 +144,30 @@ export function dropLogLines(cwd, drop) {
   return removed;
 }
 
+// The last 500 commits of HEAD → [{ commit, at, body }], or null when git cannot say: read once per HEAD in a run (the records'
+// trailers, repairNotes and noteLateCommits each want it).
+const logs = new Map();
+export function headLog(cwd) {
+  const head = headSha(cwd);
+  if (!head) return null;
+  const key = `${path.resolve(cwd)}\0${head}`;
+  if (!logs.has(key)) {
+    const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
+    logs.set(key, log.status !== 0 ? null : log.stdout.split('\x1e').map((e) => { const [commit, at, body = ''] = e.trim().split('\x00'); return { commit, at, body }; }).filter((e) => e.commit));
+  }
+  return logs.get(key);
+}
+
 // A note left on a commit the branch no longer has (a rebase or amend rewrote it) is copied to the commit of the branch
 // that carries the same "Waymark-Task: <id>" and has no note yet; the old note stays, so the chained stub still matches.
 // One git log (the last 500 commits of HEAD) and one notes list. → the task IDs whose note was copied.
 export function repairNotes(cwd, records) {
   const stubs = (records || []).filter((r) => r.id && r.note?.commit);
   if (!stubs.length) return [];
-  const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
-  if (log.status !== 0) return [];
+  const log = headLog(cwd);
+  if (!log) return [];
   const inHead = new Set(), byTask = new Map();
-  for (const entry of log.stdout.split('\x1e')) {
-    const [commit, body = ''] = entry.trim().split('\x00');
-    if (!commit) continue;
+  for (const { commit, body } of log) {
     inHead.add(commit);
     for (const m of body.matchAll(/^Waymark-Task:\s*(.+?)\s*$/gm)) if (!byTask.has(m[1])) byTask.set(m[1], commit); // newest first
   }
@@ -153,12 +190,11 @@ export function repairNotes(cwd, records) {
 export function noteLateCommits(cwd, records) {
   const loose = (records || []).filter((r) => r.id && !r.kind && !r.note && !(r.commits || []).length);
   if (!loose.length) return [];
-  const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
-  if (log.status !== 0) return [];
+  const log = headLog(cwd);
+  if (!log) return [];
   const byTask = new Map();
-  for (const entry of log.stdout.split('\x1e')) {
-    const [commit, body = ''] = entry.trim().split('\x00');
-    if (commit) for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) if (!byTask.has(m[1])) byTask.set(m[1], commit); // newest first
+  for (const { commit, body } of log) {
+    for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) if (!byTask.has(m[1])) byTask.set(m[1], commit); // newest first
   }
   const notes = readNotes(cwd), added = [];
   for (const r of loose) {
@@ -172,7 +208,22 @@ export function noteLateCommits(cwd, records) {
 
 // The remote the notes go to when none is named: the one the current branch tracks, else origin, else the only remote the repository has, else origin
 // (a clone made with `git clone -o upstream`, or a fork whose own remote is not called origin, has no `origin`).
+// keyed by .git/config's text and HEAD's: a remote added or a branch switched is asked again. A config that includes another file, or a
+// worktree's own config, is not memoized: git is asked each time, as before.
+const remotes = new Map();
 export function defaultRemote(cwd) {
+  const d = gitDirs(cwd);
+  let key = null;
+  try {
+    const config = fs.readFileSync(path.join(d.common, 'config'), 'utf8');
+    if (!/^\s*\[include/im.test(config) && !fs.existsSync(path.join(d.gitdir, 'config.worktree'))) key = `${path.resolve(cwd)}\0${config}\0${fs.readFileSync(path.join(d.gitdir, 'HEAD'), 'utf8')}`;
+  } catch {}
+  if (key && remotes.has(key)) return remotes.get(key);
+  const name = askRemote(cwd);
+  if (key) remotes.set(key, name);
+  return name;
+}
+function askRemote(cwd) {
   const g = (args) => git(cwd, args, { encoding: 'utf8' }).stdout?.trim() || '';
   const branch = g(['symbolic-ref', '--short', '-q', 'HEAD']), tracked = branch ? g(['config', '--get', `branch.${branch}.remote`]) : '';
   if (tracked && tracked !== '.') return tracked;
@@ -207,7 +258,7 @@ const fetchSpec = (remote) => `+${NOTES_REF}*:${trackRef(remote)}*`;
 // The command that takes that refspec out of .git/config again (git 2.30+), for the user to run after their yes: the remote's notes stop coming back.
 export const unsetFetchSpecCmd = (remote = 'origin') => `git config --fixed-value --unset remote.${remote}.fetch "${fetchSpec(remote)}"`;
 const exactSpec = (remote) => `+${NOTES_REF}:${trackRef(remote)}`; // 2.0.3's: it breaks fetch while the remote has no notes
-const refSha = (cwd, ref) => { const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
+const refSha = (cwd, ref) => { const tip = refTip(gitDirs(cwd), ref); if (tip !== undefined) return tip; const r = git(cwd, ['rev-parse', '-q', '--verify', ref], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
 export const hasNotes = (cwd) => REFS.some((ref) => !!refSha(cwd, ref));
 export const hasRemote = (cwd, remote = defaultRemote(cwd)) => git(cwd, ['remote', 'get-url', remote], { encoding: 'utf8' }).status === 0;
 export const hasFetchSpec = (cwd, remote = defaultRemote(cwd)) => git(cwd, ['config', '--get-all', `remote.${remote}.fetch`], { encoding: 'utf8' }).stdout?.split('\n').some((l) => l.trim() === fetchSpec(remote)) || false;

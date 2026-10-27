@@ -1,6 +1,5 @@
 // Every task record, from the log and from what only git holds (notes, waymark-log lines, trailer commits).
-import { spawnSync } from 'node:child_process';
-import { readNotes, readAnchors, readLogLines, noteTips, NOTES_REF } from '../notes.mjs';
+import { readNotes, readAnchors, readLogLines, noteTips, headSha, headLog, NOTES_REF } from '../notes.mjs';
 import { ID } from './ids.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { projectHome } from './project.mjs';
@@ -36,15 +35,12 @@ const forgotten = (root, tips) => {
 // read the records several times a turn). → records
 const trailerCache = new Map();
 function trailerRecords(root, known) {
-  const head = spawnSync('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 5000 });
-  if (head.status !== 0) return [];
-  const key = `${root}|${head.stdout.trim()}`;
+  const head = headSha(root); // from .git's files: no process
+  if (!head) return [];
+  const key = `${root}|${head}`;
   if (!trailerCache.has(key)) {
-    const log = spawnSync('git', ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 8000, maxBuffer: 16 * 1024 * 1024 });
     const byTask = new Map();
-    for (const entry of log.status === 0 ? log.stdout.split('\x1e') : []) {
-      const [commit, at, body = ''] = entry.trim().split('\x00');
-      if (!commit) continue;
+    for (const { commit, at, body } of headLog(root) || []) { // one git log per HEAD, shared with repairNotes and noteLateCommits
       for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) {
         const id = m[1];
         if (!ID.test(id)) continue;

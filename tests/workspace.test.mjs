@@ -134,6 +134,20 @@ test('7: logic — an L3 close with steps leaves a handoff the next session\'s c
   assert.ok(fs.existsSync(relayFile(api)), 'it stays for the next session, whichever agent opens it');
 });
 
+test('7: the card\'s handoff is bounded and keeps the next step; the last close does not repeat an Aprendido the handoff carries', () => {
+  const { api } = workspace(), h = P.projectHome(api);
+  const long = `${'el detalle de lo que pasó con la medida y sus causas, '.repeat(6)}Siguiente: firmar el tag ▶2`;
+  P.appendRecord(api, rec('2026-10-25 · T5', 'parcial', long));
+  writeRelay(h, rec('2026-10-25 · T5', 'parcial (falta firmar el tag y empujarlo al remoto, y el PR del usuario a main con su revisión)', long));
+  const line = card(api).split('\n').find((l) => l.startsWith('Handoff'));
+  assert.ok(line.length <= 340, `bounded: ${line.length}`);
+  assert.match(line, /Siguiente: firmar el tag ▶2 \(whole: \.waymark\/next-prompt\.md\)$/, 'the tail, with the next step, stays');
+  const last = card(api).split('\n').find((l) => l.startsWith('Last closed'));
+  assert.doesNotMatch(last, /el detalle/, 'the Aprendido is in the handoff, not twice');
+  writeRelay(h, rec('2026-10-25 · T5', 'parcial', 'corto ▶2'));
+  assert.doesNotMatch(card(api), /whole: \.waymark\/next-prompt\.md/, 'counter-example: a short handoff is shown whole');
+});
+
 test('7: CSS/HTML — a parcial style-only task leaves what is missing', () => {
   const { web } = workspace(), h = P.projectHome(web);
   assert.equal(writeRelay(h, rec('2026-10-25 · T2', 'parcial (falta el estado hover en el .html)', 'el botón móvil ya mide 390 ← falta el hover', { files: ['button.component.css', 'button.component.html'] })), 'written');

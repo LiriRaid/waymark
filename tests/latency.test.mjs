@@ -63,7 +63,44 @@ test('latency: counter-example — a note written by anyone is read on the next 
   gitT(d, 'notes', `--ref=${N.NOTES_REF}`, 'add', '-f', '-m', '{"cierre":"editada"}', 'HEAD'); // another process edits a note
   assert.equal(N.readNotes(d).get(gitT(d, 'rev-parse', 'HEAD').stdout.trim()), '{"cierre":"editada"}', 'an edited note is read as it is now');
   spawned.length = 0; N.readNotes(d);
-  assert.deepEqual(spawned.map((a) => a.split(' ')[0]), ['for-each-ref'], 'with nothing written, only the tip is asked');
+  assert.deepEqual(spawned, [], 'with nothing written, the tip is read from .git and nothing is asked');
+});
+
+// ---- the tips and HEAD from .git's own files, and the notes of a tip kept on disk for the next process ----
+const G = await import(`file://${SCRIPTS}/lib/git.mjs`);
+const asGit = (d, ref) => gitT(d, 'rev-parse', '-q', '--verify', ref).stdout.trim() || null;
+test('latency: logic — the tips and HEAD read from the files are git\'s own, loose, packed and in a worktree', () => {
+  const d = repoWithNotes('files');
+  const tips = () => [...N.noteTips(d)].sort(), viaGit = () => gitT(d, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/notes/').stdout.trim().split('\n').map((l) => l.split(' ')).sort();
+  assert.deepEqual(tips(), viaGit(), 'loose refs');
+  assert.equal(N.headSha(d), asGit(d, 'HEAD'));
+  gitT(d, 'pack-refs', '--all');
+  assert.deepEqual(tips(), viaGit(), 'packed refs');
+  assert.equal(N.headSha(d), asGit(d, 'HEAD'), 'HEAD through a packed branch');
+  const wt = path.join(path.dirname(d), `${path.basename(d)}-wt`); temps.push(wt);
+  gitT(d, 'worktree', 'add', '-q', '--detach', wt, 'HEAD');
+  assert.equal(N.headSha(wt), asGit(d, 'HEAD'), 'a worktree: its own HEAD, the common refs');
+  assert.deepEqual([...N.noteTips(wt)].sort(), viaGit());
+  const empty = path.join(path.dirname(d), `${path.basename(d)}-empty`); temps.push(empty); fs.mkdirSync(empty); gitT(empty, 'init', '-q');
+  assert.equal(N.headSha(empty), null, 'counter-example: a repo with no commit has no HEAD');
+});
+test('latency: logic — a new process reads the notes of an unchanged tip from disk, with no git call; a moved tip is read again', () => {
+  const d = repoWithNotes('disk');
+  const run = () => orig(process.execPath, ['--input-type=module', '-e', `import cp from 'node:child_process'; import { syncBuiltinESMExports } from 'node:module'; const o = cp.spawnSync; let n = 0; cp.spawnSync = function (c, a, ...r) { if (c === 'git') n++; return o.call(this, c, a, ...r); }; syncBuiltinESMExports(); const N = await import(${JSON.stringify(`file://${SCRIPTS}/notes.mjs`)}); const size = N.readNotes(${JSON.stringify(d)}).size; console.log(JSON.stringify({ n, size }));`], { encoding: 'utf8', env: { ...process.env } });
+  const first = JSON.parse(run().stdout), second = JSON.parse(run().stdout);
+  assert.deepEqual([first.size, first.n > 0], [1, true], 'the first process lists the notes');
+  assert.deepEqual(second, { n: 0, size: 1 }, 'the next one reads them from disk');
+  gitT(d, 'notes', `--ref=${N.NOTES_REF}`, 'add', '-f', '-m', '{"cierre":"otra"}', 'HEAD');
+  const moved = JSON.parse(run().stdout);
+  assert.ok(moved.n > 0, 'counter-example: a moved tip is listed again, never the stale file');
+});
+test('latency: counter-example — where the files cannot say (GIT_DIR, no repo, a reftable), git is asked as before', () => {
+  const d = repoWithNotes('fallback');
+  assert.equal(G.gitDirs(path.join(os.tmpdir(), 'no-such-repo-anywhere')), null);
+  process.env.GIT_DIR = path.join(d, '.git');
+  try { assert.equal(G.gitDirs(d), null); assert.equal(N.headSha(d), asGit(d, 'HEAD'), 'still right, through git'); } finally { delete process.env.GIT_DIR; }
+  fs.mkdirSync(path.join(d, '.git', 'reftable'));
+  assert.equal(G.gitDirs(d), null, 'a reftable repo is left to git');
 });
 
 // ---- each hook as the agent starts it (node hook-run.cjs <hook>): the git processes it spawns, counted by a preload ----

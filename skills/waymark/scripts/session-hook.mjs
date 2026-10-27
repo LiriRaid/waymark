@@ -114,8 +114,10 @@ export function digest(cwd, agentName = 'claude') {
   if (toConfirm) out.push('Architecture is detected, not confirmed (memory.md → Identity): on the first task ask the user once to confirm it, then mark it "confirmed <date>". A move between layers is always its own window (W convention --move <from> <to>).');
   // The context card: what the next agent needs first, ~400 tokens; the rest is pulled on demand with short commands.
   const all = readTaskRecords(home), last = all.filter((r) => r.id).pop(); // read once: the last close and the incidents
+  const relay = home.legacy ? '' : readRelay(home); // what the last task left for whoever starts next (.waymark/next-prompt.md), any agent
   if (last) {
-    const learned = aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
+    // the Handoff of the same task carries its Aprendido whole: the line does not repeat it
+    const learned = relay.startsWith(`Relevo de ${last.id} `) ? '' : aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
     out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 90)}` : ''} (whole record: W tasks "${last.id}")`);
   }
@@ -123,8 +125,12 @@ export function digest(cwd, agentName = 'claude') {
   const open = openIds(wipAll);
   // listed, not asked: `W check` asks which already work, so the first reply of a session is the user's task
   if (open.length) out.push(`Open tasks (▶): ${openList(open)} (W check asks the user which already work).`);
-  const relay = home.legacy ? '' : readRelay(home); // what the last task left for whoever starts next (.waymark/next-prompt.md), any agent
-  if (relay) out.push(`Handoff (the steps the last task left; the user's request comes first): ${relay.replace(/\n+/g, ' · ')}`);
+  // the card's line is bounded: the head clipped, the Aprendido's tail kept (its next step and the plan's ✔1 · ▶2 are there), the whole in the file
+  if (relay) {
+    const [head, ...rest] = relay.split(/\n+/), tail = [...rest.join(' · ')]; // by code point: a cut never splits an emoji
+    const short = `${clip(head, 110)}${tail.length ? ` · ${tail.length > 150 ? `…${tail.slice(-149).join('').trimStart()}` : tail.join('')}` : ''}`;
+    out.push(`Handoff (the user's request comes first): ${short}${short.length < relay.length ? ' (whole: .waymark/next-prompt.md)' : ''}`);
+  }
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
   const notes = wipAll.filter((l) => !/^-\s*[▶✔]?\s*\[[^\]]*· T\d/.test(l)).slice(0, 4).map((l) => clip(l, 160));
   if (notes.length) out.push('Notes:\n' + notes.join('\n'));

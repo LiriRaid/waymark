@@ -167,15 +167,32 @@ const GH_API_PR = new RegExp(`${GH_START}api\\b(?=[^\\n;&|]*(?:-X|--method)[ =]?
 // What the request says about a pull request, with what it denies left out ("no abras el PR").
 const asking = (text, words) => new RegExp(String.raw`\b(?:${words})\b`, 'i').test(String(text).replace(/\b(?:no|sin|nunca|don't|do not|never)\b[^.\n]{0,30}\b(?:pull requests?|PRs?|merge)\b/gi, ' '));
 // The project's rule of who opens pull requests (Conventions: "PRs: the user" or "Pull requests: the agent, when asked"), never an account. → the line, or null.
+// "PRs: the user", "Push: el usuario": the rule gives the step to the user (the project's own words, in English or Spanish).
+const USER_RULE = /:\s*(?:(?:the|el)\s+)?(?:user|usuario)\b/i;
 const prRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*((?:PRs?|Pull requests?):[ \t]*[^\n]+)$/im)?.[1]?.trim() || null;
 export function checkGh(command, asked = '', memory = '') {
   const sk = shellSkeleton(command, { quotes: false });
   if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
   const api = sk.match(GH_API_PR)?.[1];
   const pr = sk.match(GH_PR)?.[1] || (api !== undefined ? (/\/merge\b/.test(api) ? 'merge' : 'create') : undefined), rule = prRule(memory);
-  if (pr && rule && /:\s*(?:the\s+)?(?:user|usuario)\b/i.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
+  if (pr && rule && USER_RULE.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
   // opening one needs the words "pull request" or "PR"; merging one also takes "merge" ("resuelve el conflicto de merge" opens nothing)
   if (pr && !asking(asked, pr === 'merge' ? 'pull requests?|PRs?|merge|mergea\\w*|fusiona\\w*' : 'pull requests?|PRs?')) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
+  return null;
+}
+
+// What leaves the machine is the user's to publish (2.0.20 point 21): a `git push` (with or without a tag or a force) and a `gh release` are denied when the project's
+// Conventions say "Push: the user" (the line the user wrote, read like the PRs rule above), and on a turn routed Q that continues no task: a question never publishes.
+// Read on the skeleton, so a message or a heredoc that mentions the words is no push.
+const GIT_PUSH = /(?:^|[;&|(]\s*|\n\s*)(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|&|command|sudo|env|exec)\s+)*git(?:\.exe)?(?:\s+(?:-c\s+\S+|-C\s+\S+|--[\w-]+(?:=\S+)?))*\s+push(?![\w-])/;
+const GH_RELEASE = new RegExp(`${GH_START}release\\s+(?:create|upload|delete|edit)\\b`);
+const pushRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*(Push:[ \t]*[^\n]+)$/im)?.[1]?.trim() || null;
+export function checkPush(command, memory = '', question = false) {
+  const sk = shellSkeleton(command, { quotes: false });
+  if (!GIT_PUSH.test(sk) && !GH_RELEASE.test(sk)) return null;
+  const rule = pushRule(memory);
+  if (rule && USER_RULE.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": publishing is the user's, even when the request names it. Leave the work committed here, say what is ready to push and tell them; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
+  if (question) return 'Waymark: this turn is routed as a question (Q) and a question never publishes: nothing leaves the machine from it. If the user asked for the push, say so in a routed task (invoke the owner dept-* skill with args "L<n>"), or leave it to them.';
   return null;
 }
 
@@ -341,6 +358,13 @@ export function gate(hook, agent) {
     const link = checkLink(c.command);
     if (link) return link;
     if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
+    if (/\bpush\b|\brelease\b/.test(c.command)) { // nothing leaves the machine from a question, or against the project's "Push: the user"
+      let mem = '';
+      try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
+      const lines = turns(), turn = currentTurn(lines);
+      const push = checkPush(c.command, mem, routedLevel(turn.texts, turn.tools) === 'Q' && !openTaskRoute(lines));
+      if (push) return push;
+    }
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
     if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open

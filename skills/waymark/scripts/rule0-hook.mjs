@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions, inheritedRoute } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, pinnedCwd, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
 import { commandFiles } from './tool-hook.mjs';
@@ -109,10 +109,12 @@ const OFFER = /\b(?:si quieres|si prefieres|quieres que|puedo|te parece|want me|
 const YES_IDS = /^\s*(?:s[ií]|yes|confirmo)(?=[\s,:])[\s,:]*((?:T\d+[a-z]?(?:\s*(?:,|y|and|&)\s*)?)+)\s*[.!]*\s*$/i;
 const YES_MANY = /^\s*(?:s[ií]|yes)[\s,]*(?:a\s+)?(?:las|los|both|all)?\s*(dos|tres|cuatro|ambas|ambos|todas|todos|\d+)\s*[.!]*\s*$/i;
 const NO = /^\s*no\s*[.!]*\s*$/i;
+// the user's free words for "close the rest of them": "cierra las otras tareas también", "close the other tasks too", "marca el resto como hecho"
+export const CLOSE_REST = /^\s*(?:s[ií][,.]?\s+)?(?:cierra|cierren|cerrar|marca|close|mark)\b[^.\n]{0,40}?\b(?:otras|otros|dem[aá]s|resto|todas|todos|others?|rest|all)\b[^.\n]{0,30}?\b(?:tareas?|tasks?)\b[^.\n]{0,30}$/iu;
 const COUNT = { dos: 2, ambas: 2, ambos: 2, tres: 3, cuatro: 4 };
 export function confirmation(hook, agent, cwd) {
   const prompt = String(hook.prompt || '');
-  const named = prompt.match(YES_IDS)?.[1], many = prompt.match(YES_MANY)?.[1], no = NO.test(prompt);
+  const named = prompt.match(YES_IDS)?.[1], many = prompt.match(YES_MANY)?.[1] || (CLOSE_REST.test(prompt) ? 'todas' : undefined), no = NO.test(prompt);
   if (!YES.test(prompt) && !named && !many && !no) return null;
   const session = hook.session_id || 'unknown';
   if (openTurn(cwd, session)) return null;
@@ -308,7 +310,7 @@ export const NOTIFICATION_NOTE = 'Waymark: this message is a background task\'s 
 export function reminder(hook, agent) {
   if (silent) return null;
   if (NOTIFICATION.test(String(hook.prompt || ''))) return agent.out.context('UserPromptSubmit', NOTIFICATION_NOTE + agent.note(SKILLS_DIR)); // no snapshot, no open turn, no new task start
-  const cwd = hook.cwd || process.cwd();
+  const cwd = pinnedCwd(hook.session_id, hook.cwd || process.cwd()); // the session's project is its first prompt's folder, not where a later `cd` left the shell
   let yes = null;
   try { yes = confirmation(hook, agent, cwd); } catch (e) { logHookError('rule0-hook confirmation', e); }
   const plural = yes?.ids?.length > 1;

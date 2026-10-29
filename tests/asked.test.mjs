@@ -114,7 +114,7 @@ const cierre = (id, mid) => `## Cierre · ${id}\n${mid}\nEvidencia: observada ti
 const runStop = (cwd, lines, reply, extra = {}) => {
   const transcript = path.join(home, `asked-${Math.random()}.jsonl`);
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: 'sa1', last_assistant_message: reply, ...extra }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: `sa1-${path.basename(path.dirname(cwd))}`, last_assistant_message: reply, ...extra }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout || '{}');
 };

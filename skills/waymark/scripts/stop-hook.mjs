@@ -34,7 +34,8 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { RUNS_EGO, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
-import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { base as idBase } from './provenance/ids.mjs';
+import { pinnedCwd, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -146,7 +147,8 @@ export const keepCmd = (c) => { const s = String(c).replace(/\s+/g, ' ').trim();
 // recorded task's (its work committed now); it is read anywhere in the message, not only in the last paragraph.
 // → the commit hashes (the trailer testigo).
 export function turnCommits(tools, cwd, claimed, ids, since = 0) {
-  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id);
+  // the task's own family counts too: a follow-up's Cierre over work committed under its task's ID (the trailer names the task, the Cierre its follow-up)
+  const ok = (id) => id === claimed || id === ids?.next || !!ids?.known?.has(id) || (!!claimed && !!idBase(id) && idBase(id) === idBase(claimed));
   return [...new Set(commitsSince(new Set([path.resolve(cwd), ...commitRepos(tools, cwd)]), since)
     .filter((c) => trailerIds(c.msg).some(ok)).map((c) => c.h))];
 }
@@ -844,12 +846,10 @@ function cierreWitness(S) {
     if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
     if (ctx.ids) {
       const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-      const follow = ctx.offered === undefined ? ctx.ids.followUp : ctx.offered;
-      const offer = `${ctx.ids.next} for a new task${follow ? `, ${follow} for a follow-up of ${follow.replace(/[a-z]$/, '')}` : ''}`;
-      if (!id) cierre.push(`the task ID in the heading: "## Cierre · <id>" (${offer})`);
-      else if (!validId(id, ctx.ids)) cierre.push(`the heading's task ID ${id} is already recorded or was never offered: use ${offer}`);
-      // a follow-up ID the ask did not earn, or whose task's files this turn never touches, is a new task: recorded under the new ID, not blocked
-      else { const why = followUpFails(id, changed, ctx); if (why) renamed = { from: id, to: ctx.ids.next, why }; }
+      // The ID the prompt handed is the one the record keeps (2.0.20): a heading with no ID, a recorded one or one never offered blocks nothing and is rewritten
+      // (the record says idBy: hook and keeps what was claimed), so a reply after a block never has to repeat a Cierre for an ID. A follow-up ID the ask did not
+      // earn, or whose task's files this turn never touches, is a new task: recorded under the new ID, not blocked.
+      if (id && validId(id, ctx.ids)) { const why = followUpFails(id, changed, ctx); if (why) renamed = { from: id, to: ctx.ids.next, why }; }
     }
     // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
     if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
@@ -1199,7 +1199,9 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
 // markdown), so a question that ran a review is not taken for still pending; `skills` are the ones it ran besides its
 // department.
 export function questionRecord(turn, meta = {}) {
-  if (!turn.found || routedLevel(turn.texts, turn.tools) !== 'Q') return null;
+  // `meta.unrouted`: the agent wrote no routing line at all and the turn changed nothing and acted on nothing: it is a question all the same (2 of 7 left no record)
+  const routed = routedLevel(turn.texts, turn.tools);
+  if (!turn.found || (routed !== 'Q' && !(meta.unrouted && !routed))) return null;
   // the agent's last message as the hook was given it: the transcript can lag the reply by a moment, and the answer is what the record keeps
   const texts = meta.last && turn.texts[turn.texts.length - 1] !== meta.last ? [...turn.texts, meta.last] : turn.texts;
   const tail = String(texts[texts.length - 1] || '').replace(/\*\*|__/g, '').trimEnd().split('\n').slice(-3).join('\n');
@@ -1217,7 +1219,7 @@ export function questionRecord(turn, meta = {}) {
 
 // The record of a turn the hook crashed on: no task ID (it is no task, like a Q), the cause, nothing judged.
 // It keeps the files the turn changed, so they are not lost when the next prompt renews its snapshot (an unevaluated record is no close).
-export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cause: `unevaluated:${String(err?.message || err).replace(/\s+/g, ' ').slice(0, 160)}`, agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, ...(meta.files?.length ? { files: meta.files.slice(0, 200) } : {}) });
+export const unevaluatedRecord = (err, meta = {}) => ({ kind: 'unevaluated', cause: `unevaluated:${String(err?.message || err).replace(/\s+/g, ' ').slice(0, 160)}`, agent: meta.agent || null, at: new Date().toISOString(), session: meta.session, cwd: meta.cwd, ...(meta.prompt ? { prompt: maskSecrets(String(meta.prompt).slice(0, 600)) } : {}), ...(meta.files?.length ? { files: meta.files.slice(0, 200) } : {}) });
 
 // The files a turn wrote inside an agent's own memory folder (~/.claude/projects/<project>/memory/): a rule of the user kept there is
 // invisible to every other agent, so the notice says where it belongs (docs/adr/0043).
@@ -1279,7 +1281,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       // a session with no status line (the desktop app): what it spent, so the quota's rises are split with it too
       try { if (agent.name === 'claude') recordSpend(h.session_id, h.transcript_path); } catch (e) { logHookError('stop-hook spend', e); }
-      const cwd = h.cwd || process.cwd(), home = projectHome(cwd);
+      const cwd = pinnedCwd(h.session_id, h.cwd || process.cwd()), home = projectHome(cwd); // the session's project: its first prompt's folder
       try { loadKnownValues(home.root, { session: h.session_id }); } catch {} // what the project's .env files and the sensitive files the user allowed hold is masked in everything this hook writes (docs/adr/0045)
       // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
       const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));
@@ -1293,7 +1295,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
       if (pendingBackground(lines, since).length && !CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''))) {
         // deferred: a record that says so, with the turn's files, and a notice (docs/adr/0044); it is no close, so the next turn still judges this one
-        try { if (fs.existsSync(projectHome(cwd).memory)) { let files = []; try { files = turnChanged(h.session_id, cwd); } catch {} if (!files.length) files = [...new Set(currentTurn(lines, since).tools.filter((t) => EDITS.test(t.name)).map(fileOf).filter(Boolean))]; appendRecord(cwd, unevaluatedRecord('deferred: a background task is still running', { agent: agent.name, session: h.session_id, cwd, files })); } } catch (e) { logHookError('stop-hook deferred', e); }
+        try { if (fs.existsSync(projectHome(cwd).memory)) { let files = []; try { files = turnChanged(h.session_id, cwd); } catch {} if (!files.length) files = [...new Set(currentTurn(lines, since).tools.filter((t) => EDITS.test(t.name)).map(fileOf).filter(Boolean))]; appendRecord(cwd, unevaluatedRecord('deferred: a background task is still running', { agent: agent.name, session: h.session_id, cwd, files, prompt: currentTurn(lines, since).prompt })); } } catch (e) { logHookError('stop-hook deferred', e); }
         answer(agent, agent.out.notice('Waymark: este turno se evaluará cuando termine la tarea en segundo plano.'));
         return;
       }
@@ -1353,7 +1355,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         return;
       }
       if (!gaps) { // the turn ended: no longer open; a question leaves its short record where the project has memory
-        const q = fs.existsSync(home.memory) ? questionRecord(turn, { ...meta, last: h.last_assistant_message }) : null;
+        const q = fs.existsSync(home.memory) ? questionRecord(turn, { ...meta, last: h.last_assistant_message, unrouted: !ctx.inherited?.level && !!String(turn.prompt || '').trim() && !COURTESY.test(String(turn.prompt || '')) && !turn.tools.some(acting) }) : null;
         // the next task counts from its own prompt: a question, an L0 or an unrouted turn ended with no task (a routed task
         // that stopped before its first change keeps its start)
         const lvl = routedLevel(turn.texts, turn.tools) || ctx.inherited?.level;
@@ -1449,7 +1451,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       logHookError('stop-hook', e);
       // a turn the hook could not judge leaves a record that says so, and the user sees it: never silence
       try {
-        const cwd = parsed?.cwd || process.cwd();
+        const cwd = pinnedCwd(parsed?.session_id, parsed?.cwd || process.cwd());
         let files = [];
         try { files = turnChanged(parsed.session_id, cwd); } catch {}
         if (parsed && fs.existsSync(projectHome(cwd).memory)) appendRecord(cwd, unevaluatedRecord(e, { agent: agent.name, session: parsed.session_id, cwd, files }));

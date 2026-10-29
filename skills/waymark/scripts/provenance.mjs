@@ -102,6 +102,7 @@ export {
   taskFiles,
   taskIds,
   taskInProgress,
+  pinnedCwd,
   taskLines,
   taskOffer,
   taskStart,

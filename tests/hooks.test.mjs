@@ -353,14 +353,12 @@ test('2b: a .ts with a sibling template counts as UI; a service does not', () =>
   assert.equal(ui('articles.service.ts'), false);
 });
 
-test('Cierre: task ID missing or reused, Resultado missing', () => {
+test('Cierre: a task ID missing or reused blocks nothing (the record keeps the ID the prompt handed, 2.0.20 point 20); Resultado missing still does', () => {
   const { cwd } = fresh();
   record(cwd, `${taskIds(cwd).next}`);
   const ids = taskIds(cwd);
-  const noId = checkCierre(l2(), cierre('').replace('## Cierre · ', '## Cierre'), undefined, undefined, ctxFor(cwd));
-  assert.match(noId, /task ID in the heading/);
-  assert.ok(noId.includes(ids.next) && noId.includes(ids.followUp), 'it offers both IDs');
-  assert.match(checkCierre(l2(), cierre(ids.last), undefined, undefined, ctxFor(cwd)), /already recorded/);
+  assert.equal(checkCierre(l2(), cierre('').replace('## Cierre · ', '## Cierre'), undefined, undefined, ctxFor(cwd)), null, 'no ID in the heading');
+  assert.equal(checkCierre(l2(), cierre(ids.last), undefined, undefined, ctxFor(cwd)), null, 'an ID already recorded');
   assert.match(checkCierre(l2(), cierre(ids.followUp, undefined, ''), undefined, undefined, ctxFor(cwd)), /Resultado:/);
 });
 

@@ -2,6 +2,7 @@
 // Offline and read-only. A "prompt" is a message the user typed: tool results, command echoes, system reminders,
 // interruptions and background-task notifications (<task-notification>) are not prompts.
 import fs from 'node:fs';
+import { shellRuns } from './runs.mjs';
 
 const TAIL = 2 * 1024 * 1024; // bytes read from the end of a transcript by the hooks
 
@@ -74,17 +75,40 @@ const turnStart = (lines, since = 0) => {
 // either releases it (a notification may carry no tool-use-id). A launch older than
 // BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
 export const BACKGROUND_WAIT_MS = 30 * 60000;
+// A gate, a build or a test run the shell left in the background is waited for too (2.0.20 point 20): it ends and notifies, and the turn that ends before it was
+// judged without its result. A watcher or a server never ends, so it is not waited for. The shell's launch names its id in its result ("…with ID: bg1").
+export const SHELL_WAIT_MS = 10 * 60000;
+const NEVER_ENDS = /(?:^|\s)(?:--watch|--watchAll|-w|watch|serve|dev|start)(?=\s|$)/;
+const isShellCall = (c) => c.type === 'tool_use' && /^(Bash|PowerShell|shell)$/.test(c.name) && c.input?.run_in_background;
+const finiteCheck = (command) => !NEVER_ENDS.test(String(command || '')) && shellRuns(String(command || '')).some((p) => p.build || p.test || p.gate);
 export function pendingBackground(lines, since = 0, now = Date.now()) {
   const { from } = turnStart(lines, since);
-  const launched = [];
+  const launched = [], shellLaunch = new Map();
   for (const d of lines.slice(from)) {
-    if (d.type !== 'user' || d.isSidechain || !(d.toolUseResult?.background || d.toolUseResult?.isAsync)) continue;
     const at = Date.parse(d.timestamp || '') || 0;
-    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (isShellCall(c) && finiteCheck(c.input.command)) shellLaunch.set(c.id, at);
+    if (d.type !== 'user' || d.isSidechain) continue;
+    const parts = Array.isArray(d.message?.content) ? d.message.content : [];
+    if (d.toolUseResult?.background || d.toolUseResult?.isAsync) for (const c of parts) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
+    for (const c of parts) if (c.type === 'tool_result' && shellLaunch.has(c.tool_use_id)) {
+      const text = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '');
+      launched.push({ id: c.tool_use_id, agent: text.match(/\bID:\s*([\w-]+)/)?.[1] || null, at: shellLaunch.get(c.tool_use_id), shell: true });
+    }
   }
   if (!launched.length) return [];
   const notified = lines.filter((d) => d.type === 'user' && /<task-notification>/.test(promptText(d))).map(promptText).join('\n');
-  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > BACKGROUND_WAIT_MS)).map((l) => l.id);
+  // a shell run the agent read to its end itself (its output call shows an exit code or a final status) needs no notification
+  const polled = (id) => {
+    const calls = new Set();
+    for (const d of lines.slice(from)) {
+      for (const c of Array.isArray(d.message?.content) ? d.message.content : []) {
+        if (d.type === 'assistant' && c.type === 'tool_use' && [c.input?.bash_id, c.input?.task_id, c.input?.shell_id].includes(id)) calls.add(c.id);
+        if (d.type === 'user' && c.type === 'tool_result' && calls.has(c.tool_use_id) && /<exit_code>|<status>(?:completed|failed|killed)|exit code:?\s*\d/i.test(typeof c.content === 'string' ? c.content : JSON.stringify(c.content || ''))) return true;
+      }
+    }
+    return false;
+  };
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.shell ? SHELL_WAIT_MS : BACKGROUND_WAIT_MS)) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own

@@ -12,7 +12,7 @@ const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'task
 const M = Object.fromEntries(await Promise.all(MODULES.map(async (n) => [n, await import(`file://${SCRIPTS}/provenance/${n}.mjs`)])));
 
 // The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one. 2.0.16 adds pinnedRules (point 9); 2.0.18 adds the record schema v2 names of provenance/derive.mjs (point 2).
-const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'openTurn', 'otherOpen', 'taskLines', 'taskOffer', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'pinnedRules', 'readRelay', 'writeRelay', 'RELAY_MARK', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine', 'RECORD_SCHEMAS', 'RECORD_V1', 'RECORD_V2', 'TASK_TYPES', 'askedGaps', 'askedItems', 'followUps', 'itemsOf', 'optionAttrs', 'optionsLint', 'pedidoAnswers', 'pedidoItems', 'replayV2', 'reworkOf', 'taskTypeOf', 'v2Fields', 'windowCheck'];
+const API = ['ID', 'INTERRUPTED_AFTER', 'LOCAL_DIRS', 'PROBE_OK', 'addRepoSnapshot', 'anchorsFor', 'appendRecord', 'aprendidoOf', 'askedChoice', 'changesProject', 'clearTaskStart', 'closeOpen', 'commitsFor', 'confirmTasks', 'decisionsIn', 'deepMask', 'ensureLocal', 'expireOpen', 'findSecrets', 'forget', 'gitError', 'gitNote', 'gitSnapshot', 'hookErrorsFile', 'legacyMemory', 'loadSnapshot', 'logFile', 'logHookError', 'logId', 'markOpen', 'markPaused', 'markTaskStart', 'maskSecrets', 'mutatesFiles', 'projectHome', 'projectSlug', 'readLog', 'readNotes', 'readRecords', 'readTaskRecords', 'rebuildFromGit', 'recordName', 'recordedDecisions', 'refreshTasks', 'saveSnapshot', 'shellRuns', 'shellSkeleton', 'snapshotDiff', 'taskFiles', 'taskIds', 'taskInProgress', 'openTurn', 'otherOpen', 'pinnedCwd', 'taskLines', 'taskOffer', 'taskStart', 'taskStartMark', 'taskSummary', 'tasksMarkdown', 'tidyWip', 'turnChanged', 'pinnedRules', 'readRelay', 'writeRelay', 'RELAY_MARK', 'turnInputs', 'validId', 'verifyChain', 'workspaceSiblings', 'writeTaskLine', 'RECORD_SCHEMAS', 'RECORD_V1', 'RECORD_V2', 'TASK_TYPES', 'askedGaps', 'askedItems', 'followUps', 'itemsOf', 'optionAttrs', 'optionsLint', 'pedidoAnswers', 'pedidoItems', 'replayV2', 'reworkOf', 'taskTypeOf', 'v2Fields', 'windowCheck'];
 
 test('provenance.mjs keeps exactly its public API', () => {
   assert.deepEqual(Object.keys(P).sort(), [...API].sort());
@@ -25,7 +25,7 @@ test('every public name is the very function of the module that owns it', () => 
     project: ['hookErrorsFile', 'logHookError', 'legacyMemory', 'projectHome', 'projectSlug', 'workspaceSiblings', 'logFile', 'PROBE_OK', 'LOCAL_DIRS', 'ensureLocal'],
     chain: ['gitNote', 'gitError', 'recordName', 'readLog', 'readRecords', 'appendRecord', 'logId', 'anchorsFor', 'forget', 'verifyChain', 'readNotes'],
     records: ['readTaskRecords'],
-    tasks: ['taskIds', 'validId', 'taskLines', 'taskFiles', 'taskStart', 'taskStartMark', 'markTaskStart', 'clearTaskStart', 'taskOffer', 'taskInProgress', 'openTurn', 'otherOpen'],
+    tasks: ['taskIds', 'validId', 'taskLines', 'taskFiles', 'taskStart', 'taskStartMark', 'markTaskStart', 'clearTaskStart', 'taskOffer', 'taskInProgress', 'openTurn', 'otherOpen', 'pinnedCwd'],
     taskmd: ['INTERRUPTED_AFTER', 'RELAY_MARK', 'readRelay', 'writeRelay', 'markOpen', 'closeOpen', 'expireOpen', 'taskSummary', 'aprendidoOf', 'writeTaskLine', 'confirmTasks', 'tidyWip', 'tasksMarkdown', 'refreshTasks', 'rebuildFromGit'],
     decisions: ['decisionsIn', 'recordedDecisions', 'askedChoice'],
     derive: ['RECORD_SCHEMAS', 'RECORD_V1', 'RECORD_V2', 'TASK_TYPES', 'askedGaps', 'askedItems', 'followUps', 'itemsOf', 'optionAttrs', 'optionsLint', 'pedidoAnswers', 'pedidoItems', 'replayV2', 'reworkOf', 'taskTypeOf', 'v2Fields', 'windowCheck'],
@@ -54,7 +54,7 @@ test('no module reads from the facade, and the facade holds no logic', () => {
   for (const n of MODULES) assert.ok(!/from '\.\.\/provenance\.mjs'/.test(fs.readFileSync(path.join(SCRIPTS, 'provenance', `${n}.mjs`), 'utf8')), n);
   const facade = fs.readFileSync(path.join(SCRIPTS, 'provenance.mjs'), 'utf8').split('\n').filter((l) => l.trim() && !l.trim().startsWith('//'));
   assert.ok(facade.every((l) => /^export (\{|\*)/.test(l) || /^\s+\w+,?$|^\} from /.test(l)), 'only re-exports');
-  assert.ok(facade.length <= 100, `${facade.length} lines`);
+  assert.ok(facade.length <= 110, `${facade.length} lines`);
 });
 
 test('each module stays readable: under 350 lines', () => {

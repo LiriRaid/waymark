@@ -22,8 +22,11 @@ export function openTurn(cwd, session, now = new Date()) {
 
 // Turns that other sessions have open in this project, started within `maxAge` (two hours: an older one was interrupted):
 // two sessions on one repo. → [{ session, ...entry }]
+// An agent whose turn the end-of-turn hook cannot close (OpenCode's plugin cannot stop the turn at idle) leaves its entry open for good: it counts for
+// OPEN_UNCLOSABLE_MS only, so it never raises the notice of "another session has an open turn" for two hours after it ended.
+const OPEN_UNCLOSABLE_MS = 10 * 60000;
 export function otherOpen(cwd, session, now = new Date(), maxAge = 2 * 3600000) {
-  return Object.entries(readOpen(projectHome(cwd))).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) < maxAge).map(([k, o]) => ({ session: k, ...o }));
+  return Object.entries(readOpen(projectHome(cwd))).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) < (o.agent === 'opencode' ? Math.min(maxAge, OPEN_UNCLOSABLE_MS) : maxAge)).map(([k, o]) => ({ session: k, ...o }));
 }
 
 // The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded, `committed` the IDs
@@ -125,6 +128,21 @@ export function clearTaskStart(session) {
   if (!all[id]) return;
   delete all[id];
   writeStarts(all);
+}
+
+// The folder a session's project is read from: the one of its first prompt, kept per session (~/.waymark/.session-cwd.json). A `cd` into a sibling repo moves the
+// shell's folder, and with it the project the hooks took: IDs, records and open.json of the wrong repo. A kept folder that is gone is replaced by the current one.
+const cwdFile = () => path.join(HOME(), '.session-cwd.json');
+export function pinnedCwd(session, cwd, now = Date.now()) {
+  if (!session || !cwd) return cwd;
+  let all = {};
+  try { all = JSON.parse(fs.readFileSync(cwdFile(), 'utf8')) || {}; } catch {}
+  const kept = all[session]?.cwd;
+  if (kept && fs.existsSync(kept)) return kept;
+  for (const [k, v] of Object.entries(all)) if (now - (v.at || 0) > 7 * 86400000) delete all[k];
+  all[session] = { cwd, at: now };
+  try { fs.mkdirSync(HOME(), { recursive: true }); fs.writeFileSync(cwdFile(), JSON.stringify(all)); } catch {}
+  return cwd;
 }
 
 // A task of this session is in progress from its first prompt until its close: the size brake only advises while it lasts

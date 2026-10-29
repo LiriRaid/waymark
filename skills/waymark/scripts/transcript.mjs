@@ -356,14 +356,17 @@ export const caminoSaid = (turn, before = Infinity) => (turn?.textAt || []).some
 // and skip the gate. Looks back within the task (the two prompts before this one); an
 // explicit "Waymark → L0" or a Q turn never passes its routing on. → { level, dept } or null.
 export function inheritedRoute(lines, prompts = 2) {
+  const now = currentTurn(lines);
+  if (!lines.some(isPrompt) || routes(now.texts).length || reroute(now.tools)) return null;
+  return openTaskRoute(lines, prompts);
+}
+// The route (level and department) of the task still open before this turn: the last numerically routed turn since the task's start that has not written its Cierre,
+// whatever this turn says. A reply that continues the task is that task's, so a Q line on a reply that changes files (2.0.20 point 13) is judged and gated at its level.
+export function openTaskRoute(lines, prompts = 2) {
   const starts = [];
   for (let i = lines.length - 1; i >= 0 && starts.length <= prompts; i--) if (isPrompt(lines[i])) starts.push(i);
-  if (!starts.length) return null;
-  const turnAt = (k) => currentTurn(lines.slice(0, k === 0 ? lines.length : starts[k - 1]));
-  const now = turnAt(0);
-  if (routes(now.texts).length || reroute(now.tools)) return null;
   for (let k = 1; k < starts.length; k++) {
-    const t = turnAt(k);
+    const t = currentTurn(lines.slice(0, starts[k - 1]));
     if (t.texts.some((x) => CIERRE.test(x.replace(/\*\*|__/g, '')))) return null; // the task closed
     if (!routes(t.texts).length && !reroute(t.tools)) continue; // another unrouted reply: keep looking back
     const level = routedLevel(t.texts, t.tools);

@@ -26,7 +26,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { topOf } from './lib/git.mjs';
-import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
+import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
@@ -44,7 +44,7 @@ import { pushNotes, noteLateCommits, shouldPushNotes, unpushedNotes, defaultRemo
 import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { softCapLine } from './rule0-hook.mjs';
-import { packedFiles, procDelivered, procLate } from './lib/packed.mjs';
+import { packedFiles, packedAny, procDelivered, procLate } from './lib/packed.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { detectGuarded, guardedLine } from './lib/guard.mjs';
@@ -451,7 +451,7 @@ function observeTurn(S) {
   const rerouted = turn.tools.filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input.skill || '')) && /^\s*L[0-3]\b/i.test(String(t.input.args || ''))).pop();
   const invoked = [...new Set([...(ctx.sessionDepts || []), ...deptCalls(allTools)])];
   const lineDept = routedDept(turn.texts, turn.tools);
-  const dept = { declared: (rerouted && String(rerouted.input.skill)) || deptCalls(turn.tools)[0] || (invoked.includes(lineDept) ? lineDept : null) || deptCalls(allTools).pop() || ctx.inherited?.dept || null, invoked };
+  const dept = { declared: (rerouted && String(rerouted.input.skill)) || deptCalls(turn.tools)[0] || (invoked.includes(lineDept) ? lineDept : null) || deptCalls(allTools).pop() || ctx.inherited?.dept || (S.routed === 'Q' ? ctx.taskRoute?.dept : null) || null, invoked };
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
@@ -907,7 +907,7 @@ const WITNESS = {
   },
   memory: (S) => {
     const { observed } = S;
-    return observed.memory.searched || observed.memory.late ? [] : [`the project memory was not searched before the first change: run ${WAYMARK_CMD} pack <the changed files> now (what earlier tasks did there), or mem_search if you use engram`];
+    return observed.memory.searched || observed.memory.late ? [] : [`the project memory was neither handed nor searched before the first change (the hook hands each file's pack at the first edit, and this change named no file it could find): read it now with ${WAYMARK_CMD} memory <section> or mem_search if you use engram`];
   },
   review: (S) => {
     const { ctx, observed, reviewLeft, skip } = S;
@@ -1070,7 +1070,7 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   if (turn.tools.some((t) => shell(t) && changesProject(t.input.command))) for (const f of ctx.gitChanged || []) if (!exempt(f)) agentFiles.add(norm(f));
   const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;
   const explicitL0 = /^[ \t]*Waymark →\s*L0\b(?!\s*(?:\||or)\s*Q)/m.test([...turn.texts, full].join('\n'));
-  const declared = routed === 'Q' ? 2 : routed || (CIERRE.test(reply) ? 1 : 0);
+  const declared = routed === 'Q' ? Math.max(2, Number(ctx.taskRoute?.level) || 0) : routed || (CIERRE.test(reply) ? 1 : 0);
   const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
   if (!level) return null;
   // what the user chose in the window is an item the Cierre answers (recorded, never blocked), and the repos the Pedido names against the ones changed (docs/adr/0046)
@@ -1163,6 +1163,11 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
   }
   return { result: said };
 }
+const causesOf = (steps) => {
+  const out = {};
+  for (const s of steps || []) if (s.applies && s.pass === false && s.why?.length && !out[s.label]) out[s.label] = maskSecrets(String(s.why[0]).replace(/\s+/g, ' ').slice(0, 160));
+  return Object.keys(out).length ? out : null;
+};
 export function provenanceRecord(turn, gaps, ctx, meta = {}) {
   const answers = Number(gaps.level) >= 2 && ctx.pedido?.length >= 2 ? pedidoAnswers(gaps.reply).filter((a) => a.n >= 1 && a.n <= ctx.pedido.length).slice(0, 12) : [];
   const claimed =gaps.reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
@@ -1189,6 +1194,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     ...(gaps.win?.items.length ? { window: { chosen: gaps.win.items, ...(gaps.win.failed.length ? { failed: gaps.win.failed } : {}), ...(gaps.win.twoActions.length ? { twoActions: gaps.win.twoActions } : {}) } } : {}), // what the user chose in the window, written by the hook, and what the Cierre marked ✘ (docs/adr/0046)
     ...(gaps.askedRepos?.length ? { askedRepos: gaps.askedRepos.slice(0, 6) } : {}),
     unresolved: gaps.missing.map(maskSecrets),
+    ...(causesOf(gaps.steps) ? { causes: causesOf(gaps.steps) } : {}), // each failed testigo's own first reason, so an incident names its own cause and not another testigo's
     findings: gaps.findings.map(maskSecrets),
   });
 }
@@ -1308,7 +1314,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const o = openTurn(cwd, h.session_id); if (o && 'followUp' in o) ctx.offered = o.followUp || null; } catch {} // the follow-up the per-prompt hook offered this ask
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID
-      try { ctx.packed = packedFiles(h.session_id, taskStart(records, h.session_id)).size; } catch {} // Recordar handed over by the pre/after-tool hook
+      try { const start = taskStart(records, h.session_id); ctx.packed = packedFiles(h.session_id, start).size || (packedAny(h.session_id, start) ? 1 : 0); } catch {} // Recordar handed over by the pre/after-tool hook; a change that named no file left nothing to hand, and the hook says it did look
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       try { ctx.procLate = [...procLate(h.session_id, taskStart(records, h.session_id))]; } catch {} // handed when the department loaded after the first change
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
@@ -1317,6 +1323,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
+      ctx.taskRoute = openTaskRoute(lines); // and a reply that routes itself as a question while changing files is judged at the open task's level (point 13)
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
       ctx.taskTools = sessionTools(task); // the task's tool calls (review)

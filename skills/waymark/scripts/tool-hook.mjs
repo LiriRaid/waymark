@@ -13,7 +13,7 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, routedDept, inheritedRoute, caminoSaid, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
+import { currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
 import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
@@ -29,7 +29,7 @@ import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
 import { grantsIn, recordGrants, WINDOW } from './lib/grants.mjs';
-import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
+import { PACKED, readPacked, packedFiles, packedAny, procDelivered } from './lib/packed.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
@@ -44,7 +44,8 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
   else if (!target || exempt(target, cwd)) return null;
   const turn = currentTurn(lines);
-  const level = routedLevel(turn.texts, turn.tools) || inheritedRoute(lines)?.level || 0, q = level === 'Q';
+  // a reply that continues the open task is that task's: a Q line on it (2.0.20 point 13) is gated at the task's level, not as a question
+  const said = routedLevel(turn.texts, turn.tools), level = (said === 'Q' && openTaskRoute(lines)?.level) || said || inheritedRoute(lines)?.level || 0, q = level === 'Q';
   if (!turn.found || !level) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
@@ -445,7 +446,7 @@ export function deptLoaded(c) {
 // first edit hands them, and a turn that changes nothing is handed nothing.
 function handOnLoad(dept, session, since, file) {
   const all = readPacked(file), st = all[session]?.since === since ? all[session] : null;
-  if (!st?.files?.length) return null;
+  if (!st) return null; // no change happened in this task yet: the first one hands them (a change by shell that named no file leaves a state with no files)
   const procsDone = procDelivered(session, since, file);
   const text = procsDone.has(dept) ? null : procedureText(dept);
   if (!text) return null;
@@ -465,7 +466,8 @@ export async function packContext(hook, agent, file = PACKED()) {
     return handOnLoad(loaded, hook.session_id || 'unknown', taskStart(recs, hook.session_id || 'unknown'), file);
   }
   // a shell command that changes files: the files it names (what it will change is known only after it runs)
-  const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd) } : null) : c0;
+  // a shell change names the files it can (a script, a variable, a new folder may name none): the procedures go in all the same, before it runs
+  const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd), shell: true } : null) : c0;
   const home = projectHome(cwd);
   if (!home.dir || home.legacy) return null; // a project with Waymark's memory
   // Each file's own repo: the session's project, or another repo it edits (a front's session fixing the API). Not
@@ -477,14 +479,15 @@ export async function packContext(hook, agent, file = PACKED()) {
     return h.dir && !h.legacy && (fs.existsSync(path.join(h.root, '.git')) || fs.existsSync(h.memory)) ? h.root : null;
   };
   const files = (c?.files || []).map((f) => path.resolve(cwd, f)).filter((p) => !/\/\.(waymark|engram)\//.test(norm(p)) && repoOf(p));
-  if (!files.length) return null;
+  if (!files.length && !c?.shell) return null;
   let records = [];
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
   const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
-  if (!fresh.length && !procText) return null;
+  // a change by shell that names no file and has no owner to hand yet still leaves the task's state, so a department that loads after it is handed its procedures at the load
+  if (!fresh.length && !procText && !(c?.shell && !packedAny(session, since, file))) return null;
   const { pack } = await import('./pack.mjs');
   const byRepo = new Map();
   for (const f of fresh) { const r = repoOf(f); byRepo.set(r, [...(byRepo.get(r) || []), f]); }
@@ -495,7 +498,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
-  return [memory, procs].filter(Boolean).join('\n\n');
+  return [memory, procs].filter(Boolean).join('\n\n') || null;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

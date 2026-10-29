@@ -582,7 +582,7 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
   assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
-  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/, 'one memory: Waymark\'s, with or without engram');
+  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was neither handed nor searched before the first change[^]*node ".*waymark\.mjs" memory/, 'one memory: Waymark\'s, with or without engram; the message agrees with the claim (the hook hands it)');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
@@ -2028,11 +2028,13 @@ test('pack: per file, the last tasks that changed it (note, stub, no-commit reco
 
 test('incidents: a testigo ✘ stays open until it passes in a later task; 3 failures make a suggested rule; removed testigos are ignored', async () => {
   const { incidents, incidentsLine } = await import(`file://${SCRIPTS}/incidents.mjs`);
-  const r = (id, steps, unresolved = []) => ({ id, evaluation: { steps }, unresolved });
-  const recs = [r('T1', { Recordar: false, 'Índice': false }, ['no mem_search']), r('T2', { Recordar: true, Commit: false }), r('T3', { Commit: false }), r('T4', { Commit: false, Enrutar: false }, ['no routing line'])];
+  const r = (id, steps, unresolved = [], causes = undefined) => ({ id, evaluation: { steps }, unresolved, ...(causes ? { causes } : {}) });
+  const recs = [r('T1', { Recordar: false, 'Índice': false }, ['no mem_search']), r('T2', { Recordar: true, Commit: false }), r('T3', { Commit: false }), r('T4', { Commit: false, Enrutar: false }, ['no routing line'], { Enrutar: 'no routing line' })];
   const found = incidents(recs);
   assert.deepEqual(found.open.map((o) => [o.label, o.since, o.last, o.count]), [['Commit', 'T2', 'T4', 3], ['Enrutar', 'T4', 'T4', 1]], 'Recordar closed by T2; Índice is not a testigo any more');
   assert.equal(found.open.find((o) => o.label === 'Enrutar').cause, 'no routing line');
+  assert.equal(found.open.find((o) => o.label === 'Commit').cause, '', 'a reason that belongs to another testigo is never the cause of this one (2.0.20 point 28)');
+  assert.equal(incidents([r('T9', { Enrutar: false }, ['no routing line'])]).open[0].cause, 'no routing line', 'the only testigo that failed owns the first reason');
   assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
   assert.match(incidentsLine(found), /^Incidents: open Commit ✘×3 \(T4\), Enrutar ✘ \(T4\); suggested rule: Commit failed 3× \(node ".*waymark\.mjs" incidents\)$/);
   assert.equal(incidentsLine(incidents([])), '');
@@ -2445,7 +2447,7 @@ test('Recordar at every level: an L1 change without pack (or mem_search) is bloc
     ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
   const without = judge(lines(false));
-  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/.test(m)), JSON.stringify(without.missing));
+  assert.ok(without.missing.some((m) => /^the project memory was neither handed nor searched before the first change/.test(m)), JSON.stringify(without.missing));
   assert.equal(judge(lines(true)).steps.find((s) => s.id === 'memory').pass, true);
 });
 

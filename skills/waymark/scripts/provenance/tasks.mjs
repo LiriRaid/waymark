@@ -133,12 +133,14 @@ export function clearTaskStart(session) {
 // The folder a session's project is read from: the one of its first prompt, kept per session (~/.waymark/.session-cwd.json). A `cd` into a sibling repo moves the
 // shell's folder, and with it the project the hooks took: IDs, records and open.json of the wrong repo. A kept folder that is gone is replaced by the current one.
 const cwdFile = () => path.join(HOME(), '.session-cwd.json');
-export function pinnedCwd(session, cwd, now = Date.now()) {
+const PIN_MS = 12 * 3600000;
+export function pinnedCwd(session, cwd, now = Date.now(), { write = true } = {}) {
   if (!session || !cwd) return cwd;
   let all = {};
   try { all = JSON.parse(fs.readFileSync(cwdFile(), 'utf8')) || {}; } catch {}
   const kept = all[session]?.cwd;
-  if (kept && fs.existsSync(kept)) return kept;
+  if (kept && fs.existsSync(kept) && (write === false || now - (all[session].at || 0) < PIN_MS)) return kept; // a pin older than a working day is a resumed session's: the current folder replaces it
+  if (write === false) return cwd;
   for (const [k, v] of Object.entries(all)) if (now - (v.at || 0) > 7 * 86400000) delete all[k];
   all[session] = { cwd, at: now };
   try { fs.mkdirSync(HOME(), { recursive: true }); fs.writeFileSync(cwdFile(), JSON.stringify(all)); } catch {}

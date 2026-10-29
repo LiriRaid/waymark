@@ -133,3 +133,10 @@ test('13: a reply that routes itself as a question while it changes files is gat
   assert.equal(judged({ taskRoute: { level: 3, dept: 'dept-architecture' } }).level, 3, 'judged as L3');
   assert.equal(judged({}).level, 2, 'counter-example: with no open task a question that changed files is judged as L2, as before');
 });
+
+test('review fix: Build is suspect only when a build ran and none of the commands kept after the last change failed', () => {
+  const ran = { commands: ['pnpm run build 2>&1 | tail -5'] };
+  assert.equal(suspect({ ...ran }, 'Build'), true, 'a build ran, nothing shows it failed');
+  assert.equal(suspect({ ...ran, observed: { gates: [{ cmd: 'pnpm run build', error: true }] } }, 'Build'), false, 'a build that failed is a real failure: it may teach a rule');
+  assert.equal(suspect({ commands: ['git status'] }, 'Build'), false);
+});

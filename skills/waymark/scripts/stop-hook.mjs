@@ -549,7 +549,7 @@ function observeTurn(S) {
   const code = changed.filter((f) => !NOT_CODE.test(f) && !(touched.get(norm(f)) === true && !shellTouched));
   // the code files no review covered, in this turn or earlier in the same task (a follow-up that applies the review's
   // findings needs no second review)
-  // The review is owed once, over the code of the whole task (point 27): the files of its earlier turns count with this turn's.
+  // The review is owed once, over the code of the whole task: the files of its earlier turns count with this turn's.
   const earlierCode = (ctx.taskTools || []).filter((t) => codeEdit(t) && !t.error && !turn.tools.some((x) => x.id === t.id)).map(fileOf);
   const codeTask = [...new Map([...code, ...earlierCode].map((f) => [norm(f), f])).values()];
   const turnLeft = unreviewed(turn.tools, codeTask, (t) => !!(result(t)?.error || t.error));
@@ -812,7 +812,9 @@ function gateWitness(S) {
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
     // a red the output names file by file (a suite that flaked under load) is cleared by a later green run of each file it names, run alone
-    const flaked = (t, i) => { const files = failedFiles(output(t)); return files.length > 0 && files.every((f) => after.some(([x, j]) => j > i && !failedRun(x, 'test') && testCovers(testTargets(cmdOf(x)), [f]))); };
+    // (a run narrowed to one case by -t, --grep or -k proves nothing about the file)
+    const narrowed = (x) => /(?:^|\s)(?:-t|-k|--grep|--testNamePattern|--test-name-pattern)(?:[=\s]|$)/.test(cmdOf(x));
+    const flaked = (t, i) => { const files = failedFiles(output(t)); return files.length > 0 && files.every((f) => after.some(([x, j]) => j > i && !failedRun(x, 'test') && !narrowed(x) && testCovers(testTargets(cmdOf(x)), [f]))); };
     for (const [t, i] of after) if (failedRun(t, 'test') && !flaked(t, i) && !after.some(([x, j]) => j > i && (cmdKey(x) === cmdKey(t) || testCovers(testTargets(cmdOf(x)), testTargets(cmdOf(t)))) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
@@ -846,7 +848,7 @@ function cierreWitness(S) {
     if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
     if (ctx.ids) {
       const id = reply.match(/^[ \t]*##\s*Cierre\s*·\s*(.+)/m)?.[1]?.match(ID)?.[0];
-      // The ID the prompt handed is the one the record keeps (2.0.20): a heading with no ID, a recorded one or one never offered blocks nothing and is rewritten
+      // The ID the prompt handed is the one the record keeps : a heading with no ID, a recorded one or one never offered blocks nothing and is rewritten
       // (the record says idBy: hook and keeps what was claimed), so a reply after a block never has to repeat a Cierre for an ID. A follow-up ID the ask did not
       // earn, or whose task's files this turn never touches, is a new task: recorded under the new ID, not blocked.
       if (id && validId(id, ctx.ids)) { const why = followUpFails(id, changed, ctx); if (why) renamed = { from: id, to: ctx.ids.next, why }; }
@@ -862,7 +864,7 @@ function whenOf(S) {
   const { changed, code, committed, ctx, level, near, noBuild, observed, redTests, retried, shellChange, skip, turn, ui } = S;
   // review proportional to risk (routine.json risk, docs/adr/0027): L3, a sensitive path, or a big change blocks; a small one is recorded as omitted
   const risk = reviewRisk({ code: S.codeTask, changed: [...changed, ...S.codeTask], level, lines: editedLines(ctx.taskTools?.length ? ctx.taskTools : turn.tools, shellChange), cfg: loadRisk(ctx.root) });
-  // the review waits for the turn that closes the task (point 27): a Cierre that says parcial or bloqueado, or an L3 plan with a step ahead, is not that turn
+  // the review waits for the turn that closes the task: a Cierre that says parcial or bloqueado, or an L3 plan with a step ahead, is not that turn
   const deferred = risk.review && taskOpen(S.reply);
   const when = {
     riskyCode: risk.review && !deferred,
@@ -877,8 +879,9 @@ function whenOf(S) {
 }
 // The plan's steps in an L3 Aprendido ("✔1 · ▶2 · 3"): a step not ticked is still ahead.
 export const pendingSteps = (aprendido) => {
-  const a = String(aprendido || '');
-  return /[✔▶]\s*\d/.test(a) && (/▶\s*\d/.test(a) || /(?:^|·)\s*\d+\s*(?=·|←|$)/.test(a.replace(/[✔▶]\s*\d+/g, '@')));
+  // a plan is the part before the arrow made only of step marks joined by "·": "✔1 · ▶2 · 3". Anything else in it ("✔2 specs · 14 ← cause") is a sentence, not a plan.
+  const marks = String(aprendido || '').split('←')[0].split('·').map((s) => s.trim());
+  return marks.length > 0 && marks.every((m) => /^[✔▶]?\s*\d+$/.test(m)) && marks.some((m) => /^[✔▶]/.test(m)) && marks.some((m) => !m.startsWith('✔'));
 };
 // The task is still open in this turn's Cierre: its result is parcial or bloqueado, or the plan has a step ahead. No Cierre yet is not open: the review is listed with the rest.
 export const taskOpen = (reply) => CIERRE.test(String(reply || '')) && (/^\s*(?:parcial|bloqueado)\b/i.test(field(reply, 'Resultado')) || pendingSteps(field(reply, 'Aprendido')));
@@ -1323,7 +1326,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
-      ctx.taskRoute = openTaskRoute(lines); // and a reply that routes itself as a question while changing files is judged at the open task's level (point 13)
+      ctx.taskRoute = openTaskRoute(lines); // and a reply that routes itself as a question while changing files is judged at the open task's level
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
       const all = sessionTools(lines);
       ctx.taskTools = sessionTools(task); // the task's tool calls (review)

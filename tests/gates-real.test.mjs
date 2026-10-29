@@ -165,3 +165,13 @@ test('19: the design link the user wrote stays theirs for the whole job: a later
   assert.match(other(link) || '', /neither the local dev server/, 'counter-example: another session never wrote it');
   fs.rmSync(proj, { recursive: true, force: true });
 });
+
+test('review fix: only an ego-named scripts folder is exempt: a repository whose name starts with ego is a project; a narrowed run does not clear a red file', () => {
+  const l1 = [prompt('mira cómo quedó'), say('Waymark → L1 · dept-frontend')];
+  assert.match(checkDecision('/work/ego-web/src/app.js', l1, 's-egoweb', state(), '/work/proj') || '', /L1 decision gate/, 'a sibling repo named ego-web');
+  assert.equal(checkDecision('/home/u/ego-scripts/r.mjs', l1, 's-egoweb', state(), '/work/proj'), null, 'ego-scripts');
+  const full = call('Bash', { command: 'node --test tests/*.test.mjs' }, NODE_RED, true);
+  const failed = (g) => (g.missing || []).some((m) => /a test after the last code change failed/.test(m));
+  assert.equal(failed(judge([...L2_EDIT, ...full, ...call('Bash', { command: 'pnpm exec vitest run tests/hooks.test.mjs -t "other case"' }, 'Tests  1 passed')])), true, 'a run narrowed to one case clears nothing');
+  assert.equal(failed(judge([...L2_EDIT, ...full, ...call('Bash', { command: 'node --test tests/hooks.test.mjs' }, 'ℹ pass 12\nℹ fail 0')])), false, 'the whole file does');
+});

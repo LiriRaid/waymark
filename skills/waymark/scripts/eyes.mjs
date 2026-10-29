@@ -115,7 +115,7 @@ function scriptOf(t, writes) {
 // → { provider, calls, measures, afterLastChange, references }. Nothing of the page is kept: no URL, no text.
 export function observeEyes(tools, { from = -1, provider = null, reply = '', allowed = [] } = {}) {
   const writes = new Map();
-  const keep = (file, body) => writes.set(String(file).replace(/\\/g, '/').toLowerCase(), body);
+  const keep = (file, body) => writes.set(String(file).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').toLowerCase(), body); // a Git Bash path (/c/…) is the file:///C:/… the import names
   for (const t of tools) {
     if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content);
     else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body);

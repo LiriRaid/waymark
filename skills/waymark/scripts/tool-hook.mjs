@@ -19,7 +19,7 @@ import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
-import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
+import { pinnedCwd, taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
 import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
@@ -44,7 +44,7 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
   else if (!target || exempt(target, cwd)) return null;
   const turn = currentTurn(lines);
-  // a reply that continues the open task is that task's: a Q line on it (2.0.20 point 13) is gated at the task's level, not as a question
+  // a reply that continues the open task is that task's: a Q line on it is gated at the task's level, not as a question
   const said = routedLevel(turn.texts, turn.tools), level = (said === 'Q' && openTaskRoute(lines)?.level) || said || inheritedRoute(lines)?.level || 0, q = level === 'Q';
   if (!turn.found || !level) return null;
   let seen = {};
@@ -181,7 +181,7 @@ export function checkGh(command, asked = '', memory = '') {
   return null;
 }
 
-// What leaves the machine is the user's to publish (2.0.20 point 21): a `git push` (with or without a tag or a force) and a `gh release` are denied when the project's
+// What leaves the machine is the user's to publish: a `git push` (with or without a tag or a force) and a `gh release` are denied when the project's
 // Conventions say "Push: the user" (the line the user wrote, read like the PRs rule above), and on a turn routed Q that continues no task: a question never publishes.
 // Read on the skeleton, so a message or a heredoc that mentions the words is no push.
 const GIT_PUSH = /(?:^|[;&|(]\s*|\n\s*)(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|&|command|sudo|env|exec)\s+)*git(?:\.exe)?(?:\s+(?:-c\s+\S+|-C\s+\S+|--[\w-]+(?:=\S+)?))*\s+push(?![\w-])/;
@@ -208,7 +208,7 @@ export function namedRepos(lines) {
   }
   return text.join('\n').toLowerCase();
 }
-export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json'), task = '') {
+export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
   if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
@@ -341,31 +341,32 @@ function checkMemorySave(text, cwd, session) {
 
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
+  const project = pinnedCwd(hook.session_id, cwd, Date.now(), { write: false }); // the session's project (its first prompt's folder), read only: the shell's folder still resolves relative paths
   if (!c) return null;
   if (c.memory !== undefined) return checkMemorySave(c.memory, cwd, hook.session_id);
   // The guard that cannot judge a command denies it: failing open there let a command with a bracket in it read what the guard exists to stop.
   let sensitive;
-  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
+  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(project).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
   try { sensitive = checkSensitive(c, cwd, hook.session_id, turns); } catch (e) {
     logHookError('tool-hook guard', e);
     sensitive = `Waymark: the sensitive-path guard could not read this call (${String(e?.message || e).slice(0, 100)}), so it was not run. Rephrase it (one command, no pattern text in brackets) and run it again; the cause is in ~/.waymark/hook-errors.log.`;
   }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
-  const taskKey = () => { try { return String(taskStart(readRecords(projectHome(cwd).log), hook.session_id)); } catch { return ''; } }; // the task's start: the repo question is asked once per task
+  const taskKey = () => { try { return String(taskStart(readRecords(projectHome(project).log), hook.session_id)); } catch { return ''; } }; // the task's start, for the structural-move question
   // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
     const link = checkLink(c.command);
     if (link) return link;
-    if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
+    if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
     if (/\bpush\b|\brelease\b/.test(c.command)) { // nothing leaves the machine from a question, or against the project's "Push: the user"
       let mem = '';
-      try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
+      try { mem = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {}
       const lines = turns(), turn = currentTurn(lines);
       const push = checkPush(c.command, mem, routedLevel(turn.texts, turn.tools) === 'Q' && !openTaskRoute(lines));
       if (push) return push;
     }
-    const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
+    const trailer = checkTrailer(c.command, project) || missingTrailer(c.command, hook.session_id, project);
     if (trailer) return trailer;
     if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
@@ -374,18 +375,18 @@ export function gate(hook, agent) {
       try { move = checkMove(c.command, cwd, hook.session_id, taskKey()); } catch (e) { logHookError('tool-hook move', e); }
       if (move) return withNote(move);
     }
-    const lines = turns(), own = projectHome(cwd).root;
-    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, taskKey()); if (deny) return withNote(deny); }
-    return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, cwd));
+    const lines = turns(), own = projectHome(project).root;
+    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id); if (deny) return withNote(deny); }
+    return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, project));
   }
   const files = (c.files || []).filter((f) => !exempt(f, cwd));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
-  const own = projectHome(cwd).root;
+  const own = projectHome(project).root;
   let memory = '';
-  try { memory = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
+  try { memory = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {}
   for (const f of files) {
-    const deny = checkRepo(repoOf(f), own, lines, hook.session_id, undefined, taskKey()) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, cwd);
+    const deny = checkRepo(repoOf(f), own, lines, hook.session_id) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, project);
     if (deny) return withNote(deny);
   }
   return null;

@@ -21,13 +21,14 @@ const WINDOW = 10; // …within this many of the newest evaluated tasks, so a fa
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 
 // → { open: [{ label, since, last, count, cause }], rules: [{ label, failures, ids }] } from the records, oldest first.
-// A failure the detector may have misjudged, read from what the record itself shows (2.0.20 point 28): an eyes failure with no call counted although a command ran ego,
+// A failure the detector may have misjudged, read from what the record itself shows: an eyes failure with no call counted although a command ran ego,
 // a build failure although a build command ran, a review refused for the words of a quote, a procedure "read late" although the hook handed it. It still opens an incident
 // (the card tells it), but it never makes a suggested rule: a department would learn a false lesson from it.
 export function suspect(r, label) {
   const cmds = r.commands || [];
   if (label === 'Ojos') return (r.observed?.eyes?.calls || 0) === 0 && cmds.some((c) => RUNS_EGO.test(c));
-  if (label === 'Build') return cmds.some((c) => shellRuns(c).some((p) => p.build));
+  // a build ran and none of the commands the record kept after the last change failed: the testigo may have missed a build that passed
+  if (label === 'Build') return cmds.some((c) => shellRuns(c).some((p) => p.build)) && !(r.observed?.gates || []).some((g) => g.error && shellRuns(g.cmd || '').some((p) => p.build));
   if (label === 'Review') return (r.findings || []).some((x) => /skip quoted as the user's/.test(x));
   if (label === 'Enrutar') return r.observed?.procedure?.handed === true && r.observed?.procedure?.readBeforeChange === false;
   return false;

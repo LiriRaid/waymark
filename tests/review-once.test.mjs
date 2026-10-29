@@ -84,3 +84,8 @@ test('22: the soft cap does not tell an L2 or L3 to close: it is one task howeve
   assert.equal(run(2, 'c'), '', 'an L2 is not');
   assert.equal(run(3, 'd'), '', 'an L3 is not');
 });
+
+test('review fix: a count after a tick is a sentence, not a plan step ahead', () => {
+  for (const a of ['✔2 specs · 14 ← cause', 'hecho 3 · 4 ← y', '✔1 · ✔2 ← 29 pruebas']) assert.equal(pendingSteps(a), false, a);
+  for (const a of ['✔1 · ▶2 · 3 ← sigue', '▶1 · 2', '✔1 · 2 ← falta']) assert.equal(pendingSteps(a), true, a);
+});

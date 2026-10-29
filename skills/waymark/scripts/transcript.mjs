@@ -75,7 +75,7 @@ const turnStart = (lines, since = 0) => {
 // either releases it (a notification may carry no tool-use-id). A launch older than
 // BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
 export const BACKGROUND_WAIT_MS = 30 * 60000;
-// A gate, a build or a test run the shell left in the background is waited for too (2.0.20 point 20): it ends and notifies, and the turn that ends before it was
+// A gate, a build or a test run the shell left in the background is waited for too: it ends and notifies, and the turn that ends before it was
 // judged without its result. A watcher or a server never ends, so it is not waited for. The shell's launch names its id in its result ("…with ID: bg1").
 export const SHELL_WAIT_MS = 10 * 60000;
 const NEVER_ENDS = /(?:^|\s)(?:--watch|--watchAll|-w|watch|serve|dev|start)(?=\s|$)/;
@@ -361,7 +361,7 @@ export function inheritedRoute(lines, prompts = 2) {
   return openTaskRoute(lines, prompts);
 }
 // The route (level and department) of the task still open before this turn: the last numerically routed turn since the task's start that has not written its Cierre,
-// whatever this turn says. A reply that continues the task is that task's, so a Q line on a reply that changes files (2.0.20 point 13) is judged and gated at its level.
+// whatever this turn says. A reply that continues the task is that task's, so a Q line on a reply that changes files is judged and gated at its level.
 export function openTaskRoute(lines, prompts = 2) {
   const starts = [];
   for (let i = lines.length - 1; i >= 0 && starts.length <= prompts; i--) if (isPrompt(lines[i])) starts.push(i);

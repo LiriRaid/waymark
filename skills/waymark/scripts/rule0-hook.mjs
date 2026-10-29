@@ -175,7 +175,7 @@ export function softCap(memory) {
 // longer than IDLE between two calls counts as IDLE). `user`: the line for the user at the close of a long turn, in their words, instead of the agent's.
 const IDLE = 15 * 60000;
 export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false, level = 0 } = {}) {
-  if (!mark || level >= 2) return ''; // no task in progress: nothing to measure; an L2 or L3 is one task however long (docs/plans: point 9), so it is never told to close
+  if (!mark || level >= 2) return ''; // no task in progress: nothing to measure; an L2 or L3 is one task however long, so it is never told to close
   const home = projectHome(cwd), cap = softCap((() => { try { return fs.readFileSync(home.memory, 'utf8'); } catch { return ''; } })());
   const files = new Set();
   let calls = 0, worked = 0, prev = mark;

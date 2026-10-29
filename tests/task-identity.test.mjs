@@ -131,3 +131,13 @@ test('20: a turn that an agent which cannot close its turns left open stops rais
   const names = P.otherOpen(cwd, 'me').map((o) => o.session).sort();
   assert.deepEqual(names, ['cc-old', 'oc-new']);
 });
+
+test('review fix: a pin older than twelve hours (a resumed session) is replaced by the current folder; the tool hook reads the pin and never writes it', () => {
+  const first = fs.mkdtempSync(path.join(home, 'old-')), now = Date.now();
+  assert.equal(P.pinnedCwd('s-old', first, now - 13 * 3600000), first);
+  const other = fs.mkdtempSync(path.join(home, 'new-'));
+  assert.equal(P.pinnedCwd('s-old', other, now), other, 'stale: re-pinned');
+  assert.equal(P.pinnedCwd('s-ro', first, now, { write: false }), first, 'no pin yet: the current folder, nothing written');
+  assert.equal(P.pinnedCwd('s-ro', other, now, { write: false }), other, 'read only never pinned it');
+  assert.equal(P.pinnedCwd('s-old', first, now, { write: false }), other, 'a fresh pin is returned');
+});

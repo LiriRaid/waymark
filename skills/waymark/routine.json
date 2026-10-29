@@ -13,7 +13,7 @@
     { "id": "evidence", "label": "Evidencia", "levels": [1, 2, 3], "enforce": "block", "claim": "an Evidencia \"observada\" checked after the last change (a commit checks nothing)" },
     { "id": "secrets", "label": "Secretos", "levels": [1, 2, 3], "enforce": "block", "claim": "no secret in the memory or the task's diff and commits" },
     { "id": "memory", "label": "Recordar", "levels": [1, 2, 3], "enforce": "block", "claim": "each file's memory pack, handed by the hook at its first edit (never run pack)" },
-    { "id": "review", "label": "Review", "levels": [2, 3], "when": "riskyCode", "enforce": "block", "claim": "L2+ with risky code: code-review (or W review <files>) on the task's files" },
+    { "id": "review", "label": "Review", "levels": [2, 3], "when": "riskyCode", "enforce": "block", "claim": "L2+ with risky code: code-review (or W review <files>) once at the task's end" },
     { "id": "build", "label": "Build", "levels": [2, 3], "when": "build", "enforce": "block", "claim": "L2+ with code: the build once at the end (unless Quality gates has `build | none (<why>)`)" },
     { "id": "eyes", "label": "Ojos", "levels": [1, 2, 3], "when": "eyesDue", "enforce": "block", "claim": "a seen change measured or clicked in a browser after the last change" },
     { "id": "docs", "label": "Docs", "levels": [1, 2, 3], "when": "repeatedFailure", "enforce": "block", "claim": "a command that failed twice runs again only after consulting the docs" },

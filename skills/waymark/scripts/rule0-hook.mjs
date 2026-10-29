@@ -16,7 +16,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { sessionState, closingQuestions } from './transcript.mjs';
+import { sessionState, closingQuestions, inheritedRoute } from './transcript.mjs';
 import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
@@ -172,8 +172,8 @@ export function softCap(memory) {
 // The size of the task so far: its calls, the files it changed (by an edit or by a command that writes: sed -i, a script), and the minutes worked (a pause
 // longer than IDLE between two calls counts as IDLE). `user`: the line for the user at the close of a long turn, in their words, instead of the agent's.
 const IDLE = 15 * 60000;
-export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false } = {}) {
-  if (!mark) return ''; // no task in progress: nothing to measure
+export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false, level = 0 } = {}) {
+  if (!mark || level >= 2) return ''; // no task in progress: nothing to measure; an L2 or L3 is one task however long (docs/plans: point 9), so it is never told to close
   const home = projectHome(cwd), cap = softCap((() => { try { return fs.readFileSync(home.memory, 'utf8'); } catch { return ''; } })());
   const files = new Set();
   let calls = 0, worked = 0, prev = mark;
@@ -355,7 +355,7 @@ export function reminder(hook, agent) {
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   let cap = '';
-  try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
+  try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines, { level: Number(inheritedRoute(lines)?.level) || 0 }); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
   let owned = '';
   try { owned = ownedOffer(hook.prompt, fs.readFileSync(projectHome(cwd).memory, 'utf8')); } catch {}
   const text = (st.openedWithWaymark ? short : full) + ids + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);

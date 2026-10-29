@@ -547,8 +547,11 @@ function observeTurn(S) {
   const code = changed.filter((f) => !NOT_CODE.test(f) && !(touched.get(norm(f)) === true && !shellTouched));
   // the code files no review covered, in this turn or earlier in the same task (a follow-up that applies the review's
   // findings needs no second review)
-  const turnLeft = unreviewed(turn.tools, code, (t) => !!(result(t)?.error || t.error));
-  const taskLeft = turnLeft.length ? unreviewed(ctx.taskTools || [], code) : [];
+  // The review is owed once, over the code of the whole task (point 27): the files of its earlier turns count with this turn's.
+  const earlierCode = (ctx.taskTools || []).filter((t) => codeEdit(t) && !t.error && !turn.tools.some((x) => x.id === t.id)).map(fileOf);
+  const codeTask = [...new Map([...code, ...earlierCode].map((f) => [norm(f), f])).values()];
+  const turnLeft = unreviewed(turn.tools, codeTask, (t) => !!(result(t)?.error || t.error));
+  const taskLeft = turnLeft.length ? unreviewed(ctx.taskTools || [], codeTask) : [];
   const reviewLeft = turnLeft.filter((f) => taskLeft.includes(f));
   // "build | none" holds for the project that declares it: code changed in another repo still needs its build
   const noBuild = !!ctx.noBuild && (!ctx.root || code.every((f) => norm(f).startsWith(norm(ctx.root).replace(/\/$/, '') + '/')));
@@ -610,7 +613,7 @@ function observeTurn(S) {
     evidence: null, // the Evidencia testigo: { claim, checkedAfter, cited, unbacked }
     time: { minutes: workMs === null ? null : Math.round(workMs / 6000) / 10, userWait: Math.round(userWait / 6) / 10, toolMinutes: Math.round(timed.reduce((a, t) => a + secs(t), 0) / 6) / 10, slowest: slowest ? { tool: slowest.name, what: (cmdOf(slowest) || fileOf(slowest) || String(slowest.input.skill || '')).replace(/\s+/g, ' ').slice(0, 100), s: Math.round(secs(slowest)) } : null },
   };
-  return { shellChange, dept, procRe, lastIdx, lastCode, lastSpec, lastChange, result, firstRealChange, secs, runsOf, gateCmd, testCmd, output, exitFor, failedRun, apart, envFail, cmdKey, retried, ui, code, reviewLeft, noBuild, ASK, observed };
+  return { shellChange, dept, procRe, lastIdx, lastCode, lastSpec, lastChange, result, firstRealChange, secs, runsOf, gateCmd, testCmd, output, exitFor, failedRun, apart, envFail, cmdKey, retried, ui, code, codeTask, reviewLeft, noBuild, ASK, observed };
 }
 
 // Testigo build: a build that passed in the repo of each changed code file, after the last code change in that repo.
@@ -858,9 +861,11 @@ function cierreWitness(S) {
 function whenOf(S) {
   const { changed, code, committed, ctx, level, near, noBuild, observed, redTests, retried, shellChange, skip, turn, ui } = S;
   // review proportional to risk (routine.json risk, docs/adr/0027): L3, a sensitive path, or a big change blocks; a small one is recorded as omitted
-  const risk = reviewRisk({ code, changed, level, lines: editedLines(turn.tools, shellChange), cfg: loadRisk(ctx.root) });
+  const risk = reviewRisk({ code: S.codeTask, changed: [...changed, ...S.codeTask], level, lines: editedLines(ctx.taskTools?.length ? ctx.taskTools : turn.tools, shellChange), cfg: loadRisk(ctx.root) });
+  // the review waits for the turn that closes the task (point 27): a Cierre that says parcial or bloqueado, or an L3 plan with a step ahead, is not that turn
+  const deferred = risk.review && taskOpen(S.reply);
   const when = {
-    riskyCode: risk.review,
+    riskyCode: risk.review && !deferred,
     engram: !!ctx.engram, code: code.length > 0, build: code.length > 0 && !noBuild, ui, specNear: !!near && !skip.Tests, commit: committed && !!ctx.commits,
     // from what ran, never from words: a gate failed twice, the judged gate failed, a spec and code changed
     repeatedFailure: retried.length > 0, gateFailed: observed.gate?.ok === false || redTests.length > 0,
@@ -868,8 +873,15 @@ function whenOf(S) {
     push: false, // the notes testigo is judged after the record, when the hook pushes them (notesBlock)
     eyesDue: eyesDue({ provider: observed.eyes?.provider, ui, level: Number(level), changed }), // a seen change at L2+, or an L1 of styles and templates with no spec, and a browser to look with
   };
-  return { when, risk };
+  return { when, risk, reviewDeferred: deferred };
 }
+// The plan's steps in an L3 Aprendido ("✔1 · ▶2 · 3"): a step not ticked is still ahead.
+export const pendingSteps = (aprendido) => {
+  const a = String(aprendido || '');
+  return /[✔▶]\s*\d/.test(a) && (/▶\s*\d/.test(a) || /(?:^|·)\s*\d+\s*(?=·|←|$)/.test(a.replace(/[✔▶]\s*\d+/g, '@')));
+};
+// The task is still open in this turn's Cierre: its result is parcial or bloqueado, or the plan has a step ahead. No Cierre yet is not open: the review is listed with the rest.
+export const taskOpen = (reply) => CIERRE.test(String(reply || '')) && (/^\s*(?:parcial|bloqueado)\b/i.test(field(reply, 'Resultado')) || pendingSteps(field(reply, 'Aprendido')));
 
 // Testigo procedure: the owner department loaded and its procedures.md read.
 function procedureWitness(S) {
@@ -1010,7 +1022,7 @@ function composeSteps(S) {
 // The review a small, plain change skips is recorded with its reason, so the record says why nothing blocked.
 function omittedOf(S, steps) {
   const r = steps.find((s) => s.id === 'review');
-  const out = r && !r.applies && S.code.length && S.level >= 2 && !r.na ? { Review: `riesgo bajo (${S.risk.reason})` } : {};
+  const out = r && !r.applies && S.codeTask.length && S.level >= 2 && !r.na ? { Review: S.reviewDeferred ? 'al cierre de la tarea: este turno la deja abierta (resultado parcial o pasos pendientes)' : `riesgo bajo (${S.risk.reason})` } : {};
   // a seen change with no browser to look with (ego, a declared Playwright, the agent's panel): said, never blocked
   if (S.ui && S.level >= 2 && !S.observed.eyes.provider) out.Ojos = 'sin navegador (ni ego-browser, ni Playwright declarado, ni panel del agente): la pantalla no se pudo mirar';
   return Object.keys(out).length ? out : null;
@@ -1271,7 +1283,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { loadKnownValues(home.root, { session: h.session_id }); } catch {} // what the project's .env files and the sensitive files the user allowed hold is masked in everything this hook writes (docs/adr/0045)
       // read back to the task's start (its first prompt), so a task of many prompts or megabytes keeps its start in view
       const lines = readTurns((bytes) => agent.read(h, bytes), 3, 4 * 1024 * 1024, undefined, taskStart(readRecords(home.log), h.session_id));
-      const prompts = lines.filter(isPrompt).map(promptText).slice(-3); // this task: the current prompt and the two before it
+      const prompts = lines.filter(isPrompt).map(promptText); // every prompt of this task, read back to its start: a quoted refusal is checked against all of them
       // A turn counts from its prompt, or from this session's last close when that is later (a background notification
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
@@ -1387,7 +1399,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { const c = closeCopies(taskStart(records, h.session_id, claimed) || turn.startedAt || Date.now() - 6 * 3600000, cwd); if (c.removed.length || c.left.length) copiesNote = ` · copias limpias: ${c.removed.length} retirada${c.removed.length === 1 ? '' : 's'}${c.left.length ? `, ${c.left.length} sin poder retirar (${c.left.map((p) => path.basename(p)).join(', ')}: \`waymark.mjs copy --clean\`)` : ''}`; } catch (e) { logHookError('stop-hook copies', e); }
       // a long turn the agent ran alone never reached the per-prompt hook's soft cap: the user hears it at the close (once per task), before the task's start is cleared
       let capNote = '';
-      try { capNote = softCapLine(h, agent, cwd, taskStartMark(h.session_id), Date.now(), undefined, lines, { user: true }); } catch (e) { logHookError('stop-hook soft cap', e); }
+      try { capNote = softCapLine(h, agent, cwd, taskStartMark(h.session_id), Date.now(), undefined, lines, { user: true, level: Number(gaps?.level) || 0 }); } catch (e) { logHookError('stop-hook soft cap', e); }
       try { appendRecord(cwd, rec); clearStart(h.session_id); clearTaskStart(h.session_id); } catch (e) { logHookError('stop-hook record', e); }
       try { for (const { root, record } of touchedRepos(gaps.changed, home.root, rec, home.slug)) { appendRecord(root, record); refreshTasks(projectHome(root), true); } } catch (e) { logHookError('stop-hook touched', e); } // each other project it changed files in hears of it
       try { expireGrants(rec.id); } catch (e) { logHookError('stop-hook grants', e); } // a permission given for this task ends with it (docs/adr/0045)

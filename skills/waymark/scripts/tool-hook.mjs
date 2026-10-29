@@ -192,14 +192,15 @@ export function namedRepos(lines) {
 }
 export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json'), task = '') {
   if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
-  if (nameIn(path.basename(root), namedRepos(lines))) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-  const key = `${session}:${task}:${norm(root)}`; // once per task and repo
-  if (seen[key]) return null; // asked once; the same repo again goes through
+  const key = `${session}:${norm(root)}`; // once per session and repo: what the user said about the job (the repo, in their request or their answer) holds for its next tasks
+  if (seen[key]) return null; // asked or named once; the same repo again goes through
+  const named = nameIn(path.basename(root), namedRepos(lines));
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  if (named) return null;
   return `Waymark: this change is in ${path.basename(root)}, a repository the task's request does not name (the session works in ${path.basename(cwdRoot)}). Ask the user in your choice window whether to change it, then name it in the Pedido line ("Repos: <each repo this task touches>"). Sent again after that, it goes through.`;
 }
 

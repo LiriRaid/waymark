@@ -41,7 +41,12 @@ const MEASURES = { test: (s) => measuresIn(String(s)) };
 const PANEL_READS = new Set(['read_page', 'get_page_text', 'javascript_tool', 'find']);
 // The program being run, at the start of a command or of a segment after ; & | ( or a line: never the words inside an echo or a grep.
 const AT_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:npx\s+|pnpm\s+exec\s+|yarn\s+|bunx\s+)?(?:\S*[\\/])?`;
-export const RUNS_EGO = new RegExp(AT_START + String.raw`ego-browser(?:\.exe|\.cmd)?\s+nodejs\b`);
+// ego is run as the agent's shell lets it: bare or by an unquoted path, by a quoted absolute path ("C:/…/ego-browser.exe" nodejs), through a variable
+// (the PATH lacks it, so a message hands the path: "$EGO" nodejs, ${EGO}, $env:EGO, & $exe nodejs) and after wrappers (timeout 60, nohup, env assignments).
+// A variable counts only when `nodejs`, ego's own subcommand, is its first argument. Everything is a regex over the command: no process, no latency.
+const EGO_PROGRAM = String.raw`(?:(?:\S*[\\/])?ego-browser(?:\.exe|\.cmd)?|(?<q>["'])(?:[^"'\n]*[\\/])?ego-browser(?:\.exe|\.cmd)?\k<q>|["']?\$(?:\{[\w:]+\}|(?:env:)?\w+)["']?)`;
+const EGO_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:(?:npx|pnpm\s+exec|yarn|bunx|nohup|time|timeout\s+\S+)\s+|[A-Za-z_]\w*=\S*\s+)*`;
+export const RUNS_EGO = new RegExp(EGO_START + EGO_PROGRAM + String.raw`\s+nodejs\b`);
 const RUNS_PLAYWRIGHT = new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
 const PANEL = /^mcp__[\w-]*(?:browser|chrome)[\w-]*__(\w+)$/i;
 const PANEL_ACTS = new Set(['form_input']);
@@ -90,6 +95,16 @@ export function eyesRefusal(script, allowed = []) {
   return null;
 }
 
+// A script the shell wrote to a file with a heredoc (cat > f <<'EOF', tee f <<EOF) or a PowerShell here-string (@'…'@ | Set-Content f): the file ego is later asked to
+// import (file:///…) is not in a Write call, so its measurements went uncounted. → [[file, body]].
+const HEREDOC_FILE = /(?:\bcat\s*>>?|\btee(?:\s+-a)?)\s*(?<q>["']?)(?<file>[^\s"'<>|;&]+)\k<q>[ \t]*<<-?[ \t]*(?<k>["']?)(?<tag>[A-Za-z_]\w*)\k<k>[^\n]*\r?\n(?<body>[\s\S]*?)\r?\n[ \t]*\k<tag>[ \t]*(?:\r?\n|$)/g;
+const HERE_PIPE = /@(?<k>['"])\r?\n(?<body>[\s\S]*?)\r?\n\k<k>@\s*\|\s*(?:Set-Content|Out-File|Add-Content)\s+(?:-(?:Path|FilePath|LiteralPath)\s+)?(?<q>["']?)(?<file>[^\s"']+)\k<q>/g;
+const HERE_VALUE = /(?:Set-Content|Out-File|Add-Content)\s+(?:-(?:Path|FilePath|LiteralPath)\s+)?(?<q>["']?)(?<file>[^\s"']+)\k<q>\s+-Value\s+@(?<k>['"])\r?\n(?<body>[\s\S]*?)\r?\n\k<k>@/g;
+export function shellScripts(command) {
+  const c = String(command || '');
+  return /<<|@['"]/.test(c) ? [HEREDOC_FILE, HERE_PIPE, HERE_VALUE].flatMap((re) => [...c.matchAll(re)].map((m) => [m.groups.file, m.groups.body])) : [];
+}
+
 // The ego-browser script behind a call: the command, and the files it imports (a file given to `ego-browser nodejs -e` by a file:/// URL) written earlier in the turn.
 function scriptOf(t, writes) {
   const cmd = text(t), files = [...cmd.matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => decodeURI(m[1]).replace(/\\/g, '/').toLowerCase());
@@ -100,7 +115,11 @@ function scriptOf(t, writes) {
 // → { provider, calls, measures, afterLastChange, references }. Nothing of the page is kept: no URL, no text.
 export function observeEyes(tools, { from = -1, provider = null, reply = '', allowed = [] } = {}) {
   const writes = new Map();
-  for (const t of tools) if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') writes.set(String(t.input.file_path).replace(/\\/g, '/').toLowerCase(), t.input.content);
+  const keep = (file, body) => writes.set(String(file).replace(/\\/g, '/').toLowerCase(), body);
+  for (const t of tools) {
+    if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content);
+    else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body);
+  }
   let calls = 0, measures = 0, used = null, offHost = 0, design = 0, panelAt = 'local';
   const captures = [];
   tools.forEach((t, i) => {

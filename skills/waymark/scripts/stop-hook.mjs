@@ -31,7 +31,7 @@ import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
+import { RUNS_EGO, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
 import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
@@ -595,7 +595,7 @@ function observeTurn(S) {
     options: optionsLint(ctx.decisions, S.level),
     guarded: detectGuarded(turn.tools, { cwd: ctx.cwd, cfg: loadRisk(ctx.root, { session: ctx.session }), outputOf: output, denied }),
     chain: ctx.chain ? ctx.chain.ok : null,
-    browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && /\bego-browser\s+nodejs\b/.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
+    browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && RUNS_EGO.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
     // the eyes (docs/adr/0047): browser calls that measured or clicked after the last change; the provider the machine has when none was used
     eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [] }),
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review

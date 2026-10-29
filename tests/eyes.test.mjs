@@ -313,3 +313,78 @@ test('8: no department, tool skill or audit note keeps "the browser only when th
   for (const f of files) assert.doesNotMatch(fs.readFileSync(path.join(root, f), 'utf8'), old, f);
   assert.match(fs.readFileSync(path.join(root, 'skills/dept-devops/SKILL.md'), 'utf8'), /post-deploy smoke test of a deployed host only when the user asks/, 'counter-example: a deployed host is beyond the eyes and stays on request');
 });
+
+// ---- 2.0.20 · point 1 (rows 11, 29, 30): the forms of the ego command the agents really ran, copied as patterns (no path, name or script of a real project) ----
+const EGO_EXE = 'C:/Users/dev/.local/share/ego/active_version_dir/ego-browser.exe';
+const FORMS = {
+  'bare': `ego-browser nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'unquoted absolute path': `${EGO_EXE} nodejs -e "${MEASURE.replace(/"/g, "'")}"`,
+  'quoted absolute path (the form the 2.0.19 message recommended: 75 of 130 misses)': `"${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'single-quoted path': `'${EGO_EXE}' nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'quoted path with a space': `"C:/Program Files/ego/ego-browser.exe" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'a variable': `"$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'an unquoted variable': `$EGO nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'a braced variable': `"\${EGO}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'the variable assigned in the same command': `EGO="${EGO_EXE}"; "$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with a quoted path': `& "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with a variable': `& $exe nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with an environment variable': `& "$env:EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after cd &&': `cd web && "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after touch && sleep &&': `touch ready.flag && sleep 1 && "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after mkdir && cd &&': `mkdir -p out && cd out && "$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'behind timeout': `timeout 120 "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'behind an environment assignment': `EGO_QUIET=1 "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+};
+test('1: every form of the ego command the agents ran is a call, and its measurement counts (one case per form)', () => {
+  for (const [form, command] of Object.entries(FORMS)) {
+    assert.equal(Eyes.RUNS_EGO.test(command), true, `recognised: ${form}`);
+    const g = judge([...head(2, CSS), ...call('Bash', { command })]);
+    assert.equal(g.observed.eyes.calls, 1, `calls: ${form}`);
+    assert.equal(eyes(g).pass, true, `measured after the last change: ${form}`);
+  }
+});
+
+test('1: counter-example — a variable or a path that is not ego, or ego named inside text, is no call', () => {
+  for (const command of ['echo "$EGO nodejs"', 'grep -rn "$EGO nodejs" notes.md', '$NODE script.js', '"$EGO" skill', `"${EGO_EXE}" skill`, 'cat ego-browser-nodejs.md', 'node nodejs.js', 'echo ok && echo "ego-browser nodejs"']) {
+    assert.equal(Eyes.RUNS_EGO.test(command), false, command);
+  }
+});
+
+test('1: the browser the task tried names ego for every form, not only the bare one', () => {
+  const g = judge([...head(2, CSS), ...call('Bash', { command: FORMS['quoted absolute path (the form the 2.0.19 message recommended: 75 of 130 misses)'] })]);
+  assert.ok(g.observed.browser.tried.includes('ego-browser'));
+});
+
+test('1: a script the shell wrote (heredoc or PowerShell here-string) and ego imported later is read: its measurement counts; a look-only one does not', () => {
+  const run = `"${EGO_EXE}" nodejs -e "await import('file:///home/u/ego/round-02.mjs')"`;
+  const body = `const page = (await taskSpace("x")).page("p1");\n${MEASURE}`;
+  const written = {
+    'cat > f <<EOF': `cat > /home/u/ego/round-02.mjs <<'EOF'\n${body}\nEOF`,
+    'cat >> f <<EOF': `cat >> /home/u/ego/round-02.mjs <<'EOF'\n${body}\nEOF`,
+    'tee f <<EOF': `tee /home/u/ego/round-02.mjs <<EOF\n${body}\nEOF`,
+    'here-string piped to Set-Content': `@'\n${body}\n'@ | Set-Content -Path /home/u/ego/round-02.mjs`,
+    'Set-Content -Value here-string': `Set-Content -Path "/home/u/ego/round-02.mjs" -Value @'\n${body}\n'@`,
+  };
+  for (const [how, command] of Object.entries(written)) {
+    const tool = how.includes('here-string') || how.includes('-Value') ? 'PowerShell' : 'Bash';
+    assert.equal(eyes(judge([...head(2, CSS), ...call(tool, { command }), ...call('Bash', { command: run })])).pass, true, how);
+  }
+  const look = `cat > /home/u/ego/round-02.mjs <<'EOF'\nconst page = (await taskSpace("x")).page("p1");\n${LOOK}\nEOF`;
+  assert.equal(eyes(judge([...head(2, CSS), ...call('Bash', { command: look }), ...call('Bash', { command: run })])).pass, false, 'counter-example: a script that only looks');
+});
+
+test('1: the pre-tool guard of the ego host and profile runs for every form of the command (it shared the detector that missed 130 of 182 real calls)', async () => {
+  const { gate } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-eyes-forms-'));
+  const transcript = path.join(proj, 't.jsonl');
+  fs.writeFileSync(transcript, [prompt(`ajusta el botón como en ${DESIGN}`)].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const run = (program, script) => gate({ tool_name: 'Bash', tool_input: { command: `${program} nodejs -e '${script}'` }, cwd: proj, session_id: 's-eyes-forms', transcript_path: transcript }, claude);
+  const programs = [`"${EGO_EXE}"`, '"$EGO"', '& $exe', `cd web && "${EGO_EXE}"`, `timeout 60 "${EGO_EXE}"`];
+  for (const p of programs) {
+    assert.match(run(p, 'await page.goto("https://prod.example.com/")') || '', /neither the local dev server/, `an off host is refused: ${p}`);
+    assert.match(run(p, 'await page.cdp("Network.clearBrowserCookies")') || '', /whole browser profile/, `the profile wipe is refused: ${p}`);
+    assert.equal(run(p, `await page.goto("${DESIGN}")`), null, `the design link the user wrote passes: ${p}`);
+  }
+  fs.rmSync(proj, { recursive: true, force: true });
+});

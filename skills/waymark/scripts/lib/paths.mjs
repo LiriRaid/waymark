@@ -44,8 +44,12 @@ const tmpReal = () => { const t = os.tmpdir(); if (realTmp?.t !== t) realTmp = {
 // A relative path is read as written: resolving it against the process's own folder would make it scratch whenever
 // that folder is under temp.
 const realOf = (p) => (path.isAbsolute(String(p)) ? norm(real(p)) : norm(p));
+// An ego-browser script (a .mjs, .cjs or .js in a folder named ego, .ego or ego-*) written outside the project's root is a tool of the eyes, never a change of the project:
+// denying its write sent the agent to a heredoc, and counting it made a turn of only ego calls a task.
+const EGO_SCRIPT = /(?:^|\/)\.?ego(?:[-_.][\w.-]*)?\/(?:[^/]+\/)*[^/]+\.(?:mjs|cjs|js)$/;
 export const exemptPath = (file, root = '') => {
   const f = norm(file), F = realOf(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()), TMP = tmpReal();
+  if (EGO_SCRIPT.test(f) && !(root && (f.startsWith(`${norm(root)}/`) || F.startsWith(`${realOf(root)}/`)))) return true;
   // a directory entry (git lists an untracked folder alone) is matched like the files in it
   if ([`${f}/`, `${F}/`].some((d) => d.startsWith(`${home}/.waymark/`) || d.includes('/.waymark/') || d.includes('/.claude/projects/'))) return true;
   const scratch = (x) => x.includes('/appdata/local/temp/') || x.startsWith('/tmp/') || (tmp && x.startsWith(`${tmp}/`)) || (TMP && x.startsWith(`${TMP}/`)) || x.includes('/scratchpad/');

@@ -6,8 +6,8 @@ import path from 'node:path';
 // Shell commands that change files in place (the decision gate treats them like edits). Redirects count unless they go
 // to /dev/null, $null, NUL or a temp/scratch folder.
 // Temp/scratch locations: a whole path segment, so project paths such as src/templates/ are not mistaken for temp.
-const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|%TEMP%|\$T\b|mktemp/i;
-const MUTATING = /(?:^|[;&|(]\s*)(?:(?:do|then|else)\s+)?(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|perl\s+(?:-\w+\s+)*-\w*i\w*(?:\s|$)|rm\s|mv\s|cp\s|tee\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New)-Item)/i;
+const TEMP = /(^|[\s"'=\\/])(tmp|temp|scratchpad)[\\/]|AppData[\\/]Local[\\/]Temp|\$\{?TMP|\$\{?TEMP|\$env:(?:TEMP|TMP)|%TEMP%|\$T\b|mktemp/i;
+const MUTATING = /(?:^|[;&|(]\s*)(?:(?:do|then|else)\s+)?(?:git\s+(?:checkout\s+(?:\S+\s+)*--(?:\s|$)|(?:restore|reset\s+--hard|apply|rm|mv|clean)\b)|sed\s+(?:-\w+\s+)*-i|perl\s+(?:-\w+\s+)*-\w*i\w*(?:\s|$)|rm\s|mv\s|cp\s|tee\s|(?:del|erase|ren|rename|move|copy|xcopy|robocopy)\s|(?:Set|Add)-Content|Out-File|(?:Remove|Move|Copy|New|Rename)-Item)/i;
 // The command with the text inside quotes, heredoc bodies and PowerShell here-strings blanked (same length, so an index
 // in it is an index in the command): a ">" there is code or text, not a redirect (`node -e "…x=>{…}"`).
 // quotes: false keeps the quoted text — `bash -c "npm test"` still runs a test — and blanks only the bodies (a spec
@@ -45,13 +45,22 @@ export function scriptWriteTargets(command) {
   return [...new Set(out)];
 }
 
-export function mutatesFiles(command) {
-  const c = String(command || '');
-  if (MUTATING.test(c) || scriptWrites(c)) return true;
-  const skeleton = shellSkeleton(c);
+// Another shell given a command in quotes (bash -c "…", pwsh -Command '…', cmd /c "…"): that text is a command, unlike the quoted text of a grep or a commit message.
+const INNER_SHELL = /(?:^|[\s;&|(])(?:(?:ba|z|da)?sh|pwsh|powershell)(?:\.exe)?\s+(?:-\w+\s+)*-(?:c|Command)\s+("(?:\\.|[^"\\])*"|'[^']*')|\bcmd(?:\.exe)?\s+\/[ck]\s+("(?:\\.|[^"\\])*"|'[^']*'|[^&|;\n]+)/gi;
+// The value a variable was assigned in the same command (VAR=x, $var = "x").
+const assignedIn = (command, name) => command.match(new RegExp(String.raw`(?:^|[\s;&(])\$?${name}\s*=\s*["']?([^"';&|\n]+)`))?.[1];
+export function mutatesFiles(command, depth = 0) {
+  const c = String(command || ''), skeleton = shellSkeleton(c);
+  // read on the skeleton: a word between quotes (grep "a|rm", git commit -m "…; mv") is text, not a command
+  if (MUTATING.test(skeleton) || scriptWrites(c)) return true;
+  if (depth < 2) for (const m of c.matchAll(INNER_SHELL)) { const inner = String(m[1] ?? m[2] ?? '').replace(/^["']|["']$/g, ''); if (inner && mutatesFiles(inner, depth + 1)) return true; }
   for (const m of skeleton.matchAll(/(?<![0-9&>=-])>{1,2}/g)) { // a redirect outside quotes; its target read from the command
     const t = c.slice(m.index + m[0].length).match(/^\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;]+))/), target = t && (t[1] ?? t[2] ?? t[3]);
-    if (target && !/^(\/dev\/null|\$null|nul|&\d)$/i.test(target) && !TEMP.test(target)) return true;
+    if (!target || /^(\/dev\/null|\$null|nul|&\d)$/i.test(target) || TEMP.test(target)) continue;
+    // a variable is no path: the temp place or the folder the command assigned it, else nothing the hook can tell (the end of the turn reads what git saw)
+    const name = target.match(/^\$\{?(?:env:)?(\w+)\}?$/)?.[1];
+    if (name) { const value = assignedIn(c, name); if (!value || TEMP.test(value)) continue; }
+    return true;
   }
   return false;
 }

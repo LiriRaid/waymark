@@ -322,6 +322,11 @@ export function routedLevel(texts, tools) {
 // is not one (a Q answer that names it is not a closed task).
 export const CIERRE = /^[ \t]*##\s*Cierre\b/m;
 
+// An L1 with one real way says it in a `Camino: <it>` line before its first change and owes no choice window (Rule 0). One reading for the decision gate
+// (tool-hook.mjs) and the Decision testigo (stop-hook.mjs). `before`: the index of the turn's first change; the line counts when it was said before that call.
+export const CAMINO = /^[ \t]*(?:[-*][ \t]*)?Camino:[ \t]*\S/m;
+export const caminoSaid = (turn, before = Infinity) => (turn?.textAt || []).some(([at, t]) => at <= before && CAMINO.test(String(t).replace(/\*\*|__/g, '')));
+
 // A turn with no routing at all inherits the routing of the task's last routed turn (L1–L3) while that turn has not
 // written its Cierre: a reply to a question asked in the chat (Codex) opens a new unrouted turn, which would read as L0
 // and skip the gate. Looks back within the task (the two prompts before this one); an

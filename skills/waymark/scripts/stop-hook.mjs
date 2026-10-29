@@ -26,7 +26,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { topOf } from './lib/git.mjs';
-import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
+import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
@@ -127,6 +127,9 @@ export function testTargets(command) {
   }
   return [...new Set(out)];
 }
+// The test files a failed run names, as the runners print them: node:test "test at <file>:1:1", vitest and jest "FAIL <file>", pytest "FAILED <file>::case". → paths as testTargets spells them.
+const FAILED_FILE = /(?:^|\n)\s*(?:test at |FAIL(?:ED)?\s+)(\S+?\.(?:(?:test|spec)\.[cm]?[jt]sx?|py))(?=[:\s>]|$)/g;
+export const failedFiles = (out) => [...new Set([...String(out || '').matchAll(FAILED_FILE)].map((m) => m[1].replace(/\\/g, '/').replace(/^\.\//, '')))];
 export const testCovers = (later, earlier) => !later.length || (earlier.length > 0 && earlier.every((f) => later.some((r) => f === r || f.startsWith(`${r}/`))));
 // An edit that only re-exports (a barrel: `export * from './x'`): no behavior, so no spec has to fail before it.
 export const isBarrel = (t) => {
@@ -774,7 +777,7 @@ function decisionWitness(S) {
   // an L1 with one real way says it in a `Camino:` line before its first change, and owes no window (one response fewer, each re-reading the context)
   const turnChange = (S.turn?.tools || []).findIndex(changedFile);
   const earlierChange = firstTaskChange >= 0 && firstTaskChange < taskTools.length - (S.turn?.tools?.length || 0); // changed in an earlier turn: a Camino now comes after it
-  const camino = Number(S.level) === 1 && !earlierChange && (S.turn?.textAt || []).some(([at, t]) => (turnChange < 0 || at <= turnChange) && /^[ \t]*(?:[-*][ \t]*)?Camino:[ \t]*\S/m.test(t));
+  const camino = Number(S.level) === 1 && !earlierChange && caminoSaid(S.turn, turnChange < 0 ? Infinity : turnChange);
   if (ctx.decisions && !ctx.decisions.length && !camino) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick (an L1 with one real way: a `Camino: <it>` line before its first change instead)');
   else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
   return { decision, lateDecision };
@@ -803,7 +806,9 @@ function gateWitness(S) {
     observed.gate = run || null;
     // a run in a clean copy (git worktree) is meant to fail: it shows a failure is not this task's, or a spec red first
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > lastCode && testCmd(t) && !envFail(t) && !apart(t));
-    for (const [t, i] of after) if (failedRun(t, 'test') && !after.some(([x, j]) => j > i && (cmdKey(x) === cmdKey(t) || testCovers(testTargets(cmdOf(x)), testTargets(cmdOf(t)))) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
+    // a red the output names file by file (a suite that flaked under load) is cleared by a later green run of each file it names, run alone
+    const flaked = (t, i) => { const files = failedFiles(output(t)); return files.length > 0 && files.every((f) => after.some(([x, j]) => j > i && !failedRun(x, 'test') && testCovers(testTargets(cmdOf(x)), [f]))); };
+    for (const [t, i] of after) if (failedRun(t, 'test') && !flaked(t, i) && !after.some(([x, j]) => j > i && (cmdKey(x) === cmdKey(t) || testCovers(testTargets(cmdOf(x)), testTargets(cmdOf(t)))) && !failedRun(x, 'test'))) redTests.push(keepCmd(cmdKey(t)).cmd);
     observed.tests.failed = redTests;
     const none = 'no typecheck, lint or build ran after the last code change';
     // a gate the agent tried and the machine could not run (the tool is not installed): not a failure of the code, and not "nothing ran"
@@ -1029,8 +1034,9 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   allTools = sameTools ? turn.tools : splitShellCalls(allTools);
   ctx = { ...ctx, ...(ctx.taskTools ? { taskTools: splitShellCalls(ctx.taskTools) } : {}), ...(ctx.stretchTools ? { stretchTools: splitShellCalls(ctx.stretchTools) } : {}) };
   projectRoot = ctx.cwd || '';
+  const denied = (t) => !!(turn.results?.[t.id]?.error || t.error); // an edit the gate denied changed nothing: no file of the task, no task of its own
   const byKey = new Map();
-  for (const f of [...turn.tools.filter((t) => EDITS.test(t.name)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
+  for (const f of [...turn.tools.filter((t) => EDITS.test(t.name) && !denied(t)).map(fileOf), ...(ctx.gitChanged || [])]) if (f && !exempt(f) && !byKey.has(norm(f))) byKey.set(norm(f), f);
   const changed = [...byKey.values()];
   // A task with a Cierre whose changes are all outside the project (install, cleanup) is recorded too (ctx.outside):
   // a Cierre heading at the start of a line, in a turn routed L1–L3 — never a Q turn.
@@ -1048,7 +1054,6 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const routed = routedLevel([...turn.texts, full], turn.tools) || ctx.inherited?.level || 0; // an unrouted reply inside an open task
   // The level judged comes from what the agent changed, with the declared one as a floor: 1–2 files → L1, more → L2. L3
   // only when declared; an explicit L0 keeps its skip for a single file; a Q turn that changed files is judged as L2.
-  const denied = (t) => !!(turn.results?.[t.id]?.error || t.error); // an edit the gate denied changed nothing
   const agentFiles = new Set(turn.tools.filter((t) => EDITS.test(t.name) && !denied(t) && !exempt(fileOf(t))).map((t) => norm(fileOf(t))));
   if (turn.tools.some((t) => shell(t) && changesProject(t.input.command))) for (const f of ctx.gitChanged || []) if (!exempt(f)) agentFiles.add(norm(f));
   const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;

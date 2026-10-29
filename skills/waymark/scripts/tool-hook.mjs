@@ -13,7 +13,7 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
+import { currentTurn, routedLevel, routedDept, inheritedRoute, caminoSaid, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
 import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
@@ -56,6 +56,7 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
     try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); return true; } catch { return false; }
   };
   if (q && once('q')) return 'Waymark: this turn was routed as a question (Q) but is about to change project files. A question that becomes a change is a task: re-route with a tool call — invoke the owner dept-* skill with args "L<n>" (e.g. Skill dept-frontend, args "L2"); a routing line written mid-turn is not persisted — then the opener, and put the decision to the user with the optimal options before changing anything.';
+  if (level === 1 && caminoSaid(turn)) return null; // an L1 with its `Camino:` line owes no window: the reading the end-of-turn hook has (Rule 0)
   // Strict gate (user's decision 2026-10-02): no change until the user was asked in the choice window in this task.
   // The task starts after this session's last close: the previous task's question never opens it (the ID is not known
   // yet, so a follow-up asks or confirms again).
@@ -288,9 +289,23 @@ export function checkMove(command, cwd, session, task = '', stateFile = path.joi
 
 // An ego-browser script, with the files it imports by file:/// URL, checked before it runs (docs/adr/0047): the local dev server and the design
 // link the user wrote in the request are the only hosts; a profile-wide clear and a typed password never run. → the deny reason, or null.
-function checkEyes(command, turns) {
+// The design link is the user's for the whole job: the hosts of the links they wrote are kept per session (a small file, read and written only on an ego call), so a
+// later task of the same job, whose own prompts do not repeat the link, still may look at it.
+const EYES_HOSTS = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.eyes-hosts.json');
+function sessionHosts(session, written, file = EYES_HOSTS()) {
+  let all = {};
+  try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const kept = new Set([...(all[session]?.hosts || []), ...written]);
+  if (written.some((h) => !(all[session]?.hosts || []).includes(h))) {
+    for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
+    all[session] = { at: Date.now(), hosts: [...kept] };
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch {}
+  }
+  return [...kept];
+}
+function checkEyes(command, turns, session = 'unknown') {
   const files = [...String(command).matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => { try { return fs.readFileSync(decodeURI(m[1]), 'utf8'); } catch { return ''; } });
-  const why = eyesRefusal([command, ...files].join('\n'), requestRefs(turns().filter(isPrompt)).hosts);
+  const why = eyesRefusal([command, ...files].join('\n'), sessionHosts(session, requestRefs(turns().filter(isPrompt)).hosts));
   return why ? `Waymark: this ego-browser script was not run: ${why}. The eyes look at the local dev server as the user, already signed in (docs/adr/0047).` : null;
 }
 
@@ -326,7 +341,7 @@ export function gate(hook, agent) {
     if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
     const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
     if (trailer) return trailer;
-    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
+    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
     if (/(?:^|[;&|(\s])(?:mv|move|Move-Item)\s/i.test(c.command)) { // a census that cannot run leaves the move to the decision gate below
       let move = null;

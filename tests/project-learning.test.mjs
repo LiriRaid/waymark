@@ -54,7 +54,7 @@ test('23: the template\'s Stack, Source root, Path aliases, Related projects and
   const { spawnSync } = await import('node:child_process');
   const C = await import(`file://${SCRIPTS}/convention.mjs`);
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-boot-')); after(() => fs.rmSync(d, { recursive: true, force: true }));
-  const files = { 'package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.1.0', rxjs: '~7.8.0' } }), 'tsconfig.json': '{\n  // paths of the app\n  "compilerOptions": { "paths": { "@core/*": ["src/app/core/*"], "@shared/*": ["src/app/shared/*"] } }\n}\n' };
+  const files = { 'package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/animations': '^20.1.0', '@angular/common': '^20.1.0', '@angular/core': '^20.1.0', rxjs: '~7.8.0' } }), 'tsconfig.json': '{\n  // paths of the app\n  "compilerOptions": { "paths": { "@core/*": ["src/app/core/*"], /* shared */ "@shared/*": ["src/app/shared/*"] } }, // trailing note\n  "include": ["src/*/types/**/*.ts"]\n}\n' };
   for (let i = 1; i <= 5; i++) files[`src/app/shared/components/b${i}/b${i}.component.ts`] = '@Component({})\nexport class B {}\n';
   for (let i = 1; i <= 3; i++) files[`src/app/core/services/s${i}.service.ts`] = 'export class S {}\n';
   files['src/app/features/orders/orders.component.ts'] = '@Component({})\nexport class O {}\n';
@@ -65,7 +65,8 @@ test('23: the template\'s Stack, Source root, Path aliases, Related projects and
   fs.writeFileSync(file, fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'templates', 'project-memory.template.md'), 'utf8'));
   assert.equal(C.fillMemory(file, C.census(d), { related: ['api (../omni-inbox-api)'] }), true);
   const text = fs.readFileSync(file, 'utf8');
-  assert.match(text, /^- Stack: @angular\/core \^20\.1\.0, rxjs ~7\.8\.0 \(to confirm\)$/m);
+  assert.match(text, /^- Stack: @angular\/core 20\.1\.0\b[^\n]* \(to confirm\)$/m, 'the framework, not the first dependency');
+  assert.doesNotMatch(text, /^- Stack: @angular\/animations/m);
   assert.match(text, /^- Source root and layout: src\/app\/\{[a-z,]*core[a-z,]*\} \(to confirm\)$/m);
   assert.match(text, /^- Path aliases: @core\/\* → src\/app\/core\/\*, @shared\/\* → src\/app\/shared\/\* \(to confirm\)$/m, 'the tsconfig paths, comments and all');
   assert.match(text, /^- Related projects: api \(\.\.\/omni-inbox-api\) \(to confirm\)$/m);

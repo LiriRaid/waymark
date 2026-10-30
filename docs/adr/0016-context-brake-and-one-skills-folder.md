@@ -1,6 +1,6 @@
 # 0016 · Context brake, one project-skills folder, no-change tasks recorded
 
-**Status:** accepted (2026-10-06, Waymark 2.0.0-dev). Every pick below is the user's (2026-10-06 · T8). It amends 0015.
+**Status:** accepted (2026-10-06, Waymark 2.0.0-dev). Every pick below is the user's (2026-10-06 · T8). It amends 0015. **Amended by 0050 (2.0.20): the brake advises and saves the work's state, it no longer stops a prompt unless `WAYMARK_BRAKE_MODE=block`.**
 
 ## Context
 - **Large sessions cost the most.** A session past ~150k tokens took about 8% of the plan quota per task. Every response re-reads the whole session, even when the new task has nothing to do with the old ones. The card, tasks.md, engram and the git notes already carry the work over, so a new session loses nothing.

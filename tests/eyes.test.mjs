@@ -438,3 +438,10 @@ test('15: a space closed while the task is open, or opened anew inside one task,
   assert.ok(anew.findings.some((f) => /ego was opened 2 times in one task \(uno, dos;/.test(f)), JSON.stringify(anew.findings));
   assert.ok(!judge([...head(2, CSS), ...egoIn('uno', MEASURE), ...egoIn('uno', CLICK)]).findings.some((f) => /ego was opened/.test(f)), 'counter-example: the same space resumed is one');
 });
+
+// ---- review of level 2: the gate rule in a turn that changed nothing, and with a real failure beside a missing tool ----
+test('18 (review): a red typecheck beside a command the machine cannot run still holds the look back; the missing tool alone does not', () => {
+  const redAndMissing = judge([...bare(2, CSS), ...GATE_FAIL, ...call('Bash', { command: 'pnpm exec eslint src' }, 'eslint: command not found', true), ...ego(MEASURE)]);
+  assert.equal(eyes(redAndMissing).pass, false, 'a typecheck that really failed is not excused by a lint that could not run');
+  assert.equal(eyes(judge([...bare(2, CSS), ...GATE_MISSING, ...ego(MEASURE)])).pass, true, 'counter-example: only a missing tool');
+});

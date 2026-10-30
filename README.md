@@ -395,6 +395,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0047 · The eyes: a seen change is looked at before it is done](docs/adr/0047-the-eyes-a-seen-change-is-looked-at-before-it-is-done.md)
 - [0048 · A cut turn is not a failed task, and an agent that cannot carry the chain yet is coming soon](docs/adr/0048-a-cut-turn-is-not-a-failed-task-and-an-agent-that-cannot-yet-is-coming-soon.md)
 - [0049 · The scorecard reads real use, and the records prepare clean data](docs/adr/0049-the-scorecard-reads-real-use-and-the-records-prepare-clean-data.md)
+- [0050 · No task closes parcial, and the hooks do not repeat work](docs/adr/0050-no-task-closes-parcial-and-the-hooks-do-not-repeat-work.md)
 <!-- adr-index:end -->
 
 ## Contributing back

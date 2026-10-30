@@ -139,3 +139,12 @@ test('10: a block that asks for the Cierre names the task ID and the follow-up I
   assert.doesNotMatch(blockReason({ level: 2, missing: ['no review ran'], ids: { next: '2026-10-29 · T9', followUp: null } }), /takes the ID/, 'the Cierre is already written: its ID is not repeated');
   assert.doesNotMatch(blockReason({ level: 1, missing: noCierre }), /takes the ID/, 'a caller with no IDs says nothing');
 });
+
+// ---- review of level 2: the way out the message names is the one the record understands ----
+test('2 (review): "hecho (pendiente tuyo: …)", the form the message asks for, records what is pending and shows it in tasks.md', () => {
+  const r = outcome('Resultado: hecho (pendiente tuyo: prueba manual del flujo de pago)', [], [], 2);
+  assert.deepEqual([r.result, r.userOwned], ['hecho', ['manual']]);
+  assert.deepEqual(r.pending, ['prueba manual del flujo de pago']);
+  assert.deepEqual(outcome('Resultado: hecho', [], [], 2), { result: 'hecho' }, 'counter-example: a plain hecho records nothing pending');
+  assert.equal(outcome('Resultado: hecho (todo probado, el pendiente tuyo ya no existe)', [], [], 2).userOwned, undefined, 'counter-example: the words in a sentence are no pending');
+});

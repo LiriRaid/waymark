@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { topOf } from './lib/git.mjs';
+import { topOf, addedPaths } from './lib/git.mjs';
 import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
@@ -549,10 +549,12 @@ function observeTurn(S) {
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => runsOf(t).some((p) => p.gate || p.test));
   // the first project gate that passed after the last change: a look before it counts for nothing (the typecheck goes before the eyes). A gate the machine could not run
   // (the tool is not installed) holds nothing back: -1. Infinity: none passed.
+  // A turn that changed nothing waits for nothing (the gate was in the turn of the change); the machine's missing tool excuses the look only when no gate ran for real.
   const eyesGateAt = (from) => {
+    if (from < 0) return -1;
     const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > from && gateCmd(t) && !apart(t));
     const passed = after.find(([t]) => !failedRun(t, 'gate') && !envFail(t));
-    return passed ? passed[1] : after.some(([t]) => envFail(t)) ? -1 : Infinity;
+    return passed ? passed[1] : after.length && after.every(([t]) => envFail(t)) ? -1 : Infinity;
   };
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
@@ -868,10 +870,11 @@ function cierreWitness(S) {
       if (id && validId(id, ctx.ids)) { const why = followUpFails(id, changed, ctx); if (why) renamed = { from: id, to: ctx.ids.next, why }; }
     }
     // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
-    if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
+    const answers = pedidoAnswers(reply);
+    if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, answers, field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
     // no task closes parcial: a gap of the work is finished now (an L2/L3 task is one task), a gap only the user can close is hecho with it named, and what cannot be finished is bloqueado
-    const o = outcome(reply, ctx.pedido, pedidoAnswers(reply), S.level, ctx.owned, S.win);
-    if (/^parcial\b/i.test(field(reply, 'Resultado')) && o.result === 'parcial' && !o.cause) cierre.push('Resultado: parcial leaves work undone: finish it now (the steps of one task are done in that task); if only your user can close the gap (their manual test, their PR) say it as "hecho (pendiente tuyo: <it>)" and if something outside prevents it write "bloqueado (<why>)"');
+    const o = /^parcial\b/i.test(field(reply, 'Resultado')) ? outcome(reply, ctx.pedido, answers, S.level, ctx.owned, S.win) : null;
+    if (o && o.result === 'parcial' && !o.cause) cierre.push('Resultado: parcial leaves work undone: finish it now (the steps of one task are done in that task); if only your user can close the gap (their manual test, their PR) say it as "hecho (pendiente tuyo: <it>)" and if something outside prevents it write "bloqueado (<why>)"');
   }
   return { cierre, renamed };
 }
@@ -1174,6 +1177,9 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
   const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
   if (said === 'hecho' && gaps.length) return { result: 'parcial', said, why: 'an item of the ask is unanswered or marked ✘' };
   if (said === 'hecho' && win?.failed.length) return { result: 'parcial', said, why: 'the Cierre marks ✘ a choice of the window' };
+  // the form the Cierre's message asks for: "hecho (pendiente tuyo: <it>)" says what is left for the user, in the record and in tasks.md
+  const pendingMine = said === 'hecho' && !gaps.length && !win?.failed.length ? reply.match(/^[ \t]*Resultado:[ \t]*hecho[ \t]*\([ \t]*pendiente tuyo:[ \t]*([^)\n]+)\)/imu)?.[1] : null;
+  if (pendingMine) return { result: 'hecho', said, userOwned: ['manual'], pending: [pendingMine.trim().slice(0, 120)] };
   if (said === 'parcial') {
     const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
     // every gap the parcial lists must be a step of the user's; one gap of the work keeps it parcial
@@ -1366,7 +1372,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.related = (files) => { try { return relatedRun(home.memory, home.root, files); } catch { return null; } }; // the run of only these specs, from memory.md
       ctx.root = home.root;
-      ctx.newAtHead = (f) => { try { const rel = path.relative(home.root, f).split(path.sep).join('/'); return !rel.startsWith('..') && spawnSync('git', ['cat-file', '-e', `HEAD:${rel}`], { cwd: home.root, timeout: 1500 }).status !== 0; } catch { return false; } }; // the file is not in the last commit
+      let added = null; // looked up once, and only when a red proof would be owed
+      ctx.newAtHead = (f) => { try { added ??= addedPaths(home.root); const rel = path.relative(home.root, f).split(path.sep).join('/'); return !rel.startsWith('..') && added.has(rel); } catch { return false; } }; // HEAD never held it, under any name
       try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
       try { ctx.requests = requestRefs(task.filter(isPrompt)); } catch {} // the screenshots and the design links the user sent: what the eyes compare against

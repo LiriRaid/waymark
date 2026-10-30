@@ -146,7 +146,7 @@ test('check: each agent on the machine without Waymark hooks is offered install-
 
 test('instructions block: the "no card, no hook line" alarm only applies to an agent whose hooks run Waymark', () => {
   const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
-  assert.match(block, /Hooks installed but no card and no hook line → they are not running/);
+  assert.match(block, /Hooks installed, no card and no hook line → not running/);
   assert.ok(block.length <= 6500, `the block stays within its size (${block.length})`);
 });
 

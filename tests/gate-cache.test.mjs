@@ -28,6 +28,7 @@ const repo = (script = 'process.exit(0)') => {
   fs.mkdirSync(path.join(d, 'src'));
   fs.writeFileSync(path.join(d, 'src', 'a.mjs'), 'export const a = 1;\n');
   fs.writeFileSync(path.join(d, 'check.cjs'), `require('fs').appendFileSync(${JSON.stringify(counter(d))}, 'x'); ${script}\n`);
+  fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\n');
   fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'p', scripts: { typecheck: 'node check.cjs' } }));
   git('add', '-A'); git('commit', '-q', '-m', 'init');
   return d;
@@ -51,15 +52,26 @@ test('17a: the hook\'s own typecheck runs once on a tree it already checked; a c
   assert.equal(runs(d), 3, 'counter-example: a new file is a changed tree');
 });
 
-test('17a: a failing typecheck is kept too (the same red tree is red), and a timed-out or old entry is not trusted', () => {
+test('17a: only a pass is kept (a red from a transient would block the next Stop for twenty minutes); an old entry is not trusted', () => {
   const d = repo('process.exit(1)');
   assert.equal(gate(d).ok, false);
-  const again = gate(d);
-  assert.deepEqual([runs(d), again.ok, again.cached], [1, false, true], 'the same red tree');
+  assert.equal(gate(d).ok, false);
+  assert.equal(runs(d), 2, 'a failing run is run again: the same red tree may have been a transient');
+  const e = repo();
+  gate(e);
   const file = path.join(home, '.gate-cache.json');
   const cache = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const k of Object.keys(cache)) cache[k].at -= 21 * 60000;
   fs.writeFileSync(file, JSON.stringify(cache));
+  gate(e);
+  assert.equal(runs(e), 2, 'counter-example: an entry older than twenty minutes is run again');
+});
+
+test('17a (review): a reinstall of dependencies changes what the typecheck sees without touching git status, so it is run again', () => {
+  const d = repo();
   gate(d);
-  assert.equal(runs(d), 2, 'counter-example: an entry older than twenty minutes is run again');
+  fs.mkdirSync(path.join(d, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'node_modules', '.package-lock.json'), '{}');
+  gate(d);
+  assert.equal(runs(d), 2, 'node_modules is ignored by git: its install marker is part of the tree');
 });

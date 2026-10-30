@@ -261,5 +261,9 @@ test('owed at the end: the first change of a task hands what the close asks, onc
   const second = await packContext(call('b.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
   assert.doesNotMatch(second || '', /At L2 and above/, 'once per task, with the first change');
   const ui = await packContext(call('app.css', 's-owed-ui'), claude, path.join(home, 'packed-owed.json'));
+  const l1 = path.join(home, 'owed-l1.jsonl');
+  fs.writeFileSync(l1, [prompt('cambia el color', '2026-10-15T10:00:00Z'), ...run('Skill', { skill: 'dept-frontend', args: 'L1' })].map((l) => JSON.stringify(l)).join('\n'));
+  const small = await packContext({ ...call('a.mjs', 's-owed-l1'), transcript_path: l1 }, claude, path.join(home, 'packed-owed.json'));
+  assert.doesNotMatch(small || '', /At L2 and above/, 'an L1 is not handed a list it does not owe');
   assert.match(ui || '', /eyes: look at what you built in the browser/, 'a styles file adds the look');
 });

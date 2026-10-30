@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git } from './lib/git.mjs';
 import { read } from './lib/fs.mjs';
+import { stackOf } from './stack.mjs';
 
 const SKIP = /(^|\/)(\.git|node_modules|dist|build|out|coverage|\.angular|\.next|\.nuxt|vendor|target|\.waymark|\.agents|\.claude|\.engram)(\/|$)/;
 const SHARED = /^(shared|common|ui|components|lib|libs)$/, CORE = /^core$/, FEATURES = /^(features|modules|domains)$/;
@@ -217,13 +218,26 @@ export function judgeMove(conv, kind, from, to) {
   return { verdict: 'follows', line: `follows the convention: ${at.line}` };
 }
 
+// JSON with comments (a tsconfig): `//` to the end of the line and `/* */`, but never inside a string ("src/*/types", "./src/**/*").
+function stripJsonComments(text) {
+  let out = '', i = 0, str = false;
+  while (i < text.length) {
+    const c = text[i], n = text[i + 1];
+    if (str) { out += c; if (c === '\\') out += text[++i] ?? ''; else if (c === '"') str = false; i++; continue; }
+    if (c === '"') { str = true; out += c; i++; continue; }
+    if (c === '/' && n === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (c === '/' && n === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
 // The repo's own path aliases: the `paths` of tsconfig.json (comments allowed), tsconfig.app.json or jsconfig.json, "@core/* → src/app/core/*", at most 6; '' when it declares none.
 function pathAliases(repo) {
   for (const f of ['tsconfig.json', 'tsconfig.app.json', 'jsconfig.json']) {
     const text = read(path.join(repo, f));
     if (!text) continue;
     try {
-      const paths = JSON.parse(text.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*$/gm, '')).compilerOptions?.paths || {};
+      const paths = JSON.parse(stripJsonComments(text)).compilerOptions?.paths || {};
       const list = Object.entries(paths).map(([k, v]) => `${k} → ${[].concat(v)[0]}`).slice(0, 6);
       if (list.length) return list.join(', ');
     } catch { /* a tsconfig this does not parse says nothing */ }
@@ -234,10 +248,9 @@ function pathAliases(repo) {
 // Related projects (the workspace's other projects, given by the caller) and where each kind of reusable piece lives. A line somebody wrote is never touched.
 function fillProjectMap(text, conv, related) {
   let out = text;
-  const deps = (() => { try { return JSON.parse(read(path.join(conv.repo, 'package.json')) || '{}'); } catch { return {}; } })();
-  const declared = Object.entries({ ...deps.dependencies, ...deps.devDependencies }).slice(0, 2).map(([n, v]) => `${n} ${v}`);
+  const stack = stackOf(conv.repo), declared = stack?.deps?.length ? stack.deps.slice(0, 3).map(([n, v]) => `${n} ${v}`).join(', ') : stack?.other || ''; // the main dependencies it ranks, or the other stack's manifest
   const set = (re, line) => { if (line) out = out.replace(re, line); };
-  set(/^- Stack:\s*<[^\n]*$/m, declared.length ? `- Stack: ${declared.join(', ')} (to confirm)` : '');
+  set(/^- Stack:\s*<[^\n]*$/m, declared ? `- Stack: ${declared} (to confirm)` : '');
   const tops = [...new Set(Object.keys(conv.layers).map((l) => l.split('/')[0]).filter((l) => l !== '.'))].slice(0, 6);
   set(/^- Source root and layout:\s*<[^\n]*$/m, conv.root && tops.length ? `- Source root and layout: ${conv.root}/{${tops.join(',')}} (to confirm)` : '');
   const aliases = pathAliases(conv.repo);

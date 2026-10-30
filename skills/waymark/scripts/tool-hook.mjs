@@ -441,16 +441,20 @@ export function commandRepos(command, cwd = process.cwd()) {
 // The department the task is routed to comes first: the line "Waymark → L<n> · dept-X" of the turn, or a re-route by Skill call with args. A session
 // that loaded dept-frontend and now routes a backend task by the line alone owns a backend task, not a frontend one. The line is not in the transcript
 // for a second or two after it is written, so until it shows the last department the session invoked stands in (the next edit hands the right one).
-function ownerDept(hook, agent) {
-  if (!hook.transcript_path) return null;
+// The task's route as the transcript shows it: the owner department and the declared level (null when none).
+function routeOf(hook, agent) {
+  if (!hook.transcript_path) return { dept: null, level: null };
   try {
     const lines = agent.read(hook, 512 * 1024), turn = currentTurn(lines);
-    const routed = routedDept(turn.texts, turn.tools) || inheritedRoute(lines)?.dept; // a later prompt of the task keeps the route of the one before
-    if (routed) return routed;
+    const inherited = inheritedRoute(lines); // a later prompt of the task keeps the route of the one before
+    const level = routedLevel(turn.texts, turn.tools) || inherited?.level || null;
+    const routed = routedDept(turn.texts, turn.tools) || inherited?.dept;
+    if (routed) return { dept: routed, level };
     const calls = sessionTools(lines).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
-    return calls.length ? String(calls.at(-1).input.skill) : null;
-  } catch { return null; }
+    return { dept: calls.length ? String(calls.at(-1).input.skill) : null, level };
+  } catch { return { dept: null, level: null }; }
 }
+const ownerDept = (hook, agent) => routeOf(hook, agent).dept;
 
 // Procedures by the hook (docs/adr/0027): at the task's first change the owner department's procedures.md goes in as
 // context, once per task and department, so the agent spends no response reading it. The delivery is kept with the packed
@@ -510,7 +514,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
+  const route = routeOf(hook, agent), dept = route.dept, procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
   // a change by shell that names no file and has no owner to hand yet still leaves the task's state, so a department that loads after it is handed its procedures at the load
   if (!fresh.length && !procText && !(c?.shell && !packedAny(session, since, file))) return null;
@@ -524,7 +528,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
-  const owed = fresh.length && !done.size ? owedAtClose(fresh) : ''; // with the task's first change, never again
+  const owed = fresh.length && !done.size && Number(route.level) >= 2 ? owedAtClose(fresh) : ''; // with the first change of an L2+ task, never again; an L1 owes none of it
   return [memory, procs, owed].filter(Boolean).join('\n\n') || null;
 }
 

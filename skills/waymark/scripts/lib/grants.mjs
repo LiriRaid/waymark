@@ -12,6 +12,9 @@ import { waymarkHome } from './paths.mjs';
 export const LABELS = [[/^\s*(solo esta tarea|only this task)/i, 'task'], [/^\s*(esta sesi[oó]n|this session)/i, 'session'], [/^\s*(siempre|always)/i, 'always']];
 export const WINDOW = 'Solo esta tarea · Esta sesión · Siempre este nombre de archivo · No';
 const ASKED = /Sensitive allow:\s*([^\s?¿"“”)]+)/;
+// An answer typed instead of an option that opens with a plain yes is the user's permission for this task; one that opens with no, or with no yes, grants nothing.
+const YES = /^\s*(ok|okay|vale|s[ií]|sip|dale|claro|adelante|hazlo|puedes|yes|yep|sure|go ahead)(?![\p{L}\d])/iu; // not \b: it does not see the end of "sí"
+const TAKEN_BACK = /^\s*\p{L}+[\s,.;:!-]{0,3}(pero|mejor|aunque|but|actually)\s+(no|not)(?![\p{L}\d])/iu; // "ok, pero no": the yes is withdrawn right after the yes word
 const DAY = 86400000;
 
 // The permissions the user gave in the answered choice windows of these lines (decisionsIn): [{ path, scope }].
@@ -19,7 +22,9 @@ export function grantsIn(decisions) {
   const out = [];
   for (const d of decisions || []) {
     const asked = String(d.question || '').match(ASKED)?.[1];
-    const scope = LABELS.find(([re]) => re.test(String(d.chosen || '')))?.[1];
+    const chosen = String(d.chosen || '');
+    const typed = d.labels && !d.labels.includes(chosen) && YES.test(chosen) && !TAKEN_BACK.test(chosen); // the user's own typed answer ("Otra cosa"), never the agent's text
+    const scope = LABELS.find(([re]) => re.test(chosen))?.[1] || (typed ? 'task' : undefined);
     if (asked && scope) out.push({ path: asked.replace(/\\/g, '/'), scope });
   }
   return out;

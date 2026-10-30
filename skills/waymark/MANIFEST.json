@@ -148,7 +148,7 @@
   "waymark/scripts/lib/denied.mjs": "5bb2310ba2a80347f4084023c9afc56fa6de8194f1183614272bca16bded34aa",
   "waymark/scripts/lib/fs.mjs": "ed434cc3152feba2fc2a507c5919b02b78c0fcb65fad97a546bb8fa76b07afa8",
   "waymark/scripts/lib/git.mjs": "174ae90d66adb5b27797c1f4419a2a55bb8251518e4b81af653d287edf61bd18",
-  "waymark/scripts/lib/grants.mjs": "d6cb51b0472b0fae255771c9a53a9e624c41b1d8534c2f71679418822fce6ddf",
+  "waymark/scripts/lib/grants.mjs": "ddee1ae5ec8032fee16617f3c2fba0d8eb55a4b0b100d4cd138d810735bd07f5",
   "waymark/scripts/lib/guard.mjs": "f903191a33a9d375939d4ca18aefc9bdeabb54ecd716e69cff8bdf03af76152d",
   "waymark/scripts/lib/hash.mjs": "33e17ff428fee9ad062bbe3a09a53a15598f5796a46ab572e9dfbe76b686ad96",
   "waymark/scripts/lib/known.mjs": "5670dcd69a88c6b30471d8d906f90af8d21c931c4b4e2dab572d3f6333bb902f",

@@ -147,14 +147,28 @@ export function dropLogLines(cwd, drop) {
 // The last 500 commits of HEAD → [{ commit, at, body }], or null when git cannot say: read once per HEAD in a run (the records'
 // trailers, repairNotes and noteLateCommits each want it).
 const logs = new Map();
+// The same log kept on disk by HEAD (a commit never changes, so the log of a HEAD never does): the next hook of the same HEAD runs no `git log` (74 ms on Windows).
+// A file that cannot be read or does not match is a miss, never an error.
+const logFile = (cwd) => { const d = gitDirs(cwd); return d ? path.join(waymarkHome(), 'cache', 'headlog', `${crypto.createHash('sha1').update(path.resolve(d.gitdir)).digest('hex').slice(0, 16)}.json`) : null; }; // by the worktree's own folder: two worktrees of one repo have two HEADs and would replace each other's file
+function diskLog(cwd, head) {
+  try { const f = JSON.parse(fs.readFileSync(logFile(cwd), 'utf8')); return f.head === head && Array.isArray(f.log) ? f.log : undefined; } catch { return undefined; }
+}
+function keepLog(cwd, head, log) {
+  const file = logFile(cwd);
+  if (!file || !log) return;
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = `${file}.${process.pid}`; fs.writeFileSync(tmp, JSON.stringify({ head, log })); fs.renameSync(tmp, file); } catch {}
+}
 export function headLog(cwd) {
   const head = headSha(cwd);
   if (!head) return null;
   const key = `${path.resolve(cwd)}\0${head}`;
   if (!logs.has(key)) {
+    const kept = diskLog(cwd, head);
+    if (kept) { logs.set(key, kept); return kept; }
     // --name-only in the same call: the files of each commit follow its message (after \x1e), so a commit that only signs the manifest is known without a process per commit
     const log = git(cwd, ['log', '-n', '500', '--name-only', '--format=%x1d%H%x00%cI%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
     logs.set(key, log.status !== 0 ? null : log.stdout.split('\x1d').map((chunk) => { const [head = '', names = ''] = chunk.split('\x1e'), [commit, at, body = ''] = head.trim().split('\x00'); return { commit, at, body, files: names.split('\n').map((f) => f.trim()).filter(Boolean) }; }).filter((e) => e.commit));
+    keepLog(cwd, head, logs.get(key));
   }
   return logs.get(key);
 }

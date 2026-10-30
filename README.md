@@ -399,6 +399,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0051 · What the first real tasks of checkpoint B showed, and the measures of the card](docs/adr/0051-the-first-real-tasks-of-checkpoint-b-and-the-measures-of-the-card.md)
 - [0052 · Machine learning: patterns of use, never cases (design, no model code)](docs/adr/0052-machine-learning-from-patterns-of-use-never-from-cases.md)
 - [0053 · A build counts for its release, the ask is never lost, and the precedent reads where work was left](docs/adr/0053-a-build-counts-for-its-release-the-ask-is-never-lost-and-the-precedent-reads-where-work-was-left.md)
+- [0054 · What a hook asks git is asked once, and a test does not depend on when the checkout was made](docs/adr/0054-what-a-hook-asks-git-is-asked-once-and-a-test-does-not-depend-on-when-it-ran.md)
 <!-- adr-index:end -->
 
 ## Contributing back

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { waymarkHome as HOME } from '../lib/paths.mjs';
 import { sha } from '../lib/hash.mjs';
 import { hashFile } from '../manifest.mjs';
+import { topOf } from '../lib/git.mjs';
+import { headSha } from '../notes.mjs';
 
 const fileSha = (p) => { try { return sha(fs.readFileSync(p)).slice(0, 16); } catch { return null; } };
 
@@ -59,9 +61,9 @@ export function commitsFor(cwd, id) {
 // files written with Edit/Write.
 export function gitSnapshot(cwd) {
   const git = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
-  const top = git('rev-parse', '--show-toplevel');
-  if (top.status !== 0) return null;
-  const root = top.stdout.trim(), head = git('rev-parse', 'HEAD').stdout.trim() || null;
+  const root = topOf(cwd); // the root asked once per folder in a run, and HEAD read from the repository's own files: no git process for either
+  if (!root) return null;
+  const head = headSha(root);
   const st = git('status', '--porcelain=v1', '-z', '--untracked-files=all');
   if (st.status !== 0) return null;
   const files = {};

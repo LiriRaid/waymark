@@ -187,9 +187,9 @@ test('latency: hook-run.cjs writes the hook and its milliseconds; check warns on
   process.env.WAYMARK_HOME = p.home;
   try {
     write([...Array(20).fill(['rule0-hook', 900]), ...Array(20).fill(['tool-hook', 120])]);
-    assert.equal(W.latencyLine(now), '', 'counter-example: within the caps nothing is said');
+    assert.equal(W.latencyLine(now, 0), '', 'counter-example: within the caps nothing is said'); // since 0: the window must not depend on when this checkout was made (a fresh CI checkout postdates the rows)
     write([...Array(19).fill(['rule0-hook', 900]), ['rule0-hook', 4000], ...Array(20).fill(['stop-hook', 3000])]);
-    const line = W.latencyLine(now);
+    const line = W.latencyLine(now, 0);
     assert.match(line, /Stop p95 3\.0 s > 2\.3 s/);
     assert.doesNotMatch(line, /UserPromptSubmit/, 'one slow run in twenty is not the p95');
   } finally { delete process.env.WAYMARK_HOME; }

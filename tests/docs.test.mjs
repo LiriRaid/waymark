@@ -14,12 +14,13 @@ const SCRIPTS = path.join(ROOT, 'skills', 'waymark', 'scripts');
 const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8');
 const gen = await import(`file://${SCRIPTS}/docs-gen.mjs`);
 
-test('version: VERSION, plugin.json and the head of the CHANGELOG are one number', () => {
+test('version: VERSION, plugin.json and the head of the CHANGELOG are one number (a pre-release is the release it leads to)', () => {
   const version = read('skills', 'waymark', 'VERSION').trim();
   const plugin = JSON.parse(read('.claude-plugin', 'plugin.json')).version;
   const head = read('CHANGELOG.md').match(/^##\s*\[?v?(\d+\.\d+\.\d+)/m)?.[1];
-  assert.match(version, /^\d+\.\d+\.\d+$/);
-  assert.deepEqual([plugin, head], [version, version], 'VERSION, .claude-plugin/plugin.json and the first CHANGELOG entry');
+  assert.match(version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+  assert.equal(plugin, version, 'VERSION and .claude-plugin/plugin.json');
+  assert.equal(head, version.replace(/-[0-9A-Za-z.-]+$/, ''), 'the first CHANGELOG entry is the release the version leads to (2.0.20-dev: 2.0.20)');
 });
 
 test('size: the figures in the README table are what size.mjs measures now (5% tolerance)', () => {

@@ -212,3 +212,14 @@ test('review fix: only an ego-named scripts folder is exempt: a repository whose
   assert.equal(failed(judge([...L2_EDIT, ...full, ...call('Bash', { command: 'pnpm exec vitest run tests/hooks.test.mjs -t "other case"' }, 'Tests  1 passed')])), true, 'a run narrowed to one case clears nothing');
   assert.equal(failed(judge([...L2_EDIT, ...full, ...call('Bash', { command: 'node --test tests/hooks.test.mjs' }, 'ℹ pass 12\nℹ fail 0')])), false, 'the whole file does');
 });
+
+// ---- review of level 3: a script that only has the name of a framework CLI is not that CLI ----
+test('30 (review): node running a file called vite.js or next.js of the project is no framework CLI; one under node_modules or a bin folder is', () => {
+  assert.equal(isBuild('node scripts/vite.js build'), false, 'the project\'s own script');
+  assert.equal(isBuild('node tools/next.js build'), false);
+  assert.equal(isBuild('node ./node_modules/vite/bin/vite.js build'), true, 'the package\'s bin');
+  assert.equal(isBuild('node ./node_modules/@angular/cli/bin/ng build'), true);
+  assert.equal(isBuild('node ./node_modules/@nestjs/cli/bin/nest.js build'), true);
+  assert.equal(isBuild('node ./node_modules/typescript/bin/tsc -p tsconfig.build.json --outDir out'), true);
+  assert.equal(isBuild('node ./bin/ng build'), true, 'a bin folder of the project holding the CLI');
+});

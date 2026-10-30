@@ -118,8 +118,9 @@ function scriptOf(t, writes, log = [], at = Infinity) {
   const stdin = [...cmd.matchAll(STDIN_FILE), ...cmd.matchAll(CAT_FILE)].map((m) => fileKey(m[1] || m[2] || m[3])).map((f) => {
     const abs = /^([a-z]:)?\//.test(f), rel = f.replace(/^\.\//, '');
     const key = abs ? f : /^([a-z]:)?\//.test(dir) ? `${dir.replace(/\/$/, '')}/${rel}` : null;
-    const hit = [...log].reverse().find((w) => w.i < at && (key ? w.key === key : w.key.endsWith(`/${rel}`)));
-    return hit?.body || '';
+    const seen = log.filter((w) => w.i < at && (key ? w.key === key : w.key.endsWith(`/${rel}`)));
+    if (!key && new Set(seen.map((w) => w.key)).size > 1) return ''; // a bare name two folders hold: which one the shell meant is not guessed
+    return seen.length ? seen[seen.length - 1].body : '';
   });
   return cmd + '\n' + files.map((f) => writes.get(f) || [...writes].find(([k]) => k.endsWith(f) || f.endsWith(k))?.[1] || '').join('\n') + '\n' + stdin.join('\n');
 }
@@ -132,7 +133,10 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
   const keep = (file, body, i) => { writes.set(fileKey(file), body); log.push({ i, key: fileKey(file), body }); }; // a Git Bash path (/c/…) is the file:///C:/… the import names
   tools.forEach((t, i) => {
     if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content, i);
-    else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
+    else if (t.name === 'Edit' && t.input?.file_path && typeof t.input.old_string === 'string' && typeof t.input.new_string === 'string') { // an edit of a script written earlier: the body the next call reads
+      const was = [...log].reverse().find((w) => w.key === fileKey(t.input.file_path));
+      if (was) keep(t.input.file_path, t.input.replace_all ? was.body.split(t.input.old_string).join(t.input.new_string) : was.body.replace(t.input.old_string, () => t.input.new_string), i);
+    } else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
   });
   let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
   const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }

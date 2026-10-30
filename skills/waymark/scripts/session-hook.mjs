@@ -164,6 +164,7 @@ export function digest(cwd, agentName = 'claude') {
   return out.join('\n');
 }
 
+export const HELD_MAX_CHARS = 20000; // a held message longer than this is a pasted document, not a request: it is bounded
 // The message the context brake kept in .waymark/next-prompt.md, if under a day old; the file is removed once read.
 export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
@@ -176,7 +177,8 @@ export function heldPrompt(home, now = Date.now()) {
     if (cut < 0) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, content.slice(cut + 1));
   } catch {}
   try { fs.rmSync(path.join(home.dir, 'held-full.md'), { force: true }); } catch {} // the file 2.0.19 kept the rest of a long message in: the card now carries it whole
-  return text; // the user's words arrive whole, after the card's cap (EXTRA.held), once
+  // the user's words arrive whole, after the card's cap (EXTRA.held), once: a message of a few thousand characters is theirs entire; only a pasted document bounds it, and the card says how much was cut
+  return text.length > HELD_MAX_CHARS ? `${text.slice(0, HELD_MAX_CHARS)} … (${text.length - HELD_MAX_CHARS} more characters were cut: ask the user for the rest)` : text;
 }
 
 // One line when neither a check nor this pointer happened in the last week.

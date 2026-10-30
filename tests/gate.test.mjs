@@ -71,6 +71,7 @@ test('ci: push runs on main, on develop (2.0.20 point 5) and on tags; exactly on
   const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verify.yml'), 'utf8');
   assert.match(y, /push:\s*\n\s+branches: \[main, develop\]\s*\n\s+tags: \['v\*'\]/, 'every push to develop is checked, where the work is done before its pull request; any other branch by its pull request');
   assert.match(y, /^\s+pull_request:/m);
+  assert.match(y, /if: github\.event_name != 'pull_request' \|\| github\.head_ref != 'develop'/, 'review of level 3: the pull request of develop does not run the gate a second time on the commit its push already checked');
   const steps = y.split(/\n\s+- name: /).slice(1).filter((s) => /node scripts\/gate-tests\.mjs/.test(s));
   const once = steps.find((s) => /gate-tests\.mjs --once/.test(s)), full = steps.find((s) => !/--once/.test(s));
   assert.ok(once && full && steps.length === 2, 'one step with --once and one without');

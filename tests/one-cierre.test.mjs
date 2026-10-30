@@ -42,7 +42,7 @@ const prompt = (text, when = at()) => ({ type: 'user', uuid: `p${Math.random()}`
 const say = (text, when = at()) => ({ type: 'assistant', timestamp: when, message: { content: [{ type: 'text', text }] } });
 let ids = 0;
 const call = (name, input, when = at()) => { const id = `u${++ids}`; return [{ type: 'assistant', timestamp: when, message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: when, message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } }]; };
-const launch = (toolUseId, agentId) => ({ type: 'user', timestamp: at(), toolUseResult: { isAsync: true, agentId }, message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'launched' }] } });
+const launch = (toolUseId, agentId, when = at()) => ({ type: 'user', timestamp: when, toolUseResult: { isAsync: true, agentId }, message: { content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'launched' }] } });
 const CIERRE = (id = '2026-10-30 · T1') => `## Cierre · ${id}\nResultado: hecho\nEvidencia: inferida de la lectura (check: ver el archivo)\nAprendido: x ← y`;
 const FILE = 'src/orders.service.mjs';
 const blocked = (r) => /"decision":"block"/.test(r.out);
@@ -115,4 +115,21 @@ test('33: the Cierre of a task handed 2026-10-29 · T12 and closed the next day 
   assert.ok(rec, 'the task is recorded');
   assert.equal(rec.id, `${yesterday} · T12`, 'the ID the prompt was handed');
   assert.equal(rec.claimed, `${today} · T12`, 'what the agent wrote is kept');
+});
+
+test('31 (review of level 3): a block that only asked for the Cierre does not spend the task\'s block; one that asked for any proof does', async () => {
+  const { spendsBlock } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  assert.equal(spendsBlock(['the "## Cierre · <ID>" block is missing']), false, 'only the Cierre: the proofs were never asked');
+  assert.equal(spendsBlock(['the "## Cierre · <ID>" block is missing', 'L2+ with code: run the build once now']), true, 'the Cierre and a proof');
+  assert.equal(spendsBlock(['L2+ with code: run the build once now']), true, 'a proof alone');
+  assert.equal(spendsBlock([]), false);
+});
+
+test('31 (review of level 3): a Cierre over background work that started a long time ago is judged: an agent that never notified must not hold a finished task unrecorded', async () => {
+  const dir = tmpRepo({ [FILE]: 'x\n' }), stop = stopper(dir, 'one-old');
+  const old = (minutes) => { const when = at(-minutes * 60000), c = call('Agent', { run_in_background: true }, when); return [c[0], launch(c[0].message.content[0].id, 'bgold', when)]; };
+  const recent = await stop(CIERRE(), { extra: old(2) });
+  assert.match(recent.out, /se evaluará cuando termine/, 'two minutes: the review is still expected');
+  const stale = await stop(CIERRE(), { extra: old(20) });
+  assert.doesNotMatch(stale.out, /se evaluará cuando termine/, 'twenty minutes: judged now');
 });

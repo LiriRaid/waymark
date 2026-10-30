@@ -359,6 +359,11 @@ export function blockReason(gaps) {
   return `Waymark: this L${gaps.level} ${gaps.changed?.length ? 'turn changed files' : 'task (no project file changed)'} and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}.${id} Do what is missing (or correct the field), ${then}`;
 }
 
+export const CIERRE_WAIT_MS = 15 * 60000; // how long a Cierre waits for a background agent (a code-review) before the turn is judged
+// Whether a block uses the task's one block: only one that asked for a proof does. A block that asked for nothing but the Cierre leaves the proofs still to be
+// asked once, in the turn that follows it.
+export const spendsBlock = (missing) => (missing || []).some((m) => !String(m).startsWith('the "## Cierre'));
+
 // The IDs the close is judged against: the next one, unless this task's own prompt was handed an earlier one (the per-prompt hook keeps it in open.json), so a task
 // that crosses midnight keeps the day and the number it was handed and is not renumbered to the new day's T1.
 function idsFor(cwd, session) {
@@ -1341,7 +1346,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // notification's turn, which reads the whole stretch from the task's prompt. A Cierre written over a review that still
       // runs is no close either (one Cierre per task, the last): the review's result brings the agent back to judge it.
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
-      if (pendingBackground(lines, since).length) {
+      // a reply with a Cierre waits for a running agent only a while (a review takes minutes): an agent that never notifies must not hold a finished task unrecorded
+      const closing = CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''));
+      if (pendingBackground(lines, since, Date.now(), closing ? CIERRE_WAIT_MS : undefined).length) {
         // deferred: a record that says so, with the turn's files, and a notice (docs/adr/0044); it is no close, so the next turn still judges this one
         try { if (fs.existsSync(projectHome(cwd).memory)) { let files = []; try { files = turnChanged(h.session_id, cwd); } catch {} if (!files.length) files = [...new Set(currentTurn(lines, since).tools.filter((t) => EDITS.test(t.name)).map(fileOf).filter(Boolean))]; appendRecord(cwd, unevaluatedRecord('deferred: a background task is still running', { agent: agent.name, session: h.session_id, cwd, files, prompt: currentTurn(lines, since).prompt })); } } catch (e) { logHookError('stop-hook deferred', e); }
         answer(agent, agent.out.notice('Waymark: este turno se evaluará cuando termine la tarea en segundo plano.'));
@@ -1440,7 +1447,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         gaps.missing = [];
       }
       if (gaps.missing.length && !h.stop_hook_active) {
-        try { noteTaskBlock(h.session_id); } catch (e) { logHookError('stop-hook blocks', e); }
+        try { if (spendsBlock(gaps.missing)) noteTaskBlock(h.session_id); } catch (e) { logHookError('stop-hook blocks', e); }
         answer(agent, agent.out.block(blockReason(gaps)));
         return;
       }

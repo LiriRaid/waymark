@@ -81,7 +81,7 @@ export const SHELL_WAIT_MS = 10 * 60000;
 const NEVER_ENDS = /(?:^|\s)(?:--watch|--watchAll|-w|watch|serve|dev|start)(?=\s|$)/;
 const isShellCall = (c) => c.type === 'tool_use' && /^(Bash|PowerShell|shell)$/.test(c.name) && c.input?.run_in_background;
 const finiteCheck = (command) => !NEVER_ENDS.test(String(command || '')) && shellRuns(String(command || '')).some((p) => p.build || p.test || p.gate);
-export function pendingBackground(lines, since = 0, now = Date.now()) {
+export function pendingBackground(lines, since = 0, now = Date.now(), agentWait = BACKGROUND_WAIT_MS) {
   const { from } = turnStart(lines, since);
   const launched = [], shellLaunch = new Map();
   for (const d of lines.slice(from)) {
@@ -108,7 +108,7 @@ export function pendingBackground(lines, since = 0, now = Date.now()) {
     }
     return false;
   };
-  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.shell ? SHELL_WAIT_MS : BACKGROUND_WAIT_MS)) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.shell ? SHELL_WAIT_MS : agentWait)) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own

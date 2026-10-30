@@ -3222,3 +3222,15 @@ test('commit trailer: only a real git commit asks for the trailer; git config, a
   for (const c of ['git config --get commit.gpgsign', 'git -c commit.gpgsign=false status', 'echo git commit', 'git log --format=%H -1 && git config user.signingkey']) assert.equal(ask(c), null, c);
   for (const c of ['git commit -m "x"', 'git -c user.name=t commit -m "x"', 'git -C ../api commit -m "x"', 'cd api && git add . && git commit -m "x"', 'GIT_AUTHOR_NAME=t git commit -m "x"']) assert.match(ask(c) || '', /Waymark-Task/, c);
 });
+
+test('held message (review of level 3): it is bounded at HELD_MAX_CHARS, and says what was cut; one under the bound arrives untouched', async () => {
+  const { heldPrompt, HELD_MAX_CHARS } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const repo = memRepo('held-huge'), home2 = projectHome(repo);
+  const huge = 'x'.repeat(HELD_MAX_CHARS + 5000);
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${huge}\n`);
+  const got = heldPrompt(home2);
+  assert.ok(got.startsWith('x'.repeat(HELD_MAX_CHARS)) && got.length < HELD_MAX_CHARS + 200, 'the first HELD_MAX_CHARS and a notice');
+  assert.match(got, /5000 more characters were cut/);
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${'y'.repeat(HELD_MAX_CHARS)}\n`);
+  assert.equal(heldPrompt(home2), 'y'.repeat(HELD_MAX_CHARS), 'at the bound: whole');
+});

@@ -209,13 +209,15 @@ export function namedRepos(lines) {
   }
   return text.join('\n').toLowerCase();
 }
+// What the user chose in the choice window, and nothing else of the conversation: the only text a role word ("API") may stand in for a repo's folder name.
+const windowAnswers = (lines) => (lines || []).flatMap((d) => (d.type === 'user' && d.toolUseResult && Array.isArray(d.toolUseResult.questions) && d.toolUseResult.answers ? Object.values(d.toolUseResult.answers).map(String) : [])).join('\n');
 export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
   if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const key = `${session}:${norm(root)}`; // once per session and repo: what the user said about the job (the repo, in their request or their answer) holds for its next tasks
   if (seen[key]) return null; // asked or named once; the same repo again goes through
-  const named = repoNamedIn(path.basename(root), namedRepos(lines));
+  const named = nameIn(path.basename(root), namedRepos(lines)) || repoNamedIn(path.basename(root), windowAnswers(lines));
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }

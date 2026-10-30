@@ -486,3 +486,26 @@ test('29: references — "<element> (captura 1): parecido." and the other separa
   const g = judge([...head(2, CSS), ...ego(MEASURE)], {}, reply);
   assert.equal(g.observed.eyes.references, 5, 'the five lines, not the prose');
 });
+
+// ---- review of level 3: the script ego reads is the one the agent edited, and a bare file name that two folders hold is not guessed ----
+test('29 (review): an Edit of the script after its Write is applied before the call that reads it', () => {
+  const file = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run/round-7.mjs';
+  const look = 'await page.goto("http://localhost:4200/"); console.log(await page.snapshot());';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: look }),
+    ...call('Edit', { file_path: file, old_string: 'console.log(await page.snapshot());', new_string: 'console.log(await page.evaluate(() => document.querySelector("b").getBoundingClientRect().width));' }),
+    ...call('Bash', { command: `${QEGO} nodejs < "${file}"` })];
+  assert.equal(judge(lines).observed.eyes.measures, 1, 'the measurement the Edit added counts');
+  const removed = [...head(2, CSS), ...call('Write', { file_path: file, content: SCRIPT }),
+    ...call('Edit', { file_path: file, old_string: 'getBoundingClientRect()', new_string: 'toString()' }),
+    ...call('Bash', { command: `${QEGO} nodejs < "${file}"` })];
+  assert.equal(judge(removed).observed.eyes.measures, 0, 'counter-example: an Edit that took the measurement out is read too');
+});
+
+test('29 (review): a relative file name with no cd that two folders hold is ambiguous and credits nothing; one folder holding it is read', () => {
+  const a = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-a/round.mjs', b = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-b/round.mjs';
+  const look = 'await page.goto("http://localhost:4200/");';
+  const ambiguous = [...head(2, CSS), ...call('Write', { file_path: a, content: look }), ...call('Write', { file_path: b, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < round.mjs` })];
+  assert.equal(judge(ambiguous).observed.eyes.measures, 0, 'two folders: not guessed');
+  const single = [...head(2, CSS), ...call('Write', { file_path: b, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < round.mjs` })];
+  assert.equal(judge(single).observed.eyes.measures, 1, 'one folder: read');
+});

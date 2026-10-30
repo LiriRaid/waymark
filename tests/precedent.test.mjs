@@ -208,3 +208,18 @@ test('a short ask is searched with its session\'s previous task, and the session
   const css = [task('ajusta el espaciado del header en styles.css', ['/p/src/styles.css']), task('cambia el color del header', ['/p/src/app.css'], 'los colores son tokens', { session: 'ui' })];
   assert.equal(P.precedentFor('y el espaciado también', css, 0, 'ui')?.task, css[0].id, 'CSS/HTML: the same for a stylesheet');
 });
+
+test('evaluate (review of level 3): the random baseline draws from the tasks of other sessions, the pool the search sees', () => {
+  n = 0;
+  const z = (prompt, files) => task(prompt, files, '', { session: 'z' });
+  const c = [
+    task('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.mjs']),   // the only task of another session
+    z('corrige el login con tokens vencidos', ['/p/src/auth.mjs']),
+    z('actualiza el README con la tabla', ['/p/README.md']),
+    z('ajusta el timeout de los reintentos del servicio de pedidos', ['/p/src/orders.mjs']), // session z: its pool is the first task alone
+  ];
+  const e = P.evaluate(c, { root: '/p' });
+  assert.equal(e.eligible, 1);
+  assert.equal(e.randomAtK, 1, 'one candidate in the pool and it is the relevant one: chance is certain, not 3 in 4 of the whole history');
+  assert.equal(e.lift, 0, 'so the lift over chance is zero, not inflated by a baseline that counted tasks the search never sees');
+});

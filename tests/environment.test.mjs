@@ -150,6 +150,9 @@ test('33: a repo whose folder ends in its role (chat-api) is named by that role 
   assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(), 's33b', stateFile()), 'counter-example: no answer, denied');
   assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(answered('¿Cómo?', ['Con pruebas', 'Sin pruebas'], 'Con pruebas')), 's33c', stateFile()), 'counter-example: an answer that never says the role');
   assert.ok(T.checkRepo('/work/notes', '/work/chat', lines(answered('¿Cuánto hago?', [pick, 'Solo FE'], pick)), 's33d', stateFile()), 'counter-example: a repo with no role in its name is not covered by a word');
+  // review of level 3: the role word covers a repo only when it is in what the user chose in the window, not in any text of the conversation
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', [prompt('rehaz la pantalla y revisa la api de pagos'), say('Waymark → L2 · dept-frontend')], 's33e', stateFile()), 'counter-example: the word in the user\'s own prompt');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(say('Repos: chat, api')), 's33f', stateFile()), 'counter-example: the agent\'s own Pedido line with the role is not the user\'s answer; the folder name is what a Pedido must give');
   const a = mk({ 'src/a.mjs': 'a\n' }), b = path.join(a, 'chat-api');
   fs.mkdirSync(path.join(b, 'src'), { recursive: true }); gitT(b, 'init', '-q'); fs.writeFileSync(path.join(b, 'src', 'b.mjs'), 'b\n');
   assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], pick), [], 'the end-of-turn finding agrees');

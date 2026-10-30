@@ -131,8 +131,9 @@ function classify(words) {
       out.gate = out.build || SCRIPT_GATE.test(script);
     }
   } else if (prog === 'node' || prog === 'deno') {
-    // node running a framework's own CLI (the agent gives it more memory): judged as that CLI with the rest of the arguments, `node …/@angular/cli/bin/ng build`
-    const cli = prog === 'node' ? subs.findIndex((x) => /(^|[\\/])(ng|nest|vite|next|nuxt|astro|tsc|react-scripts|vue-cli-service)(\.[cm]?js)?$/.test(x)) : -1;
+    // node running a framework's own CLI (the agent gives it more memory): judged as that CLI with the rest of the arguments, `node …/@angular/cli/bin/ng build`; the path must be
+    // the package's (under node_modules or a bin folder): a project script that only has the name, scripts/vite.js, is not the CLI
+    const cli = prog === 'node' ? subs.findIndex((x) => /(?:^|[\\/])(?:node_modules|bin)[\\/](?:.*[\\/])?(?:ng|nest|vite|next|nuxt|astro|tsc|react-scripts|vue-cli-service)(?:\.[cm]?js)?$/.test(x)) : -1;
     if (cli >= 0 && !subs.slice(0, cli).some((x) => /^(-e|--eval|-p|--print)$/.test(x))) return classify([path.basename(String(a[cli]).replace(/\\/g, '/')).replace(/\.[cm]?js$/, ''), ...a.slice(cli + 1)]);
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;

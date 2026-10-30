@@ -67,7 +67,7 @@ A software supply chain tracks how an artifact was built: its inputs, the steps 
 
 How good is it, in numbers: `node "<skills-dir>/waymark/scripts/waymark.mjs" scorecard` (from this repository's root) scores Waymark against 13 weighted criteria, from the provenance and tamper evidence of the chain to token cost, agnosticism, reuse of earlier evidence and tasks done as asked. Every check is a file, a pattern, a command's exit or a number measured from the records; what is not built scores 0 and names the plan point that adds it, and the total is never rounded up. The weights, checks and thresholds are locked by a hash in [`docs/adr/0028-scorecard.md`](docs/adr/0028-scorecard.md), so the target cannot move without a new decision record.
 
-Where it stands for 2.0.20 (2026-10-30, measured on this repository): **99.0 %**. Red checks: 9.9 (every recorded task was closed by Claude Code), 1.2 and 13.1 (0.905 against 0.95: two tasks of the build were closed with no Cierre), 5.1 (0.944 against 0.95) and 8.7 (the routine share of the last five L1 tasks, 0.072 against 0.065); the total is never rounded up. A task costs a median 4.1 to 4.4 million tokens with cache reads included.
+Where it stands for 2.0.20 (2026-10-30, measured on this repository): **99.1 %**. Red checks: 9.9 (every recorded task was closed by Claude Code) and 8.7 (the routine share of the last five L1 tasks, 0.072 against 0.065, set by one task that spent 23 % on the routine); the total is never rounded up. Two tasks of the build that the hook recorded with no Cierre were closed afterwards by an appended record (`node "<skills-dir>/waymark/scripts/waymark.mjs" close`, ADR 0055), which keeps the fact that they were. A task costs a median 4.1 to 4.4 million tokens with cache reads included.
 
 What it is not: an SBOM or a dependency audit. Dependencies are `dept-security`'s job; this chain covers the work the agent does on your code. Decisions: [`docs/adr/`](docs/adr).
 
@@ -389,6 +389,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0052 · Machine learning: patterns of use, never cases (design, no model code)](docs/adr/0052-machine-learning-from-patterns-of-use-never-from-cases.md)
 - [0053 · A build counts for its release, the ask is never lost, and the precedent reads where work was left](docs/adr/0053-a-build-counts-for-its-release-the-ask-is-never-lost-and-the-precedent-reads-where-work-was-left.md)
 - [0054 · What a hook asks git is asked once, and a test does not depend on when the checkout was made](docs/adr/0054-what-a-hook-asks-git-is-asked-once-and-a-test-does-not-depend-on-when-it-ran.md)
+- [0055 · A task the hook closed without a Cierre is closed afterwards by an appended record](docs/adr/0055-a-task-the-hook-closed-without-a-cierre-is-closed-afterwards-by-an-appended-record.md)
 <!-- adr-index:end -->
 
 ## Contributing back

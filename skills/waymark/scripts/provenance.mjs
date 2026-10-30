@@ -117,7 +117,7 @@ export {
   findSecrets,
   maskSecrets,
 } from './provenance/secrets.mjs';
-export { readTaskRecords } from './provenance/records.mjs';
+export { LATE_CLOSE, closeLater, readTaskRecords } from './provenance/records.mjs';
 
 // The shell parsing (shellSkeleton, shellRuns, mutatesFiles, changesProject) lives in runs.mjs; re-exported for its importers.
 export { shellSkeleton, mutatesFiles, shellRuns, changesProject } from './runs.mjs';

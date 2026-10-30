@@ -14,6 +14,8 @@
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs forget <ID> | --session <id> --reason "…" [--apply]  remove records without a commit the user asked to remove: the rest
 //                                           chained again and a rewrite anchor in git with the reason (docs/adr/0025); the plan without --apply
+//   node waymark.mjs close <ID> --evidencia "…" --aprendido "…" --reason "…" [--result hecho] [--apply]  close afterwards a task the hook recorded with no Cierre: one
+//                                           appended record (docs/adr/0055), its note and the chain untouched; the plan without --apply
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
 //   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
@@ -37,7 +39,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, closeLater, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
@@ -560,6 +562,13 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (r.error) console.log(`forget: ${r.error}\nUsage: ${W} forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
+    process.exitCode = r.error ? 1 : 0;
+  } else if (sub === 'close') {
+    const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : ''; };
+    const apply = rest.includes('--apply'), id = rest.join(' ').match(ID)?.[0] || null;
+    const r = id ? closeLater(process.cwd(), id, { result: opt('--result') || 'hecho', evidencia: opt('--evidencia'), aprendido: opt('--aprendido'), reason: opt('--reason'), dryRun: !apply }) : { error: 'name the task ID' };
+    if (r.error) console.log([`close: ${r.error}`, `Usage: ${W} close "<task ID>" --evidencia "<…>" --aprendido "<…>" --reason "<why>" [--result hecho] [--apply]`].join('\n'));
+    else { if (apply) refreshTasks(projectHome(process.cwd()), true); console.log([`close ${apply ? 'written' : '(plan, nothing written)'}: ${r.id}`, r.cierre, ...(apply ? [] : ['Ask the user, then re-run with --apply'])].join('\n')); }
     process.exitCode = r.error ? 1 : 0;
   } else if (sub === 'gates') {
     const r = repairGates(process.cwd(), { apply: rest.includes('--apply') });

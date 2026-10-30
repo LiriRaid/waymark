@@ -100,3 +100,11 @@ test('size: the real reminder, the skill descriptions, what goes outside the car
   const l2 = read(path.join(CORE, 'references', 'protocol', 'l2.md')).length, l3 = read(path.join(CORE, 'references', 'protocol', 'l3.md')).length;
   assert.deepEqual([by['protocol L2'].group, by['protocol L2'].chars, by['protocol L3'].chars], ['level', l2, l2 + l3]);
 });
+
+// ---- 2.0.20 point 24: check 8.2 measures Waymark's own skills, not every skill the machine has ----
+test('24: the fixed context counts waymark, the dept-* and the owned tool skills; a skill another agent or the user installed is not Waymark\'s to answer for', async () => {
+  const { ownSkills } = await import(`file://${SCRIPTS}/size.mjs`);
+  const map = { skills: { 'ui-build': { owned: true }, 'library-docs': { owned: true }, 'code-review': {}, 'ego-browser': {} } };
+  assert.deepEqual(ownSkills(['waymark', 'dept-qa', 'ui-build', 'ego-browser', 'pdf', 'code-review', 'library-docs'], map), ['waymark', 'dept-qa', 'ui-build', 'library-docs']);
+  assert.deepEqual(ownSkills(['waymark', 'pdf'], null), ['waymark'], 'no skill-map: only the core');
+});

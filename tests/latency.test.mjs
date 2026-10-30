@@ -194,3 +194,20 @@ test('latency: hook-run.cjs writes the hook and its milliseconds; check warns on
     assert.doesNotMatch(line, /UserPromptSubmit/, 'one slow run in twenty is not the p95');
   } finally { delete process.env.WAYMARK_HOME; }
 });
+
+// ---- 2.0.20 finding 62: the window is the installed version's own, not seven days across a reinstall ----
+test('latency: runs from before the installed copy was made are another version\'s and are not counted against it', async () => {
+  const p = project('since');
+  const W = await import(`file://${SCRIPTS}/waymark.mjs`);
+  const now = Date.now(), before = new Date(now - 3 * 3600000).toISOString(), after = new Date(now - 60000).toISOString(), installed = now - 2 * 3600000;
+  const rows = [...Array(20).fill([before, 'stop-hook', 40000]), ...Array(12).fill([after, 'stop-hook', 700])];
+  process.env.WAYMARK_HOME = p.home;
+  try {
+    fs.writeFileSync(path.join(p.home, 'latency.log'), rows.map(([at, h, ms]) => `${at}\t${h}\t${ms}\n`).join(''));
+    assert.match(W.latencyLine(now, 0), /Stop p95 40\.0 s/, 'with no install time, the old runs are counted (the 7-day window)');
+    assert.equal(W.latencyLine(now, installed), '', 'since the install: 12 runs, all fast: nothing is said');
+    assert.equal(W.latencyLine(now, now - 30000), '', 'counter-example: fewer than 10 runs of this install say nothing, either way');
+    fs.writeFileSync(path.join(p.home, 'latency.log'), [...Array(20).fill([after, 'stop-hook', 5000])].map(([at, h, ms]) => `${at}\t${h}\t${ms}\n`).join(''));
+    assert.match(W.latencyLine(now, installed), /Stop p95 5\.0 s > 2\.3 s \(20 runs\)/, 'a slow install is still named');
+  } finally { delete process.env.WAYMARK_HOME; }
+});

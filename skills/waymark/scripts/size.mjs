@@ -37,9 +37,14 @@ export const README_ROWS = [
 ];
 export const readmeTable = (rows) => ['| Part | Loaded | What it is | Characters |', '|---|---|---|---|', ...README_ROWS.map(([name, when, what]) => `| ${name} | ${when} | ${what} | ${(rows.find((r) => r.name === name)?.chars || 0).toLocaleString('en-US')} |`)].join('\n');
 
+// The skills Waymark answers for: itself, the dept-* and the tool skills its skill-map marks as owned. A skill another agent or the user put in the same folder lists
+// its description in every session too, but it is not Waymark's context to measure (check 8.2).
+export const ownSkills = (dirs, map) => dirs.filter((d) => d === 'waymark' || /^dept-/.test(d) || map?.skills?.[d]?.owned);
 export function sizes(cwd) {
   const home = projectHome(cwd);
-  const dirs = fs.readdirSync(SKILLS).sort();
+  let map = null;
+  try { map = JSON.parse(read(path.join(CORE, 'skill-map.json'))); } catch {}
+  const dirs = ownSkills(fs.readdirSync(SKILLS).sort(), map);
   const descriptions = dirs.map((d) => (read(path.join(SKILLS, d, 'SKILL.md')).match(/^description:.*$/m) || [''])[0].length).reduce((a, b) => a + b, 0);
   const real = () => {
     const repo = stackLine(home.root);

@@ -401,12 +401,15 @@ export function hookErrors(now = Date.now()) {
 // an event whose p95 passes its cap (with 10 runs or more) is named. The caps are 1.5 x the median measured on a real repo and
 // transcript on Windows (2026-10-26); tests/latency.test.mjs holds the git processes each event may start.
 export const LATENCY_CAPS = { 'session-hook': ['SessionStart', 2500], 'rule0-hook': ['UserPromptSubmit', 1600], 'tool-hook': ['PreToolUse', 300], 'stop-hook': ['Stop', 2300] };
-export function latencyLine(now = Date.now()) {
+// The window starts when the installed copy was made (its MANIFEST.json, written by the install): the runs before it belong to another version, and a reinstall that
+// fixed a slow hook must not be told about the old one for seven days. `since` is a time in ms; 0 reads the whole seven days.
+const installedSince = () => { try { return fs.statSync(path.join(SCRIPTS, '..', 'MANIFEST.json')).mtimeMs; } catch { return 0; } };
+export function latencyLine(now = Date.now(), since = installedSince()) {
   let rows = [];
   try { rows = fs.readFileSync(path.join(HOME(), 'latency.log'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return ''; }
   const slow = [];
   for (const [hook, [event, cap]] of Object.entries(LATENCY_CAPS)) {
-    const ms = rows.filter(([at, h]) => h === hook && now - (Date.parse(at) || 0) < 7 * 86400000).map((r) => Number(r[2])).filter((x) => x >= 0).sort((a, b) => a - b);
+    const ms = rows.filter(([at, h]) => h === hook && now - (Date.parse(at) || 0) < 7 * 86400000 && (Date.parse(at) || 0) >= since).map((r) => Number(r[2])).filter((x) => x >= 0).sort((a, b) => a - b);
     const p95 = ms.length >= 10 ? ms[Math.ceil(0.95 * ms.length) - 1] : null;
     if (p95 > cap) slow.push(`${event} p95 ${(p95 / 1000).toFixed(1)} s > ${(cap / 1000).toFixed(1)} s (${ms.length} runs)`);
   }

@@ -86,3 +86,15 @@ test('31: a Cierre written while a review still runs in the background is deferr
   assert.match(waiting.out, /se evaluará cuando termine la tarea en segundo plano/);
   assert.ok(!recordsOf(dir).some((r) => r.id), 'and no task is closed by it');
 });
+
+// ---- 2.0.20 point 32: more than 4 decisions or review findings are all asked, in calls of 4; the rule lives where the agent reads it before its first window ----
+test('32: the instructions block says it, stays within its size, and says the block is once per task; the L2 protocol carries the review rule', () => {
+  const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
+  assert.match(block, /Over 4 items \(decisions, review findings\): list all, then calls of 4 until each is answered; never drop one/);
+  assert.match(block, /blocks once per task naming the way out/);
+  assert.ok(block.length <= 6500, `the block stays within its size (${block.length})`);
+  const l2 = fs.readFileSync(path.join(SCRIPTS, '..', 'references', 'protocol', 'l2.md'), 'utf8');
+  assert.match(l2, /Its findings are the user's to decide, all of them/);
+  assert.match(l2, /"apply all recommended" or "one by one"/);
+  assert.match(l2, /you never filter which are asked/);
+});

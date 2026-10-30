@@ -292,6 +292,18 @@ test('red by action: at L2+ a spec and code changed need the spec run before the
   assert.equal(step(turn(), why).pass, false, 'written before the block, it does not count');
 });
 
+test('red: a spec whose code is all new at HEAD needs no red proof (nothing to fail against); code that existed at HEAD still does', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs');
+  const turn = () => currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: SPECF }), call('Edit', { file_path: FILE }),
+    call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test -- orders' }), call('Skill', { skill: 'code-review' }), MEM()]);
+  const red = (newAtHead) => cierreGaps(turn(), cierre(ids.next), undefined, undefined, { ...ctxFor(cwd), ...(newAtHead ? { newAtHead } : {}) }).steps.find((x) => x.id === 'red');
+  assert.equal(red(() => true).pass, true, 'every changed code file is new at HEAD: the spec cannot be shown red against nothing');
+  assert.equal(red(() => false).pass, false, 'counter-example: the code existed at HEAD, the spec must run before it');
+  assert.equal(red().pass, false, 'counter-example: nothing says it is new');
+});
+
 test('red per spec: a spec that adds cases runs before the code after it; one that only adjusts mocks only passes; a spec written by the shell counts', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs'), OLD = '/work/proj/src/auth.service.spec.mjs';

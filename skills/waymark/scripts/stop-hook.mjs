@@ -353,7 +353,9 @@ export function blockReason(gaps) {
   // field that changes goes as that line alone. Only a turn with no Cierre at all is asked for one.
   const noCierre = gaps.missing.some((m) => m.startsWith('the "## Cierre'));
   const then = noCierre ? 'then reply with the Cierre.' : 'then reply in one or two lines with what you did. Do not repeat the Cierre: the hook keeps the one you wrote; a field that changes goes as that one line (e.g. "Resultado: parcial (…)").';
-  return `Waymark: this L${gaps.level} ${gaps.changed?.length ? 'turn changed files' : 'task (no project file changed)'} and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}. Do what is missing (or correct the field), ${then}`;
+  // the heading's ID, when the Cierre is still to be written: the new one, and the follow-up only when the hook offered it for this ask
+  const id = noCierre && gaps.ids?.next ? ` The Cierre heading takes the ID ${gaps.ids.next}${gaps.ids.followUp ? ` (or ${gaps.ids.followUp} when this ask continues it)` : ''}.` : '';
+  return `Waymark: this L${gaps.level} ${gaps.changed?.length ? 'turn changed files' : 'task (no project file changed)'} and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}.${id} Do what is missing (or correct the field), ${then}`;
 }
 
 // The reply the hook judges: the last one when it holds the Cierre; after a block, the Cierre written earlier in the
@@ -517,8 +519,12 @@ function observeTurn(S) {
   const movedOnly = casesRemoved > 0 && [...specWrites.values()].reduce((n, w) => n + w.adds, 0) <= casesRemoved;
   // a spec that only moved (git mv, mv, Move-Item) and was never written is no new behavior
   const moved = new Set(turn.tools.filter(shell).flatMap((t) => [...String(cmdOf(t)).matchAll(/(?:^|[;&|(]\s*)(?:git\s+mv|mv|move|Move-Item)\s+(?:-\S+\s+)*\S+\s+(?:-Destination\s+)?(\S+)/gi)].map((m) => path.basename(m[1].replace(/["']/g, '')).toLowerCase())));
-  const notRed = inWorktree || movedOnly ? [] : [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
+  const redCandidates = [...new Set(changed.filter((f) => SPEC.test(path.basename(f))).map((f) => path.basename(f)))]
     .filter((b) => { const w = specWrites.get(b.toLowerCase()); return !earlierSpecs.has(b.toLowerCase()) && (w ? w.adds > 0 && !ranRed(w) : !moved.has(b.toLowerCase())); });
+  // a spec whose code is all new at HEAD has nothing to fail against in a clean copy: asked only when a proof would be owed, and looked up only then
+  const codeNow = changed.filter((f) => !SPEC.test(path.basename(f)) && !NOT_CODE.test(f));
+  const allNew = () => codeNow.length > 0 && codeNow.length <= 12 && codeNow.every((f) => ctx.newAtHead?.(f));
+  const notRed = inWorktree || movedOnly || (redCandidates.length && allNew()) ? [] : redCandidates;
   // A failure of the environment (the command is not found), not of the code: no attempt, no failed gate.
   // A run that never happened: the tool is not installed, or the command was refused (a permission denied, a hook that stopped it).
   const envFail = (t) => /is not recognized as an internal or external command|command not found|not recognized as the name of a cmdlet|spawn \S+ ENOENT|permission to use .{1,40} (?:has been )?denied|doesn't want to proceed|hook error:|not allowed in this sandboxed run/i.test(String(result(t)?.text || t.out || '')) || RUNNER_MISSING.test(String(result(t)?.text || t.out || ''));
@@ -1018,7 +1024,7 @@ function composeSteps(S) {
   const otherFailed = observed.gates.filter((g) => g.error && !g.env && !g.apart && g.cmd !== observed.gate?.cmd); // the judged gate is the gate testigo's
   if (otherFailed.length) findings.push(`a command after the last change failed: ${otherFailed.map((g) => g.cmd.slice(0, 60)).join(' | ')}`);
   const omitted = omittedOf(S, steps);
-  return { level, changed, reply, missing, findings, steps, dept, observed, renamed, win, askedRepos, ...(omitted ? { omitted } : {}) };
+  return { level, changed, reply, missing, findings, steps, dept, observed, renamed, win, askedRepos, ...(omitted ? { omitted } : {}), ...(ctx.ids ? { ids: { next: ctx.ids.next, followUp: ctx.offered === undefined ? ctx.ids.followUp : ctx.offered } } : {}) };
 }
 
 // The review a small, plain change skips is recorded with its reason, so the record says why nothing blocked.
@@ -1347,6 +1353,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.copyInstall = copyInstall(stackOf(home.root)); } catch {}
       ctx.related = (files) => { try { return relatedRun(home.memory, home.root, files); } catch { return null; } }; // the run of only these specs, from memory.md
       ctx.root = home.root;
+      ctx.newAtHead = (f) => { try { const rel = path.relative(home.root, f).split(path.sep).join('/'); return !rel.startsWith('..') && spawnSync('git', ['cat-file', '-e', `HEAD:${rel}`], { cwd: home.root, timeout: 1500 }).status !== 0; } catch { return false; } }; // the file is not in the last commit
       try { ctx.kind = projectKind(home.root); } catch {}
       try { ctx.eyes = { provider: eyesProvider({ root: home.root }) }; } catch {} // the browser this machine has to look with (docs/adr/0047)
       try { ctx.requests = requestRefs(task.filter(isPrompt)); } catch {} // the screenshots and the design links the user sent: what the eyes compare against

@@ -244,3 +244,22 @@ test('procedure testigo: a delivery counts as read; with neither a read nor a de
   const other = step(judge(lines, { procDelivered: ['dept-qa'] }), 'procedure');
   assert.equal(other.pass, false, 'another department\'s delivery is not the owner\'s');
 });
+
+// point 10(a): what the level asks at the close is handed with the first change, so the Cierre is written last and no turn is spent on a list the hook already knew
+test('owed at the end: the first change of a task hands what the close asks, once per task; a UI file adds the eyes', async () => {
+  const repo = withMemory(repoAt('owed'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  for (const f of ['a.mjs', 'b.mjs', 'app.css']) fs.writeFileSync(path.join(repo, 'src', f), 'x');
+  const transcript = path.join(home, 'owed-session.jsonl');
+  fs.writeFileSync(transcript, [prompt('agrega reintentos', '2026-10-15T10:00:00Z'), ...run('Skill', { skill: 'dept-backend', args: 'L2' })].map((l) => JSON.stringify(l)).join('\n'));
+  const call = (f, session) => ({ tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', f) }, cwd: repo, session_id: session, transcript_path: transcript });
+  const first = await packContext(call('a.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
+  assert.match(first || '', /At L2 and above the close also asks for/);
+  assert.match(first || '', /write the Cierre last/);
+  assert.match(first || '', /code-review once/);
+  assert.doesNotMatch(first || '', /eyes/, 'a logic file owes no look at the screen');
+  const second = await packContext(call('b.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
+  assert.doesNotMatch(second || '', /At L2 and above/, 'once per task, with the first change');
+  const ui = await packContext(call('app.css', 's-owed-ui'), claude, path.join(home, 'packed-owed.json'));
+  assert.match(ui || '', /eyes: look at what you built in the browser/, 'a styles file adds the look');
+});

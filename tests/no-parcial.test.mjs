@@ -129,3 +129,13 @@ test('9: an option that offers only a phase of the ask is found at L2+ (recorded
   assert.equal(windowOf([wopt('Todo el pedido (Recommended)', 'Los seis pasos en una tarea: la fase 1 es el esquema, la 2 el servicio.'), wopt('Otra', 'x')]).phased, undefined, 'counter-example: the phases are the steps of the whole ask');
   assert.equal(windowOf([wopt('Solo la fase 1 (Recommended)', 'x'), wopt('Otra', 'y')], 1), null, 'counter-example: L1 is not judged');
 });
+
+// ---- point 10(d): the ID the Cierre heading takes is shown with the block that asks for the Cierre ----
+test('10: a block that asks for the Cierre names the task ID and the follow-up ID the hook accepts; other blocks do not repeat it', async () => {
+  const { blockReason } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
+  const noCierre = ['the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)'];
+  assert.match(blockReason({ level: 2, missing: noCierre, ids: { next: '2026-10-29 · T9', followUp: '2026-10-29 · T8b' } }), /The Cierre heading takes the ID 2026-10-29 · T9 \(or 2026-10-29 · T8b when this ask continues it\)\. Do what is missing/);
+  assert.match(blockReason({ level: 2, missing: noCierre, ids: { next: '2026-10-29 · T9', followUp: null } }), /takes the ID 2026-10-29 · T9\. Do what/, 'no follow-up offered: only the new ID');
+  assert.doesNotMatch(blockReason({ level: 2, missing: ['no review ran'], ids: { next: '2026-10-29 · T9', followUp: null } }), /takes the ID/, 'the Cierre is already written: its ID is not repeated');
+  assert.doesNotMatch(blockReason({ level: 1, missing: noCierre }), /takes the ID/, 'a caller with no IDs says nothing');
+});

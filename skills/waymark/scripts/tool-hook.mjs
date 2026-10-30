@@ -523,7 +523,17 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
-  return [memory, procs].filter(Boolean).join('\n\n') || null;
+  const owed = fresh.length && !done.size ? owedAtClose(fresh) : ''; // with the task's first change, never again
+  return [memory, procs, owed].filter(Boolean).join('\n\n') || null;
+}
+
+// What the close of an L2+ task asks, handed once with the first change (the level is the agent's to declare, so not earlier): the Cierre is then written last and
+// no turn is spent on a list the hook already knew. A styles or template file adds the look at the screen.
+const UI_FILE = /\.(?:html?|css|scss|sass|less|vue|svelte|jsx|tsx)$|\.component\./i;
+function owedAtClose(files) {
+  const items = ['the project gate after your last change (typecheck, lint of the touched files; the full gate and the build once, at the very end)', 'a spec next to the code you change, run before the code it tests',
+    'code-review once, when the whole task is complete', ...(files.some((f) => UI_FILE.test(f)) ? ['eyes: look at what you built in the browser, one line per element of a screenshot'] : []), 'the Pedido answered item by item in the Cierre'];
+  return `At L2 and above the close also asks for: ${items.join(' · ')}. Do them as you go and write the Cierre last.`;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

@@ -24,7 +24,9 @@ const at = () => new Date().toISOString();
 const prompt = (text) => ({ type: 'user', uuid: `p${Math.random()}`, timestamp: at(), message: { role: 'user', content: text } });
 const say = (text) => ({ type: 'assistant', timestamp: at(), message: { content: [{ type: 'text', text }] } });
 const call = (name, input, out = 'ok', error = false) => { const id = `u${++ids}`; return [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: at(), message: { content: [{ type: 'tool_result', tool_use_id: id, content: out, is_error: error }] } }]; };
-const head = (level, ...files) => [prompt('ajusta el botón'), say(`Waymark → L${level} · dept-frontend`), ...call('Skill', { skill: 'dept-frontend' }), ...files.flatMap((f) => call('Edit', { file_path: f }))];
+const bare = (level, ...files) => [prompt('ajusta el botón'), say(`Waymark → L${level} · dept-frontend`), ...call('Skill', { skill: 'dept-frontend' }), ...files.flatMap((f) => call('Edit', { file_path: f }))];
+// the usual task: the edits, then the project's typecheck passing, then whatever the case does; `bare` is the same with no gate
+const head = (level, ...files) => [...bare(level, ...files), ...call('Bash', { command: 'pnpm exec tsc --noEmit' })];
 const CIERRE = '## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: observada ancho 40\nAprendido: x ← y';
 const judge = (lines, ctx = {}, reply = CIERRE) => cierreGaps(currentTurn(lines), reply, undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [{ question: '¿Cómo?', chosen: 'A', discarded: [] }], cwd: '/work/proj', procDelivered: ['dept-frontend'], eyes: { provider: 'ego' }, ...ctx });
 const eyes = (g) => g.steps.find((s) => s.id === 'eyes');
@@ -108,7 +110,7 @@ test('8: the provider is what the machine has: ego first, Playwright where the p
 test('8: the record keeps the eyes: provider, calls, measures, and nothing of the page', () => {
   const g = judge([...head(2, CSS), ...ego(MEASURE)]);
   const o = g.observed.eyes;
-  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references'].sort());
+  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references', 'returns', 'spaces'].sort()); // the ego task space(s) and the returns to ego are kept by name and count only (2.0.20 point 15)
   assert.ok(!JSON.stringify(o).includes('localhost'), 'no URL, no text of the page');
 });
 
@@ -387,4 +389,52 @@ test('1: the pre-tool guard of the ego host and profile runs for every form of t
     assert.equal(run(p, `await page.goto("${DESIGN}")`), null, `the design link the user wrote passes: ${p}`);
   }
   fs.rmSync(proj, { recursive: true, force: true });
+});
+
+// ---- point 18 (2.0.20): the typecheck goes before the eyes ----
+const GATE = call('Bash', { command: 'pnpm exec tsc --noEmit' });
+const GATE_FAIL = call('Bash', { command: 'pnpm exec tsc --noEmit' }, "src/app/shared/button/button.component.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.", true);
+const GATE_MISSING = call('Bash', { command: 'pnpm exec tsc --noEmit' }, 'tsc: command not found', true);
+
+test('18: a look counts only after the project\'s typecheck or build passed since the last change; the message says it in those words', () => {
+  const ok = judge([...bare(2, CSS, HTML), ...GATE, ...ego(MEASURE)]);
+  assert.equal(eyes(ok).pass, true, 'gate, then the look');
+  const before = judge([...bare(2, CSS, HTML), ...ego(MEASURE), ...GATE]);
+  assert.equal(eyes(before).pass, false, 'the look came before the gate: it saw a version nobody had compiled');
+  assert.equal(before.observed.eyes.beforeGate, true, 'the record says why the look did not count');
+  assert.match(before.missing.find((m) => /browser|ego/i.test(m)), /typecheck or build first[^;]*cannot be seen until it is fixed/, 'the instruction, in its words');
+  const failed = judge([...bare(2, CSS), ...GATE_FAIL, ...ego(MEASURE)]);
+  assert.equal(eyes(failed).pass, false, 'a gate that failed is no gate that passed');
+  const none = judge([...bare(2, CSS), ...ego(MEASURE)]);
+  assert.equal(eyes(none).pass, false, 'no gate at all since the change');
+  assert.equal(none.observed.eyes.beforeGate, true);
+});
+
+test('18: counter-examples — a gate the machine cannot run does not hold the look back; a gate after an earlier look and before a later one counts that later look', () => {
+  assert.equal(eyes(judge([...bare(2, CSS), ...GATE_MISSING, ...ego(MEASURE)])).pass, true, 'the tool is not installed: not the code\'s failure');
+  assert.equal(eyes(judge([...bare(2, CSS), ...ego(MEASURE), ...GATE, ...ego(CLICK)])).pass, true, 'the second look came after the gate');
+});
+
+// ---- point 15 (2.0.20): one ego space per task, closed by the agent when the task is complete; the returns to it are counted ----
+const egoIn = (name, body) => call('Bash', { command: `ego-browser nodejs <<'EOF'\nconst task = await taskSpace("${name}");\nconst page = task.page("p1");\n${body}\nEOF` });
+const FINISH = 'await task.finish({ keep: [] });';
+const edit = (f) => call('Edit', { file_path: f });
+const OPEN_TASK = '## Cierre · 2026-10-25 · T1\nResultado: parcial (falta el paso 3)\nEvidencia: observada ancho 40\nAprendido: ✔1 · ▶2 · 3 ← pasos';
+
+test('15: the record keeps the spaces (opened, finished) and how many times the agent went back to ego after a change', () => {
+  const g = judge([...head(2, CSS), ...egoIn('pedidos', MEASURE), ...edit(HTML), ...call('Bash', { command: 'pnpm exec tsc --noEmit' }), ...egoIn('pedidos', CLICK), ...edit(CSS), ...call('Bash', { command: 'pnpm exec tsc --noEmit' }), ...egoIn('pedidos', MEASURE + FINISH)]);
+  assert.deepEqual(g.observed.eyes.spaces, [{ name: 'pedidos', opened: 3, finished: true }], 'one space, resumed, finished once');
+  assert.equal(g.observed.eyes.returns, 3, 'each look that followed a change');
+  assert.equal(eyes(g).pass, true);
+});
+
+test('15: a space closed while the task is open, or opened anew inside one task, is a finding (recorded, never a block); one closed at the end of a complete task is not', () => {
+  const finished = [...head(2, CSS), ...egoIn('pedidos', MEASURE + FINISH)];
+  const open = judge(finished, {}, OPEN_TASK);
+  assert.ok(open.findings.some((f) => /ego space was closed while the task is still open/.test(f)), JSON.stringify(open.findings));
+  assert.deepEqual(open.missing.filter((m) => /ego space/.test(m)), [], 'a look, never a block');
+  assert.ok(!judge(finished).findings.some((f) => /ego space/.test(f)), 'counter-example: a complete task closes its space');
+  const anew = judge([...head(2, CSS), ...egoIn('uno', MEASURE), ...egoIn('dos', MEASURE)]);
+  assert.ok(anew.findings.some((f) => /ego was opened 2 times in one task \(uno, dos;/.test(f)), JSON.stringify(anew.findings));
+  assert.ok(!judge([...head(2, CSS), ...egoIn('uno', MEASURE), ...egoIn('uno', CLICK)]).findings.some((f) => /ego was opened/.test(f)), 'counter-example: the same space resumed is one');
 });

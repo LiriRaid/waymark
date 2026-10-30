@@ -546,6 +546,13 @@ function observeTurn(S) {
     return { cmd, docs: turn.tools.some((t, i) => i > at[1] && (next < 0 || i < next) && DOCS(t)), late: next >= 0 };
   });
   const gatesAfter = turn.tools.slice(Math.max(lastChange, lastCode) + 1).filter((t) => runsOf(t).some((p) => p.gate || p.test));
+  // the first project gate that passed after the last change: a look before it counts for nothing (the typecheck goes before the eyes). A gate the machine could not run
+  // (the tool is not installed) holds nothing back: -1. Infinity: none passed.
+  const eyesGateAt = (from) => {
+    const after = turn.tools.map((t, i) => [t, i]).filter(([t, i]) => i > from && gateCmd(t) && !apart(t));
+    const passed = after.find(([t]) => !failedRun(t, 'gate') && !envFail(t));
+    return passed ? passed[1] : after.some(([t]) => envFail(t)) ? -1 : Infinity;
+  };
   // UI: templates and styles, `.component.ts`, and a `.ts` with a sibling `.html` (Angular 20+ names drop the suffix)
   const ui = changed.some((f) => UI.test(f) || (/\.ts$/i.test(f) && !SPEC.test(path.basename(f)) && fs.existsSync(f.replace(/\.ts$/i, '.html'))));
   // a file touched only by comment-only edits (and by no shell change) is no code for the gate, the spec and the build
@@ -611,7 +618,7 @@ function observeTurn(S) {
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && RUNS_EGO.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
     // the eyes (docs/adr/0047): browser calls that measured or clicked after the last change; the provider the machine has when none was used
-    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [] }),
+    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), gateAt: eyesGateAt(Math.max(lastChange, lastCode)), isChange, provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [] }),
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
@@ -1017,6 +1024,10 @@ function composeSteps(S) {
   if (win?.failed.length) findings.push(`the Cierre marks ✘ what the user chose in the window: ${win.failed.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (win?.twoActions.length) findings.push(`a label the user chose holds two actions (apply and run, delete and deploy…): the Cierre must say which of them was done: ${win.twoActions.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (outsideRepos.length) findings.push(`changed a repository the Pedido does not name (Repos:): ${outsideRepos.slice(0, 3).join(', ')}`);
+  // one ego space per task (points 15 and 2): closed by the agent when the task is complete, resumed (not opened anew) while it is not; a look in the card, never a block
+  const spaces = observed.eyes?.spaces || [];
+  if (spaces.some((x) => x.finished) && taskOpen(reply)) findings.push('the ego space was closed while the task is still open (recorded, not blocked): the agent closes it once, in the last round of a complete task');
+  if (spaces.length > 1) findings.push(`ego was opened ${spaces.length} times in one task (${spaces.map((x) => x.name).slice(0, 4).join(', ')}; recorded, not blocked): one space per task, resumed at every doubt and every step`);
   if (observed.options?.phased?.length) findings.push(`the first choice window offers only a phase of the ask (recorded, not blocked): an L2+ ask is built whole in one task, so the window offers the whole ask with its decisions: ${observed.options.phased.slice(0, 2).join(' · ')}`);
   if (observed.options?.missing.length) findings.push(`the first choice window does not mark exactly one option (Recommended) (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
   if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked

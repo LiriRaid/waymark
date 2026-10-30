@@ -111,17 +111,18 @@ function scriptOf(t, writes) {
   return cmd + '\n' + files.map((f) => writes.get(f) || [...writes].find(([k]) => k.endsWith(f) || f.endsWith(k))?.[1] || '').join('\n');
 }
 
-// What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts.
-// → { provider, calls, measures, afterLastChange, references }. Nothing of the page is kept: no URL, no text.
-export function observeEyes(tools, { from = -1, provider = null, reply = '', allowed = [] } = {}) {
+// What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts. `gateAt`: the index of the first project gate that passed after it
+// (Infinity: none did): a look before it saw a version nobody had compiled, so it does not count (`beforeGate`). -1: no gate is required (it could not run here).
+// → { provider, calls, measures, afterLastChange, beforeGate, references }. Nothing of the page is kept: no URL, no text.
+export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [] } = {}) {
   const writes = new Map();
   const keep = (file, body) => writes.set(String(file).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').toLowerCase(), body); // a Git Bash path (/c/…) is the file:///C:/… the import names
   for (const t of tools) {
     if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content);
     else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body);
   }
-  let calls = 0, measures = 0, used = null, offHost = 0, design = 0, panelAt = 'local';
-  const captures = [];
+  let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
+  const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }
   tools.forEach((t, i) => {
     let kind = null, measuring = false, where = 'local';
     const panel = PANEL.exec(t.name || '');
@@ -141,17 +142,25 @@ export function observeEyes(tools, { from = -1, provider = null, reply = '', all
         where = places.includes('off') ? 'off' : places.includes('local') || !places.length ? 'local' : 'design'; // a script that compares the design with the local build looks at the build
       } else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; where = (text(t).match(URL_RE) || []).some((u) => whereTo(u, allowed) === 'off') ? 'off' : 'local'; }
     }
-    if (!kind) return;
+    if (!kind) { if (isChange?.(t, i)) sinceChange = true; return; }
+    if (kind === 'ego') { // one space per task: which one the script takes, whether it closes it, and a return to ego after the code changed
+      const s = scriptOf(t, writes), names = [...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+      for (const n of names) spaces.set(n, { opened: (spaces.get(n)?.opened || 0) + 1, finished: false });
+      const last = names[names.length - 1] || [...spaces.keys()].pop();
+      if (/\bfinish\s*\(/.test(s) && last && spaces.has(last)) spaces.get(last).finished = true;
+      if (sinceChange || !calls) returns++;
+      sinceChange = false;
+    }
     if (where === 'off') offHost++;
     if (where === 'design') design++;
     if (where !== 'local') measuring = false; // only the local build is the change; the design is a reference
     if (kind === 'ego') for (const m of scriptOf(t, writes).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
-    if (measuring && i > from) measures++;
+    if (measuring && i > from) { if (i > gateAt) measures++; else early++; }
   });
   const verdicts = (String(reply).match(/:\s*(?:igual|parecido|falta)\b\s*[—–-]/gi) || []).length; // "<element>: igual — <measurement>", never the word in prose
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, references: verdicts, captures, offHost, design };
+  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
 }
 
 // ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----
@@ -223,8 +232,9 @@ export function referenceGaps(observed, refs) {
 export function eyesGaps(observed, provider, captures = null) {
   if (observed?.afterLastChange) return [];
   const where = captures ? `; captures in ${slash(captures)}` : '';
-  const how = provider === 'ego' ? 'ego-browser nodejs (read `ego-browser skill` first): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it'
+  const how = provider === 'ego' ? 'ego-browser nodejs (read `ego-browser skill` first; one space for the whole task, resumed and not opened anew, closed with finish only when the task is complete): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it'
     : provider === 'playwright' ? 'the project\'s Playwright against the local dev server: a measurement of the element or a real click with the state after it'
       : 'the browser panel against the local dev server: a script that measures the element, or a real click with the state after it';
-  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
+  const gate = observed?.beforeGate ? 'a look made before the gate passed since your last change does not count; ' : '';
+  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${gate}run the project's typecheck or build first and read its result, and if it fails the change cannot be seen until it is fixed: fix it first and do not open the browser to find the error. Then ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
 }

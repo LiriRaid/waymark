@@ -532,7 +532,7 @@ export async function packContext(hook, agent, file = PACKED()) {
 const UI_FILE = /\.(?:html?|css|scss|sass|less|vue|svelte|jsx|tsx)$|\.component\./i;
 function owedAtClose(files) {
   const items = ['the project gate after your last change (typecheck, lint of the touched files; the full gate and the build once, at the very end)', 'a spec next to the code you change, run before the code it tests',
-    'code-review once, when the whole task is complete', ...(files.some((f) => UI_FILE.test(f)) ? ['eyes: look at what you built in the browser, one line per element of a screenshot'] : []), 'the Pedido answered item by item in the Cierre'];
+    'code-review once, when the whole task is complete', ...(files.some((f) => UI_FILE.test(f)) ? ['eyes: look at what you built in the browser, one line per element of a screenshot, in ONE ego space for the whole task (the first look is the reference; go back to the same space at every big step and for every doubt or divergence, end with a full test of operation, and close it once yourself, only when the task is complete); the session is the user\'s: never type credentials, and if a page asks for a login stop and tell them'] : []), 'the Pedido answered item by item in the Cierre'];
   return `At L2 and above the close also asks for: ${items.join(' · ')}. Do them as you go and write the Cierre last.`;
 }
 

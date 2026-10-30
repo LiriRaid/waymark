@@ -51,10 +51,11 @@ import { claudeDir } from './agents/paths.mjs';
 import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { pack } from './pack.mjs';
+import { newer } from './lib/version.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
 import { makeCopy, removeCopy, orphans, cleanOrphans, copyRoot } from './copy.mjs';
-import { eyesLine } from './eyes.mjs';
+import { eyesLine, egoOffPath } from './eyes.mjs';
 import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -67,11 +68,7 @@ const section = (text, title) => {
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
 export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', report: 'report.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
 
-export const newer = (a, b) => {
-  const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
-  return false;
-};
+export { newer };
 
 export async function update() {
   const repo = process.env.WAYMARK_REPO || 'LiriRaid/waymark';
@@ -366,6 +363,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => gatesLine(cwd));
   await add(() => copiesLine());
   await add(() => eyesLine());
+  await add(() => (egoOffPath() ? 'eyes: ego is installed but not on the PATH (`ego-browser` is not recognized by the agent\'s shell): the block hands the absolute path meanwhile; add ~/.local/share/ego/active_version_dir to the PATH and start the agent again so it runs the bare command' : ''));
   await add(() => longpathsLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
@@ -444,6 +442,7 @@ export function learnProposals(cwd) {
   if (!home.dir || home.legacy) return '';
   const all = proposals(home, readTaskRecords(home)), lines = [];
   for (const p of all.filter((x) => x.kind === 'skill')) lines.push(`procedure: ${p.text.replace(/^project skill for /, '')}. Offer a project skill for it with the user's yes; the count is in memory.md → Repeated procedures.`);
+  for (const p of all.filter((x) => x.kind === 'design' || x.kind === 'term')) lines.push(`${p.kind}: ${p.text}. Offer to write it with the user's yes; never write it on your own.`);
   for (const p of all.filter((x) => x.kind === 'preference')) lines.push(`preference: ${p.text.replace(/^preference /, '')}. The user corrected this more than once: offer to add it to ~/.waymark/preferences.md with their yes.`);
   return lines.join('\n');
 }

@@ -73,6 +73,12 @@ export function learnGates(text, rec, date) {
   });
 }
 
+// The eyes row written as 'to confirm' becomes confirmed once a task's look measured or clicked the page after its last change (the screen answered at that host).
+export function learnEyes(text, rec, date) {
+  if (!(rec?.observed?.eyes?.afterLastChange)) return text;
+  return editSection(text, 'Quality gates', (body) => body.split('\n').map((l) => (isRow(l) && cells(l)[0] === 'eyes' && /to confirm/i.test(l) ? `| eyes | ${cells(l)[1]} | confirmed ${date} by a task's look |` : l)).join('\n'));
+}
+
 // ---------- Project map ----------
 
 const AREAS = '- Areas (hook: last task per folder):';
@@ -240,7 +246,34 @@ export function proposals(home, records) {
   for (const c of corrections(records, `${read(PREFS())}\n${conventions}`)) {
     out.push({ kind: 'preference', key: `pref:${[...keys(c.first)].sort().join(' ')}`, text: `preference "${c.text}" (${c.ids.length}×: ${c.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md, or ~/.waymark/preferences.md if it holds in every project of yours (the user decides)` });
   }
+  for (const d of designLinks(records, conventions)) out.push({ kind: 'design', key: `design:${d.host}`, text: `design link ${d.host} (the user wrote it in ${d.ids.length} tasks: ${d.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md, so the eyes look at it without it being written again (the user decides)` });
+  for (const t of terms(records, conventions)) out.push({ kind: 'term', key: `term:${norm(t.term)}`, text: `term "${t.term}" means "${t.meaning}" for this user (${t.ids.length}×: ${t.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md (the user decides)` });
   return out;
+}
+
+const LINK = /https?:\/\/[^\s'"`)<>\]]+/gi;
+const LOCAL = /^(?:localhost|127\.0\.0\.1|\[::1\]|[\w.-]+\.localhost|[\w.-]+\.test)$/i;
+// A design link (a host that is not local) the user wrote in 2 tasks or more and the project's Conventions do not hold yet. → [{ host, ids }]
+export function designLinks(records, conventions = '') {
+  const by = new Map();
+  for (const r of records.filter((x) => x.id && x.kind !== 'Q')) {
+    const hosts = new Set();
+    for (const t of r.prompts?.length ? r.prompts : [r.prompt]) for (const u of String(t || '').match(LINK) || []) { try { const h = new URL(u).hostname.toLowerCase(); if (!LOCAL.test(h)) hosts.add(h); } catch {} }
+    for (const h of hosts) by.set(h, [...(by.get(h) || []), r.id]);
+  }
+  return [...by].filter(([h, ids]) => ids.length >= 2 && !conventions.toLowerCase().includes(h)).map(([host, ids]) => ({ host, ids }));
+}
+
+// "when I say X I mean Y": a word with a meaning of its own, said in 2 tasks or more. → [{ term, meaning, ids }]
+const TERM = /cuando\s+(?:te\s+)?(?:digo|dije|hablo de|escribo|when i say)\s+["«“']?([^"»”',.;:]{2,30}?)["»”']?\s*,?\s*(?:me refiero a|quiero decir|es decir|significa|i mean)\s+([^.,;\n]{3,80})/giu;
+export function terms(records, conventions = '') {
+  const by = new Map();
+  for (const r of records.filter((x) => x.id)) {
+    for (const t of [r.prompt, ...(r.prompts || []), ...(r.decisions || []).filter((d) => d.source === 'reply').map((d) => d.chosen)]) {
+      for (const m of String(t || '').matchAll(TERM)) { const k = norm(m[1]).trim(), g = by.get(k) || { term: m[1].trim(), meaning: m[2].trim(), ids: new Set() }; g.ids.add(r.id); g.meaning = m[2].trim(); by.set(k, g); }
+    }
+  }
+  return [...by].filter(([k, g]) => g.ids.size >= 2 && !norm(conventions).includes(k)).map(([, g]) => ({ term: g.term, meaning: g.meaning, ids: [...g.ids] }));
 }
 
 // The proposals never said before in this project (.waymark/proposals-seen.json): the session card says them once.
@@ -260,7 +293,7 @@ export function newProposals(home, records) {
 export function learn(home, rec, records, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || rec.kind === 'Q' || !fs.existsSync(home.memory)) return false;
   const text = fs.readFileSync(home.memory, 'utf8');
-  let next = learnGates(text, rec, now.toLocaleDateString('sv'));
+  let next = learnEyes(learnGates(text, rec, now.toLocaleDateString('sv')), rec, now.toLocaleDateString('sv'));
   next = learnAreas(next, rec, home.root);
   next = learnProcedures(next, procedures(records));
   if (next === text) return false;

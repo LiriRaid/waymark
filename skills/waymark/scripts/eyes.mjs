@@ -10,10 +10,25 @@ const EXE = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
 const EGO = 'ego-browser';
 const onPath = (name, env) => String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean).some((d) => EXE.some((x) => fs.existsSync(path.join(d, name + x))));
 
+// Where ego's installer puts the program when the PATH lacks it: the absolute path, or null.
+const egoInstalled = (env) => {
+  const home = env.HOME || env.USERPROFILE || '';
+  const dir = home && path.join(home, '.local', 'share', 'ego', 'active_version_dir');
+  const x = dir && EXE.find((e) => fs.existsSync(path.join(dir, EGO + e)));
+  return x === undefined ? null : path.join(dir, EGO + x);
+};
+// The command the block hands the agent: the bare name while the agent's shell runs it, the absolute path (quoted, forward slashes) only while the PATH lacks it.
+export function egoCommand(env = process.env) {
+  if (onPath(EGO, env)) return EGO;
+  const at = egoInstalled(env);
+  return at ? `"${slash(at)}"` : EGO;
+}
+// Ego installed but not on the PATH: what `check` tells the user (the agent is handed the path meanwhile).
+export const egoOffPath = (env = process.env) => !onPath(EGO, env) && !!egoInstalled(env);
+
 // → 'ego' | 'playwright' | null: ego on PATH (or where its installer puts it), else a Playwright the project declares.
 export function eyesProvider({ root, env = process.env } = {}) {
-  const home = env.HOME || env.USERPROFILE || '';
-  if (onPath(EGO, env) || (home && EXE.some((x) => fs.existsSync(path.join(home, '.local', 'share', 'ego', 'active_version_dir', EGO + x))))) return 'ego';
+  if (onPath(EGO, env) || egoInstalled(env)) return 'ego';
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(root || '', 'package.json'), 'utf8'));
     if (Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).some((n) => /^(@playwright\/test|playwright)$/.test(n))) return 'playwright';
@@ -47,7 +62,8 @@ const AT_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:npx\s+|pnpm\s+exec\s+|yarn\s
 const EGO_PROGRAM = String.raw`(?:(?:\S*[\\/])?ego-browser(?:\.exe|\.cmd)?|(?<q>["'])(?:[^"'\n]*[\\/])?ego-browser(?:\.exe|\.cmd)?\k<q>|["']?\$(?:\{[\w:]+\}|(?:env:)?\w+)["']?)`;
 const EGO_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:(?:npx|pnpm\s+exec|yarn|bunx|nohup|time|timeout\s+\S+)\s+|[A-Za-z_]\w*=\S*\s+)*`;
 export const RUNS_EGO = new RegExp(EGO_START + EGO_PROGRAM + String.raw`\s+nodejs\b`);
-const RUNS_PLAYWRIGHT = new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
+const EGO_SKILL = new RegExp(EGO_START + EGO_PROGRAM + String.raw`\s+skill\b`); // `ego-browser skill`, by any form of the program: ego's own manual
+const RUNS_PLAYWRIGHT =new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
 const PANEL = /^mcp__[\w-]*(?:browser|chrome)[\w-]*__(\w+)$/i;
 const PANEL_ACTS = new Set(['form_input']);
 const text = (t) => String(t.input?.command ?? '');
@@ -139,9 +155,12 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     } else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
   });
   let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
+  let skillRead = false, readFirst = null; // skillRead: the agent read ego's own skill (`ego-browser skill`); readFirst: whether it had by the first ego script
   const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }
+  const scripts = new Map(), scriptAt = (t, i) => { if (!scripts.has(i)) scripts.set(i, scriptOf(t, writes, log, i)); return scripts.get(i); }; // read once per call, not once per use
   tools.forEach((t, i) => {
     let kind = null, measuring = false, where = 'local';
+    if ((t.name === 'Skill' && /ego-browser/.test(String(t.input?.skill || ''))) || (/^(Bash|PowerShell|shell)$/.test(t.name) && EGO_SKILL.test(text(t)))) skillRead = true;
     const panel = PANEL.exec(t.name || '');
     if (panel) {
       kind = 'panel';
@@ -154,30 +173,31 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
       if (RUNS_EGO.test(text(t))) {
         kind = 'ego';
-        const s = scriptOf(t, writes, log, i), places = (s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
+        const s = scriptAt(t, i), places =(s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
         measuring = MEASURES.test(s);
         where = places.includes('off') ? 'off' : places.includes('local') || !places.length ? 'local' : 'design'; // a script that compares the design with the local build looks at the build
       } else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; where = (text(t).match(URL_RE) || []).some((u) => whereTo(u, allowed) === 'off') ? 'off' : 'local'; }
     }
     if (!kind) { if (isChange?.(t, i)) sinceChange = true; return; }
     if (kind === 'ego') { // one space per task: which one the script takes, whether it closes it, and a return to ego after the code changed
-      const s = scriptOf(t, writes, log, i), names = [...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+      const s = scriptAt(t, i), names =[...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
       for (const n of names) spaces.set(n, { opened: (spaces.get(n)?.opened || 0) + 1, finished: false });
       const last = names[names.length - 1] || [...spaces.keys()].pop();
       if (/\bfinish\s*\(/.test(s) && last && spaces.has(last)) spaces.get(last).finished = true;
+      if (readFirst === null) readFirst = skillRead;
       if (sinceChange || !calls) returns++;
       sinceChange = false;
     }
     if (where === 'off') offHost++;
     if (where === 'design') design++;
     if (where !== 'local') measuring = false; // only the local build is the change; the design is a reference
-    if (kind === 'ego') for (const m of scriptOf(t, writes, log, i).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
+    if (kind === 'ego') for (const m of scriptAt(t, i).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
     if (measuring && i > from) { if (i > gateAt) measures++; else early++; }
   });
   const verdicts = (String(reply).match(/:[ \t]*(?:igual|parecido|falta)\b[ \t]*(?:[—–.,(-]|$)/gim) || []).length; // "<element>: igual — <measurement>" (or after the word a dot, a comma, a parenthesis, the end of the line), never the word in prose
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
+  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(readFirst === null ? {} : { skillRead: readFirst }), ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
 }
 
 // ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----
@@ -246,12 +266,13 @@ export function referenceGaps(observed, refs) {
 
 // The block: what the eyes still owe.
 // `captures`: the task's folder for screenshots (eyesDir), named so they land under the Waymark home and go after a week, never in the repo.
-export function eyesGaps(observed, provider, captures = null) {
+export function eyesGaps(observed, provider, captures = null, env = process.env) {
   if (observed?.afterLastChange) return [];
   const where = captures ? `; captures in ${slash(captures)}` : '';
-  const how = provider === 'ego' ? 'ego-browser nodejs (read `ego-browser skill` first; one space for the whole task, resumed and not opened anew, closed with finish only when the task is complete): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it'
+  const ego = egoCommand(env);
+  const how = provider === 'ego' ? `${ego} nodejs (read \`${ego} skill\` first; one space for the whole task, resumed and not opened anew, closed with finish only when the task is complete): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it`
     : provider === 'playwright' ? 'the project\'s Playwright against the local dev server: a measurement of the element or a real click with the state after it'
       : 'the browser panel against the local dev server: a script that measures the element, or a real click with the state after it';
   const gate = observed?.beforeGate ? 'a look made before the gate passed since your last change does not count; ' : '';
-  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${gate}run the project's typecheck or build first and read its result, and if it fails the change cannot be seen until it is fixed: fix it first and do not open the browser to find the error. Then ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
+  return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${gate}run the project's typecheck or build first and read its result (and the dev server's own compile output where the project has one: it shows the version being served is the new one), and if it fails the change cannot be seen until it is fixed: fix it first and do not open the browser to find the error. Then ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
 }

@@ -1082,7 +1082,12 @@ test('waymark check: skills never indexed or changed since the last sync, framew
   try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*acme-orch in /.test(t))); }
   finally { if (keep === null) fs.rmSync(agentMd); else fs.writeFileSync(agentMd, keep); }
   assert.equal(newer('2.1.0', '2.0.0-dev'), true);
-  assert.equal(newer('2.0.0', '2.0.0-dev'), false);
+  assert.equal(newer('2.0.0', '2.0.0-dev'), true, 'a dev install is offered its release');
+  assert.equal(newer('2.0.0-dev', '2.0.0'), false, 'counter-example: a pre-release is older than its release');
+  assert.equal(newer('2.0.0-rc.2', '2.0.0-rc.1'), true, 'two pre-releases compare by identifier');
+  assert.equal(newer('2.0.0-rc.1', '2.0.0-rc.2'), false);
+  assert.equal(newer('2.0.0-rc.1', '2.0.0-dev'), true, 'text identifiers compare as text: rc after dev');
+  assert.equal(newer('2.0.0-rc.10', '2.0.0-rc.9'), true, 'numeric identifiers compare as numbers');
   assert.equal(newer('1.9.9', '2.0.0'), false);
 });
 

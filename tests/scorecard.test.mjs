@@ -95,6 +95,20 @@ test('0: a ratio check scores value/threshold capped at 1, "le" inverts it, a nu
   assert.match(r[6].detail, /frozen in the next release$/, 'a point past the last one of the card is no point of this plan');
 });
 
+test('0: a record-based check with records only of another version waits for its first task; with no records at all it cannot be measured', async () => {
+  const P = await import(`file://${REPO}/skills/waymark/scripts/provenance.mjs`);
+  const card = [{ id: '1', what: 'fields', point: 0, kind: 'measure', measure: 'records.fieldShare', op: 'ge', threshold: 0.9 }];
+  const empty = fixture(one(card), { '.waymark/memory.md': '# P\n' });
+  assert.match((await S.scorecard(empty)).criteria[0].checks[0].detail, /cannot be measured here yet/, 'counter-example: no record at all');
+  const old = fixture(one(card), { '.waymark/memory.md': '# P\n' });
+  const home = P.projectHome(old);
+  fs.mkdirSync(path.dirname(home.log), { recursive: true });
+  fs.writeFileSync(home.log, JSON.stringify({ id: '2026-01-01 · T1', at: '2026-01-01T00:00:00.000Z', inputs: { waymark: '1.0.0' } }) + '\n');
+  const c = (await S.scorecard(old)).criteria[0].checks[0];
+  assert.equal(c.status, 'unmeasured');
+  assert.match(c.detail, /no records of version \d+\.\d+\.\d+ yet/);
+});
+
 test('0: the total is a weighted sum and the rendered figure is cut, never rounded up', async () => {
   const root = fixture([
     { id: 1, name: 'half', weight: 60, target: 95, checks: [{ id: '1', what: 'a', point: 0, kind: 'exists', files: ['a.txt'] }, { id: '2', what: 'b', point: 0, kind: 'exists', files: ['no'] }] },

@@ -70,7 +70,8 @@ const MEMORY_FILE = /[\\/]\.waymark[\\/](projects[\\/][^\\/]+\.md|memory\.md)$/i
 // A command's output that shows a failure, read only when its exit is not the gate's or the test's own (a pipe, a `;`).
 // Only the tools' own summary lines, never a count anywhere (a test titled "reports 2 errors" passes); eslint's
 // "✖ N problems" counts only with errors in it, since warnings alone exit 0.
-const FAIL_OUT = /error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed|Failed to resolve import|ERR_MODULE_NOT_FOUND|Cannot find module '/im; // vitest prints "Tests  N failed" (two spaces); a spec red because its import does not resolve is a red
+const DOUBT = /(?<![\p{L}])(?:no estoy segur[oa]|me qued[oó] la duda|tengo (?:la )?duda|supuse|asum[ií]|no pude confirmar|not sure|assumed)(?![\p{L}])/iu; // the Cierre says it guessed
+const FAIL_OUT =/error TS\d+|error\[E\d+\]|npm ERR!|ELIFECYCLE|Command failed with exit code|^SyntaxError:|Found [1-9]\d* errors?\b|✖ [1-9]\d* problems? \([1-9]\d* errors?|^\s*[1-9]\d* failing\b|ℹ fail [1-9]|Tests?:\s+[1-9]\d* failed|^\s*Tests\s+[1-9]\d* failed|Test Files\s+[1-9]\d* failed|Failed to resolve import|ERR_MODULE_NOT_FOUND|Cannot find module '/im; // vitest prints "Tests  N failed" (two spaces); a spec red because its import does not resolve is a red
 const FAIL_LINE = /^\s*(?:FAIL|×|✗)\s+\S/m; // vitest's " FAIL  file > case" and "× case", ava's and tap's "✗ case", case-sensitive: a log line "fail to connect" is no test failure
 // The test runner itself did not start (its package is missing, as in a clean copy with no install): the environment failed, not the spec. An import of
 // the code under test that does not resolve is still a red (FAIL_OUT).
@@ -1046,6 +1047,10 @@ function composeSteps(S) {
   // one ego space per task (points 15 and 2): closed by the agent when the task is complete, resumed (not opened anew) while it is not; a look in the card, never a block
   const spaces = observed.eyes?.spaces || [];
   if (spaces.some((x) => x.finished) && taskOpen(reply)) findings.push('the ego space was closed while the task is still open (recorded, not blocked): the agent closes it once, in the last round of a complete task');
+  if (observed.eyes?.provider === 'ego' && observed.eyes.skillRead === false) findings.push('ego was run without reading its own skill first (`ego-browser skill`; recorded, not blocked): the skill says how a space is taken, resumed and closed');
+  const stepsDone = (String(reply).match(/Aprendido:[^\n]*/i)?.[0].match(/✔\s*\d+/g) || []).length;
+  if (spaces.length && stepsDone > (observed.eyes.returns || 0)) findings.push(`ego was revisited ${observed.eyes.returns || 0} time${observed.eyes.returns === 1 ? '' : 's'} for ${stepsDone} steps done (recorded, not blocked): go back to ego at every finished step and compare with the first look`);
+  if (spaces.length && (observed.eyes.returns || 0) <= 1 && DOUBT.test(String(reply).match(/(?:Evidencia|Aprendido):[^\n]*/gi)?.join('\n') || '')) findings.push('the Cierre names a doubt or an assumption and ego was looked at once (recorded, not blocked): a doubt about a design, a flow or what an action does is answered by going back to ego in the same space, not by guessing');
   if (spaces.length > 1) findings.push(`ego was opened ${spaces.length} times in one task (${spaces.map((x) => x.name).slice(0, 4).join(', ')}; recorded, not blocked): one space per task, resumed at every doubt and every step`);
   if (observed.options?.phased?.length) findings.push(`the first choice window offers only a phase of the ask (recorded, not blocked): an L2+ ask is built whole in one task, so the window offers the whole ask with its decisions: ${observed.options.phased.slice(0, 2).join(' · ')}`);
   if (observed.options?.missing.length) findings.push(`the first choice window does not mark exactly one option (Recommended) (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);

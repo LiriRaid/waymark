@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { release } from './lib/version.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -67,7 +68,6 @@ const as = (v) => (Array.isArray(v) ? v : [v]);
 // The last n tasks of the project's log; `full` keeps those whose detail (the git note) could be read, which hold the fields. Only the records the
 // measured version's hooks wrote count: one another version wrote (inputs.waymark) is not this version's to answer for.
 // A pre-release is the version it leads to: what an installed 2.0.19-dev writes is measured as 2.0.19.
-const release = (v) => String(v || '').replace(/-[0-9A-Za-z.-]+$/, '');
 const VERSION = (() => { try { return release(fs.readFileSync(path.join(HERE, '..', 'VERSION'), 'utf8').trim()) || null; } catch { return null; } })();
 // The writer version of each record, in date order. One with no version (a task only a commit's trailer holds, or one from before records
 // named it) is the version that ran at its date: the last record before it that names one, else the first after it; with none named, null.
@@ -212,7 +212,12 @@ async function runCheck(root, c, lastPoint = Infinity) {
     const fn = MEASURES[c.measure];
     let value = null;
     try { value = fn ? await fn(root) : null; } catch { value = null; }
-    if (value === null || value === undefined) return { score: 0, status: 'unmeasured', detail: `${c.measure} cannot be measured here yet` };
+    if (value === null || value === undefined) {
+      // records exist but none was written by this version: the check waits for its first task, it did not fail
+      let fresh = false;
+      try { fresh = !!VERSION && (await rawTasks(root)).records.some((r) => r.id && !r.kind) && !(await versionTasks(root)).length; } catch { /* no records to read */ }
+      return { score: 0, status: 'unmeasured', detail: fresh ? `${c.measure}: no records of version ${VERSION} yet (it counts from the first task run on it)` : `${c.measure} cannot be measured here yet` };
+    }
     if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in ${c.frozenIn > lastPoint ? 'the next release' : `point ${c.frozenIn}`}` };
     const score = scoreOf(c.op, value, c.threshold);
     return { score, status: score >= 1 ? 'pass' : 'fail', value, detail: `${c.measure} = ${fmt(value)} (${c.op === 'ge' ? '≥' : '≤'} ${c.threshold})` };

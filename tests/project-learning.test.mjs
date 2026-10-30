@@ -76,3 +76,21 @@ test('23: the template\'s Stack, Source root, Path aliases, Related projects and
   C.fillMemory(file, C.census(d), { related: ['x (../x)'] });
   assert.equal(fs.readFileSync(file, 'utf8'), own, 'counter-example: what a person wrote is never overwritten');
 });
+
+test('23: a design link written in two tasks and a term with its own meaning said twice are proposals for Conventions; once, local or already written is not', async () => {
+  const { designLinks, terms, learnEyes } = await import(`file://${SCRIPTS}/learn.mjs`);
+  const link = 'https://claude.ai/design/p/abc';
+  const records = [rec(1, `hazlo igual a ${link}`), rec(2, `revisa otra vez ${link} y el modal`), rec(3, 'abre http://localhost:4200/ y mira')];
+  assert.deepEqual(designLinks(records).map((d) => d.host), ['claude.ai']);
+  assert.deepEqual(designLinks(records.slice(0, 1)), [], 'once');
+  assert.deepEqual(designLinks(records, '- Design: claude.ai/design/p/abc'), [], 'already in Conventions');
+  const t = terms([rec(1, 'cuando digo franjas me refiero a las tabs del encabezado'), rec(2, 'ojo: cuando digo franjas me refiero a las tabs del encabezado')]);
+  assert.equal(t.length, 1);
+  assert.equal(t[0].term, 'franjas');
+  assert.deepEqual(terms([rec(1, 'cuando digo franjas me refiero a las tabs del encabezado')]), [], 'once');
+  const out = proposals(memory(), records);
+  assert.ok(out.some((p) => p.kind === 'design' && /claude\.ai/.test(p.text)));
+  const mem = '## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| eyes | `pnpm run start` · http://localhost:4200 | to confirm: proposed from package.json |\n';
+  assert.match(learnEyes(mem, { observed: { eyes: { afterLastChange: true } } }, '2026-10-30'), /\| eyes \| `pnpm run start` · http:\/\/localhost:4200 \| confirmed 2026-10-30/, 'a look after the change confirms the row');
+  assert.equal(learnEyes(mem, { observed: { eyes: { afterLastChange: false } } }, '2026-10-30'), mem, 'counter-example: no look, the row stays to confirm');
+});

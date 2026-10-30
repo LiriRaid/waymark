@@ -110,7 +110,7 @@ test('8: the provider is what the machine has: ego first, Playwright where the p
 test('8: the record keeps the eyes: provider, calls, measures, and nothing of the page', () => {
   const g = judge([...head(2, CSS), ...ego(MEASURE)]);
   const o = g.observed.eyes;
-  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references', 'returns', 'spaces'].sort()); // the ego task space(s) and the returns to ego are kept by name and count only (2.0.20 point 15)
+  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references', 'returns', 'skillRead', 'spaces'].sort()); // the ego task space(s) and the returns to ego are kept by name and count only, and whether ego's own skill was read first (2.0.20 point 15)
   assert.ok(!JSON.stringify(o).includes('localhost'), 'no URL, no text of the page');
 });
 
@@ -508,4 +508,44 @@ test('29 (review): a relative file name with no cd that two folders hold is ambi
   assert.equal(judge(ambiguous).observed.eyes.measures, 0, 'two folders: not guessed');
   const single = [...head(2, CSS), ...call('Write', { file_path: b, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < round.mjs` })];
   assert.equal(judge(single).observed.eyes.measures, 1, 'one folder: read');
+});
+
+test('2.0.20 point 1: the block hands the bare ego command while the PATH has it and the absolute path only while it lacks it; check says so', () => {
+  const dirHome = fs.mkdtempSync(path.join(home, 'eh-'));
+  const bin = path.join(dirHome, '.local', 'share', 'ego', 'active_version_dir');
+  fs.mkdirSync(bin, { recursive: true });
+  const exe = path.join(bin, process.platform === 'win32' ? 'ego-browser.exe' : 'ego-browser');
+  fs.writeFileSync(exe, '');
+  const off = { HOME: dirHome, USERPROFILE: dirHome, PATH: '' };
+  assert.match(Eyes.egoCommand(off), /^".*ego-browser(\.exe)?"$/, 'off the PATH: the quoted absolute path');
+  assert.ok(Eyes.egoOffPath(off));
+  assert.match(Eyes.eyesGaps({}, 'ego', null, off)[0], /"[^"]*ego-browser(\.exe)? " ?nodejs|ego-browser(\.exe)?" nodejs/, 'the block carries the path');
+  const on = { ...off, PATH: bin };
+  assert.equal(Eyes.egoCommand(on), 'ego-browser', 'counter-example: on the PATH the bare command is handed, not the path');
+  assert.equal(Eyes.egoOffPath(on), false);
+  assert.match(Eyes.eyesGaps({}, 'ego', null, on)[0], /ego-browser nodejs \(read `ego-browser skill` first/);
+  assert.match(Eyes.eyesGaps({}, 'ego', null, on)[0], /dev server's own compile output/);
+});
+
+test('2.0.20 point 1: the record says whether the agent read ego\'s own skill before its first script', () => {
+  const run = (cmd) => ({ name: 'Bash', input: { command: cmd } });
+  const script = run(`ego-browser nodejs <<'EOF'\nconst task = await taskSpace("t");\nconsole.log(1);\nEOF`);
+  assert.equal(Eyes.observeEyes([run('ego-browser skill'), script]).skillRead, true, 'read first');
+  assert.equal(Eyes.observeEyes([{ name: 'Skill', input: { skill: 'ego-browser' } }, script]).skillRead, true, 'the skill through the Skill tool');
+  assert.equal(Eyes.observeEyes([run('"C:/Users/dev/.local/share/ego/active_version_dir/ego-browser.exe" skill'), script]).skillRead, true, 'by the absolute path');
+  assert.equal(Eyes.observeEyes([script, run('ego-browser skill')]).skillRead, false, 'counter-example: read after the first script');
+  assert.equal('skillRead' in Eyes.observeEyes([run('ls')]), false, 'no ego call: nothing to say');
+});
+
+test('2.0.20 point 15: the card records returns against steps, an ego run without its skill and a Cierre that guessed; none blocks', () => {
+  const lines = [...head(2, CSS), ...egoIn('t', `${LOOK}\n${MEASURE}`)];
+  const cierre = (aprendido, evid = 'observada ancho 40') => `## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: ${evid}\nAprendido: ${aprendido}`;
+  const g = judge(lines, {}, cierre('✔1 modal · ✔2 tabla · ✔3 filtros ← x'));
+  assert.ok(g.findings.some((f) => /revisited 1 time for 3 steps done \(recorded, not blocked\)/.test(f)), 'three steps, one return');
+  assert.ok(g.findings.some((f) => /ego was run without reading its own skill/.test(f)), 'the skill was not read');
+  assert.ok(g.findings.some((f) => /names a doubt or an assumption/.test(f)) === false, 'counter-example: no doubt written');
+  assert.ok(judge(lines, {}, cierre('x ← y', 'observada ancho 40; asumí el color del hover')).findings.some((f) => /names a doubt or an assumption/.test(f)), 'a guess named in the Cierre');
+  assert.equal(eyes(g)?.pass, true, 'recorded, never a block');
+  const ok = judge([...head(2, CSS), ...call('Bash', { command: 'ego-browser skill' }), ...egoIn('t', `${LOOK}\n${MEASURE}`)], {}, cierre('✔1 modal ← x'));
+  assert.ok(!ok.findings.some((f) => /without reading its own skill|revisited/.test(f)), 'skill read, one step, one return');
 });

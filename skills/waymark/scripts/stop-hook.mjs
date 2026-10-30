@@ -672,7 +672,9 @@ function observeBuild(S) {
   const lastIn = (r) => lastIdx((t) => shellChange(t) || (codeEdit(t) && !SPEC.test(path.basename(fileOf(t))) && repoAt(path.dirname(fileOf(t))) === r));
   const builtAfter = (r) => { const last = lastIn(r); return builds.some((b) => b.i > (last < 0 ? lastBuilt : last) && (!b.repo || !r || b.repo === r)); };
   const buildAfter = lastCode >= 0 && (codeRepos.length ? codeRepos.every(builtAfter) : builds.some((b) => b.i > lastBuilt));
-  return { near, committed, buildAfter, styleOnlyChange: code.length > 0 && !logic.length };
+  // the repos still owed a build, by folder name: a task that changed two repos is told which one has none (a repo the hook cannot tell is not named)
+  const buildMissing = lastCode >= 0 && codeRepos.length > 1 ? codeRepos.filter((r) => r && !builtAfter(r)).map((r) => path.basename(String(r).replace(/\\/g, '/'))) : [];
+  return { near, committed, buildAfter, buildMissing, styleOnlyChange: code.length > 0 && !logic.length };
 }
 
 // Testigo evidence (docs/adr/0025, 0026): an Evidencia "observada" needs a check after the last change, and each fact it cites is looked up in the tool calls.
@@ -934,9 +936,9 @@ const WITNESS = {
     return skip.Review || observed.review ? [] : [`code changed and no review ran: run code-review after the code change, or ${WAYMARK_CMD} review <files> where the agent has no code-review, naming the code files not reviewed yet (${reviewLeft.slice(0, 4).map((f) => path.basename(f)).join(', ')}${reviewLeft.length > 4 ? '…' : ''})${delta}`];
   },
   build: (S) => {
-    const { buildAfter, buildNo, ctx, excepted, styleOnlyChange } = S;
+    const { buildAfter, buildMissing, buildNo, ctx, excepted, styleOnlyChange } = S;
     // a legacy stack's build takes minutes and a stylesheet or a template with no binding is what it would only re-compile: a styles-only change owes none there
-    return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ctx.legacy && styleOnlyChange ? (excepted.build = 'legacy stack: a styles-only change needs no full build', []) : ['L2+ with code: run the build once now, after the last change, in the repo of the changed code (or write Build: no (<why>) if the project has none)'];
+    return buildAfter ? [] : buildNo ? (excepted.build = buildNo, []) : ctx.legacy && styleOnlyChange ? (excepted.build = 'legacy stack: a styles-only change needs no full build', []) : [`L2+ with code: run the build once now, after the last change, in ${buildMissing?.length ? `the repo that has none: ${buildMissing.join(', ')}` : 'the repo of the changed code'} (or write Build: no (<why>) if the project has none)`];
   },
   eyes: (S) => {
     const { eyesNo, excepted, observed } = S;

@@ -116,7 +116,12 @@ function classify(words) {
   if (/^(bash|sh|zsh|dash)$/.test(prog) && sub === '-c') return { inner: a[1] };
   if (prog === 'cmd' && /^\/[ck]$/.test(sub)) return { inner: a.slice(1).join(' ') };
   if (/^(pwsh|powershell)$/.test(prog)) { const i = subs.findIndex((x) => /^-(c|command)$/.test(x)); if (i >= 0) return { inner: a.slice(i + 1).join(' ') }; }
-  if (LINTERS.test(prog)) { out.gate = true; out.build = prog === 'tsc' && subs.includes('-b'); }
+  if (LINTERS.test(prog)) {
+    out.gate = true;
+    // tsc builds with -b, or compiles a project made for the build (a tsconfig named build) or into an --outDir; --noEmit emits nothing, so it is a typecheck
+    const at = subs.findIndex((x) => /^(-p|--project)$/.test(x)), project = at >= 0 ? subs[at + 1] || '' : (subs.find((x) => /^--project=/.test(x)) || '').slice(10);
+    out.build = prog === 'tsc' && (subs.includes('-b') || subs.includes('--build') || (!subs.includes('--noemit') && (/build/.test(path.basename(project)) || subs.some((x) => /^--outdir(=|$)/.test(x)))));
+  }
   else if (TESTERS.test(prog)) out.test = true;
   else if (/^(npm|pnpm|yarn|bun)$/.test(prog)) {
     const script = /^(run|run-script)$/.test(sub) ? String(a[1] || '') : sub;
@@ -126,6 +131,9 @@ function classify(words) {
       out.gate = out.build || SCRIPT_GATE.test(script);
     }
   } else if (prog === 'node' || prog === 'deno') {
+    // node running a framework's own CLI (the agent gives it more memory): judged as that CLI with the rest of the arguments, `node …/@angular/cli/bin/ng build`
+    const cli = prog === 'node' ? subs.findIndex((x) => /(^|[\\/])(ng|nest|vite|next|nuxt|astro|tsc|react-scripts|vue-cli-service)(\.[cm]?js)?$/.test(x)) : -1;
+    if (cli >= 0 && !subs.slice(0, cli).some((x) => /^(-e|--eval|-p|--print)$/.test(x))) return classify([path.basename(String(a[cli]).replace(/\\/g, '/')).replace(/\.[cm]?js$/, ''), ...a.slice(cli + 1)]);
     if (subs.includes('--check') || /^(check|lint)$/.test(sub)) out.gate = true;
     else if (subs.includes('--test') || sub === 'test') out.test = true;
   } else if (/^(ng|nest|react-scripts|vue-cli-service|turbo|nx|vite|next|nuxt|astro|go|cargo|dotnet|mvn|mvnw|gradle|gradlew|make|cmake|ctest|rails|rake|artisan|php|terraform|tofu|composer|flutter|dart|mix|swift)$/.test(prog)) {

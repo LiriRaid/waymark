@@ -17,7 +17,7 @@ after(() => fs.rmSync(home, { recursive: true, force: true }));
 const { cierreGaps } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
 const { currentTurn } = await import(`file://${SCRIPTS}/transcript.mjs`);
 const { checkDecision } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
-const { changesProject, mutatesFiles } = await import(`file://${SCRIPTS}/runs.mjs`);
+const { changesProject, mutatesFiles, shellRuns } = await import(`file://${SCRIPTS}/runs.mjs`);
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 
 let ids = 0, gate = 0;
@@ -106,6 +106,43 @@ test('19: the build counts by form: piped, in a subshell, in a chain of two repo
   const done = call('BashOutput', { bash_id: 'bg1' }, '<exit_code>0</exit_code>\nBuild at: now');
   assert.equal(buildOwed(judge([...L2_EDIT, ...launch, ...done])), false, 'background: the later read of its result credits it');
   assert.equal(buildOwed(judge([...L2_EDIT, ...launch])), true, 'counter-example: a launch nobody saw finish');
+});
+
+// ---- 2.0.20 point 30, from the first real task of checkpoint B: the API was compiled to a temp folder, the front by node running the Angular CLI ----
+const isBuild = (command) => shellRuns(command).some((p) => p.build);
+test('30: the forms real agents use to build count: tsc of a build tsconfig or to an --outDir, and node running a framework CLI', () => {
+  assert.ok(isBuild('cd "/work/api" && ls tsconfig.build.json >/dev/null && pnpm exec tsc -p tsconfig.build.json --outDir "/tmp/api-build" 2>&1 | tail -5; echo BUILD_EXIT=$?'), 'tsc -p tsconfig.build.json --outDir');
+  assert.ok(isBuild('npx tsc -p tsconfig.build.json 2>&1 | tail -5'), 'a build tsconfig with no outDir flag');
+  assert.ok(isBuild('pnpm exec tsc --project tsconfig.json --outDir /tmp/x'), 'any tsconfig to an --outDir');
+  assert.ok(isBuild('node --max_old_space_size=6144 ./node_modules/@angular/cli/bin/ng build --output-path /tmp/dist > /tmp/build.log 2>&1'), 'node running the Angular CLI');
+  assert.ok(isBuild('node --max-old-space-size 6144 ./node_modules/@angular/cli/bin/ng build'), 'a flag with its value apart');
+  assert.ok(isBuild('node ./node_modules/@nestjs/cli/bin/nest.js build'), 'node running the Nest CLI');
+  assert.ok(isBuild('node ./node_modules/vite/bin/vite.js build'), 'node running vite');
+  for (const [command, why] of [
+    ['pnpm exec tsc --noEmit -p tsconfig.app.json', 'the typecheck stays a typecheck'],
+    ['pnpm exec tsc -p tsconfig.build.json --noEmit', 'a build tsconfig with --noEmit emits nothing'],
+    ['pnpm exec tsc --noEmit --outDir /tmp/x -p tsconfig.json', '--noEmit wins'],
+    ['pnpm exec tsc -p tsconfig.json', 'no build tsconfig and no --outDir: a plain compile in place is not named a build'],
+    ['node ./node_modules/@angular/cli/bin/ng test', 'node running the CLI is read by its verb: test is no build'],
+    ['node --max-old-space-size 6144 server.js', 'a server is no build'],
+    ['node --max-old-space-size 6144 ./node_modules/@angular/cli/bin/ng serve', 'serve is no build'],
+  ]) assert.equal(isBuild(command), false, why);
+  assert.ok(shellRuns('pnpm exec tsc -p tsconfig.build.json --outDir /tmp/x').some((p) => p.gate), 'it is still a gate');
+});
+
+test('30: a task that changes two repos owes the build of each, and the block names the one that has none', () => {
+  const repoOf = (d) => String(d).replace(/\\/g, '/').replace(/^[a-z]:/i, '').match(/^\/work\/(api|web)\b/)?.[0] || null;
+  const WEB = '/work/web/src/a.mjs', API = '/work/api/src/b.mjs';
+  const two = [...head(2), ...ASKED, ...call('Edit', { file_path: WEB }), ...call('Edit', { file_path: API })];
+  const fe = call('Bash', { command: 'cd "/work/web" && pnpm run build 2>&1 | grep -E "ERROR|error TS|complete" | head -5' }, 'Application bundle generation complete.');
+  const none = judge([...two, ...fe], { repoOf });
+  const msg = none.missing.find((m) => /run the build once/.test(m)) || '';
+  assert.ok(msg, 'the API has no build: owed');
+  assert.match(msg, /\bapi\b/, msg);
+  assert.doesNotMatch(msg, /\bweb\b/, 'the front was built: it is not named');
+  const api = call('Bash', { command: 'cd "/work/api" && pnpm exec tsc -p tsconfig.build.json --outDir "/tmp/api-build" 2>&1 | tail -5; echo BUILD_EXIT=$?' });
+  assert.equal(buildOwed(judge([...two, ...fe, ...api], { repoOf })), false, 'the API compiled to a temp folder counts');
+  assert.equal(buildOwed(judge([...two, ...api], { repoOf })), true, 'counter-example: the front is missing now');
 });
 
 const NODE_RED = 'ℹ tests 40\nℹ pass 39\nℹ fail 1\n✖ failing tests:\n\ntest at tests/hooks.test.mjs:120:1\n✖ the hook stays under its cap (310.2ms)\n  AssertionError: 310 > 300';

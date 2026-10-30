@@ -64,11 +64,11 @@ function findNode() {
 }
 
 // Each run's milliseconds (from the process start, as the agent waits for it) go to <WAYMARK_HOME>/latency.log, one tab-separated
-// line: when, the hook, ms. `waymark.mjs check` names an event whose p95 passes its cap. The log keeps its last 2,000 lines.
+// line: when, the hook, ms, and the tag the hook set (project:session:transcript KB). `waymark.mjs check` names an event whose p95 passes its cap. The log keeps its last 2,000 lines.
 function logLatency() {
   try {
     var file = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), 'latency.log');
-    var line = new Date().toISOString() + '\t' + path.basename(script).replace(/\.[cm]?js$/, '') + '\t' + Math.round(process.uptime() * 1000) + '\n';
+    var line = new Date().toISOString() + '\t' + path.basename(script).replace(/\.[cm]?js$/, '') + '\t' + Math.round(process.uptime() * 1000) + (process.env.WAYMARK_LATENCY_TAG ? '\t' + process.env.WAYMARK_LATENCY_TAG : '') + '\n';
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (isFile(file) && fs.statSync(file).size > 256 * 1024) fs.writeFileSync(file, fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(-2000).join('\n') + '\n');
     fs.appendFileSync(file, line);

@@ -7,13 +7,14 @@
 // It prints the chain, the task's commits and their trailer, secrets in those commits, and the repo typecheck run now.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readRecords, readTaskRecords, readNotes, gitNote, verifyChain, anchorsFor, commitsFor, findSecrets } from './provenance.mjs';
 import { stackOf, translate, gateCell, rowProblem } from './stack.mjs';
 import { runtimeCells, runtimeDir, runtimeEnv } from './runtime.mjs';
 import { read } from './lib/fs.mjs';
-import { real } from './lib/paths.mjs';
+import { real, waymarkHome } from './lib/paths.mjs';
 import { git as gitIn, topOf } from './lib/git.mjs';
 
 const GATE_MS = 40000; // under the agents' default hook timeout
@@ -112,9 +113,36 @@ export function rerunGate(codeFiles, home) {
   roots.sort((a, b) => (same(b, home.root) ? 1 : 0) - (same(a, home.root) ? 1 : 0));
   for (const root of roots) {
     const gate = gateCommand(root, same(root, home.root) ? home.memory : null);
-    if (gate) return runGate(gate, root);
+    if (gate) return cachedGate(gate, root);
   }
   return null;
+}
+
+// The hook's own typecheck is not run twice on a tree it already checked: a block that changed no code, the second Stop of one close, a retry. The tree is HEAD plus every
+// changed or new file with its mtime and size, taken before the run and after it (a typecheck that writes its own build info leaves the tree it will be asked about next).
+// A timed-out or unavailable run is never kept; an entry lives twenty minutes.
+const GATE_TTL = 20 * 60000;
+const gateCacheFile = () => path.join(waymarkHome(), '.gate-cache.json');
+function treeKey(root, cmd) {
+  const head = git(root, 'rev-parse', 'HEAD'), st = git(root, 'status', '--porcelain=v1', '-uall', '-z');
+  if (st.status !== 0) return null;
+  const stats = String(st.stdout || '').split('\0').filter(Boolean).map((l) => { try { const s = fs.statSync(path.join(root, l.slice(3))); return `${l}:${s.mtimeMs}:${s.size}`; } catch { return `${l}:gone`; } });
+  return crypto.createHash('sha1').update([cmd, String(head.stdout || '').trim(), ...stats].join('\n')).digest('hex');
+}
+function cachedGate(gate, root) {
+  let cache = {}, before = null;
+  try { cache = JSON.parse(read(gateCacheFile()) || '{}'); } catch {}
+  try { before = treeKey(root, gate.cmd); } catch {}
+  const hit = cache[root];
+  if (before && hit && hit.keys.includes(before) && Date.now() - hit.at < GATE_TTL) return { ...hit.run, cached: true };
+  const run = runGate(gate, root);
+  if (before && !run.timedOut && !run.unavailable) {
+    let after = null;
+    try { after = treeKey(root, gate.cmd); } catch {}
+    cache[root] = { at: Date.now(), keys: [...new Set([before, after].filter(Boolean))], run };
+    try { fs.mkdirSync(path.dirname(gateCacheFile()), { recursive: true }); fs.writeFileSync(gateCacheFile(), JSON.stringify(cache)); } catch {}
+  }
+  return run;
 }
 
 // What the testigo "sin secretos" reads besides what Waymark writes: the project memory

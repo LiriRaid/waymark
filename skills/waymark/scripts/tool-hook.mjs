@@ -30,6 +30,7 @@ import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
 import { grantsIn, recordGrants, WINDOW } from './lib/grants.mjs';
 import { PACKED, readPacked, packedFiles, packedAny, procDelivered } from './lib/packed.mjs';
+import { tagLatency } from './lib/latency.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
@@ -545,6 +546,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try {
       const hook = parseHook(input, agent);
       if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+      tagLatency(hook, hook.cwd);
       const after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
       if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       // a session with no status line (the desktop app): what it spent so far, so a rise read mid-turn is split with it

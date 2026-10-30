@@ -2,6 +2,7 @@
 // or a memory-only turn is no task, and "apply the findings" is the user's own decision. Synthetic copies of the patterns: a logic case,
 // a CSS/HTML case and the counter-example for each. Run: node --test tests/budget.test.mjs
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+process.env.WAYMARK_BRAKE_MODE = 'block'; // the cases here are the brake that stops a prompt (opt-in now); the default advice is tests/brake-advice.test.mjs
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

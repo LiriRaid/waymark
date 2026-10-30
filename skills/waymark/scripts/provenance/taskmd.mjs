@@ -10,6 +10,7 @@ import { appendRecord, gitNote } from './chain.mjs';
 import { readTaskRecords } from './records.mjs';
 import { taskIds, openFile, readOpen } from './tasks.mjs';
 import { followUps } from './derive.mjs';
+import { ownedCell, unjudgedRows } from './rows.mjs';
 
 // Turns that started and never reached the end-of-turn hook (quota ran out, the agent crashed): .waymark/open.json, one
 // entry per session (read by tasks.mjs), written by the per-prompt hook and removed when the turn ends.
@@ -259,11 +260,10 @@ export function tasksMarkdown(home, now = new Date()) {
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
   const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
-  const ownedCell = (owned) => { const steps = owned.filter((s) => s !== 'manual'); return `hecho (${[...(owned.includes('manual') ? ['pendiente tuyo: prueba manual'] : []), ...(steps.length ? [`${steps.join(', ')}: tuyo`] : [])].join('; ')})`; }; // the user's own test is named as what is pending from them; a step (deploy, PR) as theirs
   const result = (r, later = []) => (r.fromCommit ? 'solo commit' : r.outcome?.userOwned ? ownedCell(r.outcome.userOwned) : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
-  const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
-    .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
+  const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
+    .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS)).concat(unjudgedRows(all, { cell, clip })); // the open turns, then the turns nobody judged
   // the questions since the last close, the newest QUESTIONS_SHOWN as one line each: when, department, skills, the
   // question and what it answered (older records have no skills or answer)
   const asked = all.slice(all.lastIndexOf(lastRec) + 1).filter((r) => r.kind === 'Q'), questions = asked.length;
@@ -297,7 +297,7 @@ export function tasksMarkdown(home, now = new Date()) {
   const render = () => [`# Tasks · ${home.slug}`, '',
     `Generated at each task close (${now.toISOString()}); do not edit. Detail: \`memory.md\` (*Work in progress*) and the records (the \`tasks [<task ID>]\` command: git notes ${NOTES_REF} + \`provenance.jsonl\`).`, '',
     '## In progress / pending', ...(tasks.length ? tasks : ['- none']), ...(hidden ? [`- (+${hidden} more tasks in memory.md)`] : []), ...(notes > 0 ? [`- (${notes} more notes in memory.md, not tasks)`] : []), '',
-    ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash)', ...started, ''] : []),
+    ...(started.length ? ['## Started, not closed (still running, the turn reading this file included, or it never ended: quota, crash; a turn marked not evaluated was deferred or unjudged)', ...started, ''] : []),
     ...(questions ? [`## Preguntas (Q) desde el último cierre: ${questions} (${qRows.length < questions ? `las últimas ${qRows.length}; ` : ''}provenance.jsonl, kind "Q")`, ...qRows, ''] : []),
     ...(touched.length ? ['## Touched from another project (its task is recorded there; kind "touched")', ...touched, ''] : []),
     ...lastClosed,

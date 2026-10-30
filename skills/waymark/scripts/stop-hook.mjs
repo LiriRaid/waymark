@@ -45,6 +45,7 @@ import { autoPushNotes, pushPref } from './notes-remote.mjs';
 import { saveLearned, saveQuestion, engramInput } from './engram.mjs';
 import { softCapLine } from './rule0-hook.mjs';
 import { packedFiles, packedAny, procDelivered, procLate } from './lib/packed.mjs';
+import { tagLatency } from './lib/latency.mjs';
 import { commitSignatures } from './verify.mjs';
 import { deniedSince } from './lib/denied.mjs';
 import { detectGuarded, guardedLine } from './lib/guard.mjs';
@@ -1308,6 +1309,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       const h = parseHook(input, agent);
       if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
       parsed = h;
+      tagLatency(h, h.cwd);
       if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       // a session with no status line (the desktop app): what it spent, so the quota's rises are split with it too
       try { if (agent.name === 'claude') recordSpend(h.session_id, h.transcript_path); } catch (e) { logHookError('stop-hook spend', e); }

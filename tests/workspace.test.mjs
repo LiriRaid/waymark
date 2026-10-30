@@ -2,6 +2,7 @@
 // task or opened a turn since this session's previous prompt, and nothing otherwise. Synthetic copies of the pattern: a logic case, a CSS/HTML
 // case and the counter-examples for each. Run: node --test tests/workspace.test.mjs
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+process.env.WAYMARK_BRAKE_MODE = 'block'; // the cases here are the brake that stops a prompt (opt-in now); the default advice is tests/brake-advice.test.mjs
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

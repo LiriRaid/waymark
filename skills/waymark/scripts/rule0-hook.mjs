@@ -25,6 +25,7 @@ import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
 import { waymarkHome } from './lib/paths.mjs';
+import { tagLatency } from './lib/latency.mjs';
 
 const HOME = waymarkHome();
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // where this install's skills live
@@ -245,11 +246,11 @@ export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 
-// Context brake (docs/adr/0016): every response re-reads the whole session, so a new message to a session past
-// BRAKE_TOKENS is stopped before the model (0 tokens), once per BRAKE_STEP the context grows (300k, 400k, 500k…). The
-// message is kept in .waymark/next-prompt.md and the next session's card brings it; sending it again here continues
-// until the next step. Agents whose prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder
-// instead. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
+// Context brake (docs/adr/0016): every response re-reads the whole session, so a session past BRAKE_TOKENS is advised, once per
+// BRAKE_STEP the context grows (300k, 400k, 500k…): one line in the reminder says a new session is cheaper, after the job's state is
+// saved in .waymark/ (tasks.md names what is open). It never stops a prompt: a stopped prompt with screenshots is a message the user
+// cannot resend as it was. WAYMARK_BRAKE_MODE=block keeps the stop before the model, with the message kept in
+// .waymark/next-prompt.md for the next session's card. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
 // Neither brake holds a message mid-task (no Cierre yet, or cut by the quota): a new session mid-task would rebuild what
 // this one holds, so past HARD_TOKENS the agent is told to offer one in its window. A task closed parcial or bloqueado is
 // between tasks and brakes like any other (docs/adr/0044).
@@ -263,6 +264,8 @@ export const HARD_TOKENS = Number(process.env.WAYMARK_HARD_TOKENS ?? 500000); //
 export const IDLE_TOKENS =Number(process.env.WAYMARK_IDLE_TOKENS ?? 100000);
 export const IDLE_MINUTES = Number(process.env.WAYMARK_IDLE_MINUTES ?? 60);
 export const NEXT_PROMPT = 'next-prompt.md';
+// What an advice to leave needs on disk first: tasks.md with the job still open (started, not closed) and the plan line of its last close.
+const saveState = (hook) => { try { const home = projectHome(hook.cwd || process.cwd()); if (home.dir && !home.legacy) refreshTasks(home, true); } catch {} };
 export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'), now = Date.now()) {
   const context = st.context || 0, idleMin = st.lastAt ? (now - st.lastAt) / 60000 : 0;
   const big = BRAKE_TOKENS && context >= BRAKE_TOKENS;
@@ -277,6 +280,7 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
     if (seen[key]) return null;
     seen[key] = now;
     try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+    saveState(hook);
     return { line: ` Context: this session holds ~${k} tokens and every response re-reads all of it. Offer the user, in your choice window, to close this task and continue in a new session (the card, tasks.md and engram carry the work over).` };
   }
   // the idle stretch is named by the last response before it: a resend (no response since) finds it seen and continues.
@@ -297,7 +301,7 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   const why = idle
     ? `this session holds ~${k} tokens of context and was idle ${idleMin >= 120 ? `${Math.round(idleMin / 60)} h` : `${Math.round(idleMin)} min`}: its cache expired, so the next response re-writes all of it, which costs far more than a new session.`
     : `this session holds ~${k} tokens of context and every response re-reads all of it.`;
-  if (!agent.out.blockPrompt) return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
+  if (!agent.out.blockPrompt || (process.env.WAYMARK_BRAKE_MODE || 'advice') !== 'block') { saveState(hook); return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper: the job's state is saved in .waymark/ (tasks.md) and the card, tasks.md and engram carry the work over.` }; }
   const home = projectHome(hook.cwd || process.cwd());
   let kept = '';
   try { if (home.dir && !home.legacy) { // a handoff already in the file follows the held message (the card takes the message, then leaves the handoff)
@@ -380,6 +384,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     done = true;
     const hook = parseHook(input, agent, { lenient: true });
     if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+    tagLatency(hook, hook.cwd);
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
     try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) answer(agent, out); } catch (e) { logHookError('rule0-hook', e); }
   };

@@ -27,6 +27,7 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
 import { newProposals } from './learn.mjs';
 import { waymarkHome } from './lib/paths.mjs';
+import { tagLatency } from './lib/latency.mjs';
 import { read } from './lib/fs.mjs';
 
 const HOME = waymarkHome();
@@ -215,6 +216,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     let cwd = process.cwd(), sessionId = null;
     const h = parseHook(input, agent, { lenient: true });
     if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+    tagLatency(h, h.cwd);
     if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; }
     cwd = h.cwd || cwd; sessionId = h.session_id || null;
     let text = '', held = '';

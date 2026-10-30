@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'waymark', 'scripts');
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
-const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'taskmd', 'decisions', 'snapshot', 'derive'];
+const MODULES = ['ids', 'secrets', 'project', 'chain', 'records', 'tasks', 'taskmd', 'decisions', 'snapshot', 'derive', 'rows'];
 const M = Object.fromEntries(await Promise.all(MODULES.map(async (n) => [n, await import(`file://${SCRIPTS}/provenance/${n}.mjs`)])));
 
 // The 2.0.14 public API of provenance.mjs (13 scripts import it): the split must not add, drop or rename one. 2.0.16 adds pinnedRules (point 9); 2.0.18 adds the record schema v2 names of provenance/derive.mjs (point 2); 2.0.20 adds pendingSteps (the per-prompt hook and the Stop hook read the same plan marks).

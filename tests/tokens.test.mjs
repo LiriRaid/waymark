@@ -108,3 +108,12 @@ test('24: the fixed context counts waymark, the dept-* and the owned tool skills
   assert.deepEqual(ownSkills(['waymark', 'dept-qa', 'ui-build', 'ego-browser', 'pdf', 'code-review', 'library-docs'], map), ['waymark', 'dept-qa', 'ui-build', 'library-docs']);
   assert.deepEqual(ownSkills(['waymark', 'pdf'], null), ['waymark'], 'no skill-map: only the core');
 });
+
+test('24: check 8.3 measures the reminder with a typical task and git line: a dirty working tree does not move it', async () => {
+  const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
+  const clean = memRepo('prompt-clean'), dirty = memRepo('prompt-dirty');
+  for (const i of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) fs.writeFileSync(path.join(dirty, `a-very-long-file-name-to-make-the-git-line-longer-${i}.mjs`), 'x\n');
+  const real = (cwd, opts) => sizes(cwd, opts).find((r) => r.name === 'reminder (real)').chars;
+  assert.notEqual(real(clean, {}), real(dirty, {}), 'live, the git line follows the tree (why the card must not read it live)');
+  assert.equal(real(clean, { pinned: true }), real(dirty, { pinned: true }), 'pinned, it does not');
+});

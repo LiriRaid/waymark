@@ -40,7 +40,7 @@ export const readmeTable = (rows) => ['| Part | Loaded | What it is | Characters
 // The skills Waymark answers for: itself, the dept-* and the tool skills its skill-map marks as owned. A skill another agent or the user put in the same folder lists
 // its description in every session too, but it is not Waymark's context to measure (check 8.2).
 export const ownSkills = (dirs, map) => dirs.filter((d) => d === 'waymark' || /^dept-/.test(d) || map?.skills?.[d]?.owned);
-export function sizes(cwd) {
+export function sizes(cwd, { pinned = !!process.env.WAYMARK_SIZE_PINNED } = {}) {
   const home = projectHome(cwd);
   let map = null;
   try { map = JSON.parse(read(path.join(CORE, 'skill-map.json'))); } catch {}
@@ -49,7 +49,7 @@ export function sizes(cwd) {
   const real = () => {
     const repo = stackLine(home.root);
     // WAYMARK_SIZE_PINNED: the tests measure the reminder with a typical task line and git line, not this working tree's (the number of changed files and the length of their names moved it by a few characters between runs)
-    if (process.env.WAYMARK_SIZE_PINNED) return REMINDER.full + ' ID: new 2026-01-01 · T1.' + (repo ? ` Repo: ${repo}.` : '') + ' Git: main · 2 changed: M a-file.ts, M b-file.ts, ….';
+    if (pinned) return REMINDER.full + ' ID: new 2026-01-01 · T1.' + (repo ? ` Repo: ${repo}.` : '') + ' Git: main · 2 changed: M a-file.ts, M b-file.ts, ….';
     return REMINDER.full + taskLine(cwd) + (repo ? ` Repo: ${repo}.` : '') + gitLine(home.root);
   };
   const protocol = (part) => read(path.join(CORE, 'references', 'protocol', part)).length;

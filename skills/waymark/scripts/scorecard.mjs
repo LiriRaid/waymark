@@ -174,7 +174,7 @@ const MEASURES = {
     const n = (name) => rows.find((r) => r.name === name)?.chars || 0;
     return n('instructions block') + n('context card') + n('skill descriptions');
   },
-  async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
+  async 'size.perPrompt'(root) { return (await import(pathToFileURL(path.join(HERE, 'size.mjs')).href)).sizes(root, { pinned: true }).find((r) => r.name === 'reminder (real)')?.chars ?? null; },
   async 'cost.routineShareL2'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 2, 10)?.share ?? null; },
   async 'cost.routineShareL1'(root) { const { C, tasks } = await versionCost(root); return C.routineShare(tasks, 1, 5)?.share ?? null; },
   async 'precedent.precisionAt3'(root) { return (await precedentEval(root))?.precisionAtK ?? null; },

@@ -110,6 +110,23 @@ test('evaluate: each task is searched with its own ask against the tasks before 
   assert.equal(P.evaluate([c[0]], { root: '/p' }).eligible, 0, 'a lone task has nothing before it');
 });
 
+// ---- 2.0.20 point 24, check 10.3: a miss that is impossible by construction is no miss ----
+test('evaluate: the earlier tasks of the same session are not relevant, because the hand-over searches only the tasks of other sessions', () => {
+  n = 0;
+  const same = (prompt, files) => task(prompt, files, '', { session: 'one-session' });
+  const c = [
+    same('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.mjs']),
+    same('ajusta el timeout de los reintentos del servicio de pedidos', ['/p/src/orders.mjs']),      // its only precedent is in its own session
+    task('corrige el login con tokens vencidos', ['/p/src/auth.mjs']),
+    task('revisa el servicio de pedidos y sus reintentos', ['/p/src/orders.mjs']),                   // another session: findable
+  ];
+  const e = P.evaluate(c, { root: '/p' });
+  assert.equal(e.eligible, 1, 'the second task cannot find the first (same session): it is not eligible; the fourth can');
+  assert.equal(e.precisionAtK, 1, 'and the measure no longer carries a miss no search could avoid');
+  assert.equal(e.detail.length, 1);
+  assert.equal(e.detail[0].id, c[3].id);
+});
+
 test('usedOf: cited when the task names the earlier one, files when a call touched its files, otherwise null', () => {
   const p = { task: `${day} · T4`, files: ['orders.mjs'] };
   assert.equal(P.usedOf(p, { texts: [`Seguí el precedente ${day} · T4`], tools: [] }), 'cited');

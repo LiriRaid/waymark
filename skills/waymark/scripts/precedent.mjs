@@ -129,7 +129,8 @@ export function evaluate(records, { k = 3, minScore = null, root = '' } = {}) {
     const top = search(queryOf(t.prompt, earlier, t.session), othersOf(earlier, t.session), k), first = precedentFor(t.prompt, earlier, minScore ?? undefined, t.session);
     if (first) maxChars = Math.max(maxChars, first.chars);
     if (!mine.size) continue;
-    const relevant = earlier.filter((e) => (e.files || []).some((f) => mine.has(norm(f, r0))));
+    // relevant: the earlier tasks of other sessions on its files, the only ones the hand-over searches (othersOf): an earlier task of its own session would be a miss no search could avoid
+    const relevant = othersOf(earlier, t.session).filter((e) => (e.files || []).some((f) => mine.has(norm(f, r0))));
     if (!relevant.length) continue;
     eligible++;
     const hit = top.some((x) => relevant.includes(x.record));

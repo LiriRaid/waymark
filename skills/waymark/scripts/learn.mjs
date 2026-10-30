@@ -75,8 +75,11 @@ export function learnGates(text, rec, date) {
 
 // The eyes row written as 'to confirm' becomes confirmed once a task's look measured or clicked the page after its last change (the screen answered at that host).
 export function learnEyes(text, rec, date) {
-  if (!(rec?.observed?.eyes?.afterLastChange)) return text;
-  return editSection(text, 'Quality gates', (body) => body.split('\n').map((l) => (isRow(l) && cells(l)[0] === 'eyes' && /to confirm/i.test(l) ? `| eyes | ${cells(l)[1]} | confirmed ${date} by a task's look |` : l)).join('\n'));
+  const eyes = rec?.observed?.eyes;
+  if (!eyes?.afterLastChange) return text;
+  // the look has to be at the server the row names: its port is among the ports the counted looks measured
+  const looked = (l) => { const port = cells(l)[1]?.match(/:(\d{2,5})\b/)?.[1]; return !port || (eyes.ports || []).includes(port); };
+  return editSection(text, 'Quality gates', (body) => body.split('\n').map((l) => (isRow(l) && cells(l)[0] === 'eyes' && /to confirm/i.test(l) && looked(l) ? `| eyes | ${cells(l)[1]} | confirmed ${date} by a task's look |` : l)).join('\n'));
 }
 
 // ---------- Project map ----------
@@ -252,20 +255,22 @@ export function proposals(home, records) {
 }
 
 const LINK = /https?:\/\/[^\s'"`)<>\]]+/gi;
+// The hosts of design tools: a docs or repository link written twice is not a design the user works from
+const DESIGN_HOST = /(?:^|\.)(?:figma\.com|claude\.ai|penpot\.app|sketch\.com|zeplin\.io|canva\.com|framer\.(?:com|app)|miro\.com|invisionapp\.com|whimsical\.com|excalidraw\.com|v0\.dev|stitch\.withgoogle\.com|adobe\.com)$/i;
 const LOCAL = /^(?:localhost|127\.0\.0\.1|\[::1\]|[\w.-]+\.localhost|[\w.-]+\.test)$/i;
-// A design link (a host that is not local) the user wrote in 2 tasks or more and the project's Conventions do not hold yet. → [{ host, ids }]
+// A design link (the host of a design tool, not a local one) the user wrote in 2 tasks or more and the project's Conventions do not hold yet. → [{ host, ids }]
 export function designLinks(records, conventions = '') {
   const by = new Map();
   for (const r of records.filter((x) => x.id && x.kind !== 'Q')) {
     const hosts = new Set();
-    for (const t of r.prompts?.length ? r.prompts : [r.prompt]) for (const u of String(t || '').match(LINK) || []) { try { const h = new URL(u).hostname.toLowerCase(); if (!LOCAL.test(h)) hosts.add(h); } catch {} }
+    for (const t of r.prompts?.length ? r.prompts : [r.prompt]) for (const u of String(t || '').match(LINK) || []) { try { const h = new URL(u).hostname.toLowerCase(); if (!LOCAL.test(h) && DESIGN_HOST.test(h)) hosts.add(h); } catch {} }
     for (const h of hosts) by.set(h, [...(by.get(h) || []), r.id]);
   }
   return [...by].filter(([h, ids]) => ids.length >= 2 && !conventions.toLowerCase().includes(h)).map(([host, ids]) => ({ host, ids }));
 }
 
 // "when I say X I mean Y": a word with a meaning of its own, said in 2 tasks or more. → [{ term, meaning, ids }]
-const TERM = /cuando\s+(?:te\s+)?(?:digo|dije|hablo de|escribo|when i say)\s+["«“']?([^"»”',.;:]{2,30}?)["»”']?\s*,?\s*(?:me refiero a|quiero decir|es decir|significa|i mean)\s+([^.,;\n]{3,80})/giu;
+const TERM = /(?:cuando\s+(?:te\s+)?(?:digo|dije|hablo de|escribo)|when\s+i\s+say)\s+["«“']?([^"»”',.;:]{2,30}?)["»”']?\s*,?\s*(?:me refiero a|quiero decir|es decir|significa|i mean)\s+([^.,;\n]{3,80})/giu;
 export function terms(records, conventions = '') {
   const by = new Map();
   for (const r of records.filter((x) => x.id)) {

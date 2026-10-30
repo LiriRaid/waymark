@@ -549,3 +549,20 @@ test('2.0.20 point 15: the card records returns against steps, an ego run withou
   const ok = judge([...head(2, CSS), ...call('Bash', { command: 'ego-browser skill' }), ...egoIn('t', `${LOOK}\n${MEASURE}`)], {}, cierre('✔1 modal ← x'));
   assert.ok(!ok.findings.some((f) => /without reading its own skill|revisited/.test(f)), 'skill read, one step, one return');
 });
+
+test('2.0.20 review: no HOME means no ego; the ego skill is read by name only; read earlier in the task counts; a counted look keeps its local port', () => {
+  assert.equal(Eyes.eyesProvider({ root: '/nowhere', env: { PATH: '' } }), null, 'no HOME and no ego on the PATH: no provider (it was "ego")');
+  assert.equal(Eyes.egoOffPath({ PATH: '' }), false);
+  assert.equal(Eyes.egoCommand({ PATH: '' }), 'ego-browser');
+  const sh = (command) => ({ name: 'Bash', input: { command } });
+  assert.equal(Eyes.readsEgoSkill(sh('ego-browser skill')), true);
+  assert.equal(Eyes.readsEgoSkill(sh('"$EGO" skill')), true, 'a variable named for ego');
+  assert.equal(Eyes.readsEgoSkill(sh('$EDITOR skill')), false, 'counter-example: any other variable');
+  assert.equal(Eyes.readsEgoSkill(sh('git log --skill')), false);
+  assert.equal(Eyes.readsEgoSkill({ name: 'Skill', input: { skill: 'ego-browser' } }), true);
+  const script = sh(`ego-browser nodejs <<'EOF'\nconst task = await taskSpace("t");\nawait page.goto("http://localhost:4200/");\nconsole.log(await page.evaluate(() => document.querySelector("a").getBoundingClientRect().width));\nEOF`);
+  assert.equal(Eyes.observeEyes([script], { skillSeen: true }).skillRead, true, 'read in an earlier turn of the task');
+  assert.equal(Eyes.observeEyes([script]).skillRead, false, 'counter-example: read nowhere');
+  assert.deepEqual(Eyes.observeEyes([script]).ports, ['4200'], 'the port of the page that was measured');
+  assert.equal('ports' in Eyes.observeEyes([sh('ls')]), false);
+});

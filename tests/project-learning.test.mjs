@@ -91,6 +91,13 @@ test('23: a design link written in two tasks and a term with its own meaning sai
   const out = proposals(memory(), records);
   assert.ok(out.some((p) => p.kind === 'design' && /claude\.ai/.test(p.text)));
   const mem = '## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| eyes | `pnpm run start` · http://localhost:4200 | to confirm: proposed from package.json |\n';
-  assert.match(learnEyes(mem, { observed: { eyes: { afterLastChange: true } } }, '2026-10-30'), /\| eyes \| `pnpm run start` · http:\/\/localhost:4200 \| confirmed 2026-10-30/, 'a look after the change confirms the row');
+  assert.match(learnEyes(mem, { observed: { eyes: { afterLastChange: true, ports: ['4200'] } } }, '2026-10-30'), /\| eyes \| `pnpm run start` · http:\/\/localhost:4200 \| confirmed 2026-10-30/, 'a look after the change confirms the row');
   assert.equal(learnEyes(mem, { observed: { eyes: { afterLastChange: false } } }, '2026-10-30'), mem, 'counter-example: no look, the row stays to confirm');
+  assert.equal(learnEyes(mem, { observed: { eyes: { afterLastChange: true, ports: ['3000'] } } }, '2026-10-30'), mem, 'counter-example: a look at another server (port 3000) does not confirm the row of 4200');
+  assert.equal(learnEyes(mem, { observed: { eyes: { afterLastChange: true } } }, '2026-10-30'), mem, 'counter-example: a record that kept no port cannot confirm a row that names one');
+  const docs = [rec(1, 'mira https://github.com/acme/app/issues/3'), rec(2, 'y de nuevo https://github.com/acme/app/issues/3')];
+  assert.deepEqual(designLinks(docs), [], 'counter-example: a repository link written twice is not a design link');
+  assert.deepEqual(designLinks([rec(1, 'igual a https://www.figma.com/design/AbC/kit'), rec(2, 'sigue https://www.figma.com/design/AbC/kit')]).map((d) => d.host), ['www.figma.com'], 'a design tool host, subdomain included');
+  const many = terms([rec(1, 'cuando digo "franjas", quiero decir las tabs'), rec(2, 'when i say franjas i mean las tabs'), rec(3, 'cuando te digo plantillas significa los layouts de página'), rec(4, 'cuando digo plantillas me refiero a los layouts')]);
+  assert.deepEqual(many.map((x) => x.term).sort(), ['franjas', 'plantillas'], 'a quoted term, an English cue and the connectors significa / me refiero a / quiero decir each count');
 });

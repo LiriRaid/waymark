@@ -166,3 +166,12 @@ test('7.1 notes.unpushed: a note waits to be pushed only in a project that said 
     assert.equal((await detail()).status, 'fail', 'yes: the note that did not go up waits');
   } finally { fs.rmSync(prefs, { force: true }); }
 });
+
+test('0: "no records of this version yet" is said only for a measure that reads the records', async () => {
+  const P = await import(`file://${REPO}/skills/waymark/scripts/provenance.mjs`);
+  const root = fixture(one([{ id: '1', what: 'not built', point: 0, kind: 'measure', measure: 'conformance.cases', op: 'ge', threshold: 30 }]), { '.waymark/memory.md': '# P\n' });
+  const home = P.projectHome(root);
+  fs.mkdirSync(path.dirname(home.log), { recursive: true });
+  fs.writeFileSync(home.log, JSON.stringify({ id: '2026-01-01 · T1', at: '2026-01-01T00:00:00.000Z', inputs: { waymark: '1.0.0' } }) + '\n');
+  assert.match((await S.scorecard(root)).criteria[0].checks[0].detail, /cannot be measured here yet/, 'a measure that is not built is not waiting for records');
+});

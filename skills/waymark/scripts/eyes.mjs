@@ -13,8 +13,9 @@ const onPath = (name, env) => String(env.PATH || env.Path || '').split(path.deli
 // Where ego's installer puts the program when the PATH lacks it: the absolute path, or null.
 const egoInstalled = (env) => {
   const home = env.HOME || env.USERPROFILE || '';
-  const dir = home && path.join(home, '.local', 'share', 'ego', 'active_version_dir');
-  const x = dir && EXE.find((e) => fs.existsSync(path.join(dir, EGO + e)));
+  if (!home) return null;
+  const dir = path.join(home, '.local', 'share', 'ego', 'active_version_dir');
+  const x = EXE.find((e) => fs.existsSync(path.join(dir, EGO + e)));
   return x === undefined ? null : path.join(dir, EGO + x);
 };
 // The command the block hands the agent: the bare name while the agent's shell runs it, the absolute path (quoted, forward slashes) only while the PATH lacks it.
@@ -62,8 +63,12 @@ const AT_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:npx\s+|pnpm\s+exec\s+|yarn\s
 const EGO_PROGRAM = String.raw`(?:(?:\S*[\\/])?ego-browser(?:\.exe|\.cmd)?|(?<q>["'])(?:[^"'\n]*[\\/])?ego-browser(?:\.exe|\.cmd)?\k<q>|["']?\$(?:\{[\w:]+\}|(?:env:)?\w+)["']?)`;
 const EGO_START = String.raw`(?:^|[;&|(]\s*|\n)\s*(?:(?:npx|pnpm\s+exec|yarn|bunx|nohup|time|timeout\s+\S+)\s+|[A-Za-z_]\w*=\S*\s+)*`;
 export const RUNS_EGO = new RegExp(EGO_START + EGO_PROGRAM + String.raw`\s+nodejs\b`);
-const EGO_SKILL = new RegExp(EGO_START + EGO_PROGRAM + String.raw`\s+skill\b`); // `ego-browser skill`, by any form of the program: ego's own manual
-const RUNS_PLAYWRIGHT =new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
+// `ego-browser skill`, ego's own manual: the program by name or path, or through a variable whose name says ego ("$EGO", ${EGO_BIN}); never any other variable
+const EGO_NAMED = String.raw`(?:(?:\S*[\\/])?ego-browser(?:\.exe|\.cmd)?|(?<q>["'])(?:[^"'\n]*[\\/])?ego-browser(?:\.exe|\.cmd)?\k<q>|["']?\$(?:\{[\w:]*ego\w*\}|(?:env:)?\w*ego\w*)["']?)`;
+const EGO_SKILL = new RegExp(EGO_START + EGO_NAMED + String.raw`\s+skill\b`, 'i');
+// Does this tool call read ego's own skill? (the Skill tool, or `ego-browser skill` in a shell; the cheap word test first, the regex only for a command that has it)
+export const readsEgoSkill = (t) => (t.name === 'Skill' && /(^|:)ego-browser$/.test(String(t.input?.skill || ''))) || (/^(Bash|PowerShell|shell)$/.test(t.name) && text(t).includes('skill') && EGO_SKILL.test(text(t)));
+const RUNS_PLAYWRIGHT = new RegExp(AT_START + String.raw`playwright(?:\.cmd)?\s+(?:test|screenshot)\b`);
 const PANEL = /^mcp__[\w-]*(?:browser|chrome)[\w-]*__(\w+)$/i;
 const PANEL_ACTS = new Set(['form_input']);
 const text = (t) => String(t.input?.command ?? '');
@@ -72,6 +77,8 @@ const text = (t) => String(t.input?.command ?? '');
 const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\]|[\w.-]+\.localhost|[\w.-]+\.test)$/i;
 const URL_RE = /\b(?:https?:\/\/[^\s'"`)<>\]]+|file:\/\/\/?[^\s'"`)<>]+)/gi;
 const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return null; } };
+// The port a http(s) URL looks at ('' for a file or a bad URL).
+const portOf = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.port || (x.protocol === 'https:' ? '443' : '80') : ''; } catch { return ''; } };
 // → 'local' | 'design' | 'off' for one URL, given the hosts the user wrote in the request.
 export function whereTo(url, allowed = []) {
   if (/^file:/i.test(url)) return 'local';
@@ -144,7 +151,7 @@ function scriptOf(t, writes, log = [], at = Infinity) {
 // What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts. `gateAt`: the index of the first project gate that passed after it
 // (Infinity: none did): a look before it saw a version nobody had compiled, so it does not count (`beforeGate`). -1: no gate is required (it could not run here).
 // → { provider, calls, measures, afterLastChange, beforeGate, references }. Nothing of the page is kept: no URL, no text.
-export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [] } = {}) {
+export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [], skillSeen = false } = {}) {
   const writes = new Map(), log = []; // log: every script write in the order of the calls, so a file rewritten under one name is read as it stood at each call
   const keep = (file, body, i) => { writes.set(fileKey(file), body); log.push({ i, key: fileKey(file), body }); }; // a Git Bash path (/c/…) is the file:///C:/… the import names
   tools.forEach((t, i) => {
@@ -155,17 +162,18 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     } else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
   });
   let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
-  let skillRead = false, readFirst = null; // skillRead: the agent read ego's own skill (`ego-browser skill`); readFirst: whether it had by the first ego script
+  let skillRead = skillSeen, readFirst = null; // skillRead: the agent read ego's own skill (`ego-browser skill`), in this turn or earlier in the task (skillSeen); readFirst: whether it had by the first ego script
+  const ports = new Set(); let panelUrl = ''; // the local ports a counted look measured (a number only, never a page)
   const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }
   const scripts = new Map(), scriptAt = (t, i) => { if (!scripts.has(i)) scripts.set(i, scriptOf(t, writes, log, i)); return scripts.get(i); }; // read once per call, not once per use
   tools.forEach((t, i) => {
     let kind = null, measuring = false, where = 'local';
-    if ((t.name === 'Skill' && /ego-browser/.test(String(t.input?.skill || ''))) || (/^(Bash|PowerShell|shell)$/.test(t.name) && EGO_SKILL.test(text(t)))) skillRead = true;
+    if (readsEgoSkill(t)) skillRead = true;
     const panel = PANEL.exec(t.name || '');
     if (panel) {
       kind = 'panel';
       const name = panel[1], input = t.input || {};
-      if (input.url && /^(navigate|preview_start|tabs_create)$/.test(name)) panelAt = whereTo(String(input.url), allowed); // the page the next panel calls look at
+      if (input.url && /^(navigate|preview_start|tabs_create)$/.test(name)) { panelAt = whereTo(String(input.url), allowed); panelUrl = String(input.url); } // the page the next panel calls look at
       where = panelAt;
       const acted = PANEL_ACTS.has(name) || (name === 'computer' && /click|drag/.test(String(input.action || '')));
       const readAfter = () => tools.slice(i + 1).some((x) => PANEL_READS.has(PANEL.exec(x.name || '')?.[1]));
@@ -173,14 +181,14 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
       if (RUNS_EGO.test(text(t))) {
         kind = 'ego';
-        const s = scriptAt(t, i), places =(s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
+        const s = scriptAt(t, i), places = (s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
         measuring = MEASURES.test(s);
         where = places.includes('off') ? 'off' : places.includes('local') || !places.length ? 'local' : 'design'; // a script that compares the design with the local build looks at the build
       } else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; where = (text(t).match(URL_RE) || []).some((u) => whereTo(u, allowed) === 'off') ? 'off' : 'local'; }
     }
     if (!kind) { if (isChange?.(t, i)) sinceChange = true; return; }
     if (kind === 'ego') { // one space per task: which one the script takes, whether it closes it, and a return to ego after the code changed
-      const s = scriptAt(t, i), names =[...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+      const s = scriptAt(t, i), names = [...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
       for (const n of names) spaces.set(n, { opened: (spaces.get(n)?.opened || 0) + 1, finished: false });
       const last = names[names.length - 1] || [...spaces.keys()].pop();
       if (/\bfinish\s*\(/.test(s) && last && spaces.has(last)) spaces.get(last).finished = true;
@@ -194,10 +202,13 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     if (kind === 'ego') for (const m of scriptAt(t, i).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
-    if (measuring && i > from) { if (i > gateAt) measures++; else early++; }
+    if (measuring && i > from) {
+      if (i > gateAt) measures++; else early++;
+      for (const u of kind === 'panel' ? [panelUrl] : kind === 'ego' ? scriptAt(t, i).match(URL_RE) || [] : text(t).match(URL_RE) || []) { const p = whereTo(u, allowed) === 'local' ? portOf(u) : null; if (p) ports.add(p); }
+    }
   });
   const verdicts = (String(reply).match(/:[ \t]*(?:igual|parecido|falta)\b[ \t]*(?:[—–.,(-]|$)/gim) || []).length; // "<element>: igual — <measurement>" (or after the word a dot, a comma, a parenthesis, the end of the line), never the word in prose
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(readFirst === null ? {} : { skillRead: readFirst }), ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
+  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(readFirst === null ? {} : { skillRead: readFirst }), ...(ports.size ? { ports: [...ports].slice(0, 6) } : {}), ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
 }
 
 // ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----

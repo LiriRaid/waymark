@@ -215,7 +215,7 @@ async function runCheck(root, c, lastPoint = Infinity) {
     if (value === null || value === undefined) {
       // records exist but none was written by this version: the check waits for its first task, it did not fail
       let fresh = false;
-      try { fresh = !!VERSION && (await rawTasks(root)).records.some((r) => r.id && !r.kind) && !(await versionTasks(root)).length; } catch { /* no records to read */ }
+      try { fresh = /^(records|cost)\./.test(c.measure) && !!VERSION && (await rawTasks(root)).records.some((r) => r.id && !r.kind) && !(await versionTasks(root)).length; } catch { /* no records to read */ }
       return { score: 0, status: 'unmeasured', detail: fresh ? `${c.measure}: no records of version ${VERSION} yet (it counts from the first task run on it)` : `${c.measure} cannot be measured here yet` };
     }
     if (c.threshold === null) return { score: 0, status: 'pending', value, detail: `${c.measure} = ${fmt(value)}; threshold frozen in ${c.frozenIn > lastPoint ? 'the next release' : `point ${c.frozenIn}`}` };

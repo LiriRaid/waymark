@@ -143,6 +143,18 @@ test('11: the end-of-turn hook records a changed repo the Pedido never named, an
   assert.deepEqual(reposNotNamed([path.join(a, 'src', 'a.mjs')], a, []), [], 'counter-example: only the own repo');
   assert.deepEqual(namedRepos(['Repos: web, api y gateway']), ['web', 'api', 'gateway']);
 });
+test('33: a repo whose folder ends in its role (chat-api) is named by that role in what the user chose in the window: "FE primero y API donde falte"', () => {
+  const lines = (...more) => [prompt('rehaz la pantalla de turnos'), say('Waymark → L2 · dept-frontend'), ...more];
+  const pick = 'Los 7 estados, FE primero y API donde falte';
+  assert.equal(T.checkRepo('/work/chat-api', '/work/chat', lines(answered('¿Cuánto hago?', [pick, 'Solo FE'], pick)), 's33a', stateFile()), null, 'the role the user chose covers the repo');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(), 's33b', stateFile()), 'counter-example: no answer, denied');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(answered('¿Cómo?', ['Con pruebas', 'Sin pruebas'], 'Con pruebas')), 's33c', stateFile()), 'counter-example: an answer that never says the role');
+  assert.ok(T.checkRepo('/work/notes', '/work/chat', lines(answered('¿Cuánto hago?', [pick, 'Solo FE'], pick)), 's33d', stateFile()), 'counter-example: a repo with no role in its name is not covered by a word');
+  const a = mk({ 'src/a.mjs': 'a\n' }), b = path.join(a, 'chat-api');
+  fs.mkdirSync(path.join(b, 'src'), { recursive: true }); gitT(b, 'init', '-q'); fs.writeFileSync(path.join(b, 'src', 'b.mjs'), 'b\n');
+  assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], pick), [], 'the end-of-turn finding agrees');
+  assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], 'Con pruebas'), ['chat-api'], 'counter-example: still a finding when nothing covers it');
+});
 
 // ---- the project's own migration script comes first ----
 const CONV = '# P\n\n## Conventions specific to this project\n- Migrations: bin/migrate new <name> (it backs up the database first)\n';

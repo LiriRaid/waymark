@@ -52,7 +52,7 @@ import { detectGuarded, guardedLine } from './lib/guard.mjs';
 import { expireGrants } from './lib/grants.mjs';
 import { loadKnownValues } from './lib/known.mjs';
 import { learn } from './learn.mjs';
-import { norm, real, exemptPath, repoOf as nearestRepo, nameIn, waymarkHome, WAYMARK_CMD } from './lib/paths.mjs';
+import { norm, real, exemptPath, repoOf as nearestRepo, nameIn, repoNamedIn, waymarkHome, WAYMARK_CMD } from './lib/paths.mjs';
 import { loadRisk, reviewRisk, editedLines } from './lib/risk.mjs';
 import { commentOnlyEdit } from './lib/comments.mjs';
 
@@ -359,6 +359,14 @@ export function blockReason(gaps) {
   return `Waymark: this L${gaps.level} ${gaps.changed?.length ? 'turn changed files' : 'task (no project file changed)'} and is missing: ${gaps.missing.map((m, i) => `${i + 1}) ${m}`).join(' ')}.${id} Do what is missing (or correct the field), ${then}`;
 }
 
+// The IDs the close is judged against: the next one, unless this task's own prompt was handed an earlier one (the per-prompt hook keeps it in open.json), so a task
+// that crosses midnight keeps the day and the number it was handed and is not renumbered to the new day's T1.
+function idsFor(cwd, session) {
+  const ids = taskIds(cwd);
+  try { const handed = openTurn(cwd, session)?.next; if (handed && handed !== ids.next && !ids.known.has(handed)) return { ...ids, next: handed }; } catch {}
+  return ids;
+}
+
 // The reply the hook judges: the last one when it holds the Cierre; after a block, the Cierre written earlier in the
 // turn with the field lines the last reply corrected (Resultado, Evidencia, Aprendido), then the rest of that reply
 // (an exception such as "no comprobado (…)" or "Tests: no (…)" still counts). → text.
@@ -417,7 +425,7 @@ export function reposNotNamed(changed, root, named, answers = '') {
     const top = nearestRepo(f);
     if (!top || (root && sameDir(top, root))) continue;
     const name = path.basename(top);
-    if (!nameIn(name, named.join('\n')) && !nameIn(name, answers)) out.add(name);
+    if (!nameIn(name, named.join('\n')) && !repoNamedIn(name, answers)) out.add(name);
   }
   return [...out];
 }
@@ -1344,7 +1352,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // the stretch since this session's last close holds the decisions; a follow-up's task reaches back to its start
       const records = readRecords(home.log);
       const stretch = taskLines(lines, { since: taskStart(records, h.session_id) }), task = taskLines(lines, { since: taskStart(records, h.session_id, claimed) });
-      const turn = currentTurn(lines, since), ctx = { ids: taskIds(cwd), resumed: since > 0 && turn.startedAt <= since, decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
+      const turn = currentTurn(lines, since), ctx = { ids: idsFor(cwd, h.session_id), resumed: since > 0 && turn.startedAt <= since, decisions: decisionsIn(stretch), taskFiles: (id) => new Set(taskFiles(records, id).map(norm)), records, memoryFile: home.memory.replace(/\\/g, '/'), slug: home.slug, session: h.session_id, lacks: agent.lacks, agent: agent.name, outside: true, blocked: !!h.stop_hook_active, cwd };
       try { const o = openTurn(cwd, h.session_id); if (o && 'followUp' in o) ctx.offered = o.followUp || null; } catch {} // the follow-up the per-prompt hook offered this ask
       ctx.commits = commitsFor(cwd, claimed);
       try { ctx.trailered = turnCommits(turn.tools, cwd, claimed, ctx.ids, turn.startedAt || 0); } catch {} // another repo, an earlier task's ID

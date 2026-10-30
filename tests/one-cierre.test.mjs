@@ -98,3 +98,21 @@ test('32: the instructions block says it, stays within its size, and says the bl
   assert.match(l2, /"apply all recommended" or "one by one"/);
   assert.match(l2, /you never filter which are asked/);
 });
+
+// ---- 2.0.20 point 33: a task that crosses midnight keeps the ID its prompt was handed ----
+test('33: the Cierre of a task handed 2026-10-29 · T12 and closed the next day is recorded as the ID it was handed, not renumbered to the new day', async () => {
+  const dir = tmpRepo({ [FILE]: 'x\n' });
+  const day = (d) => P.taskIds(dir, d).next.split(' · ')[0];
+  const today = day(new Date()), yesterday = day(new Date(Date.now() - 86400000));
+  P.markOpen(dir, 'midnight', 'ajusta el servicio', new Date(Date.now() - 86400000));
+  const open = P.projectHome(dir).dir + '/open.json', entries = JSON.parse(fs.readFileSync(open, 'utf8'));
+  entries.midnight.next = `${yesterday} · T12`; // the number of the day before: eleven tasks had been closed
+  entries.midnight.at = new Date(Date.now() - 40 * 60000).toISOString(); // the prompt came forty minutes ago, before midnight
+  fs.writeFileSync(open, JSON.stringify(entries));
+  const stop = stopper(dir, 'midnight');
+  await stop(CIERRE(`${today} · T12`), { active: true }); // stop_hook_active: nothing blocks, the record is written
+  const rec = recordsOf(dir).find((r) => r.id);
+  assert.ok(rec, 'the task is recorded');
+  assert.equal(rec.id, `${yesterday} · T12`, 'the ID the prompt was handed');
+  assert.equal(rec.claimed, `${today} · T12`, 'what the agent wrote is kept');
+});

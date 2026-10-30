@@ -22,7 +22,7 @@ import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './
 import { pinnedCwd, taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
+import { norm, exemptPath, repoOf, nameIn, repoNamedIn } from './lib/paths.mjs';
 import { inRoot } from './copy.mjs';
 import { census, groupOf, judgeMove } from './convention.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
@@ -215,7 +215,7 @@ export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(p
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const key = `${session}:${norm(root)}`; // once per session and repo: what the user said about the job (the repo, in their request or their answer) holds for its next tasks
   if (seen[key]) return null; // asked or named once; the same repo again goes through
-  const named = nameIn(path.basename(root), namedRepos(lines));
+  const named = repoNamedIn(path.basename(root), namedRepos(lines));
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }

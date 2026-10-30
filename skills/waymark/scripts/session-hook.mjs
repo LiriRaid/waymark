@@ -88,8 +88,12 @@ export function digest(cwd, agentName = 'claude') {
     return out.join('\n');
   }
   // the template's Architecture placeholder becomes what the repo itself shows (docs/adr/0043), never over a line somebody wrote
-  if (!home.legacy && /^- Architecture:\s*<slug/m.test(best.text)) {
-    try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
+  // with it, the Stack, Source root, Path aliases, Related projects and Reusables placeholders the repo answers by itself, each "(to confirm)"
+  if (!home.legacy && /^- (?:Architecture|Stack|Source root and layout|Path aliases|Related projects):\s*<(?!\s*$)/m.test(best.text)) {
+    try {
+      const related = workspaceSiblings(home.root).slice(0, 4).map((h) => `${h.slug} (${path.relative(home.root, h.root).split(path.sep).join('/')})`);
+      if (fillMemory(home.memory, census(home.root), { related })) best.text = read(home.memory);
+    } catch (e) { logHookError('session-hook convention', e); }
   }
   // the template's Package manager placeholder becomes the repo's own (lockfile or packageManager), marked to confirm
   if (!home.legacy && PM_PLACEHOLDER.test(best.text)) {

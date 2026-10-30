@@ -217,12 +217,46 @@ export function judgeMove(conv, kind, from, to) {
   return { verdict: 'follows', line: `follows the convention: ${at.line}` };
 }
 
+// The repo's own path aliases: the `paths` of tsconfig.json (comments allowed), tsconfig.app.json or jsconfig.json, "@core/* → src/app/core/*", at most 6; '' when it declares none.
+function pathAliases(repo) {
+  for (const f of ['tsconfig.json', 'tsconfig.app.json', 'jsconfig.json']) {
+    const text = read(path.join(repo, f));
+    if (!text) continue;
+    try {
+      const paths = JSON.parse(text.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*$/gm, '')).compilerOptions?.paths || {};
+      const list = Object.entries(paths).map(([k, v]) => `${k} → ${[].concat(v)[0]}`).slice(0, 6);
+      if (list.length) return list.join(', ');
+    } catch { /* a tsconfig this does not parse says nothing */ }
+  }
+  return '';
+}
+// The Identity and Project map placeholders the repo answers by itself, each "(to confirm)": Stack (the dependencies it declares), Source root and layout, Path aliases,
+// Related projects (the workspace's other projects, given by the caller) and where each kind of reusable piece lives. A line somebody wrote is never touched.
+function fillProjectMap(text, conv, related) {
+  let out = text;
+  const deps = (() => { try { return JSON.parse(read(path.join(conv.repo, 'package.json')) || '{}'); } catch { return {}; } })();
+  const declared = Object.entries({ ...deps.dependencies, ...deps.devDependencies }).slice(0, 2).map(([n, v]) => `${n} ${v}`);
+  const set = (re, line) => { if (line) out = out.replace(re, line); };
+  set(/^- Stack:\s*<[^\n]*$/m, declared.length ? `- Stack: ${declared.join(', ')} (to confirm)` : '');
+  const tops = [...new Set(Object.keys(conv.layers).map((l) => l.split('/')[0]).filter((l) => l !== '.'))].slice(0, 6);
+  set(/^- Source root and layout:\s*<[^\n]*$/m, conv.root && tops.length ? `- Source root and layout: ${conv.root}/{${tops.join(',')}} (to confirm)` : '');
+  const aliases = pathAliases(conv.repo);
+  set(/^- Path aliases:\s*<[^\n]*$/m, aliases ? `- Path aliases: ${aliases} (to confirm)` : '');
+  set(/^- Related projects:\s*<[^\n]*$/m, related.length ? `- Related projects: ${related.slice(0, 4).join(', ')} (to confirm)` : '');
+  for (const [kind, label] of [['component', 'Components / UI'], ['service', 'Services / API clients'], ['model', 'Models / entities / types']]) {
+    const k = conv.kinds[kind];
+    if (k?.dominant) set(new RegExp(`^( {2}- ${label.replace(/[/]/g, '\\/')}:)\\s*<[^\\n]*$`, 'm'), `$1 ${conv.root}/${k.dominant} (${k[k.dominant]}/${k.total} ${kind} pieces) (to confirm)`);
+  }
+  return out;
+}
+
 // memory.md: the Architecture and Conventions placeholders of the template become what the census found, marked "(to confirm)".
 // Never overwrites a line somebody wrote. → true when the file changed.
-export function fillMemory(file, conv) {
+export function fillMemory(file, conv, { related = [] } = {}) {
   const text = read(file);
   if (!text || !conv.total) return false;
   let out = text;
+  out = fillProjectMap(out, conv, related);
   const slug = conv.variant === 'none' ? 'unknown' : 'screaming';
   const arch = `- Architecture: ${slug} — ${conv.line} — evidence: census of ${conv.total} pieces under ${conv.root}/${conv.docs.length ? `; project docs: ${conv.docs.join(', ')}` : ''} (to confirm)`;
   out = out.replace(/^- Architecture:\s*<slug[^\n]*$/m, arch);

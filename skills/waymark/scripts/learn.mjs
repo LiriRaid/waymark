@@ -184,7 +184,7 @@ export function learnProcedures(text, procs) {
 
 // ---------- Corrections → preferences ----------
 
-const CORRECTION = /(^|[^\p{L}])(siempre|nunca|jam[aá]s|no (vuelvas a|hagas|uses|pongas|cambies|toques|agregues|borres|quites|abras)|te dije|ya te dije|deja de|otra vez|de ahora en adelante|recuerda que|always|never|don'?t|do not|stop (doing|using)|from now on|i told you)(?=$|[^\p{L}])/iu;
+const CORRECTION = /(^|[^\p{L}])(siempre|nunca|jam[aá]s|no (vuelvas a|hagas|uses|pongas|cambies|toques|agregues|borres|quites|abras)|te dije|ya te dije|deja de|otra vez|de ahora en adelante|recuerda que|reutiliza|reusa|ya existe|en vez de|en lugar de|por defecto|por default|always|never|don'?t|do not|stop (doing|using)|from now on|i told you|reuse|already exists|instead of|by default)(?=$|[^\p{L}])/iu;
 const STOP = new Set(['que', 'los', 'las', 'del', 'por', 'para', 'con', 'una', 'uno', 'como', 'esto', 'esta', 'este', 'eso', 'pero', 'porque', 'sin', 'mas', 'muy', 'the', 'and', 'for', 'with', 'that', 'this', 'from', 'you', 'your', 'not', 'are', 'siempre', 'nunca', 'jamas', 'dije', 'deja', 'otra', 'vez', 'ahora', 'adelante', 'recuerda', 'always', 'never', 'dont', 'stop', 'told']);
 const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const keys = (s) => new Set(norm(s).match(/[a-z0-9]{3,}/g)?.filter((w) => !STOP.has(w)) || []);
@@ -235,8 +235,10 @@ export function proposals(home, records) {
     const owner = ownerOf(records, r.ids);
     out.push({ kind: 'rule', key: `rule:${r.label}`, text: `Learned rule for ${owner || 'the owner department'} (${owner ? `${owner}/SKILL.md → ## Learned rules` : 'its SKILL.md → ## Learned rules'}): ${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]}; waymark.mjs incidents shows the causes)` });
   }
-  for (const c of corrections(records, read(PREFS()))) {
-    out.push({ kind: 'preference', key: `pref:${[...keys(c.first)].sort().join(' ')}`, text: `preference "${c.text}" (${c.ids.length}×: ${c.ids.slice(-3).join(', ')}) → ~/.waymark/preferences.md` });
+  // what the user says twice is the project's convention first; a line already in its Conventions or in preferences.md is not proposed again
+  const conventions = (('\n' + read(home.memory)).match(/\n## Conventions[^\n]*\n([\s\S]*?)(?=\n## |$)/)?.[1] || '');
+  for (const c of corrections(records, `${read(PREFS())}\n${conventions}`)) {
+    out.push({ kind: 'preference', key: `pref:${[...keys(c.first)].sort().join(' ')}`, text: `preference "${c.text}" (${c.ids.length}×: ${c.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md, or ~/.waymark/preferences.md if it holds in every project of yours (the user decides)` });
   }
   return out;
 }

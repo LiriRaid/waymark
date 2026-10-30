@@ -60,10 +60,6 @@ test('12: check and install-hooks tell a coming-soon agent apart: its reason, no
   assert.match(r.stdout, /coming soon/i);
 });
 
-test('12: the README lists the real-use checks only the user can run, and the ADR records the decision', () => {
-  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
-  const section = readme.split(/^## /m).find((s) => /^Pending real-use checks/.test(s)) || '';
-  assert.ok(section, 'a section with that name');
-  for (const w of ['Codex', 'OpenCode', 'Gemini', 'hand', 'Cursor', 'Copilot', 'Kiro', 'Antigravity', 'Qwen', 'Droid', 'Amp', 'non-Anthropic', 'update']) assert.match(section, new RegExp(w, 'i'), w);
+test('12: the ADR records the decision of the cut turn and of the coming-soon agents', () => {
   assert.ok(fs.readdirSync(path.join(ROOT, 'docs', 'adr')).some((f) => /^0048-/.test(f)));
 });

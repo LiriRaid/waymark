@@ -86,12 +86,15 @@ const isShellCall = (c) => c.type === 'tool_use' && /^(Bash|PowerShell|shell)$/.
 const finiteCheck = (command) => !NEVER_ENDS.test(String(command || '')) && shellRuns(String(command || '')).some((p) => p.build || p.test || p.gate);
 export function pendingBackground(lines, since = 0, now = Date.now(), agentWait = BACKGROUND_WAIT_MS) {
   const { from } = turnStart(lines, since);
-  const launched = [], shellLaunch = new Map();
+  const launched = [], shellLaunch = new Map(), monitors = new Set();
   for (const d of lines.slice(from)) {
     const at = Date.parse(d.timestamp || '') || 0;
-    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) if (isShellCall(c) && finiteCheck(c.input.command)) shellLaunch.set(c.id, at);
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) { if (isShellCall(c) && finiteCheck(c.input.command)) shellLaunch.set(c.id, at); if (c.type === 'tool_use' && c.name === 'Monitor') monitors.add(c.id); }
     if (d.type !== 'user' || d.isSidechain) continue;
     const parts = Array.isArray(d.message?.content) ? d.message.content : [];
+    // a Monitor that watches for a gate to end is waited for until its own timeout (a persistent one watches forever: never waited for); its <task-notification> names its task id
+    const mon = d.toolUseResult;
+    if (mon?.taskId && mon.timeoutMs && !mon.persistent) for (const c of parts) if (c.type === 'tool_result' && monitors.has(c.tool_use_id)) launched.push({ id: c.tool_use_id, agent: mon.taskId, at, wait: Math.min(Number(mon.timeoutMs), BACKGROUND_WAIT_MS) });
     if (d.toolUseResult?.background || d.toolUseResult?.isAsync) for (const c of parts) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
     for (const c of parts) if (c.type === 'tool_result' && shellLaunch.has(c.tool_use_id)) {
       const text = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '');
@@ -111,7 +114,7 @@ export function pendingBackground(lines, since = 0, now = Date.now(), agentWait 
     }
     return false;
   };
-  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.shell ? SHELL_WAIT_MS : agentWait)) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.wait || (l.shell ? SHELL_WAIT_MS : agentWait))) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own

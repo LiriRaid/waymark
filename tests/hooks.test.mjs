@@ -1482,6 +1482,18 @@ test('2.0.7 background: an agent launched in the background (isAsync) holds the 
   assert.deepEqual(pendingBackground(notified), []);
 });
 
+test('2.0.20 background: a Monitor watching a gate holds the close until its notification or its timeout; a persistent one never does', () => {
+  const watch = (persistent) => [prompt('corre el gate'), say('Waymark → L2 · dept-qa'), { type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_mon1', name: 'Monitor', input: { command: 'until grep -q EXIT gate.log; do sleep 10; done' } }] } },
+    { type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_mon1', content: 'Monitor started (task bz8)' }] }, toolUseResult: { taskId: 'bz8', timeoutMs: 600000, persistent } }, say('Espero el gate completo.')];
+  assert.deepEqual(pendingBackground(watch(false)), ['toolu_mon1'], 'the turn that waits for the gate is not over');
+  assert.deepEqual(pendingBackground(watch(true)), [], 'a persistent watch never ends: not waited for');
+  const notified = [...watch(false), { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>bz8</task-id>\n<status>completed</status>\n</task-notification>' } }];
+  assert.deepEqual(pendingBackground(notified), [], 'its notification releases it');
+  assert.deepEqual(pendingBackground(watch(false), 0, Date.now() + 11 * 60000), [], 'past its timeout it is not waited for');
+  const long = watch(false); long[3].toolUseResult.timeoutMs = 4 * 3600000;
+  assert.deepEqual(pendingBackground(long, 0, Date.now() + 31 * 60000), [], 'a long watch is waited for no longer than a background agent');
+});
+
 test('T2o stop hook: no block and no task record while the background review runs, only an unevaluated record and a notice', () => {
   const { cwd, log } = fresh();
   const transcript = path.join(home, `t-bg-${n}.jsonl`);

@@ -18,6 +18,7 @@ Repository: `https://github.com/LiriRaid/waymark`
 | "actualiza / update Waymark" | §9 |
 | "desinstala / uninstall Waymark" | §10 |
 | "quita la versión vieja e instala la nueva" / a Waymark before 2.0 is installed | §11 |
+| "reinstalación limpia" of a 2.0 that is already installed | §12 |
 
 ## 1. Detect the agent and its paths
 
@@ -347,3 +348,15 @@ I found Waymark <version> (skills in ~/.claude/skills). I will:
    - Codex: trust the four hooks in `/hooks`.
    - `node "<skills-dir>/waymark/scripts/waymark.mjs" check` reports nothing pending.
 
+
+## 12. Clean reinstall of a 2.0 that is already installed **[ask]**
+
+For a machine that already runs 2.0 and should end with the same files again (a dev build, a release, a repaired copy). The order below is the one that worked on 2026-10-30 in eight agents; `~/.waymark/` (the user's memory), engram, the MCP servers and every project's `.waymark/` stay.
+
+1. **Back up** (§3): `<skills-dir>` skills, the instructions files, and the private layer's files (`README.md`, `agent.md`, `preferences.md`, `profile.md`, `projects.md`, `subagents.md`, `learnings/`), into `~/.waymark-backups/<date>-reinstall/`.
+2. **Remove what Waymark wrote into the agents:** `node "$HOME/.agents/skills/waymark/scripts/uninstall.mjs"` shows the plan, `--apply` after the yes (each file is backed up to `<date>-uninstall/`). It leaves Claude Code's `CLAUDE.md` empty when the block was all it held.
+3. **Replace the 17 skills** (§5) from the repository: remove each real folder in `~/.agents/skills` (never a link) and copy the new one. Before it, compare each `## Learned rules` / `## Learned notes` and `skill-map.json`: an entry the repository does not have (a skill the user mapped, `ego-browser`, `pdf`) is added back to the new `skill-map.json`.
+4. **Hooks first** (§7.2): `install-hooks.mjs --apply` for Claude Code, then `--agent <name> --apply` for each agent found, always from `~/.agents/skills/waymark/scripts` and with the Node the hooks should use.
+5. **Then the instructions:** `connect-agents.mjs` shows the plan, `--apply` after the yes. It writes the block of Codex, Gemini CLI, OpenCode, Copilot CLI, Kiro and the pointer of Windsurf; **Claude Code's block it does not write**: put `<skills-dir>/waymark/templates/instructions.md` in `~/.claude/CLAUDE.md` (§6.2; if the file is not empty, at the top).
+6. **Sync and verify:** `node "<skills-dir>/waymark/scripts/sync.mjs"` (§7.3), then `node "<skills-dir>/waymark/scripts/waymark.mjs" verify --install` (§8: the files must match the manifest; a signature the user has not made yet reads `BAD signature`), then `node "<skills-dir>/waymark/scripts/waymark.mjs" check` from each project the user works in, which reports what that project still needs.
+7. Restart every agent; in Codex trust the hooks in `/hooks`.

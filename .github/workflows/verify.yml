@@ -4,7 +4,7 @@ name: verify
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     tags: ['v*']
   pull_request:
 

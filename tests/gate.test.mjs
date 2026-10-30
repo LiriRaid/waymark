@@ -67,9 +67,9 @@ test('ci: verify.yml runs the gate and verify on push, pull request and tag, in 
 });
 
 // 2.0.19 point 9a: the faster CI. A branch is checked by its pull request; Windows runs one pass there, the release tag keeps three on both systems.
-test('ci: push runs only on main and on tags; exactly one gate step runs per system and event, and the release tag runs the three passes everywhere', () => {
+test('ci: push runs on main, on develop (2.0.20 point 5) and on tags; exactly one gate step runs per system and event, and the release tag runs the three passes everywhere', () => {
   const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verify.yml'), 'utf8');
-  assert.match(y, /push:\s*\n\s+branches: \[main\]\s*\n\s+tags: \['v\*'\]/, 'a branch is checked by its pull request, not twice');
+  assert.match(y, /push:\s*\n\s+branches: \[main, develop\]\s*\n\s+tags: \['v\*'\]/, 'every push to develop is checked, where the work is done before its pull request; any other branch by its pull request');
   assert.match(y, /^\s+pull_request:/m);
   const steps = y.split(/\n\s+- name: /).slice(1).filter((s) => /node scripts\/gate-tests\.mjs/.test(s));
   const once = steps.find((s) => /gate-tests\.mjs --once/.test(s)), full = steps.find((s) => !/--once/.test(s));

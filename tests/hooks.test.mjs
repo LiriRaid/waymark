@@ -2026,6 +2026,17 @@ test('Identity: the template\'s Package manager placeholder becomes the repo\'s 
   assert.match(fs.readFileSync(bareMem, 'utf8'), /build tool: <pnpm/);
 });
 
+test('2.0.20 context card: the Aprendido of the last close is cut to 75 characters, the whole stays in W tasks', () => {
+  const repo = memRepo('card-clip', '');
+  const long = 'x'.repeat(40) + ' ← ' + 'y'.repeat(300);
+  appendRecord(repo, { id: '2026-10-05 · T1', agent: 'claude', at: '2026-10-05T10:00:00Z', commits: [], cierre: `## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: ${long}` });
+  const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
+  const line = card.split('\n').find((l) => l.startsWith('Last closed:'));
+  const shown = line.match(/hecho · (.*) \(whole record/)[1];
+  assert.ok(shown.length <= 75, `the Aprendido shown is ${shown.length} characters`);
+  assert.ok(shown.endsWith('…'), 'a cut one says so');
+});
+
 test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
   const repo = memRepo('card', '- ▶ [2026-10-04 · T3] waiting for the user\n- [2026-10-04 · T2] older pending: Pendiente: x\n- Gotcha: a note\n- ✔ [2026-10-05 · T1] done thing\n');
   fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));

@@ -258,7 +258,7 @@ test('card: the last closed task\'s Aprendido shows once (not again under Learne
   ].join('\n'));
   const card = withEngram(fake.bin, () => digest(repo, 'claude'));
   assert.equal(card.split('la lección nueva').length - 1, 1, card);
-  assert.match(card, new RegExp(`- ${day} · T1 · una lección vieja y larga que el título recorta pero el cuerpo no`));
+  assert.match(card, new RegExp(`- ${day} · T1 · una lección vieja y larga que el título recorta pero el…`));
   assert.match(card, /- ADR 0001: \[2026-10-05\] ADR 0001 y tema|- \[2026-10-05\] ADR 0001 y tema/);
 });
 

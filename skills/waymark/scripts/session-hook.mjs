@@ -122,7 +122,7 @@ export function digest(cwd, agentName = 'claude') {
     // the Handoff of the same task carries its Aprendido whole: the line does not repeat it
     const learned = relay.startsWith(`Relevo de ${last.id} `) ? '' : aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 90)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 75)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
@@ -147,7 +147,7 @@ export function digest(cwd, agentName = 'claude') {
   try { const inc = incidentsLine(incidents(all), 'W'); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 2, 90, last?.id); } catch {} // the last closed is already above
+  try { if (!home.legacy) learned = learnedLines(home, 2, 75, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
   out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); W memory <section>, W tasks on demand.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so

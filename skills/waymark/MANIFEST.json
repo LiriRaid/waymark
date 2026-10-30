@@ -184,7 +184,7 @@
   "waymark/scripts/runs.mjs": "faec437ad25e7be08f4070af7f8d3ad9392e88201f741ad18995162f2b9d30a0",
   "waymark/scripts/runtime.mjs": "38473e4a738d11b2a967a50aa38940450f6d574d5f47b6096a697b4ab981e1fc",
   "waymark/scripts/scorecard.mjs": "6ff3ee676f880fb443b8a314261fd122ded45a2f3b2a97fb37513960d36ee4da",
-  "waymark/scripts/session-hook.mjs": "f411842d0f9f08c7a89a09ffe241bdab85cbdeea53c7449a7d71417f85dc3d0f",
+  "waymark/scripts/session-hook.mjs": "4d4a5cbeff8541f8b734e8d3407043747a5bf2d3927532768078c8f5e5f8742d",
   "waymark/scripts/sign.mjs": "6195cc7531cbe714e83d3eae586b4873112536bba15ce7ecda48afae7e4d67e0",
   "waymark/scripts/size.mjs": "0914ab5432e4f0c0e74b70339c2c0d79a32448ba40e1ddcaa5937f4033163583",
   "waymark/scripts/skill-fit.mjs": "af18b8aa4977ae626125b084e7cec1f8872fb454ec55725dcb604315fdc45f0c",

@@ -38,7 +38,7 @@ What it records, and where each statement is tested:
 | The review is required where the risk is: L3, a sensitive path, many files or lines | `tests/risk.test.mjs` |
 | Reading or editing secret-bearing paths is blocked where the agent's hook runs before the tool | `tests/guard.test.mjs` |
 | `node "<skills-dir>/waymark/scripts/waymark.mjs" verify` checks the chain, the installed files against `MANIFEST.json` and the release signature; `attest` exports one task | `tests/verify.test.mjs` |
-| Stack profiles for 13 ecosystems and 6 architectures, measured on five outside repositories | `skills/waymark/stacks`, `tests/external.test.mjs` |
+| Stack profiles for 14 stack profiles (plus a generic one) and 6 architectures, measured on eight outside repositories | `skills/waymark/stacks`, `tests/external.test.mjs` |
 
 What it does not do, so that nobody has to find out later:
 

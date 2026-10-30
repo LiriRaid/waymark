@@ -99,6 +99,7 @@ export {
   markTaskStart,
   openTurn,
   otherOpen,
+  pendingSteps,
   taskFiles,
   taskIds,
   taskInProgress,

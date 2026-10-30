@@ -17,7 +17,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { sessionState, closingQuestions, inheritedRoute } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, pinnedCwd, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, pinnedCwd, pendingSteps, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
 import { commandFiles } from './tool-hook.mjs';
@@ -62,6 +62,9 @@ const END = '(?=$|[^\\p{L}\\p{N}_])';
 export const CONTINUES = new RegExp(`^\\s*(?:(?:sigue|contin[uú]a|retoma|seguimos|reanuda|continue|resume|go on)${END}(?!\\s+(?:con|with|el|la|los|las|the|to)\\s+(?!(?:eso|esto|ello|lo|it|that|this)${END}))|(?:dale|termina|acaba|finish)(?=\\s*(?:$|[,.!;:])|\\s+(?:lo|eso|esto|ello|it|that|this)${END}|\\s+T\\d))`, 'iu');
 const STOPPED = /(?:se\s+(?:interrumpi[oó]|cort[oó])|por\s+donde\s+(?:qued|ibas|iba)|donde\s+(?:te\s+)?qued|where\s+(?:you|we)\s+left\s+off|(?:was|got)\s+(?:interrupted|cut))/iu;
 export const REDO = /(?<![\p{L}\p{N}])(?:no\s+funciona|no\s+sirve|no\s+(?:se\s+)?(?:ve|aplic[oó]|cambi[oó]|guard[oó]|carga)|no\s+(?:era|es)\s+eso|no\s+qued[oó]|sigue\s+(?:fallando|igual|sin|mal|apareciendo|saliendo)|(?:todav[ií]a|a[uú]n)\s+(?:falla|sale|aparece|no\s+(?:funciona|se\s+ve|sale|aparece|cambia))|otra\s+vez|de\s+nuevo|rehaz|deshaz|revi[eé]rte|vuelve\s+a\s+(?:hacer|intentar)|still\s+(?:fails|broken|not)|does\s*n[o']?t\s+work|not\s+working|try\s+again|redo|undo)(?![\p{L}\p{N}])/iu;
+// The ask says something about what the last task produced: it does not show, it is missing, it came out wrong. Read by the shape (a negation before a verb of
+// the result, "you forgot", "came out wrong"), not by a fixed phrase: "dale un margen al botón" or "agrega el filtro" say nothing about the last result.
+export const ABOUT_RESULT = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(?:no|nunca|tampoco)\s+(?:(?:me|te|se|lo|la|le)\s+)*(?:ve[ns]?|veo|vi|muestra[ns]?|sale[ns]?|sali[oó]|queda[ns]?|qued[oó]|funcion[aó]|aparece[ns]?|aparec[ií]|cambi[aó]|guard[aó]|abre|abri[oó]|carg[aó]|aplic[aó]|hizo|hiciste|puso|pusiste|agregaste|a[ñn]adiste)|te\s+falt[oó]|faltaron|olvidaste|te\s+olvidaste|dejaste\s+(?:sin|de)|(?:qued[oó]|sali[oó])\s+(?:mal|raro|feo|cortado|desalineado)|(?:is|are|was|were)\s*n[o']?t\s+(?:showing|working|shown|saved|applied|visible)|you\s+(?:forgot|missed|didn'?t))(?![\p{L}\p{N}])`, 'iu');
 const replyText = (lines) => {
   const reply = [...(lines || [])].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
   return (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
@@ -90,9 +93,11 @@ export function taskTurn(cwd, now = new Date(), { session = null, prompt = '', r
   let last = null;
   try { last = session ? lastOfSession(cwd, session) : null; } catch {}
   const mine = !!last?.id && bare(last.id) === ids.last, external = mine && last.outcome?.cause === 'external';
-  const says = CONTINUES.test(text) || STOPPED.test(text) || REDO.test(text) || NO.test(text);
+  const says = CONTINUES.test(text) || STOPPED.test(text) || REDO.test(text) || ABOUT_RESULT.test(text) || NO.test(text);
   const unread = !text.trim() && !external; // an agent whose hook does not carry the ask (Antigravity): nothing to judge, both IDs offered
-  if (says || unread || (mine && !external && endsAsking(reply))) return { next: ids.next, followUp: ids.followUp, why: '' };
+  // a task left open (bloqueado, parcial, a plan step ahead) is one task: the user's next ask on it is its follow-up whatever the words (a cause outside the work is the exception)
+  const open = mine && !external && (/^(?:parcial|bloqueado)$/i.test(last.outcome?.result || '') || pendingSteps(aprendidoOf(String(last.cierre || ''))));
+  if (says || unread || open || (mine && !external && endsAsking(reply))) return { next: ids.next, followUp: ids.followUp, why: '' };
   // a parcial for a cause outside the work (the quota, a provider) is said, so the model knows why no follow-up is offered
   return { next: ids.next, followUp: null, why: external ? ` The last task (${last.id}) is parcial for a cause outside the work: this ask is a new task unless the user says it continues.` : '' };
 }

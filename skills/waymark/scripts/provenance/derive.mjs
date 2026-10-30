@@ -129,6 +129,7 @@ export function windowCheck(decisions, reply) {
 // (Recommended). `decisions` are the task's answered questions (decisionsIn: each carries its options). A window of one option, or a question
 // whose options are not known (asked in the chat), is not judged. → { options, missing: [...] } or null.
 const REC = /\((?:Recomendad[ao]|Recommended)\)\s*$/i;
+const PHASED = /(?<![\p{L}\p{N}])(?:(?:s[oó]lo|solamente|only|just)\s+(?:la\s+|el\s+|the\s+)?(?:(?:primera|first|1[ªa]?)\s+)?(?:fase|etapa|phase|stage)(?:\s*(?:1|uno|one))?|primera\s+(?:fase|etapa)|first\s+(?:phase|stage)|empezar\s+por\s+(?:una|la\s+primera)\s+(?:fase|etapa)|(?:start|begin)\s+with\s+(?:one|the\s+first)\s+(?:phase|stage))(?![\p{L}\p{N}])/iu;
 export function optionsLint(decisions, level) {
   if (!(Number(level) >= 2)) return null;
   const first = (decisions || []).find((d) => d.optionList?.length >= 2);
@@ -142,7 +143,9 @@ export function optionsLint(decisions, level) {
     const marked = d.optionList.filter((o) => REC.test(String(o.label || ''))).length;
     if (marked !== 1) missing.push(`${q}: ${marked ? 'more than one' : 'no'} option marked (Recommended)`);
   }
-  return { questions: window.length, missing: missing.slice(0, 8) };
+  // an L2+ ask is built whole, in one task: no option offers a phase of it as a way to shrink the work ("solo la fase 1", "primera fase")
+  const phased = window.flatMap((d) => d.optionList.filter((o) => PHASED.test(`${o.label || ''} ${o.description || ''}`)).map((o) => `${String(d.question || '').slice(0, 30)}: "${String(o.label || '').slice(0, 40)}" offers a phase of the ask`));
+  return { questions: window.length, missing: missing.slice(0, 8), ...(phased.length ? { phased: phased.slice(0, 4) } : {}) };
 }
 
 // One option of the choice window → { label, recommended, files, risk, estCost }; what its description does not say is null.

@@ -46,6 +46,13 @@ export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   return { next: `${day} · T${n + 1}`, last, followUp: last ? follow(last) : null, known, committed, follow };
 }
 
+// The plan's steps in an L3 Aprendido ("✔1 · ▶2 · 3"): a step not ticked is still ahead.
+export const pendingSteps = (aprendido) => {
+  // a plan is the part before the arrow made only of step marks joined by "·": "✔1 · ▶2 · 3". Anything else in it ("✔2 specs · 14 ← cause") is a sentence, not a plan.
+  const marks = String(aprendido || '').split('←')[0].split('·').map((s) => s.trim());
+  return marks.length > 0 && marks.every((m) => /^[✔▶]?\s*\d+$/.test(m)) && marks.some((m) => /^[✔▶]/.test(m)) && marks.some((m) => !m.startsWith('✔'));
+};
+
 // An ID is valid for this turn when it is the next new one, one only a commit's trailer holds (its task closing now), or
 // an unused follow-up letter of a recorded task.
 export function validId(id, ids) {

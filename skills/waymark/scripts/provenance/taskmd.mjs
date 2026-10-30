@@ -259,7 +259,8 @@ export function tasksMarkdown(home, now = new Date()) {
   const cell = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\|/g, '/').trim();
   // "sin resolver" stays while no later task has passed a testigo this one failed (the incident is still open)
   const stillOpen = (r, later) => !r.evaluation?.steps || Object.entries(r.evaluation.steps).some(([label, ok]) => ok === false && !later.some((x) => x.evaluation?.steps?.[label] === true));
-  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : r.outcome?.userOwned ? `hecho (${r.outcome.userOwned.join(', ')}: tuyo)` : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
+  const ownedCell = (owned) => { const steps = owned.filter((s) => s !== 'manual'); return `hecho (${[...(owned.includes('manual') ? ['pendiente tuyo: prueba manual'] : []), ...(steps.length ? [`${steps.join(', ')}: tuyo`] : [])].join('; ')})`; }; // the user's own test is named as what is pending from them; a step (deploy, PR) as theirs
+  const result = (r, later = []) => (r.fromCommit ? 'solo commit' : r.outcome?.userOwned ? ownedCell(r.outcome.userOwned) : cell((r.cierre || '').match(/Resultado:[ \t]*([^·\n]*)/i)?.[1] || '?') + (r.unresolved?.length && stillOpen(r, later) ? ` · ${r.unresolved.length} sin resolver` : ''));
   const started = Object.values(readOpen(home)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
     .map((o) => clip(`- ${o.next}${o.followUp ? ` (or follow-up ${o.followUp})` : ''} · started${o.agent ? ` in ${cell(o.agent)}` : ''} ${new Date(o.at).toLocaleString('sv').slice(0, 16)} · "${o.prompt}"`, TASK_CHARS));
   const all = readTaskRecords(home), records = all.filter((r) => r.id), lastRec = records[records.length - 1]; // the rows shown
@@ -280,7 +281,7 @@ export function tasksMarkdown(home, now = new Date()) {
       // Decisión: the user's picks as recorded from the choice window; older records keep the Cierre's field
       .map(([name, re]) => [name, name === 'Decisión' && lastRec.decisions?.length ? lastRec.decisions.map((x) => x.chosen).join('; ')
         : (lastRec.cierre || '').replace(/\*\*|__/g, '').match(new RegExp(`${re}:[ \\t]*(.*?)(?=\\s*·\\s*(?:Resultado|Decisi[oó]n|Sub-?decisiones|Evidencia|Aprendido):|\\n|$)`, 'i'))?.[1]])
-      .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`),
+      .filter(([, v]) => v).map(([name, v]) => `- ${name}: ${clip(cell(v), 220)}`), ...(lastRec.outcome?.userOwned && lastRec.outcome.pending?.length ? [`- Pendiente de ti: ${clip(cell(lastRec.outcome.pending.join('; ')), 220)}`] : []),
     ...(lastRec.evaluation ? [(() => { const st = Object.entries(lastRec.evaluation.steps || {}), failed = st.filter(([, v]) => !v).map(([k]) => k), declared = st.filter(([, v]) => v === 'exception' || v === 'warn').map(([k]) => k); return `- Evaluación: ${lastRec.evaluation.score}${failed.length ? ` (✘ ${failed.join(', ')})` : ''}${declared.length ? ` (⚠ ${declared.join(', ')})` : ''}`; })()] : []), ''] : [];
   // the facts the Cierre cited that a tool call of the task backs, "10/10" (⚠ below BACKED_MIN); — when it cited none or the record has no evidence
   const backed = (r) => { const e = r.observed?.evidence; return e?.cited > 0 ? `${e.cited - (e.unbacked?.length || 0) < e.cited * BACKED_MIN ? '⚠ ' : ''}${e.cited - (e.unbacked?.length || 0)}/${e.cited}` : '—'; };

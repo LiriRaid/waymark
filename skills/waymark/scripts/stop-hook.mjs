@@ -35,7 +35,7 @@ import { RUNS_EGO, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, refere
 import { projectKind } from './report.mjs';
 import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { base as idBase } from './provenance/ids.mjs';
-import { pinnedCwd, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { pinnedCwd, pendingSteps, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -855,6 +855,9 @@ function cierreWitness(S) {
     }
     // L2+: the ask kept as numbered items (the Pedido line, ctx.pedido); the Cierre answers each one, and "hecho" cannot stand over a ✘ (docs/adr/0038)
     if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, pedidoAnswers(reply), field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
+    // no task closes parcial: a gap of the work is finished now (an L2/L3 task is one task), a gap only the user can close is hecho with it named, and what cannot be finished is bloqueado
+    const o = outcome(reply, ctx.pedido, pedidoAnswers(reply), S.level, ctx.owned, S.win);
+    if (/^parcial\b/i.test(field(reply, 'Resultado')) && o.result === 'parcial' && !o.cause) cierre.push('Resultado: parcial leaves work undone: finish it now (the steps of one task are done in that task); if only your user can close the gap (their manual test, their PR) say it as "hecho (pendiente tuyo: <it>)" and if something outside prevents it write "bloqueado (<why>)"');
   }
   return { cierre, renamed };
 }
@@ -877,13 +880,8 @@ function whenOf(S) {
   };
   return { when, risk, reviewDeferred: deferred };
 }
-// The plan's steps in an L3 Aprendido ("✔1 · ▶2 · 3"): a step not ticked is still ahead.
-export const pendingSteps = (aprendido) => {
-  // a plan is the part before the arrow made only of step marks joined by "·": "✔1 · ▶2 · 3". Anything else in it ("✔2 specs · 14 ← cause") is a sentence, not a plan.
-  const marks = String(aprendido || '').split('←')[0].split('·').map((s) => s.trim());
-  return marks.length > 0 && marks.every((m) => /^[✔▶]?\s*\d+$/.test(m)) && marks.some((m) => /^[✔▶]/.test(m)) && marks.some((m) => !m.startsWith('✔'));
-};
 // The task is still open in this turn's Cierre: its result is parcial or bloqueado, or the plan has a step ahead. No Cierre yet is not open: the review is listed with the rest.
+export { pendingSteps };
 export const taskOpen = (reply) => CIERRE.test(String(reply || '')) && (/^\s*(?:parcial|bloqueado)\b/i.test(field(reply, 'Resultado')) || pendingSteps(field(reply, 'Aprendido')));
 
 // Testigo procedure: the owner department loaded and its procedures.md read.
@@ -1013,6 +1011,7 @@ function composeSteps(S) {
   if (win?.failed.length) findings.push(`the Cierre marks ✘ what the user chose in the window: ${win.failed.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (win?.twoActions.length) findings.push(`a label the user chose holds two actions (apply and run, delete and deploy…): the Cierre must say which of them was done: ${win.twoActions.slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(' · ')}`);
   if (outsideRepos.length) findings.push(`changed a repository the Pedido does not name (Repos:): ${outsideRepos.slice(0, 3).join(', ')}`);
+  if (observed.options?.phased?.length) findings.push(`the first choice window offers only a phase of the ask (recorded, not blocked): an L2+ ask is built whole in one task, so the window offers the whole ask with its decisions: ${observed.options.phased.slice(0, 2).join(' · ')}`);
   if (observed.options?.missing.length) findings.push(`the first choice window does not mark exactly one option (Recommended) (recorded, not blocked): ${observed.options.missing.slice(0, 3).join(' · ')}`);
   if (observed.guarded?.length) findings.push(guardedLine(observed.guarded)); // detected after the fact: recorded in the chain, never blocked
   if (ROUTINE.fallback) findings.push('waymark/routine.json missing or invalid: checked with the minimal catalog (decision, gate, Cierre)');
@@ -1149,6 +1148,9 @@ export function ownedSteps(text) {
   for (const m of String(text || '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/^[ \t]*[-*]?[ \t]*([^:\n]{2,40}):[ \t]*(?:el usuario|usuario|the user|user|yo|me|manual|a mano|by hand)\b/gim)) for (const [step, re] of Object.entries(STEP_WORDS)) if ((KEY_WORDS[step] || re).test(m[1].trim()) && STEP_KEY.test(m[1].trim())) owned.add(step); // the key names the step and nothing else ("Push notifications" is no rule)
   return owned;
 }
+// The user's own test, by hand: the one gap an agent cannot close. It needs the user as subject ("tu prueba", "que pruebes tú") or the word manual
+// ("prueba manual", "manual test"): "falta probar el filtro" is the work, which the agent can run.
+const MANUAL_TEST = /(?<![\p{L}\p{N}])(?:(?:tu|su)\s+(?:prueba|verificaci[oó]n|revisi[oó]n)|(?:prueba|verificaci[oó]n|revisi[oó]n)\s+manual(?:es)?|que\s+(?:lo\s+)?(?:pruebes|pruebe|verifiques|revises)(?:\s+t[uú])?|(?:pru[eé]balo|prueba(?:r)?lo|verif[ií]calo|rev[ií]salo)\s+t[uú]|(?:your|user'?s?)\s+(?:manual\s+)?(?:test|check|verification)|manual\s+(?:test(?:ing)?|check|verification)|test\s+by\s+hand)(?![\p{L}\p{N}])/iu;
 export function outcome(reply, items, answers, level, owned = new Set(), win = null) {
   const said = (reply.match(/^[ \t]*Resultado:[ \t]*(\p{L}+)/imu)?.[1] || '').toLowerCase() || null;
   const gaps = Number(level) >= 2 ? askedGaps(items, answers, said || '') : [];
@@ -1158,10 +1160,11 @@ export function outcome(reply, items, answers, level, owned = new Set(), win = n
     const line = reply.match(/^[ \t]*Resultado:[^\n]*/im)?.[0] || '';
     // every gap the parcial lists must be a step of the user's; one gap of the work keeps it parcial
     const parts = (line.match(/\((.*)\)/)?.[1] || line.replace(/^[ \t]*Resultado:[ \t]*\p{L}+/iu, '')).split(/\s*[,;]\s*|\s+(?:y|and|e)\s+/i).filter((p) => p.trim());
-    const ownedPart = (p) => [...owned].some((s) => STEP_WORDS[s].test(p));
-    const mine = parts.length && parts.every(ownedPart) ? [...owned].filter((s) => STEP_WORDS[s].test(line)) : [];
-    const undone = (answers || []).filter((a) => !a.ok && ![...owned].some((s) => STEP_WORDS[s].test(a.note || ''))); // an item ✘ for another reason keeps it parcial
-    if (mine.length && !gaps.length && !undone.length) return { result: 'hecho', said, userOwned: mine, why: `the only step left is the user's (${mine.join(', ')})` };
+    const ownedPart = (p) => MANUAL_TEST.test(p) || [...owned].some((s) => STEP_WORDS[s].test(p));
+    const manual = parts.filter((p) => MANUAL_TEST.test(p));
+    const mine = parts.length && parts.every(ownedPart) ? [...[...owned].filter((s) => STEP_WORDS[s].test(line)), ...(manual.length ? ['manual'] : [])] : [];
+    const undone = (answers || []).filter((a) => !a.ok && !MANUAL_TEST.test(a.note || '') && ![...owned].some((s) => STEP_WORDS[s].test(a.note || ''))); // an item ✘ for another reason keeps it parcial
+    if (mine.length && !gaps.length && !undone.length) return { result: 'hecho', said, userOwned: mine, pending: parts.map((p) => p.trim().slice(0, 120)).slice(0, 4), why: `the only step left is the user's (${mine.join(', ')})` };
     if (EXTERNAL.test(line)) return { result: said, cause: 'external' };
   }
   return { result: said };
@@ -1181,6 +1184,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     // Never a secret in the chained record (it cannot be edited later): picked labels only, no free-text answer, and
     // passwords, tokens and keys masked in what is kept as text.
     level: gaps.level, department: gaps.dept, prompt: maskSecrets(String(turn.prompt || '').slice(0, 600)), decisions: recordedDecisions(ctx.decisions),
+    ...(ctx.taskPrompts?.length > 1 ? { prompts: ctx.taskPrompts.slice(-12).map((p) => maskSecrets(String(p || '').slice(0, 600))) } : {}), // every ask of the task, in order: a correction or an addition is part of it
     files: [...new Set(gaps.changed)],
     ...v2Fields({ prompt: turn.prompt, files: gaps.changed, level: gaps.level, records: ctx.records, self: ok ? claimed : ctx.ids.next, norm, pedido: Number(gaps.level) >= 2 ? ctx.pedido || [] : [] }), // schema v2: taskType, asked, reworks, reworkFiles
     ...(answers.length ? { answered: answers } : {}), // what the Cierre's Pedido line says of each item
@@ -1321,6 +1325,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       try { ctx.procDelivered = [...procDelivered(h.session_id, taskStart(records, h.session_id))]; } catch {} // the owner's procedures.md, handed over the same way
       try { ctx.procLate = [...procLate(h.session_id, taskStart(records, h.session_id))]; } catch {} // handed when the department loaded after the first change
       ctx.sessionDepts = records.filter((r) => r.session === h.session_id).flatMap((r) => r.department?.invoked || []); // loaded earlier in this session
+      ctx.taskPrompts = task.filter(isPrompt).map(promptText);
       ctx.pedido = pedidoItems(task); // the numbered items of the Pedido line the agent wrote (L2+): what the Cierre owes an answer to
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape

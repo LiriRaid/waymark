@@ -180,7 +180,7 @@ Nothing is preloaded "just in case". Loading is layered:
 | reminder (full) | every prompt | the rule line of the per-prompt reminder (the task ID, stack and git line come on top) | 93 |
 | reminder (short) | every prompt after a reply that followed the routine | the short reminder | 37 |
 | protocol L2 | an L2 task | the protocol an L2 reads | 4,034 |
-| protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 5,709 |
+| protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 6,131 |
 | held message (max) | only after the context brake | the largest line the session hook adds for a held message | 637 |
 <!-- size:end -->
 

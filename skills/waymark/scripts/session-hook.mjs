@@ -73,8 +73,6 @@ export const openList = (ids) => {
   const shown = ids.slice(0, OPEN_MAX).map((id) => { const [d, t] = id.split(' · '); if (t && d === day) return t; day = t ? d : null; return id; });
   return shown.join(', ') + (ids.length > OPEN_MAX ? ` +${ids.length - OPEN_MAX} (W tasks)` : '');
 };
-export const HELD_MAX = 520; // characters of the held message the card carries; a longer one is kept whole in held-full.md
-export const HELD_MORE = ' … (the rest: .waymark/held-full.md)';
 export function digest(cwd, agentName = 'claude') {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
@@ -177,10 +175,8 @@ export function heldPrompt(home, now = Date.now()) {
     if (now - fs.statSync(file).mtimeMs < 86400000) text = whole.replace(/^<!--[^\n]*-->\n/, '').trim();
     if (cut < 0) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, content.slice(cut + 1));
   } catch {}
-  if (text.length <= HELD_MAX) return text;
-  // the user's words are never lost to the cap: the whole message stays in a file the agent reads on demand
-  try { fs.writeFileSync(path.join(home.dir, 'held-full.md'), text + '\n'); } catch {}
-  return text.slice(0, HELD_MAX) + HELD_MORE;
+  try { fs.rmSync(path.join(home.dir, 'held-full.md'), { force: true }); } catch {} // the file 2.0.19 kept the rest of a long message in: the card now carries it whole
+  return text; // the user's words arrive whole, after the card's cap (EXTRA.held), once
 }
 
 // One line when neither a check nor this pointer happened in the last week.

@@ -3200,15 +3200,17 @@ test('cost per link: a command that only names waymark.mjs (a syntax check, a gi
   assert.deepEqual([l.routine.responses, l.work.responses], [1, 1]);
 });
 
-test('held message: the card carries at most HELD_MAX characters of it and the whole message stays in held-full.md', async () => {
-  const { heldPrompt, HELD_MAX, HELD_MORE, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+test('held message (2.0.20): the card carries the whole message, no held-full.md is made, and one an earlier version left goes', async () => {
+  const { heldPrompt, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
   const repo = memRepo('held-long'), home2 = projectHome(repo);
   const long = 'pide algo muy largo '.repeat(80).trim();
   fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${long}\n`);
+  fs.writeFileSync(path.join(home2.dir, 'held-full.md'), 'left by 2.0.19\n');
   const got = heldPrompt(home2);
-  assert.equal(got, long.slice(0, HELD_MAX) + HELD_MORE);
-  assert.equal(fs.readFileSync(path.join(home2.dir, 'held-full.md'), 'utf8').trim(), long, 'the user\'s words are not lost to the cap');
-  assert.ok(EXTRA.held(got).length <= 700, 'the held message the card adds stays under 700 characters');
+  assert.equal(got, long, 'the user\'s words arrive whole: nothing is cut and nothing is kept in a file to read later');
+  assert.ok(!fs.existsSync(path.join(home2.dir, 'held-full.md')), 'no held-full.md, and the stale one is removed');
+  assert.ok(!fs.existsSync(path.join(home2.dir, 'next-prompt.md')), 'the held message is read once');
+  assert.ok(EXTRA.held(got).endsWith(long), 'the card adds it after its cap');
   fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), '<!-- x -->\ncorto\n');
   assert.equal(heldPrompt(home2), 'corto', 'a short one is carried as it is');
 });

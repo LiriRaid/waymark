@@ -181,7 +181,7 @@ Nothing is preloaded "just in case". Loading is layered:
 | reminder (short) | every prompt after a reply that followed the routine | the short reminder | 37 |
 | protocol L2 | an L2 task | the protocol an L2 reads | 4,034 |
 | protocol L3 | an L3 task | the protocol an L3 reads (L2 and L3 parts) | 6,131 |
-| held message (max) | only after the context brake | the largest line the session hook adds for a held message | 637 |
+| held message (frame) | only after the context brake | the line the session hook adds for a held message, before the user's own words (carried whole, once) | 81 |
 <!-- size:end -->
 
 Other parts, loaded when they apply: a department's `dept-*/SKILL.md` once per session per department (about 5 to 7 thousand characters), its `procedures.md` (the hook hands it over at the task's first change), the project card once per session (a few hundred characters here; it grows with the project's open work and learned memory), the core references and the stack and architecture profiles only in the situations they list. Project memory and its *Project map* replace re-exploring the project each session.

@@ -566,3 +566,32 @@ test('2.0.20 review: no HOME means no ego; the ego skill is read by name only; r
   assert.deepEqual(Eyes.observeEyes([script]).ports, ['4200'], 'the port of the page that was measured');
   assert.equal('ports' in Eyes.observeEyes([sh('ls')]), false);
 });
+
+test('2.0.20 point 18: the dev server\'s own compile output is the second signal; an error after the last change means the page is the old version', () => {
+  const edit = { name: 'Edit', id: 'e1', input: { file_path: 'src/app/a.ts' } };
+  const start = { name: 'Bash', id: 's1', input: { command: 'pnpm run start', run_in_background: true } };
+  const outs = { s1: 'Command running in background with ID: bg7. Output is being written to: /tmp/o.txt', r1: 'Application bundle generation complete. [1.2 seconds]', r2: 'Error: src/app/a.ts:3 [ERROR] TS2304: Cannot find name x\nApplication bundle generation failed.' };
+  const read = (id) => ({ name: 'BashOutput', id, input: { bash_id: 'bg7' } });
+  const outOf = (t) => outs[t.id] || '';
+  const look = { name: 'Bash', id: 'l1', input: { command: `ego-browser nodejs <<'EOF'\nconst r = await page.evaluate(() => document.querySelector('h1').getBoundingClientRect());\nconsole.log(r);\nEOF` } };
+  const ok = Eyes.observeEyes([start, edit, read('r1'), look], { from: 1, outOf });
+  assert.equal(ok.server, 'ok');
+  assert.equal(ok.afterLastChange, true, 'a clean compile leaves the look standing');
+  const bad = Eyes.observeEyes([start, edit, read('r2'), look], { from: 1, outOf });
+  assert.equal(bad.server, 'failed');
+  assert.equal(bad.afterLastChange, false, 'counter-example: a compile error after the change makes the look a look at the old page');
+  assert.match(Eyes.eyesGaps(bad, 'ego')[0], /dev server you started printed a compile error/);
+  assert.equal(Eyes.observeEyes([start, edit, look], { from: 1, outOf }).server, 'unread', 'a server nobody read after the change says nothing');
+  assert.equal(Eyes.observeEyes([edit, look], { from: 0, outOf }).server, undefined, 'no server started: no signal');
+});
+
+test('2.0.20 review: a compile error is read ("Found 3 errors"), and one server\'s error is not hidden by another\'s clean compile', () => {
+  const edit = { name: 'Edit', id: 'e1', input: { file_path: 'src/a.ts' } };
+  const srv = (id, bg) => ({ name: 'Bash', id, input: { command: 'pnpm run start:dev', run_in_background: true } });
+  const read = (id, bg) => ({ name: 'BashOutput', id, input: { bash_id: bg } });
+  const outs = { s1: 'ID: bgA', s2: 'ID: bgB', r1: 'Found 3 errors. Watching for file changes.', r2: 'Found 0 errors. Watching for file changes.' };
+  const outOf = (t) => outs[t.id] || '';
+  const r = Eyes.devServerCompile([srv('s1'), srv('s2'), edit, read('r1', 'bgA'), read('r2', 'bgB')], outOf, 2);
+  assert.equal(r.compile, 'failed');
+  assert.equal(Eyes.devServerCompile([srv('s2'), edit, read('r2', 'bgB')], outOf, 1).compile, 'ok');
+});

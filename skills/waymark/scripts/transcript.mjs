@@ -21,9 +21,12 @@ export function readTail(file, bytes = TAIL) {
   return parseLines(rows.join('\n'));
 }
 
+// A status note the app adds to the user's message (<system-reminder>…</system-reminder>) is not the ask: the words around it are.
+const NOTE = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 export const promptText = (d) => {
   const c = d.message?.content;
-  return typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
+  const text = typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
+  return text.includes('<system-reminder>') ? text.replace(NOTE, ' ').trim() : text;
 };
 
 // The summary a context compaction writes to continue the session is no prompt either. Its shape is not documented
@@ -359,6 +362,20 @@ export function inheritedRoute(lines, prompts = 2) {
   const now = currentTurn(lines);
   if (!lines.some(isPrompt) || routes(now.texts).length || reroute(now.tools)) return null;
   return openTaskRoute(lines, prompts);
+}
+// The highest level any turn of these lines (a task's stretch) routed itself at: a short turn that continues the task ("do the migrate") keeps the task's level,
+// never lowers it, whether or not an earlier turn of the stretch already wrote a Cierre (a blocked one records nothing, so the task is still open).
+export function taskLevel(lines) {
+  const starts = [];
+  lines.forEach((d, i) => { if (isPrompt(d)) starts.push(i); });
+  if (!starts.length) starts.push(0);
+  let top = 0;
+  starts.forEach((s, k) => {
+    const t = currentTurn(lines.slice(0, starts[k + 1] ?? lines.length).slice(s));
+    const level = routedLevel(t.texts, t.tools);
+    if (typeof level === 'number' && level > top) top = level;
+  });
+  return top;
 }
 // The route (level and department) of the task still open before this turn: the last numerically routed turn since the task's start that has not written its Cierre,
 // whatever this turn says. A reply that continues the task is that task's, so a Q line on a reply that changes files is judged and gated at its level.

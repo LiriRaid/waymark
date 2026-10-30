@@ -40,10 +40,12 @@ test('tokens: lower case, no accents, no stop words or tags, a path and a versio
 });
 
 test('search: the earlier task that shares the rarer words ranks first; nothing in common, nothing ranked', () => {
-  const [top, second] = P.search('arregla el backoff de reintentos del servicio de pedidos', corpus(), 3);
-  assert.match(top.record.prompt, /reintentos con backoff/);
-  assert.ok(!second || second.score < top.score);
-  assert.deepEqual(P.search('receta de arroz con coco', corpus()), []);
+  const found = P.search('arregla el backoff de reintentos del servicio de pedidos', corpus(), 3);
+  const best = found.reduce((a, x) => (x.score > a.score ? x : a));
+  assert.match(best.record.prompt, /reintentos con backoff/, 'the task that shares the words has the best score and is among the three');
+  assert.ok(found.every((x) => x === best || x.score < best.score));
+  assert.ok(P.search('receta de arroz con coco', corpus()).every((x) => x.score === 0), 'nothing in common: only the newest are listed, with no score, and none is ever handed over');
+  assert.equal(P.precedentFor('receta de arroz con coco', corpus(), 0.1), null);
 });
 
 test('precedentFor: hands over the best task with its files, gates and lesson, in at most 400 characters', () => {
@@ -222,4 +224,28 @@ test('evaluate (review of level 3): the random baseline draws from the tasks of 
   assert.equal(e.eligible, 1);
   assert.equal(e.randomAtK, 1, 'one candidate in the pool and it is the relevant one: chance is certain, not 3 in 4 of the whole history');
   assert.equal(e.lift, 0, 'so the lift over chance is zero, not inflated by a baseline that counted tasks the search never sees');
+});
+
+test('10.3 (2.0.20): the files the ask names are a second ranking, fused by rank; a task found by its files alone is ranked but never handed over', () => {
+  const tasks = corpus();
+  const top = P.search('revisa receipt y deja todo igual', tasks, 3).find((x) => x.record.files[1] === '/p/src/receipt.mjs');
+  assert.ok(top, 'the ask names receipt: the task that changed receipt.mjs is found though few words match');
+  assert.equal(P.precedentFor('receipt', tasks, 0.5), null, 'one word names too little to hand anything over');
+  const byText = P.search('agrega reintentos con backoff al servicio de pedidos', tasks, 3).find((x) => /reintentos con backoff/.test(x.record.prompt));
+  assert.ok(byText && byText.score > 0, 'counter-example: an ask that names no file still finds the task by its words');
+});
+
+test('10.3 (2.0.20 completion): the folders a task touched are words of the task, the newer of two equal matches ranks first, and the hand-over is the first of the three that resembles the ask', () => {
+  n = 0;
+  const old = task('ajusta la validacion', ['/p/docs/plans/alpha.md'], 'nada');
+  const mid = task('revisa el parser', ['/p/src/payments/charge.mjs'], 'nada');
+  const recent = task('ajusta la validacion', ['/p/docs/plans/beta.md'], 'nada');
+  // the ask names an area, never a file: the folder words reach the task that touched it
+  assert.equal(P.search('arregla payments', [old, mid, recent], 1)[0].record, mid, 'a folder name is a word of the task');
+  // two equal text matches: the newer first
+  assert.equal(P.search('ajusta la validacion', [old, mid, recent], 1)[0].record, recent, 'the newer of two equal matches ranks first');
+  // a newer task with no word in common is ranked (recency) but never handed over; the hand-over is the first candidate that resembles the ask
+  const dull = task('otra cosa totalmente distinta', ['/p/x.mjs'], 'nada');
+  const p = P.precedentFor('ajusta la validacion del parser', [old, mid, recent, dull], 0.1);
+  assert.ok(p && [old.id, recent.id, mid.id].includes(p.task), 'the dull newest task is not what is handed over');
 });

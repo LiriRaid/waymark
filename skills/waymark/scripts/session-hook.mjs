@@ -131,7 +131,7 @@ export function digest(cwd, agentName = 'claude') {
   // the card's line is bounded: the head clipped, the Aprendido's tail kept (its next step and the plan's ✔1 · ▶2 are there), the whole in the file
   if (relay) {
     const [head, ...rest] = relay.split(/\n+/), tail = [...rest.join(' · ')]; // by code point: a cut never splits an emoji
-    const short = `${clip(head, 110)}${tail.length ? ` · ${tail.length > 150 ? `…${tail.slice(-149).join('').trimStart()}` : tail.join('')}` : ''}`;
+    const short = `${clip(head, 90)}${tail.length ? ` · ${tail.length > 70 ? `…${tail.slice(-69).join('').trimStart()}` : tail.join('')}` : ''}`;
     out.push(`Handoff (the user's request comes first): ${short}${short.length < relay.length ? ' (whole: .waymark/next-prompt.md)' : ''}`);
   }
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
@@ -149,7 +149,7 @@ export function digest(cwd, agentName = 'claude') {
   let learned = [];
   try { if (!home.legacy) learned = learnedLines(home, 2, 90, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); on demand: W memory <section> (Conventions · Identity), W tasks.`);
+  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); W memory <section>, W tasks on demand.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {

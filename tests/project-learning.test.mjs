@@ -63,13 +63,13 @@ test('23: the template\'s Stack, Source root, Path aliases, Related projects and
   g('init', '-q'); g('add', '-A'); g('commit', '-q', '-m', 'x');
   const file = path.join(d, 'memory.md');
   fs.writeFileSync(file, fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'templates', 'project-memory.template.md'), 'utf8'));
-  assert.equal(C.fillMemory(file, C.census(d), { related: ['api (../omni-inbox-api)'] }), true);
+  assert.equal(C.fillMemory(file, C.census(d), { related: ['api (../shop-api)'] }), true);
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /^- Stack: @angular\/core 20\.1\.0\b[^\n]* \(to confirm\)$/m, 'the framework, not the first dependency');
   assert.doesNotMatch(text, /^- Stack: @angular\/animations/m);
   assert.match(text, /^- Source root and layout: src\/app\/\{[a-z,]*core[a-z,]*\} \(to confirm\)$/m);
   assert.match(text, /^- Path aliases: @core\/\* → src\/app\/core\/\*, @shared\/\* → src\/app\/shared\/\* \(to confirm\)$/m, 'the tsconfig paths, comments and all');
-  assert.match(text, /^- Related projects: api \(\.\.\/omni-inbox-api\) \(to confirm\)$/m);
+  assert.match(text, /^- Related projects: api \(\.\.\/shop-api\) \(to confirm\)$/m);
   assert.match(text, /^ {2}- Components \/ UI: src\/app\/shared \(\d+\/\d+ [a-z]+ pieces\) \(to confirm\)$/m);
   const own = '## Identity\n- Stack: ruby 3.3 / rails 7 — mine\n- Related projects: ninguno\n\n## Project map\n- Path aliases: @/* → app/*\n';
   fs.writeFileSync(file, own);
@@ -100,4 +100,13 @@ test('23: a design link written in two tasks and a term with its own meaning sai
   assert.deepEqual(designLinks([rec(1, 'igual a https://www.figma.com/design/AbC/kit'), rec(2, 'sigue https://www.figma.com/design/AbC/kit')]).map((d) => d.host), ['www.figma.com'], 'a design tool host, subdomain included');
   const many = terms([rec(1, 'cuando digo "franjas", quiero decir las tabs'), rec(2, 'when i say franjas i mean las tabs'), rec(3, 'cuando te digo plantillas significa los layouts de página'), rec(4, 'cuando digo plantillas me refiero a los layouts')]);
   assert.deepEqual(many.map((x) => x.term).sort(), ['franjas', 'plantillas'], 'a quoted term, an English cue and the connectors significa / me refiero a / quiero decir each count');
+});
+
+test('23: the Placement line proposed as to confirm is confirmed with the Architecture the user confirmed, and not before', async () => {
+  const { learnPlacement } = await import(`file://${SCRIPTS}/learn.mjs`);
+  const open = '- Architecture: screaming — features — evidence: census (to confirm)\n- Placement (to confirm, detected 2026-10-20): features/<f>/{components,services}\n';
+  assert.equal(learnPlacement(open, '2026-10-30'), open, 'counter-example: the Architecture still waits for the user, so does the Placement');
+  const done = open.replace(' (to confirm)\n- Placement', ' (confirmed 2026-10-30)\n- Placement');
+  assert.match(learnPlacement(done, '2026-10-31'), /- Placement \(confirmed 2026-10-31, detected 2026-10-20\): features/);
+  assert.equal(learnPlacement('## Conventions\n- Placement (to confirm, detected x): y\n', '2026-10-31'), '## Conventions\n- Placement (to confirm, detected x): y\n', 'no Architecture line: nothing to confirm against');
 });

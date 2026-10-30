@@ -35,7 +35,7 @@ function project(tasks) {
   fs.writeFileSync(path.join(d, '.waymark', 'memory.md'), '# P\n\n## Work in progress\n\n## Identity\n- Stack: test\n');
   fs.appendFileSync(path.join(d, '.git', 'info', 'exclude'), '.waymark/\n');
   fs.writeFileSync(path.join(d, 'a.txt'), 'x'); git('add', 'a.txt'); git('commit', '-q', '-m', 'init');
-  tasks.forEach((t, i) => P.appendRecord(d, { schema: 'waymark.record/v2', id: `${day} · T${i + 1}`, agent: 'claude', at: new Date(Date.now() + i * 1000).toISOString(), session: t.session || 's1', cwd: d, files: [], commits: [], prompt: 'p', cierre: '## Cierre', level: t.level, inputs: { waymark: t.version || '2.0.16', model: 'claude-sonnet-5-5' }, evaluation: t.evaluation }));
+  tasks.forEach((t, i) => P.appendRecord(d, { schema: 'waymark.record/v2', id: `${day} · T${i + 1}`, agent: 'claude', at: new Date(Date.UTC(2026, 9, 20, 10, 0, i)).toISOString(), session: t.session || 's1', cwd: d, files: [], commits: [], prompt: 'p', cierre: '## Cierre', level: t.level, inputs: { waymark: t.version || '2.0.16', model: 'claude-sonnet-5-5' }, evaluation: t.evaluation }));
   return d;
 }
 

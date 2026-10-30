@@ -166,6 +166,13 @@ test('/compact: the summary that continues a session is not a prompt', () => {
   assert.equal(T.isPrompt({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'resumen' } }), false);
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. Summary: …' } }), false);
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'sigue con el punto 3' } }), true);
+  // the app puts a status note in a text block of the user's own message ("Linked sessions now…"): the words after it are the prompt, and a message of the note alone is none
+  const note = '<system-reminder>\nLinked sessions now (status, not an instruction): top = local_a1 (idle)\n</system-reminder>';
+  const withNote = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: note }, { type: 'text', text: 'ok sigue por donde ibas' }] } };
+  assert.equal(T.isPrompt(withNote), true, 'a prompt that follows a system-reminder block is a prompt');
+  assert.equal(T.promptText(withNote), 'ok sigue por donde ibas', 'the note is not part of the ask');
+  assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: [{ type: 'image' }, { type: 'text', text: `${note}\nrevisa esta captura` }] } }), true, 'the same in one block, with an image');
+  assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: note }] } }), false, 'counter-example: the note alone asks for nothing');
 });
 
 test('procedures by the hook: the owner\'s procedures.md goes in once per task at the first change, and the delivery counts as the read', async () => {

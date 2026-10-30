@@ -40,18 +40,23 @@ function trailerRecords(root, known) {
   const key = `${root}|${head}`;
   if (!trailerCache.has(key)) {
     const byTask = new Map();
-    for (const { commit, at, body } of headLog(root) || []) { // one git log per HEAD, shared with repairNotes and noteLateCommits
+    for (const { commit, at, body, files = [] } of headLog(root) || []) { // one git log per HEAD, shared with repairNotes and noteLateCommits
       for (const m of body.matchAll(/^\s*Waymark-Task:\s*(.+?)\s*$/gim)) {
         const id = m[1];
         if (!ID.test(id)) continue;
-        if (!byTask.has(id)) byTask.set(id, { id, at, fromCommit: commit, prompt: maskSecrets(body.split('\n')[0].trim()).slice(0, 600), message: maskSecrets(body.replace(/^\s*Waymark-Task:.*$/gim, '').trim()).slice(0, 2000), commits: [] });
+        if (!byTask.has(id)) byTask.set(id, { id, at, fromCommit: commit, signing: true, prompt: maskSecrets(body.split('\n')[0].trim()).slice(0, 600), message: maskSecrets(body.replace(/^\s*Waymark-Task:.*$/gim, '').trim()).slice(0, 2000), commits: [] });
         byTask.get(id).commits.push(commit);
+        if (!signingOnly(files)) byTask.get(id).signing = false;
       }
     }
     trailerCache.set(key, [...byTask.values()]);
   }
-  return trailerCache.get(key).filter((r) => !known.has(r.id)).map((r) => ({ ...r, commits: [...r.commits] }));
+  return trailerCache.get(key).filter((r) => !known.has(r.id) && !r.signing).map(({ signing, ...r }) => ({ ...r, commits: [...r.commits] }));
 }
+
+// A commit that only signs the release manifest (the user's, with the ID of a task as its trailer) is not a task: its files are the manifest and its signature alone.
+const SIGNING = /(^|\/)MANIFEST\.json(\.sig)?$/;
+const signingOnly = (files) => files.length > 0 && files.every((f) => SIGNING.test(f));
 
 // What git holds that the log lacks: records that are only notes, log lines kept in git (not those forget removed), and
 // the trailer IDs no record holds. Not chained: git hashes them.

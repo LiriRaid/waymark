@@ -80,7 +80,7 @@ export function repoOf(p) {
 
 // A repo's name as a whole word of a text ("api" is not in "api-gateway").
 export const nameIn = (name, text) => new RegExp(`(?<![\\w-])${String(name).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(String(text).toLowerCase());
-// What the user says of a job names a repo by its role as often as by its folder: "FE primero y API donde falte" names yaloatiendo-chat-api. A folder that ends in a role
+// What the user says of a job names a repo by its role as often as by its folder: "FE primero y API donde falte" names the API repo. A folder that ends in a role
 // word (-api, -web, -front, -backend…) is named by that word too; a folder with no role in its name is named only by itself.
 const ROLE = /^(?:api|web|front|frontend|backend|server|client|worker|admin)$/i;
 export const repoNamedIn = (name, text) => {

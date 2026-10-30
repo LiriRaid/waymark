@@ -144,7 +144,7 @@ test('1.2: logic — a record another version wrote is not this version\'s to an
   P.appendRecord(p, { schema: 'waymark.record/v1', id: '2026-10-25 · T30', agent: 'claude', at: new Date(Date.UTC(2026, 9, 25)).toISOString(), session: 'cur', level: 2, files: ['src/app.css'], inputs: { waymark: VERSION }, outcome: { result: 'parcial' }, cierre: '## Cierre\nResultado: parcial\nEvidencia: x\nAprendido: y' });
   assert.equal(await SC.measure('records.parcialShare', p), 1, 'CSS/HTML: a parcial this version wrote counts');
   const only = project('only-old', []);
-  P.appendRecord(only, { schema: 'waymark.record/v1', id: '2026-10-20 · T1', agent: 'claude', at: new Date().toISOString(), session: 'o', level: 2, files: ['a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'hecho' } });
+  P.appendRecord(only, { schema: 'waymark.record/v1', id: '2026-10-20 · T1', agent: 'claude', at: new Date(Date.UTC(2026, 9, 20)).toISOString(), session: 'o', level: 2, files: ['a.ts'], inputs: { waymark: '0.0.1' }, outcome: { result: 'hecho' } });
   assert.equal(await SC.measure('records.parcialShare', only), null, 'counter-example: no record of this version: unmeasured, never passed');
 });
 
@@ -168,4 +168,16 @@ test('1.2: a record with no version takes the version that ran at its date: a co
   rec('2026-10-25 · T4', 25, 'hecho', ['src/a.ts'], VERSION);
   rec('2026-10-26 · T5', 26, 'parcial', ['src/app.css']);
   assert.equal(await SC.measure('records.parcialShare', p), 1 / 2, 'counter-example: a record with no version from this version\'s days still counts');
+});
+
+test('15: the real-use report shows, per project, the tasks that used ego and how many of them kept up with their steps (no "revisited" finding)', async () => {
+  const p = project('shop2', mix(0, 4));
+  const rows = P.readRecords(P.projectHome(p).log).filter((r) => r.id);
+  assert.equal(rows.length, 4);
+  for (const [i, r] of rows.entries()) P.appendRecord(p, { ...r, id: `2026-10-2${i} · T1`, session: `e${i}`, observed: { eyes: { calls: 3, returns: i } }, findings: i < 2 ? [`ego was revisited ${i} time for 3 steps done (recorded, not blocked)`] : [] });
+  const rep = await SC.projectsReport([p]);
+  assert.deepEqual(rep.projects[0].egoReturns, { tasks: 4, keptUp: 2 }, 'two of the four tasks that used ego went back at every step');
+  assert.match(SC.renderProjects(rep), /ego returns 2 of 4/);
+  const none = await SC.projectsReport([project('plain', mix(0, 2))]);
+  assert.equal(none.projects[0].egoReturns, null, 'counter-example: no task used ego, nothing to say');
 });

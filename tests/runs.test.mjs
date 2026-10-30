@@ -58,3 +58,22 @@ test('review fixes: Pop-Location ends the temp place; temp/ and $TEMPLATE_DIR ar
   assert.equal(R.commandKind('cd /tmp/c && npm test'), 'copy');
   assert.equal(R.commandKind('cd "$TMPDIR/x" && npm test'), 'copy');
 });
+
+test('2.0.20 stop block: a commit whose message tells of a script or bash -c is no edit; a copy into the tool folders is no code the gate must follow', () => {
+  const commit = "git add skills && git commit -q -F - <<'EOF'\nfix: the node -e script that does writeFileSync(x) and bash -c \"rm a\" in tests\n\nWaymark-Task: T1\nEOF";
+  assert.equal(R.scriptWrites(commit), false, 'the interpreter inside a heredoc body is text');
+  assert.equal(R.mutatesFiles(commit), false, 'a bash -c in a message runs nothing');
+  assert.equal(R.scriptWrites("node -e \"require('fs').writeFileSync('a.ts','x')\""), true, 'a real script that writes still does');
+  assert.equal(R.mutatesFiles('bash -c "rm a.ts"'), true);
+  const reinstall = 'D=/c/Users/me/.agents/skills/waymark; cp -r "${S:?}/scripts/." "${D:?}/scripts/"';
+  assert.equal(R.outsideProject(reinstall.replace('${S:?}', 'src')), true, 'a copy into ~/.agents is a reinstall');
+  assert.equal(R.outsideProject('cp a.ts b.ts'), false, 'a copy inside the project is an edit');
+  assert.equal(R.outsideProject('D=/c/Users/me/.agents/x; cp a.ts b.ts; cp c.ts "$D/c.ts"'), false, 'one part that changes the project keeps it a change');
+  assert.equal(R.changesProject(reinstall), true, 'the decision gate still sees a reinstall as a change');
+});
+
+test('2.0.20 review: a copy FROM the tool folders into the project is an edit; only the destination decides', () => {
+  assert.equal(R.outsideProject('cp ~/.agents/skills/x/a.ts src/a.ts'), false);
+  assert.equal(R.outsideProject('cp src/a.ts ~/.agents/skills/x/a.ts'), true);
+  assert.equal(R.outsideProject('D=/c/Users/me/.agents/skills/w; cp -r "src/." "${D}/scripts/"'), true);
+});

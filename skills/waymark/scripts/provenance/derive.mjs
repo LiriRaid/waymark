@@ -95,7 +95,7 @@ export function askedGaps(items, answers, resultado = '') {
   const missing = items.map((_, i) => i + 1).filter((n) => !have.has(n));
   if (missing.length) gaps.push(`Pedido: answer each numbered item of the ask (missing ${missing.map((n) => `${n}) ${String(items[n - 1]).slice(0, 50)}`).join(' · ')}): "Pedido: ✔1 <evidence> · ✘2 <why not>"`);
   const failed = answers.filter((a) => !a.ok && a.n >= 1 && a.n <= items.length).map((a) => a.n);
-  if (failed.length && /^hecho$/i.test(String(resultado).trim())) gaps.push(`Resultado: hecho while item ${failed.join(', ')} is ✘: write "Resultado: parcial (<what is missing>)"`);
+  if (failed.length && /^hecho$/i.test(String(resultado).trim())) gaps.push(`Resultado: hecho while item ${failed.join(', ')} is ✘: finish it (one task is done whole), then write "Resultado: hecho"`);
   return gaps;
 }
 

@@ -237,3 +237,11 @@ test('2e: a step the user says is theirs ("los PR los abro yo", "yo despliego") 
   assert.equal(ownedOffer('yo despliego', '# P\n## Conventions specific to this project\n- Deploys: the user (2026-10-01: «yo despliego»)\n', day), '', 'counter-example: already written');
   assert.equal(ownedOffer('despliega tú a producción', '# P\n', day), '', 'counter-example: the agent is asked to do it');
 });
+
+test('10d: a hecho that left testigos unresolved says so in the line the user reads, with how many and what they are; a clean hecho does not', () => {
+  const open = confirmAsk({ outcome: { result: 'hecho' }, unresolved: ['L2+ with code: run the build once now, after the last change', 'a spec that adds cases never ran before the code it tests'] });
+  assert.match(open, /con 2 testigos abiertos/, 'the count');
+  assert.match(open, /run the build once now/, 'the first one by name');
+  assert.doesNotMatch(confirmAsk({ outcome: { result: 'hecho' }, unresolved: [] }), /abiertos/, 'counter-example: nothing left, nothing said');
+  assert.match(confirmAsk({ outcome: { result: 'hecho' }, unresolved: ['x'] }), /con 1 testigo abierto:/, 'singular');
+});

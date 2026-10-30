@@ -34,7 +34,7 @@ After the 3e tests, three gaps kept Waymark from being one supply chain:
 
 **Notes that travel and survive.**
 - **With the push:** when the agent pushes the task, the end-of-turn hook pushes `refs/notes/waymark` to the same remote. Pushing at all is the user's request. A failure is reported, never forced.
-  - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): a failure is no longer only reported. In YaloAtiendo 2026-10-15 · T4b, the hook's push failed with «make sure you have the correct access rights», because its process had no credentials. The same push worked from the agent's shell. The summary line said so, and nobody ran the command.
+  - Amended in 2.0.14 (2026-10-15 · T3, the user's picks): a failure is no longer only reported. In the real-use project 2026-10-15 · T4b, the hook's push failed with «make sure you have the correct access rights», because its process had no credentials. The same push worked from the agent's shell. The summary line said so, and nobody ran the command.
     - The hook pushes the notes in **each repo the turn pushed** (`cd <repo> && git push`, `git -C <repo> push`), to the remote each push named.
     - **Testigo `notes`** (`routine.json`, enforce `block`): when a push fails, the close blocks once, after the record is written, and asks for `cd "<repo>" && node waymark.mjs notes push` from the agent's shell in each repo. It is judged after the record, because the hook pushes once the record is a note, so it is not in that record's score.
     - The next stop checks the tracking refs, without network (`pushNotes` moves them to what it pushed), and says in the summary whether the notes are on the remote.

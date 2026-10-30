@@ -148,10 +148,44 @@ function scriptOf(t, writes, log = [], at = Infinity) {
   return cmd + '\n' + files.map((f) => writes.get(f) || [...writes].find(([k]) => k.endsWith(f) || f.endsWith(k))?.[1] || '').join('\n') + '\n' + stdin.join('\n');
 }
 
+// The dev server's own compile output, the second signal that the version served is the new one (docs/adr/0047): the server the agent started in the background and the
+// output it read afterwards (its output tool, or the file it writes to). Only a read after the last change says what the server compiled from it; the last state in it wins.
+// → { launched, compile: 'ok' | 'failed' | null }. 'failed': the newest line after the change reports an error (a page then shows the version before it).
+const DEV_CMD = /\b(?:ng\s+serve|vite(?:\s+dev)?|next\s+dev|nuxt\s+dev|astro\s+dev|webpack(?:-dev-server|\s+serve)|react-scripts\s+start|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:start|dev|serve))\b/i;
+const SERVER_OK = /Application bundle generation complete|[Cc]ompiled successfully|Compiled client and server|compiled in \d|\bready in \d|webpack compiled|No issues found|Compiled with warnings|Found 0 errors/;
+const SERVER_BAD = /Failed to compile|\bERROR in\b|Build failed|\[ERROR\]|error TS\d+|Module not found|SyntaxError|Application bundle generation failed|Found [1-9]\d* errors?/;
+export function devServerCompile(tools, outOf, from = -1) {
+  const lastState = (out) => { // the newest state-bearing line wins
+    let state = null;
+    for (const line of String(out || '').split('\n')) { if (SERVER_BAD.test(line)) state = 'failed'; else if (SERVER_OK.test(line)) state = 'ok'; }
+    return state;
+  };
+  let launched = false, compile = null;
+  tools.forEach((t, i) => {
+    const bg = /^(Bash|PowerShell|shell)$/.test(t.name) && t.input?.run_in_background && DEV_CMD.test(text(t));
+    if (!bg) return;
+    launched = true;
+    const launch = String(outOf(t) || ''), id = launch.match(/\bID:\s*([\w-]+)/)?.[1], file = launch.match(/written to:?\s*(\S+)/i)?.[1];
+    let mine = null; // this server's newest state; one server's error is not hidden by another's clean compile
+    for (let j = Math.max(i, from) + 1; j < tools.length; j++) { // a read after the last change (or the launch, when the server started after it)
+      const u = tools[j], said = `${u.input?.command || ''} ${u.input?.file_path || ''}`;
+      if (!((id && (u.input?.bash_id === id || u.input?.task_id === id || u.input?.shell_id === id)) || (file && said.includes(file)))) continue;
+      mine = lastState(outOf(u)) || mine;
+    }
+    if (from < i && !mine) mine = lastState(launch);
+    if (mine && compile !== 'failed') compile = mine;
+  });
+  return { launched, compile };
+}
+
 // What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts. `gateAt`: the index of the first project gate that passed after it
 // (Infinity: none did): a look before it saw a version nobody had compiled, so it does not count (`beforeGate`). -1: no gate is required (it could not run here).
 // → { provider, calls, measures, afterLastChange, beforeGate, references }. Nothing of the page is kept: no URL, no text.
-export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [], skillSeen = false } = {}) {
+// A look that landed on the local app's sign-in page: the ego space holds no session for it. The user signs in there (the agent never types credentials) and the task goes on.
+// It is the address the call landed on, the first line of ego's output that is an address (a script may print its own lines before it): a link to /login inside a page's links, or a line of source naming it, is not a page without a session.
+const LOGIN_PAGE = /^\s*https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/(?:login|signin|sign-in)(?![\w-])/i;
+export const SIGN_IN_GAP = 'the ego space shows the app\'s sign-in page';
+export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [], skillSeen = false, outOf = () => '' } = {}) {
   const writes = new Map(), log = []; // log: every script write in the order of the calls, so a file rewritten under one name is read as it stood at each call
   const keep = (file, body, i) => { writes.set(fileKey(file), body); log.push({ i, key: fileKey(file), body }); }; // a Git Bash path (/c/…) is the file:///C:/… the import names
   tools.forEach((t, i) => {
@@ -161,7 +195,7 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
       if (was) keep(t.input.file_path, t.input.replace_all ? was.body.split(t.input.old_string).join(t.input.new_string) : was.body.replace(t.input.old_string, () => t.input.new_string), i);
     } else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
   });
-  let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
+  let login = false, calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
   let skillRead = skillSeen, readFirst = null; // skillRead: the agent read ego's own skill (`ego-browser skill`), in this turn or earlier in the task (skillSeen); readFirst: whether it had by the first ego script
   const ports = new Set(); let panelUrl = ''; // the local ports a counted look measured (a number only, never a page)
   const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }
@@ -201,6 +235,7 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     if (where !== 'local') measuring = false; // only the local build is the change; the design is a reference
     if (kind === 'ego') for (const m of scriptAt(t, i).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
+    if (kind === 'ego' && i > from) login = LOGIN_PAGE.test(String(outOf(t) || '').split('\n').find((l) => /^\s*https?:\/\//i.test(l)) || ''); // the newest look after the last change: the app's own sign-in page, so the space holds no session
     used = used || kind;
     if (measuring && i > from) {
       if (i > gateAt) measures++; else early++;
@@ -208,7 +243,9 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     }
   });
   const verdicts = (String(reply).match(/:[ \t]*(?:igual|parecido|falta)\b[ \t]*(?:[—–.,(-]|$)/gim) || []).length; // "<element>: igual — <measurement>" (or after the word a dot, a comma, a parenthesis, the end of the line), never the word in prose
-  return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(readFirst === null ? {} : { skillRead: readFirst }), ...(ports.size ? { ports: [...ports].slice(0, 6) } : {}), ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
+  // the server's own compile output after the last change: an error there means the page served is the version before it, so a look does not count
+  const server = devServerCompile(tools, outOf, from), served = server.compile === 'failed';
+  return { provider: used || provider, calls, ...(login ? { login: true } : {}), measures, afterLastChange: measures > 0 && !served && !login, ...(early ? { beforeGate: true } : {}), ...(server.launched ? { server: server.compile || 'unread' } : {}), references: verdicts, captures, offHost, design, ...(readFirst === null ? {} : { skillRead: readFirst }), ...(ports.size ? { ports: [...ports].slice(0, 6) } : {}), ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
 }
 
 // ---- the captures folder: ~/.waymark/eyes/<project>/<task>/, never in the repo, gone after seven days ----
@@ -284,6 +321,7 @@ export function eyesGaps(observed, provider, captures = null, env = process.env)
   const how = provider === 'ego' ? `${ego} nodejs (read \`${ego} skill\` first; one space for the whole task, resumed and not opened anew, closed with finish only when the task is complete): the dev server on localhost, the viewport the task claims (Emulation.setDeviceMetricsOverride), a measurement of the element (getBoundingClientRect, getComputedStyle) or a real click with the state after it`
     : provider === 'playwright' ? 'the project\'s Playwright against the local dev server: a measurement of the element or a real click with the state after it'
       : 'the browser panel against the local dev server: a script that measures the element, or a real click with the state after it';
-  const gate = observed?.beforeGate ? 'a look made before the gate passed since your last change does not count; ' : '';
+  if (observed?.login) return [SIGN_IN_GAP + ' (no session in it): this is not a gap you can close and not a Cierre yet. Ask it in the choice window ("Ya inicié sesión" / "Aún no"), wait for the answer with no Cierre, and when they answer go back to the same space and measure what you built'];
+  const gate = (observed?.beforeGate ? 'a look made before the gate passed since your last change does not count; ' : '') + (observed?.server === 'failed' ? 'the dev server you started printed a compile error after your last change, so the page it serves is the version before it: fix that error and read its output again; ' : '');
   return [`the task changed something seen and no browser measured or clicked it after the last change (a build or a spec does not see the screen): ${gate}run the project's typecheck or build first and read its result (and the dev server's own compile output where the project has one: it shows the version being served is the new one), and if it fails the change cannot be seen until it is fixed: fix it first and do not open the browser to find the error. Then ${how}${where}; or write Ojos: no (<why the screen cannot be checked>)`];
 }

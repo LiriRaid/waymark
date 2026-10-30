@@ -152,8 +152,9 @@ export function headLog(cwd) {
   if (!head) return null;
   const key = `${path.resolve(cwd)}\0${head}`;
   if (!logs.has(key)) {
-    const log = git(cwd, ['log', '-n', '500', '--format=%H%x00%cI%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
-    logs.set(key, log.status !== 0 ? null : log.stdout.split('\x1e').map((e) => { const [commit, at, body = ''] = e.trim().split('\x00'); return { commit, at, body }; }).filter((e) => e.commit));
+    // --name-only in the same call: the files of each commit follow its message (after \x1e), so a commit that only signs the manifest is known without a process per commit
+    const log = git(cwd, ['log', '-n', '500', '--name-only', '--format=%x1d%H%x00%cI%x00%B%x1e', 'HEAD'], { encoding: 'utf8' });
+    logs.set(key, log.status !== 0 ? null : log.stdout.split('\x1d').map((chunk) => { const [head = '', names = ''] = chunk.split('\x1e'), [commit, at, body = ''] = head.trim().split('\x00'); return { commit, at, body, files: names.split('\n').map((f) => f.trim()).filter(Boolean) }; }).filter((e) => e.commit));
   }
   return logs.get(key);
 }

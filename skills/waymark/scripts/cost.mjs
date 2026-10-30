@@ -12,6 +12,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectHome, readTaskRecords } from './provenance.mjs';
 import { parseLines } from './transcript.mjs';
+import { writtenBy, BUILD_START } from './lib/version.mjs';
+
+const CURRENT = (() => { try { return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'VERSION'), 'utf8').trim(); } catch { return null; } })();
 
 export const SCHEMA = 'waymark.cost/v1';
 // Relative price of each kind of token (input 1): cache write 1.25, cache read 0.1, output 5. A weight for comparing links, not a quota.
@@ -30,7 +33,7 @@ export function tasksOf(cwd, records) {
     const links = r.evaluation.links || null;
     const u = r.evaluation.usage || {};
     return {
-      id: r.id, session: r.session || null, cwd: r.cwd || null, version: r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null, modelChanged: !!r.modelChanged,
+      id: r.id, session: r.session || null, cwd: r.cwd || null, version: (r.inputs?.waymark && CURRENT && writtenBy(r.inputs.waymark, r.at, CURRENT, BUILD_START)) || r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null, modelChanged: !!r.modelChanged,
       tokens: r.evaluation.tokens, units: units(u), usage: u, links, subagents: r.evaluation.subagents ?? u.subagents ?? 0,
       responses: links ? LINKS.reduce((a, k) => a + (links[k]?.responses || 0), 0) : null,
       quotaPct: r.evaluation.quotaPct ?? null, quotaBy: r.evaluation.quotaBy || null, taskType: r.taskType || null,

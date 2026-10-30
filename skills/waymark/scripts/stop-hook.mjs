@@ -26,14 +26,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { topOf, addedPaths } from './lib/git.mjs';
-import { CIERRE, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
+import { CIERRE, taskLevel, externalStop, modelsOf, pendingBackground, subagentUsage, withSubagents, currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, isPrompt, closingQuestions, promptText, sessionTools, readSomething, turnUsage, turnLinks, costByCall, sessionState } from './transcript.mjs';
 import { estimate, appendPair } from './calibrate.mjs';
 import { takePrecedent, keepPrecedent, usedOf } from './precedent.mjs';
 import { measure, clearStart, recordSpend, watched } from './statusline.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
-import { RUNS_EGO, readsEgoSkill, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
+import { SIGN_IN_GAP, RUNS_EGO, readsEgoSkill, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, referenceGaps, requestRefs } from './eyes.mjs';
 import { projectKind } from './report.mjs';
-import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
+import { changesProject, outsideProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { base as idBase } from './provenance/ids.mjs';
 import { pinnedCwd, taskBlocks, noteTaskBlock, pendingSteps, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
@@ -364,6 +364,8 @@ export function blockReason(gaps) {
 export const CIERRE_WAIT_MS = 15 * 60000; // how long a Cierre waits for a background agent (a code-review) before the turn is judged
 // Whether a block uses the task's one block: only one that asked for a proof does. A block that asked for nothing but the Cierre leaves the proofs still to be
 // asked once, in the turn that follows it.
+// What is missing is only the user's sign-in on ego's tab (eyes.mjs: the app's own login page): nothing the agent can close, so it is no block
+export const signInOnly = (missing) => (missing || []).length > 0 && missing.every((m) => String(m).startsWith(SIGN_IN_GAP));
 export const spendsBlock = (missing) => (missing || []).some((m) => !String(m).startsWith('the "## Cierre'));
 
 // The IDs the close is judged against: the next one, unless this task's own prompt was handed an earlier one (the per-prompt hook keeps it in open.json), so a task
@@ -473,7 +475,7 @@ function observeTurn(S) {
   const procRe = dept.declared ? new RegExp(`${dept.declared}[\\\\/]procedures\\.md`) : /procedures\.md/;
   const procReads = allTools.filter((t) => /procedures\.md/.test(where(t)) && readSomething(t));
   const lastIdx = (pred) => { for (let i = turn.tools.length - 1; i >= 0; i--) if (pred(turn.tools[i])) return i; return -1; };
-  const lastCode = lastIdx((t) => codeEdit(t) || shellChange(t));
+  const lastCode = lastIdx((t) => codeEdit(t) || (shellChange(t) && !outsideProject(cmdOf(t)))); // a copy into the user's tool folders (a reinstall) is no edit the gate must follow
   const lastSpec = lastIdx((t) => EDITS.test(t.name) && SPEC.test(path.basename(fileOf(t))));
   const lastChange = lastIdx(isChange);
   const result = (t) => turn.results?.[t.id];
@@ -636,7 +638,7 @@ function observeTurn(S) {
     chain: ctx.chain ? ctx.chain.ok : null,
     browser: { ui, tried: turn.tools.filter((t) => (t.name === 'Skill' && /^(browser-verify|run|ego-browser)$/.test(String(t.input.skill || ''))) || /browser|playwright|chrome/i.test(t.name) || (shell(t) && RUNS_EGO.test(cmdOf(t)))).map((t) => t.name === 'Skill' ? t.input.skill : shell(t) ? 'ego-browser' : t.name).slice(0, 5) },
     // the eyes (docs/adr/0047): browser calls that measured or clicked after the last change; the provider the machine has when none was used
-    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), gateAt: eyesGateAt(Math.max(lastChange, lastCode)), isChange, provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [], skillSeen: !!ctx.eyes?.skillSeen }),
+    eyes: observeEyes(turn.tools, { from: Math.max(lastChange, lastCode), gateAt: eyesGateAt(Math.max(lastChange, lastCode)), isChange, provider: ctx.eyes?.provider || null, reply, allowed: ctx.requests?.hosts || [], skillSeen: !!ctx.eyes?.skillSeen, outOf: output }),
     // in this turn, or earlier in the same task: a follow-up that applies the review's findings needs no second review
     review: !reviewLeft.length,
     docs: turn.tools.filter(DOCS).length,
@@ -715,11 +717,14 @@ function observeEvidence(S) {
   // file:line is also backed by a call that named the file and printed that line without the file's name: grep -n of one
   // file ("45:"), its context lines ("45-") and Read ("45→", "45\t")
   const lineShown = (f) => {
-    const m = f.match(/^(?:.*[\\/])?([^\\/\s:]+\.\w+):(\d+)$/);
+    const m = f.match(/^(?:.*[\\/])?([^\\/\s:]+\.\w+):(\d+)(?:[-–](\d+))?$/);
     if (!m) return false;
     const at = new RegExp(`(?:^|\\n)\\s*${m[2]}(?:[:\\t→-])`);
     const named = new RegExp(`(?:^|[\\s/"'=])${esc(m[1].toLowerCase())}(?![\\w.-])`); // login.ts, never auth-login.ts
-    return calls.some((c) => named.test(c.input) && at.test(c.out));
+    // a range ("1334-1362"): the call printed its first line and its last
+    const first = Number(m[2]), last = Number(m[3] || m[2]);
+    const endAt = (c) => last === first || new RegExp(`(?:^|\\n)\\s*${last}(?:[:\\t→-])`).test(c.out);
+    return calls.some((c) => named.test(c.input) && at.test(c.out) && endAt(c));
   };
   // a path is also backed by a call whose command named its folder and whose output printed its name (ls dir | tail -1)
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -796,7 +801,7 @@ function readExceptions(S) {
 
 // Testigo decision: the user's answer in the choice window came before the first change.
 function decisionWitness(S) {
-  const { ASK, allTools, ctx } = S;
+  const { ASK, allTools, ctx, observed } = S;
   // Testigo decision: the user's answer in the choice window, never the agent's restatement of it. ✔ when the first
   // answered question of the task came before its first change; each answer is recorded with its position, and a later
   // question does not count against it. An edit the gate denied changed nothing. Measured on the stretch since the last
@@ -818,6 +823,16 @@ function decisionWitness(S) {
   const camino = Number(S.level) === 1 && !earlierChange && caminoSaid(S.turn, turnChange < 0 ? Infinity : turnChange);
   if (ctx.decisions && !ctx.decisions.length && !camino) decision.push('no choice-window answer in this task: ask the user now (AskUserQuestion) with the optimal options and every decision that shapes the work, then apply their pick (an L1 with one real way: a `Camino: <it>` line before its first change instead)');
   else if (ctx.decisions && firstAsk >= 0 && firstTaskChange >= 0 && firstAsk > firstTaskChange) lateDecision = true;
+  // The findings the review reported are the items foreseen; the windows that follow are the items offered (point 32): a finding no window names was decided by the agent
+  // alone. A finding counts as offered when its file (and line, when it names one) appears in a question or an option of a window asked after the report.
+  const reported = taskTools.findIndex((t) => /(^|__)ReportFindings$/.test(t.name) && (t.input?.findings || []).length && !(t.input.findings || []).some((f) => f.outcome));
+  if (reported >= 0) {
+    const foreseen = taskTools[reported].input.findings, asked = taskTools.slice(reported + 1).filter((t) => ASK(t) && !t.error).map((t) => JSON.stringify(t.input || {})).join(' ');
+    const offered = (f) => { const base = String(f.file || '').split(/[\\/]/).pop(); return !!base && asked.includes(f.line ? `${base}:${f.line}` : base); };
+    const left = foreseen.filter((f) => !offered(f));
+    if (observed) observed.options = { missing: [], ...(observed.options || {}), foreseen: foreseen.length, offered: foreseen.length - left.length };
+    if (left.length) decision.push(`the review reported ${foreseen.length} finding(s) and ${left.length} never reached the user (${left.slice(0, 4).map((f) => (f.line ? `${f.file}:${f.line}` : f.file)).join(', ')}): list them with file:line, severity and the recommended action and ask them now, 4 per call, none dropped (the user decides which apply)`);
+  }
   return { decision, lateDecision };
 }
 
@@ -876,7 +891,7 @@ function cierreWitness(S) {
   let renamed = null;
   if (!hasCierre) cierre.push('the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)');
   else {
-    if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | parcial (<what is missing>) | bloqueado (<why>)');
+    if (!field(reply, 'Resultado')) cierre.push('Resultado: hecho | bloqueado (<why>)');
     if (!field(reply, 'Evidencia')) cierre.push('Evidencia: observada <what you saw> | inferida de <source> (check: <one line for the user>)');
     if (!field(reply, 'Aprendido') || /^ninguno/i.test(field(reply, 'Aprendido'))) cierre.push('Aprendido: <the task\'s line for the next session, ≤200 characters line> (never "ninguno")');
     if (ctx.ids) {
@@ -891,7 +906,7 @@ function cierreWitness(S) {
     if (Number(S.level) >= 2 && ctx.pedido?.length >= 2) cierre.push(...askedGaps(ctx.pedido, answers, field(reply, 'Resultado').match(/^\p{L}+/u)?.[0]));
     // no task closes parcial: a gap of the work is finished now (an L2/L3 task is one task), a gap only the user can close is hecho with it named, and what cannot be finished is bloqueado
     const o = /^parcial\b/i.test(field(reply, 'Resultado')) ? outcome(reply, ctx.pedido, answers, S.level, ctx.owned, S.win) : null;
-    if (o && o.result === 'parcial' && !o.cause) cierre.push('Resultado: parcial leaves work undone: finish it now (the steps of one task are done in that task); if only your user can close the gap (their manual test, their PR) say it as "hecho (pendiente tuyo: <it>)" and if something outside prevents it write "bloqueado (<why>)"');
+    if (o && o.result === 'parcial' && !o.cause) cierre.push('Resultado: parcial leaves work undone: finish it now (the steps of one task are done in that task, then code-review, then the one Cierre); a step only your user can do (restart the API, sign in to the ego tab) is asked in this turn and waited for, with no Cierre until they say it is done; a migration is asked in the choice window and on a yes you run it; if something outside prevents it write "bloqueado (<why>)"');
   }
   return { cierre, renamed };
 }
@@ -958,7 +973,8 @@ const WITNESS = {
   eyes: (S) => {
     const { eyesNo, excepted, observed } = S;
     if (eyesNo) { excepted.eyes = eyesNo; return []; }
-    return [...eyesGaps(observed.eyes, observed.eyes.provider, S.ctx.slug ? eyesDir(S.ctx.slug, S.ctx.ids?.next) : null), ...referenceGaps(observed.eyes, S.ctx.requests)]; // the look after the last change, and the answer to the references the user sent
+    const login = observed.eyes.login && !S.changed.some((f) => /login|sign-?in|auth/i.test(path.basename(f))); // a task that builds the login page measures it on purpose
+    return [...eyesGaps({ ...observed.eyes, login }, observed.eyes.provider, S.ctx.slug ? eyesDir(S.ctx.slug, S.ctx.ids?.next) : null), ...(login ? [] : referenceGaps(observed.eyes, S.ctx.requests))]; // on the sign-in page there is nothing to compare yet // the look after the last change, and the answer to the references the user sent
   },
   docs: (S) => {
     const { retried } = S;
@@ -1116,7 +1132,8 @@ export function cierreGaps(turn, last, allTools = turn.tools, prompts = [turn.pr
   const byFiles = agentFiles.size > 2 ? 2 : agentFiles.size ? 1 : 0;
   const explicitL0 = /^[ \t]*Waymark →\s*L0\b(?!\s*(?:\||or)\s*Q)/m.test([...turn.texts, full].join('\n'));
   const declared = routed === 'Q' ? Math.max(2, Number(ctx.taskRoute?.level) || 0) : routed || (CIERRE.test(reply) ? 1 : 0);
-  const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles);
+  // a short turn that continues the open task keeps the highest level the task reached: "do the migrate" after an L2 build is judged L2, not an L1 with fewer testigos
+  const level = declared === 3 ? 3 : explicitL0 && agentFiles.size <= 1 ? 0 : Math.max(declared, byFiles, Number(ctx.taskLevel) || 0);
   if (!level) return null;
   // what the user chose in the window is an item the Cierre answers (recorded, never blocked), and the repos the Pedido names against the ones changed (docs/adr/0046)
   const win = Number(level) >= 2 ? windowCheck(ctx.decisions, reply) : null;
@@ -1300,7 +1317,7 @@ export const nativeMemoryNote =(files) => files.length ? ` · ⚠ escribió en l
 
 // The question at the end of a task that said hecho: a bare "sí" closes it for good (the per-prompt hook runs `done`); any other
 // message continues it. Shown to the user, never added to the model's context.
-export const confirmAsk = (rec) => (rec?.outcome?.result === 'hecho' ? ' · ¿Se completó lo que pediste? Responde «sí» y la tarea queda confirmada; otra cosa la continúa como seguimiento' : '');
+export const confirmAsk = (rec) => (rec?.outcome?.result === 'hecho' ? `${rec.unresolved?.length ? ` · con ${rec.unresolved.length} testigo${rec.unresolved.length > 1 ? 's' : ''} abierto${rec.unresolved.length > 1 ? 's' : ''}: ${maskSecrets((([m]) => (m.length > 60 ? `${m.slice(0, 60).replace(/\s\S*$/, '')}…` : m))([String(rec.unresolved[0]).replace(/\s+/g, ' ')]))}` : ''} · ¿Se completó lo que pediste? Responde «sí» y la tarea queda confirmada; otra cosa la continúa como seguimiento` : '');
 
 // One line for the user (systemMessage: shown in the UI, not added to the model's context).
 // A measured % is never asked. Otherwise, while the model has fewer than 3 calibration pairs (no fit yet), it asks the
@@ -1379,6 +1396,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       ctx.inputs = turnInputs(taskLines(lines, { prompts: 1 }), cwd, agent.instructions);
       try { const e = engramInput(); if (e) ctx.inputs.engram = e; } catch {} // the learned layer's version (docs/adr/0036); a record without engram keeps its old shape
       ctx.gitChanged = turnChanged(h.session_id, cwd); // from the per-prompt snapshot, and other repos' from the pre-tool hook
+      try { ctx.taskLevel = taskLevel(stretch); } catch {} // the highest level any turn of the open task routed itself at
       ctx.inherited = inheritedRoute(lines); // an unrouted reply inside an open task keeps its routing
       ctx.taskRoute = openTaskRoute(lines); // and a reply that routes itself as a question while changing files is judged at the open task's level
       ctx.engram = lines.some((d) => JSON.stringify(d.attachment || '').includes('mcp__engram__') || (d.message?.content || []).some?.((c) => c.type === 'tool_use' && String(c.name).startsWith('mcp__engram__')));
@@ -1445,6 +1463,12 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         gaps.steps = gaps.steps.map((s) => (s.applies ? { ...s, applies: false, pass: null, why: [], na: stopped.cause } : s));
         gaps.findings = [`the turn was cut by the ${stopped.cause}: no testigo was judged`];
       } else if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
+      // the only thing missing is the user's sign-in on ego's tab: no block (nothing the agent can do), no record; the task stays open and the next message goes on with it
+      if (!stopped && signInOnly(gaps.missing)) {
+        try { markPaused(h.session_id); } catch {}
+        answer(agent, agent.out.notice('Waymark: la tarea sigue abierta: ego muestra el login de la app, sin sesión. Inicia sesión en esa pestaña y avisa para seguir (el Cierre no se registró).'));
+        return;
+      }
       // One block per task (decided 2026-10-30): the first close that lacks something is blocked, naming it; a later turn of the same task that still lacks it is
       // recorded in red and let go. A close with no Cierre at all is always blocked: the task cannot end without one.
       const owesCierre = gaps.missing.some((m) => m.startsWith('the "## Cierre'));

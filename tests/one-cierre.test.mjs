@@ -133,3 +133,31 @@ test('31 (review of level 3): a Cierre over background work that started a long 
   const stale = await stop(CIERRE(), { extra: old(20) });
   assert.doesNotMatch(stale.out, /se evaluará cuando termine/, 'twenty minutes: judged now');
 });
+
+// ---- 2.0.20 point 32: the Decision testigo compares the findings the review reported (foreseen) with the ones the windows put to the user (offered) ----
+const finding = (n) => ({ file: `skills/waymark/scripts/mod${n}.mjs`, line: 10 + n, category: 'correctness', summary: `defect ${n}`, failure_scenario: `case ${n}` });
+const windowOf = (items) => call('AskUserQuestion', { questions: items.map((f) => ({ question: `${f.file}:${f.line} (high): ${f.summary}. Recommended: fix`, header: 'Finding', multiSelect: false, options: [{ label: 'Fix (Recommended)', description: 'apply' }, { label: 'Leave', description: 'skip' }] })) });
+const callsOf4 = (items) => { const out = []; for (let i = 0; i < items.length; i += 4) out.push(...windowOf(items.slice(i, i + 4))); return out; };
+const reply = async (n, offered) => {
+  const dir = tmpRepo({ [FILE]: 'x\n' }), stop = stopper(dir, `p32-${n}-${offered}`), all = Array.from({ length: n }, (_, i) => finding(i + 1));
+  return stop(CIERRE(), { extra: [...call('ReportFindings', { level: 'high', findings: all }), ...callsOf4(all.slice(0, offered))] });
+};
+test('32: 10 findings all put to the user in calls of 4 (4, 4, 2) leave the Decision testigo quiet about them', async () => {
+  const r = await reply(10, 10);
+  assert.doesNotMatch(r.out, /never reached the user/);
+});
+test('32: 13 findings, 8 asked in two calls: the testigo names the 5 that never reached the user and asks for them in calls of 4', async () => {
+  const r = await reply(13, 8);
+  assert.match(r.out, /the review reported 13 finding\(s\) and 5 never reached the user/);
+  assert.match(r.out, /mod9\.mjs:19/, 'it names the first one left, with its line');
+  assert.match(r.out, /4 per call, none dropped/);
+});
+test('32: 10 findings of which the agent asked only 4 (the real run: 6 left on its own) are caught', async () => {
+  const r = await reply(10, 4);
+  assert.match(r.out, /the review reported 10 finding\(s\) and 6 never reached the user/);
+});
+test('32: a re-report with outcomes (after the fixes) is not a second list to ask', async () => {
+  const dir = tmpRepo({ [FILE]: 'x\n' }), stop = stopper(dir, 'p32-rereport'), all = [1, 2].map(finding);
+  const r = await stop(CIERRE(), { extra: [...call('ReportFindings', { level: 'high', findings: all }), ...callsOf4(all), ...call('ReportFindings', { level: 'high', findings: all.map((f) => ({ ...f, outcome: 'fixed' })) })] });
+  assert.doesNotMatch(r.out, /never reached the user/);
+});

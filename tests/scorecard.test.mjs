@@ -109,6 +109,48 @@ test('0: a record-based check with records only of another version waits for its
   assert.match(c.detail, /no records of version \d+\.\d+\.\d+ yet/);
 });
 
+test('0: a record the previous version stamped but a build of this release wrote counts as this release (BUILD_START, ADR 0053)', async () => {
+  const { writtenBy } = await import(`file://${REPO}/skills/waymark/scripts/lib/version.mjs`);
+  const start = '2026-10-29T22:56:00Z';
+  assert.equal(writtenBy('2.0.19', '2026-10-30T01:00:00Z', '2.0.20', start), '2.0.20', 'stamped by the old VERSION, written after the build was installed');
+  assert.equal(writtenBy('2.0.19', '2026-10-29T10:00:00Z', '2.0.20', start), '2.0.19', 'counter-example: written before the build existed');
+  assert.equal(writtenBy('2.0.21', '2026-10-30T01:00:00Z', '2.0.20', start), '2.0.21', 'counter-example: a newer stamp is never pulled back');
+  assert.equal(writtenBy('2.0.19', '2026-10-30T01:00:00Z', '2.0.20', null), '2.0.19', 'no BUILD_START: the stamp stands');
+  assert.equal(writtenBy('2.0.20-dev', '2026-10-30T01:00:00Z', '2.0.20', start), '2.0.20', 'a pre-release stamp is the release it leads to');
+  assert.equal(writtenBy(null, '2026-10-30T01:00:00Z', '2.0.20', start), null, 'an unstamped record is placed by its neighbours, not here');
+  const shipped = fs.readFileSync(path.join(REPO, 'skills', 'waymark', 'BUILD_START'), 'utf8').trim();
+  assert.ok(Number.isFinite(Date.parse(shipped)), 'BUILD_START holds an ISO time');
+});
+
+test('1.2: a record saved with an empty ask takes the first prompt of its session when the transcript is on this machine; without it nothing changes (ADR 0053)', async () => {
+  const P = await import(`file://${REPO}/skills/waymark/scripts/provenance.mjs`);
+  const root = fixture(one([{ id: '1', what: 'fields', point: 0, kind: 'measure', measure: 'records.fieldShare', op: 'ge', threshold: 0.95 }]), { '.waymark/memory.md': '# P\n' });
+  const home = P.projectHome(root);
+  const rec = { schema: 2, id: `${new Date().getUTCFullYear()}-01-01 · T1`, at: new Date().toISOString(), session: 'sess-1', cwd: root, prompt: '', cierre: '## Cierre', decisions: [], evaluation: { score: '1/1' }, inputs: { waymark: fs.readFileSync(path.join(REPO, 'skills', 'waymark', 'VERSION'), 'utf8').trim() }, pinned: [], observed: {} };
+  fs.mkdirSync(path.dirname(home.log), { recursive: true });
+  fs.writeFileSync(home.log, JSON.stringify(rec) + '\n');
+  assert.equal(await S.measure('records.fieldShare', root), 0, 'counter-example: no transcript, the empty ask stays empty');
+  const dir = path.join(os.homedir(), '.claude', 'projects', root.replace(/[:\\/]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sess-1.jsonl'), JSON.stringify({ type: 'user', message: { role: 'user', content: 'arregla el cierre temprano del hook' }, timestamp: rec.at, sessionId: 'sess-1' }) + '\n');
+  assert.equal(await S.measure('records.fieldShare', root), 1, 'the ask is read back from the session');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('0: a record stamped with the previous version after BUILD_START is measured by the card; one before it is not (ADR 0053)', async () => {
+  const P = await import(`file://${REPO}/skills/waymark/scripts/provenance.mjs`);
+  const stamp = fs.readFileSync(path.join(REPO, 'skills', 'waymark', 'BUILD_START'), 'utf8').trim();
+  const make = (at) => {
+    const root = fixture(one([{ id: '1', what: 'ratio', point: 0, kind: 'measure', measure: 'records.testigoRatio', op: 'ge', threshold: 0.95 }]), { '.waymark/memory.md': '# P\n' });
+    const home = P.projectHome(root);
+    fs.mkdirSync(path.dirname(home.log), { recursive: true });
+    fs.writeFileSync(home.log, JSON.stringify({ schema: 2, id: '2026-11-01 · T1', at, session: 's', cwd: root, prompt: 'x', evaluation: { score: '9/10' }, inputs: { waymark: '0.0.1' } }) + '\n');
+    return root;
+  };
+  assert.equal(await S.measure('records.testigoRatio', make(new Date(Date.parse(stamp) + 3600e3).toISOString())), 0.9, 'written after the build was installed: it counts');
+  assert.equal(await S.measure('records.testigoRatio', make(new Date(Date.parse(stamp) - 3600e3).toISOString())), null, 'counter-example: written before it, it is the old version\'s');
+});
+
 test('0: the total is a weighted sum and the rendered figure is cut, never rounded up', async () => {
   const root = fixture([
     { id: 1, name: 'half', weight: 60, target: 95, checks: [{ id: '1', what: 'a', point: 0, kind: 'exists', files: ['a.txt'] }, { id: '2', what: 'b', point: 0, kind: 'exists', files: ['no'] }] },

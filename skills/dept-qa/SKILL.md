@@ -1,6 +1,6 @@
 ---
 name: dept-qa
-description: "QA. FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"cobertura\", \"revisa mi código\". Closes every L1+ task."
+description: "QA. FIRST, before code-review, for tests and verification: \"escribe tests\", \"hay un bug\", \"no funciona\", \"regresión\", \"revisa mi código\". Closes every L1+ task."
 ---
 
 # Quality Assurance & Testing

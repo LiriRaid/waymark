@@ -444,10 +444,15 @@ export function commandRepos(command, cwd = process.cwd()) {
 // that loaded dept-frontend and now routes a backend task by the line alone owns a backend task, not a frontend one. The line is not in the transcript
 // for a second or two after it is written, so until it shows the last department the session invoked stands in (the next edit hands the right one).
 // The task's route as the transcript shows it: the owner department and the declared level (null when none).
-function routeOf(hook, agent) {
+// The route is read back to the task's start (the same reach as the gate): a task whose routing line sits under megabytes of screenshots and tool output is not
+// routed from a tail alone. `kept`: the route this task's state already holds, so a long transcript is read once per task, not once per edit.
+function routeOf(hook, agent, since = 0, kept = null) {
   if (!hook.transcript_path) return { dept: null, level: null };
   try {
-    const lines = agent.read(hook, 512 * 1024), turn = currentTurn(lines);
+    const read = (s) => readTurns((b) => agent.read(hook, b), 1, 512 * 1024, undefined, s);
+    let lines = read(0), turn = currentTurn(lines); // the tail first: a re-route inside the task shows there and wins over the route kept
+    if (kept && (kept.level || kept.dept) && !routedLevel(turn.texts, turn.tools) && !routedDept(turn.texts, turn.tools) && !inheritedRoute(lines)) return { dept: kept.dept || null, level: kept.level || null };
+    if (since && !routedLevel(turn.texts, turn.tools) && !routedDept(turn.texts, turn.tools)) { lines = read(since); turn = currentTurn(lines); } // not there: back to the task's start
     const inherited = inheritedRoute(lines); // a later prompt of the task keeps the route of the one before
     const level = routedLevel(turn.texts, turn.tools) || inherited?.level || null;
     const routed = routedDept(turn.texts, turn.tools) || inherited?.dept;
@@ -516,7 +521,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  const route = routeOf(hook, agent), dept = route.dept, procsDone = procDelivered(session, since, file);
+  const state = readPacked(file)[session], route = routeOf(hook, agent, since, state?.since === since ? state.route : null), dept = route.dept, procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
   // a change by shell that names no file and has no owner to hand yet still leaves the task's state, so a department that loads after it is handed its procedures at the load
   if (!fresh.length && !procText && !(c?.shell && !packedAny(session, since, file))) return null;
@@ -526,7 +531,7 @@ export async function packContext(hook, agent, file = PACKED()) {
   const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], late: all[session]?.since === since ? all[session].late || [] : [] };
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], ...(route.level || route.dept ? { route } : {}), late: all[session]?.since === since ? all[session].late || [] : [] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
@@ -540,7 +545,7 @@ const UI_FILE = /\.(?:html?|css|scss|sass|less|vue|svelte|jsx|tsx)$|\.component\
 function owedAtClose(files) {
   const items = ['the project gate after your last change (typecheck, lint of the touched files; the full gate and the build once, at the very end)', 'a spec next to the code you change, run before the code it tests',
     'code-review once, when the whole task is complete', ...(files.some((f) => UI_FILE.test(f)) ? ['eyes: look at what you built in the browser, one line per element of a screenshot, in ONE ego space for the whole task (the first look is the reference; go back to the same space at every big step and for every doubt or divergence, end with a full test of operation, and close it once yourself, only when the task is complete); the session is the user\'s: never type credentials, and if a page asks for a login stop and tell them'] : []), 'the Pedido answered item by item in the Cierre'];
-  return `At L2 and above the close also asks for: ${items.join(' · ')}. Order: the code and its spec, then code-review (wait for its result: never write a Cierre while it runs, its result brings you back), apply its findings, then the final gate, the build of every repo you changed${files.some((f) => UI_FILE.test(f)) ? ' and the eyes on the final code' : ''}, and write the one Cierre last.`;
+  return `At L2 and above the close also asks for: ${items.join(' · ')}. Order: the code and its spec, then code-review (wait for its result: never write a Cierre while it runs, its result brings you back), apply its findings, then the final gate, the build of every repo you changed${files.some((f) => UI_FILE.test(f)) ? ' and the eyes on the final code' : ''}, and write the one Cierre last, only when all of it is done (a Cierre is never "parcial"; what the user finds later is a follow-up T<n>b). A step only the user can do (restart the API after a change it must load, sign in to the ego tab) is asked and waited for in the same turn, with no Cierre; a migration is asked in the choice window and on a yes you run it. A user message that arrives mid-task is answered in one line and the work goes on: it is not the end.`;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

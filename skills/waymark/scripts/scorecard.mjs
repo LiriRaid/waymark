@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { release } from './lib/version.mjs';
+import { release, writtenBy, BUILD_START } from './lib/version.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -73,7 +73,7 @@ const VERSION = (() => { try { return release(fs.readFileSync(path.join(HERE, '.
 // named it) is the version that ran at its date: the last record before it that names one, else the first after it; with none named, null.
 const writers = (rs) => {
   let v = null;
-  const at = rs.map((r) => (r.inputs?.waymark ? (v = release(r.inputs.waymark)) : v));
+  const at = rs.map((r) => (r.inputs?.waymark ? (v = writtenBy(r.inputs.waymark, r.at, VERSION, BUILD_START)) : v));
   const first = at.find(Boolean) || null;
   return at.map((x) => x || first);
 };
@@ -85,9 +85,22 @@ const once = (key, f) => {
   return run.get(key);
 };
 const provenance = () => import(pathToFileURL(path.join(HERE, 'provenance.mjs')).href);
+// A record saved with an empty ask (the turn that closed it began with no prompt) takes the first prompt of its session, when the
+// agent's transcript is still on this machine: the ask was made, it was only not kept (docs/adr/0053). Read-only, and only here.
+const askOf = async (r, all = []) => {
+  if (r.prompt || !r.id || !r.session || !r.cwd) return r;
+  try {
+    const f = (await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href)).transcriptFile(r);
+    if (!f) return r;
+    // the first prompt after the session's previous record: the ask of this task, not of the session's first
+    const T = await import(pathToFileURL(path.join(HERE, 'transcript.mjs')).href), from = Date.parse(all.filter((x) => x.session === r.session && x.id && x.at < r.at).pop()?.at || '') || 0;
+    const first = T.parseLines(fs.readFileSync(f, 'utf8')).find((d) => T.isPrompt(d) && (Date.parse(d.timestamp || '') || 0) > from);
+    return first ? { ...r, prompt: String(T.promptText(first)).trim().slice(0, 600) } : r;
+  } catch { return r; }
+};
 const rawTasks = (root) => once(`raw:${root}`, async () => {
   const { projectHome, readTaskRecords } = await provenance(), h = projectHome(root);
-  return { h, records: h.dir ? readTaskRecords(h) : [] };
+  return { h, records: h.dir ? await (async (all) => Promise.all(all.map((r) => askOf(r, all))))(readTaskRecords(h)) : [] };
 });
 const versionTasks = (root) => once(`tasks:${root}`, async () => {
   const tasks = (await rawTasks(root)).records.filter((r) => r.id && !r.kind), by = writers(tasks);
@@ -147,7 +160,8 @@ const MEASURES = {
     const cited = ev.reduce((a, e) => a + e.cited, 0);
     return cited ? (cited - ev.reduce((a, e) => a + (e.unbacked?.length || 0), 0)) / cited : null;
   },
-  async 'records.followUpShare'(root) { return share(await recent(root, 30, false),(r) => /T\d+[a-z]+$/.test(r.id)); },
+  // redone = a follow-up (the ID's letter: the ask corrected the last result) that changed files an earlier task had changed (the record's reworks); a follow-up on other files is a new ask
+  async 'records.followUpShare'(root) { return share(await recent(root, 30, false), (r) => /T\d+[a-z]+$/.test(r.id) && (r.reworks || []).length > 0); },
   // The latest release tag is signed by a key in ALLOWED_SIGNERS. The manifest's own signature is checked at the release
   // (verify --install --require-signature, plan point 12): it is regenerated, and so unsigned, at each point that adds a file.
   async 'release.tagSigned'(root) {
@@ -278,7 +292,7 @@ export async function projectsReport(roots = namedProjects()) {
     if (!fs.existsSync(root)) { projects.push({ name, missing: true }); continue; }
     const rs = await recent(root, 30, false);
     pooled.push(...rs); full.push(...await recent(root, 30, true));
-    projects.push({ name, tasks: rs.length, parcialShare: parcialOf(rs), unresolvedShare: unresolvedOf(rs), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent) });
+    projects.push({ name, tasks: rs.length, parcialShare: parcialOf(rs), unresolvedShare: unresolvedOf(rs), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent), egoReturns: egoReturnsOf(rs) });
   }
   const agents = countBy(pooled.filter((r) => r.agent), (r) => r.agent);
   const total = { tasks: pooled.length, parcialShare: parcialOf(pooled), unresolvedShare: unresolvedOf(pooled), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
@@ -289,11 +303,13 @@ export async function projectsReport(roots = namedProjects()) {
   });
   return { projects, total, checks };
 }
+// The tasks that looked at the screen with ego and how many went back at every finished step (the record holds no "ego was revisited" finding): null when none used it.
+const egoReturnsOf = (rs) => { const used = rs.filter((r) => r.observed?.eyes?.calls > 0); return used.length ? { tasks: used.length, keptUp: used.filter((r) => !(r.findings || []).some((x) => /ego was revisited/.test(x))).length } : null; };
 const countBy = (rs, f) => rs.reduce((o, r) => { const k = f(r); o[k] = (o[k] || 0) + 1; return o; }, {});
 export function renderProjects(r) {
   const pc = (v) => (v === null || v === undefined ? '—' : `${Math.round(v * 1000) / 10} %`);
   const out = ['Waymark real use · the last 30 tasks of each project named', ''];
-  for (const p of r.projects) out.push(p.missing ? `  ${p.name}: path not found` : `  ${p.name}: ${p.tasks} tasks · parcial ${pc(p.parcialShare)} · unresolved ${pc(p.unresolvedShare)} · agents ${Object.entries(p.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`);
+  for (const p of r.projects) out.push(p.missing ? `  ${p.name}: path not found` : `  ${p.name}: ${p.tasks} tasks · parcial ${pc(p.parcialShare)} · unresolved ${pc(p.unresolvedShare)} · agents ${Object.entries(p.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}${p.egoReturns ? ` · ego returns ${p.egoReturns.keptUp} of ${p.egoReturns.tasks}` : ''}`);
   out.push('', `  Together: ${r.total.tasks} tasks · parcial ${pc(r.total.parcialShare)} · unresolved ${pc(r.total.unresolvedShare)} · median ${r.total.medianTokens === null ? '—' : `${Math.round(r.total.medianTokens / 1000)}k`} tokens per task · ${r.total.oneAgent ? `one agent (${Object.keys(r.total.agents)[0]}): nothing here shows the other agents work` : `agents ${Object.entries(r.total.agents).map(([a, n]) => `${a} ${n}`).join(', ') || '—'}`}`);
   for (const c of r.checks) out.push(`  ${c.id} ${c.measure}: ${c.status}${c.value === null || c.value === undefined ? '' : ` (${Number.isInteger(c.value) ? c.value : c.value.toFixed(3)})`}`);
   return out.join('\n');

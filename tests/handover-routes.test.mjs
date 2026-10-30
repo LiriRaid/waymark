@@ -140,3 +140,11 @@ test('review fix: Build is suspect only when a build ran and none of the command
   assert.equal(suspect({ ...ran, observed: { gates: [{ cmd: 'pnpm run build', error: true }] } }, 'Build'), false, 'a build that failed is a real failure: it may teach a rule');
   assert.equal(suspect({ commands: ['git status'] }, 'Build'), false);
 });
+
+test('28: a failure made with this release\'s build but stamped with the previous version counts for the release (BUILD_START, ADR 0053)', () => {
+  const now = Date.parse('2026-11-02T12:00:00Z');
+  const rec = (id, at, version) => ({ id, at, evaluation: { steps: { Previos: false } }, inputs: { waymark: version } });
+  const open = (list) => incidents(list, { now, version: '2.0.20' }).open.map((o) => o.last);
+  assert.deepEqual(open([rec('T1', '2026-10-31T10:00:00Z', '2.0.19')]), ['T1'], 'written after the build was installed');
+  assert.deepEqual(open([rec('T1', '2026-10-27T10:00:00Z', '2.0.19')]), [], 'counter-example: written before it');
+});

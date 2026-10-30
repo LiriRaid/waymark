@@ -82,6 +82,13 @@ export function learnEyes(text, rec, date) {
   return editSection(text, 'Quality gates', (body) => body.split('\n').map((l) => (isRow(l) && cells(l)[0] === 'eyes' && /to confirm/i.test(l) && looked(l) ? `| eyes | ${cells(l)[1]} | confirmed ${date} by a task's look |` : l)).join('\n'));
 }
 
+// The Placement line proposed as 'to confirm' is confirmed with the Architecture it was detected with: once the user confirmed that (the line no longer ends in '(to confirm)'),
+// the placement rules of the same census stand on the same word, with the date of the task that saw it.
+export function learnPlacement(text, date) {
+  if (!/^- Architecture:/m.test(text) || /^- Architecture:[^\n]*\(to confirm\)\s*$/m.test(text)) return text;
+  return text.replace(/^(- Placement) \(to confirm, detected ([^)]*)\):/m, `$1 (confirmed ${date}, detected $2):`);
+}
+
 // ---------- Project map ----------
 
 const AREAS = '- Areas (hook: last task per folder):';
@@ -299,7 +306,7 @@ export function learn(home, rec, records, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || rec.kind === 'Q' || !fs.existsSync(home.memory)) return false;
   const text = fs.readFileSync(home.memory, 'utf8');
   let next = learnEyes(learnGates(text, rec, now.toLocaleDateString('sv')), rec, now.toLocaleDateString('sv'));
-  next = learnAreas(next, rec, home.root);
+  next = learnPlacement(learnAreas(next, rec, home.root), now.toLocaleDateString('sv'));
   next = learnProcedures(next, procedures(records));
   if (next === text) return false;
   fs.writeFileSync(home.memory, next);

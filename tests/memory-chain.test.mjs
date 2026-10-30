@@ -346,3 +346,18 @@ test('2.0.14 no notes in git: the trailer commits are the records, per task ID; 
   assert.deepEqual(recs.map((r) => [r.id, !!r.fromCommit]), [[`${day} · T1`, true], [`${day} · T2`, false]]);
   assert.equal(taskIds(d).next, `${day} · T3`);
 });
+
+test('1.10 (2.0.20): a commit that only signs the manifest, with a task ID as its trailer, is no task; a commit that changes anything else with the same shape is', () => {
+  const base = tmp('signing'), repo = path.join(base, 'r'), day = new Date().toLocaleDateString('sv');
+  fs.mkdirSync(repo, { recursive: true });
+  gitT(repo, 'init', '-q');
+  fs.writeFileSync(path.join(repo, 'a.txt'), '1');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', 'base');
+  fs.mkdirSync(path.join(repo, 'skills', 'x'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json'), '{}'); fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json.sig'), 'sig');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', `release: the manifest is signed\n\nWaymark-Task: ${day} · T1`);
+  fs.writeFileSync(path.join(repo, 'a.txt'), '2'); fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json'), '{"v":2}');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', `feat: a change with the manifest\n\nWaymark-Task: ${day} · T2`);
+  const ids = readTaskRecords(projectHome(repo)).filter((r) => r.id).map((r) => r.id);
+  assert.deepEqual(ids, [`${day} · T2`], 'the signing commit leaves no phantom task; the commit that also changed code stays');
+});

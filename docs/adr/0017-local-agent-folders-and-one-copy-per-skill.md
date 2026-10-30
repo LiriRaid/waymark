@@ -3,7 +3,7 @@
 **Status:** accepted (2026-10-06, Waymark 2.0.0-dev). Every pick below is the user's (2026-10-06 · T10). It amends 0015 (engram travels with the repo) and 0016 (the project-skills mirror). It also carries out the skill tiers the user set on 2026-10-06 · T9.
 
 ## Context
-The three-agent test after 0016 ran four tasks in `landing-flujo`: Claude Code ("Volver arriba"), Codex (the `landing-section` project skill), OpenCode (the FAQ search) and a commit by each. One Cierre per task held, and so did the trailers, the card's learned lines across agents and the skill mirror. Seven gaps showed up:
+The three-agent test after 0016 ran four tasks in `a landing-page project`: Claude Code ("Volver arriba"), Codex (the `landing-section` project skill), OpenCode (the FAQ search) and a commit by each. One Cierre per task held, and so did the trailers, the card's learned lines across agents and the skill mirror. Seven gaps showed up:
 - **`.engram/` in the commits read as a mistake.** OpenCode saw `.engram/` staged by the hook and offered to amend the commit and ignore the folder. The user's answer: the agents' folders stay out of git, like `.waymark/`.
 - **The skill was copied, not shared.** The mirror left a second real copy in `.claude/skills`. It was untracked, so it showed in every `git status`, and it cost Codex one more question before its commit.
 - **Agents still ran `pack`.** The hook handed the pack over, yet Claude Code and Codex also ran it, because the testigo read "the project memory searched (waymark.mjs pack) before the first change".
@@ -12,7 +12,7 @@ The three-agent test after 0016 ran four tasks in `landing-flujo`: Claude Code (
 - **A commit-only task scored ✘.** For "haz commit" the user's order is the decision, but Decision applied and scored ✘ (T5b 6/7).
 - **A follow-up ID for unrelated work.** Codex titled a new skill task as a follow-up of Claude's footer task (`T5c`). The hook recorded it as `T6`, so the Cierre and the record disagreed.
 
-Two smaller items from earlier tasks: a project skill's `name` must equal its folder (`landing-section` was named `landing-flujo-landing-section`), and the context brake left `next-prompt.md` behind when the user resent in the same session.
+Two smaller items from earlier tasks: a project skill's `name` must equal its folder (`landing-section` was named `a landing-page project-landing-section`), and the context brake left `next-prompt.md` behind when the user resent in the same session.
 
 ## Decision
 **The agents' folders stay local.**

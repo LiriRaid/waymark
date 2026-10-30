@@ -9,6 +9,7 @@ import { readTaskRecords, projectHome } from './provenance.mjs';
 import { WAYMARK_CMD } from './lib/paths.mjs';
 import { RUNS_EGO } from './eyes.mjs';
 import { shellRuns } from './runs.mjs';
+import { release, writtenBy, BUILD_START } from './lib/version.mjs';
 
 // Only the testigos of the current catalog: one removed since (an older record's label) is no incident.
 const LABELS = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'routine.json'), 'utf8')).testigos.map((t) => t.label)); } catch { return null; } })();
@@ -37,7 +38,7 @@ export function suspect(r, label) {
 export function incidents(records, { now = Date.now(), version = VERSION } = {}) {
   const open = new Map(), failures = new Map();
   // only what this version produced: a record that names another Waymark version is left out (one with no version is kept), and an old failure ages out
-  const evaluated = records.filter((r) => r.id && r.evaluation?.steps && !(version && r.inputs?.waymark && r.inputs.waymark !== version)), recent = new Set(evaluated.slice(-WINDOW));
+  const evaluated = records.filter((r) => r.id && r.evaluation?.steps && !(version && r.inputs?.waymark && writtenBy(r.inputs.waymark, r.at, version, BUILD_START) !== release(version))), recent = new Set(evaluated.slice(-WINDOW));
   for (const r of evaluated) {
     const steps = r.evaluation.steps;
     for (const [label, ok] of Object.entries(steps)) {

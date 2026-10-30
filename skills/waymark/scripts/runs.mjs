@@ -33,7 +33,8 @@ export function shellSkeleton(command, { quotes = true } = {}) {
 // Python or Node as often as through Edit, and neither the memory pack nor the decision gate saw it. Writing to a temp/scratch place is no change.
 const INTERPRETER = /(?:^|[;&|(\s])(?:python3?|py|node|deno|ruby|perl|php)(?:\.exe)?\s+(?:-[A-Za-z]*\s+)*(?:-\s*)?(?:<<|-[ecr]\b|--eval\b|-p\b)/;
 const FILE_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|renameSync|copyFileSync)\s*\(|\.write_text\s*\(|\.write_bytes\s*\(|\bopen\s*\([^)]*,\s*['"][^'"]*[wa+][^'"]*['"]|\bshutil\.(?:copy|copyfile|move|rmtree)\s*\(|\bos\.(?:remove|rename|unlink)\s*\(|\bFile\.(?:write|rename|delete)\s*\(|\bfile_put_contents\s*\(/;
-export const scriptWrites = (command) => INTERPRETER.test(String(command || '')) && FILE_WRITES.test(String(command || '')) && !TEMP.test(String(command || ''));
+// The interpreter is read outside quotes and heredoc bodies: a message that tells of a script (a commit's heredoc) is text, not a script that runs.
+export const scriptWrites = (command) => { const c = String(command || ''); return INTERPRETER.test(shellSkeleton(c)) && FILE_WRITES.test(c) && !TEMP.test(c); };
 // The files such a script names to write: a quoted path in front of the call (open('a.ts', 'w'), writeFileSync('a.ts', …), Path('a.ts').write_text).
 export function scriptWriteTargets(command) {
   const c = String(command || '');
@@ -53,7 +54,8 @@ export function mutatesFiles(command, depth = 0) {
   const c = String(command || ''), skeleton = shellSkeleton(c);
   // read on the skeleton: a word between quotes (grep "a|rm", git commit -m "…; mv") is text, not a command
   if (MUTATING.test(skeleton) || scriptWrites(c)) return true;
-  if (depth < 2) for (const m of c.matchAll(INNER_SHELL)) { const inner = String(m[1] ?? m[2] ?? '').replace(/^["']|["']$/g, ''); if (inner && mutatesFiles(inner, depth + 1)) return true; }
+  // heredoc bodies are blanked: a commit message that tells of `bash -c` runs nothing
+  if (depth < 2) for (const m of shellSkeleton(c, { quotes: false }).matchAll(INNER_SHELL)) { const inner = String(m[1] ?? m[2] ?? '').replace(/^["']|["']$/g, ''); if (inner && mutatesFiles(inner, depth + 1)) return true; }
   for (const m of skeleton.matchAll(/(?<![0-9&>=-])>{1,2}/g)) { // a redirect outside quotes; its target read from the command
     const t = c.slice(m.index + m[0].length).match(/^\s*(?:"([^"]*)"|'([^']*)'|([^\s"'&|;]+))/), target = t && (t[1] ?? t[2] ?? t[3]);
     if (!target || /^(\/dev\/null|\$null|nul|&\d)$/i.test(target) || TEMP.test(target)) continue;
@@ -202,6 +204,17 @@ export function ephemeral(command) {
 }
 // A part names an ephemeral file when one of its words is that name (or a path ending in it): a whole word, never a substring ("a" is in every path).
 const onlyEphemeral = (text, eph) => eph.size > 0 && [...String(text).matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g)].some((m) => { const w = bareName(String(m[1] ?? m[2] ?? m[3]).replace(/^>{1,2}/, '')); return eph.has(w) || [...eph].some((n) => w.endsWith(`/${n}`)); });
+
+// The user's tool folders (installed skills, an agent's settings, the backups): a copy into them is a reinstall, not an edit of the project's code.
+const TOOL_HOME = /(?:^|[\s"'=/\\])(?:~|\$\{?HOME\}?|[A-Za-z]:[\\/]Users[\\/][^\\/\s]+|[\\/][a-z][\\/]Users[\\/][^\\/\s]+)[\\/]\.(?:agents|claude|codex|gemini|opencode|cursor|copilot|kiro|waymark|waymark-backups)(?:[\\/]|\b)/i;
+// the variables the same command assigned (D=/c/Users/me/.agents/skills; cp x "${D:?}/y"), in the part's own text
+const withVars = (text, whole) => String(text).replace(/\$\{(\w+)(?::?[?=+-][^}]*)?\}|\$(\w+)/g, (m, a, b) => assignedIn(whole, a || b) || m);
+// only the destination counts (the last word that is no flag): `cp ~/.agents/x src/x` reads the tool folder and writes the project
+export const outsideProject = (c) => {
+  const mut = shellRuns(c).filter((p) => mutatesFiles(p.text));
+  const dest = (p) => withVars(p.text, c).trim().split(/\s+/).filter((w) => !/^-/.test(w)).pop() || '';
+  return mut.length > 0 && mut.every((p) => TOOL_HOME.test(` ${dest(p).replace(/^["']|["']$/g, '')}`));
+};
 
 // A shell command that changes project files: mutating, and not only about temp/scratch or Waymark's own memory, nor about a file it makes and removes itself.
 // `eph` (ephemeral) is the whole command's set when the part of a chained command is judged alone (splitAtChange).

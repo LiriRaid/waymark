@@ -27,11 +27,15 @@ export const tokens = (text) => strip(text).replace(/<[^>]*>/g, ' ').split(/[^a-
   .flatMap((w) => (w.includes('/') || w.includes('.') ? [w, ...w.split(/[\/.]/)] : [w]))
   .filter((w) => w.length > 2 && !STOP.has(w) && !/^\d+$/.test(w)).map((w) => w.replace(/(es|s)$/, ''));
 
-const docOf = (r) => [...tokens(String(r.prompt || '').slice(0, 600)), ...tokens(aprendidoOf(String(r.cierre || '')))];
+// The words of an earlier task: its ask, its Aprendido, the start of its Cierre and the two folders above each file it changed (an ask names an area, "plans" or "payments", before it names a file).
+const folders = (r) => (r.files || []).flatMap((f) => tokens(String(f).replace(/\\/g, '/').split('/').slice(-3, -1).join(' ')));
+const DOCS = new WeakMap(); // a record's words, read once per process
+const docOf = (r) => { if (!DOCS.has(r)) DOCS.set(r, wordsOf(r)); return DOCS.get(r); };
+const wordsOf = (r) => [...tokens(String(r.prompt || '').slice(0, 600)), ...tokens(aprendidoOf(String(r.cierre || ''))), ...tokens(String(r.cierre || '').slice(0, 1500)), ...folders(r)];
 const oneLine = (s, n) => { const t = String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
 
-// The earlier tasks ranked against an ask: [{ record, score }], best first, with a score above zero.
-export function search(query, records, k = 3) {
+// BM25 of the words of the ask against the words of each earlier task: [{ record, score, matched }], best first, with a score above zero.
+function textSearch(query, records, k) {
   const docs = records.filter((r) => r.id && r.prompt && !r.kind).map((r) => ({ r, t: docOf(r) }));
   const N = docs.length, df = new Map();
   for (const { t } of docs) for (const w of new Set(t)) df.set(w, (df.get(w) || 0) + 1);
@@ -50,6 +54,28 @@ export function search(query, records, k = 3) {
     }
     return { record: r, score, matched };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, k);
+}
+
+// The file names an earlier task changed (without extension, longer than three letters), as the ask can name them: "arregla stop-hook" names the files of the tasks that changed stop-hook.mjs.
+const fileKeys = (r) => [...new Set((r.files || []).map((f) => path.basename(String(f).replace(/\\/g, '/')).toLowerCase().replace(/\.[a-z0-9]+$/, '')))].filter((n) => n.length > 3);
+const RECENT = 30; // how many of the newest tasks the recency ranking lists
+const RRF_K = 60; // the constant of reciprocal rank fusion (Cormack et al.), not fitted to any set of tasks
+
+// The earlier tasks ranked against an ask: [{ record, score, matched }], best first, with a score above zero. Two rankings fused by rank (RRF): the words of the ask against
+// the words of each task (BM25), and the files the ask names against the files each task changed. The fusion only reorders; `score` stays the BM25 score (the hand-over's
+// minimum reads it), so a task found by its files alone has none and is never handed over by itself.
+export function search(query, records, k = 3) {
+  const text = textSearch(query, records, records.length), q = strip(query);
+  const byFile = records.filter((r) => r.id && r.prompt && !r.kind).map((r) => ({ record: r, hits: fileKeys(r).filter((n) => q.includes(n)).length })).filter((x) => x.hits > 0).sort((a, b) => b.hits - a.hits);
+  const rank = new Map(), found = new Map();
+  text.forEach((x, i) => { rank.set(x.record, (rank.get(x.record) || 0) + 1 / (RRF_K + i + 1)); found.set(x.record, x); });
+  byFile.forEach((x, i) => { rank.set(x.record, (rank.get(x.record) || 0) + 1 / (RRF_K + i + 1)); if (!found.has(x.record)) found.set(x.record, { record: x.record, score: 0, matched: 0 }); });
+  // a third ranking, the newest tasks: work continues where it was last done, so of equal matches the recent one is likelier the one wanted (and "sigue con el plan" names
+  // little but the place the work was left). A task found only by being new has score 0: it is ranked, never handed over (precedentFor reads the score).
+  records.filter((r) => r.id && r.prompt && !r.kind).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, RECENT).forEach((r, i) => {
+    rank.set(r, (rank.get(r) || 0) + 1 / (RRF_K + i + 1)); if (!found.has(r)) found.set(r, { record: r, score: 0, matched: 0 });
+  });
+  return [...rank.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([r]) => found.get(r));
 }
 
 // The gates an earlier task ran, as short commands: the test, lint, check or build segment of each gate command it recorded.
@@ -89,8 +115,9 @@ const othersOf = (records, session) => (session ? records.filter((r) => r.sessio
 export function precedentFor(prompt, records, minScore = minScoreFor(records.filter((r) => r.id && r.prompt && !r.kind).length), session = null) {
   const query = queryOf(prompt, records, session); // "sigue con el punto 2" alone is one word; with its session's task it says what it continues
   if (process.env.WAYMARK_PRECEDENT === '0' || !tokens(prompt).length || tokens(query).length < 2) return null; // a bare "sí" or "ok" asks for nothing
-  const [top] = search(query, othersOf(records, session), 1);
-  if (!top || top.score < minScore || top.matched < MIN_MATCHES) return null; // one rare word in common is a coincidence, not a precedent
+  // the first of the three best that resembles the ask: a recent task with no word in common is ranked, never handed over
+  const top = search(query, othersOf(records, session), 3).find((x) => x.score >= minScore && x.matched >= MIN_MATCHES); // one rare word in common is a coincidence, not a precedent
+  if (!top) return null;
   const text = handover(top.record);
   return { task: top.record.id, score: Math.round(top.score * 10) / 10, files: names(top.record), text, chars: text.length };
 }

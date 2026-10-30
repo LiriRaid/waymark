@@ -223,3 +223,33 @@ test('30 (review): node running a file called vite.js or next.js of the project 
   assert.equal(isBuild('node ./node_modules/typescript/bin/tsc -p tsconfig.build.json --outDir out'), true);
   assert.equal(isBuild('node ./bin/ng build'), true, 'a bin folder of the project holding the CLI');
 });
+
+// ---- 11.2 (2.0.20): one test per class of fact the Evidencia cited and a call did back, which the card read as unbacked ----
+const backed = (cited, calls, ctx = {}) => {
+  const reply = `## Cierre · 2026-10-30 · T1\nResultado: hecho\nEvidencia: observada ${cited}\nAprendido: x ← y`;
+  return judge([...L2_EDIT, ...call('Bash', { command: 'node --check src/orders.service.mjs && pnpm run build' }, 'ok'), ...calls.flat()], ctx, reply).observed.evidence?.unbacked || [];
+};
+test('11.2: a count of a suite (`39/39`) is backed by a run that printed the pass count of that suite', () => {
+  assert.deepEqual(backed('`39/39`', [call('Bash', { command: 'node --test tests/orders.test.mjs' }, 'ℹ tests 39\nℹ pass 39\nℹ fail 0')]), []);
+  assert.deepEqual(backed('`14/14`', [call('Bash', { command: 'node --test tests/orders.test.mjs' }, 'ℹ tests 14\nℹ pass 14\nℹ fail 0')]), []);
+  assert.deepEqual(backed('`14/14`', [call('Bash', { command: 'node --test tests/orders.test.mjs' }, 'ℹ tests 39\nℹ pass 39\nℹ fail 0')]), ['14/14'], 'counter-example: another count');
+});
+test('11.2: a line range cited as read (`stop-hook.mjs:1334-1362`) is backed by a Read of that file around it', () => {
+  assert.deepEqual(backed('`stop-hook.mjs:1334-1362`', [call('Read', { file_path: '/work/proj/src/stop-hook.mjs', offset: 1325, limit: 60 }, '1334\tx\n1362\ty')]), []);
+  assert.deepEqual(backed('`stop-hook.mjs:1334-1362`', [call('Read', { file_path: '/work/proj/src/other.mjs', offset: 1325, limit: 60 }, '1334\tx\n1362\ty')]), ['stop-hook.mjs:1334-1362'], 'counter-example: another file');
+});
+test('11.2: a command cited as run (`manifest.mjs --write`, `nest build`) is backed by the call that ran it', () => {
+  assert.deepEqual(backed('`manifest.mjs --write`', [call('Bash', { command: 'node skills/waymark/scripts/manifest.mjs --write | tail -1' }, 'manifest: 232 files')]), []);
+  assert.deepEqual(backed('`nest build`', [call('Bash', { command: 'cd api && pnpm exec nest build' }, 'ok')]), []);
+  assert.deepEqual(backed('`nest build`', [call('Bash', { command: 'git status' }, 'clean')]), ['nest build'], 'counter-example: never ran');
+});
+test('11.2: a path under ~/ (`~/.waymark/hook-errors.log`) and a database file read (`opencode.db`) are backed by a call that named them', () => {
+  assert.deepEqual(backed('`~/.waymark/hook-errors.log`', [call('Bash', { command: 'ls ~/.waymark' }, 'hook-errors.log\nlatency.log')]), []);
+  assert.deepEqual(backed('`opencode.db`', [call('Bash', { command: 'sqlite3 ~/.local/share/opencode/opencode.db ".tables"' }, 'message session')]), []);
+  assert.deepEqual(backed('`opencode.db`', [call('Bash', { command: 'git status' }, 'clean')]), ['opencode.db'], 'counter-example: no call named it');
+});
+test('11.2: a word the ego script printed (`Available`) and an identifier a search printed (`sizesAt`) are backed by those outputs', () => {
+  assert.deepEqual(backed('`Available`', [call('Bash', { command: 'ego-browser nodejs < /tmp/look.mjs' }, 'status: Available')]), []);
+  assert.deepEqual(backed('`sizesAt`', [call('Grep', { pattern: 'sizesAt' }, 'src/size.mjs:12: const sizesAt = 1')]), []);
+  assert.deepEqual(backed('`sizesAt`', [call('Grep', { pattern: 'other' }, 'src/size.mjs:12: nothing')]), ['sizesAt'], 'counter-example: not in any output');
+});

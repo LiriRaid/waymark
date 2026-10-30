@@ -313,7 +313,7 @@ test('red per spec: a spec that adds cases runs before the code after it; one th
     call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test' }), call('Skill', { skill: 'code-review' }), MEM()]);
   const red = (work) => cierreGaps(turn(work), cierre(ids.next), undefined, undefined, ctxFor(cwd));
   const mocks = call('Edit', { file_path: OLD, old_string: 'deleteMany: vi.fn()', new_string: 'deleteSessions: vi.fn()' });
-  // YaloAtiendo 2026-10-14 · T2: new specs written and run red by the shell, then code, then mocks adjusted
+  // the real-use project 2026-10-14 · T2: new specs written and run red by the shell, then code, then mocks adjusted
   const shellRed = ran('s1', `cat > src/orders.service.spec.mjs <<'EOF'\nit('retries', () => {})\nEOF\nnpm test -- orders`, true);
   const g = red([...shellRed, call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), mocks]);
   assert.equal(g.steps.find((x) => x.id === 'red').pass, true, 'the new spec ran red first; the mocks need no red');
@@ -520,7 +520,7 @@ test('Cierre: fields and claims are read from the Cierre block only, not the pro
 test('Cierre: an empty field does not take the next line as its value', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  assert.match(checkCierre(l2(), cierre(id, undefined, 'Resultado:\n'), undefined, undefined, ctxFor(cwd)), /Resultado: hecho \| parcial/);
+  assert.match(checkCierre(l2(), cierre(id, undefined, 'Resultado:\n'), undefined, undefined, ctxFor(cwd)), /Resultado: hecho | bloqueado\| parcial/);
 });
 
 test('branches: the branch of each repo that holds a changed file', () => {
@@ -2027,7 +2027,7 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\) \(W incidents\)/, 'the card says W, defined above');
   assert.match(card, /W = node "[^"]+waymark\.mjs"\./);
-  assert.match(card, /Commands: the hook hands you W pack at a file's first edit.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /Commands: the hook hands you W pack at a file's first edit.*W memory <section>, W tasks on demand/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2484,7 +2484,7 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   assert.deepEqual(skills("Get-Content -Path 'C:\\Users\\u\\.claude\\skills\\dept-frontend\\SKILL.md'"), ['dept-frontend']);
 });
 
-// 2.0.7: YaloAtiendo's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
+// 2.0.7: the real-use project's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
 // && … review <front files>`) and the testigo read only the first call.
 test('review: every waymark.mjs review in one command counts; the message names the code files left unreviewed', () => {
   const { cwd } = fresh();
@@ -2500,7 +2500,7 @@ test('review: every waymark.mjs review in one command counts; the message names 
   assert.equal(both.observed.review, true, 'the second call of the same command covers the front');
 });
 
-// 2.0.13: YaloAtiendo's T3 built the API and the front after changing both, then wrote only the front's main.spec.ts and
+// 2.0.13: the real-use project's T3 built the API and the front after changing both, then wrote only the front's main.spec.ts and
 // rebuilt only the front; the testigo wanted every repo built after the turn's last code change.
 test('build: each repo needs a build that passed after the last code change in that repo', () => {
   const { cwd } = fresh();
@@ -2519,7 +2519,7 @@ test('build: each repo needs a build that passed after the last code change in t
   assert.equal(built([...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('web')]), false, 'the API was never built');
 });
 
-// 2.0.13: YaloAtiendo's T4 wrote "conteos antes y después (29/86/326/15/1)" and the testigo read "29/86" and "326/15"
+// 2.0.13: the real-use project's T4 wrote "conteos antes y después (29/86/326/15/1)" and the testigo read "29/86" and "326/15"
 // as pass/total results no call showed.
 test('evidence facts: a chain of three or more numbers joined by / is not a pass/total', async () => {
   const { evidenceFacts } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
@@ -3077,7 +3077,7 @@ test('decision: the user\'s reply after rejecting the choice window is their dec
   assert.deepEqual(decisionsIn([ask, clarify, prompt('corrige las 4')]).map((d) => d.chosen), ['corrige las 4'], 'the user chose to clarify first (Claude Code 2.1.x)');
 });
 
-// A commit with no trailer leaves its task's record unlinked (YaloAtiendo-Chat 2026-10-12 · T2c): stopped once per task
+// A commit with no trailer leaves its task's record unlinked (the real-use project 2026-10-12 · T2c): stopped once per task
 // with the ID to add; sent again without it, it goes through (the user may not want one there).
 test('commit trailer: a commit with none is stopped once with the ID to add', async () => {
   const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
@@ -3095,7 +3095,7 @@ test('commit trailer: a commit with none is stopped once with the ID to add', as
 });
 
 // The turn's commits are looked for where they were made (`cd <repo> && git commit`), and an earlier recorded task's ID
-// counts: its work committed now (YaloAtiendo-Chat 2026-10-12 · T2c committed T2b's work in the API's repo).
+// counts: its work committed now (the real-use project 2026-10-12 · T2c committed T2b's work in the API's repo).
 test('commit trailer: a commit made in another repo with an earlier task\'s ID counts', async () => {
   const { turnCommits } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
   const session = memRepo('sess-commit'), api = tmpRepo('api-commit'), day = new Date().toLocaleDateString('sv');
@@ -3116,7 +3116,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>`); // both trailers in the last p
   assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
 });
 
-// 2.0.14: YaloAtiendo 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
+// 2.0.14: the real-use project 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
 // was made in one call and run in another (PowerShell), failed on pnpm's own TTY check, and was judged the task's gate.
 const ranOut = (id, name, command, out, failed = false) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: { command } }] } },
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: failed, content: out }] } }];

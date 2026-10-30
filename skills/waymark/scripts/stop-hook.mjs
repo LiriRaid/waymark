@@ -35,7 +35,7 @@ import { RUNS_EGO, eyesProvider, eyesDue, observeEyes, eyesGaps, eyesDir, refere
 import { projectKind } from './report.mjs';
 import { changesProject, mutatesFiles, slash, shellSkeleton, shellRuns, splitAtChange, copyPaths, inCopy as inCopyCmd, apart as apartCmd } from './runs.mjs';
 import { base as idBase } from './provenance/ids.mjs';
-import { pinnedCwd, pendingSteps, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
+import { pinnedCwd, taskBlocks, noteTaskBlock, pendingSteps, ID, RECORD_V2, v2Fields, pedidoItems, pedidoAnswers, askedGaps, optionsLint, windowCheck, pinnedRules, taskIds, validId, taskLines, taskStart, taskFiles, decisionsIn, appendRecord, openTurn, turnInputs, commitsFor, saveSnapshot, projectHome, refreshTasks, ensureLocal, closeOpen, readRecords, maskSecrets, recordedDecisions, deepMask, verifyChain, anchorsFor, readNotes, writeTaskLine, writeRelay, readTaskRecords, gitNote, aprendidoOf, turnChanged, markPaused, clearTaskStart, taskStartMark, logHookError, gitError, PROBE_OK } from './provenance.mjs';
 import { rerunGate, secretSources, secretHits, buildNone, testsBroken } from './testigos.mjs';
 import { stackOf, syncIdentity, copyInstall, relatedRun } from './stack.mjs';
 import { closeCopies } from './copy.mjs';
@@ -1226,7 +1226,7 @@ export function provenanceRecord(turn, gaps, ctx, meta = {}) {
     outcome: gaps.external ? { result: 'parcial', cause: 'external', why: gaps.external.cause } : outcome(gaps.reply, ctx.pedido, answers, gaps.level, ctx.owned, gaps.win), // hecho | parcial | bloqueado, as a label
     ...(gaps.win?.items.length ? { window: { chosen: gaps.win.items, ...(gaps.win.failed.length ? { failed: gaps.win.failed } : {}), ...(gaps.win.twoActions.length ? { twoActions: gaps.win.twoActions } : {}) } } : {}), // what the user chose in the window, written by the hook, and what the Cierre marked ✘ (docs/adr/0046)
     ...(gaps.askedRepos?.length ? { askedRepos: gaps.askedRepos.slice(0, 6) } : {}),
-    unresolved: gaps.missing.map(maskSecrets),
+    unresolved: (gaps.unresolved || gaps.missing).map(maskSecrets),
     ...(causesOf(gaps.steps) ? { causes: causesOf(gaps.steps) } : {}), // each failed testigo's own first reason, so an incident names its own cause and not another testigo's
     findings: gaps.findings.map(maskSecrets),
   });
@@ -1330,10 +1330,10 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       // resumed the session after the close).
       const since = Date.parse(readRecords(home.log).filter((r) => r.session === h.session_id).pop()?.at || '') || 0;
       // A skill or agent still running in the background: the turn is not over (no block, no record); it closes in the
-      // notification's turn, which reads the whole stretch from the task's prompt. A reply that already carries its
-      // Cierre is the end of the task: judged now.
+      // notification's turn, which reads the whole stretch from the task's prompt. A Cierre written over a review that still
+      // runs is no close either (one Cierre per task, the last): the review's result brings the agent back to judge it.
       h.last_assistant_message ??= h.prompt_response; // Gemini CLI's AfterAgent names the last reply prompt_response
-      if (pendingBackground(lines, since).length && !CIERRE_HEAD.test(String(h.last_assistant_message || '').replace(/\*\*|__/g, ''))) {
+      if (pendingBackground(lines, since).length) {
         // deferred: a record that says so, with the turn's files, and a notice (docs/adr/0044); it is no close, so the next turn still judges this one
         try { if (fs.existsSync(projectHome(cwd).memory)) { let files = []; try { files = turnChanged(h.session_id, cwd); } catch {} if (!files.length) files = [...new Set(currentTurn(lines, since).tools.filter((t) => EDITS.test(t.name)).map(fileOf).filter(Boolean))]; appendRecord(cwd, unevaluatedRecord('deferred: a background task is still running', { agent: agent.name, session: h.session_id, cwd, files, prompt: currentTurn(lines, since).prompt })); } } catch (e) { logHookError('stop-hook deferred', e); }
         answer(agent, agent.out.notice('Waymark: este turno se evaluará cuando termine la tarea en segundo plano.'));
@@ -1423,7 +1423,16 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
         gaps.steps = gaps.steps.map((s) => (s.applies ? { ...s, applies: false, pass: null, why: [], na: stopped.cause } : s));
         gaps.findings = [`the turn was cut by the ${stopped.cause}: no testigo was judged`];
       } else if (pausedReply(h.last_assistant_message)) { try { markPaused(h.session_id); } catch {} return; }
+      // One block per task (decided 2026-10-30): the first close that lacks something is blocked, naming it; a later turn of the same task that still lacks it is
+      // recorded in red and let go. A close with no Cierre at all is always blocked: the task cannot end without one.
+      const owesCierre = gaps.missing.some((m) => m.startsWith('the "## Cierre'));
+      if (gaps.missing.length && !h.stop_hook_active && !owesCierre && taskBlocks(h.session_id) >= 1) {
+        gaps.findings = [...(gaps.findings || []), `the task was already blocked once: ${gaps.missing.length} testigo(s) still missing, recorded in red, not blocked again`];
+        gaps.unresolved = gaps.missing;
+        gaps.missing = [];
+      }
       if (gaps.missing.length && !h.stop_hook_active) {
+        try { noteTaskBlock(h.session_id); } catch (e) { logHookError('stop-hook blocks', e); }
         answer(agent, agent.out.block(blockReason(gaps)));
         return;
       }

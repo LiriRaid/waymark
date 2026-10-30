@@ -128,8 +128,26 @@ export function taskOffer(session, offer) {
   writeOffers(all);
   return offer;
 }
+// How many times the end-of-turn hook blocked this task (~/.waymark/.task-blocks.json): the rule is one block per task, then what is missing is recorded in red and
+// nothing more stops the turn. It ends with the task's start mark, in clearTaskStart.
+const blocksFile = () => path.join(HOME(), '.task-blocks.json');
+const readBlocks = () => { try { return JSON.parse(fs.readFileSync(blocksFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeBlocks = (all) => {
+  for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(blocksFile(), JSON.stringify(all));
+};
+export const taskBlocks = (session) => readBlocks()[session || 'unknown']?.n || 0;
+export function noteTaskBlock(session) {
+  const all = readBlocks(), id = session || 'unknown';
+  all[id] = { n: (all[id]?.n || 0) + 1, at: Date.now() };
+  writeBlocks(all);
+  return all[id].n;
+}
 export function clearTaskStart(session) {
   const all = readStarts(), id = session || 'unknown';
+  const blocks = readBlocks();
+  if (id in blocks) { delete blocks[id]; writeBlocks(blocks); }
   const offers = readOffers();
   if (id in offers) { delete offers[id]; writeOffers(offers); }
   if (!all[id]) return;

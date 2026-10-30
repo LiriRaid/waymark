@@ -255,8 +255,10 @@ test('owed at the end: the first change of a task hands what the close asks, onc
   const call = (f, session) => ({ tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', f) }, cwd: repo, session_id: session, transcript_path: transcript });
   const first = await packContext(call('a.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
   assert.match(first || '', /At L2 and above the close also asks for/);
-  assert.match(first || '', /write the Cierre last/);
+  assert.match(first || '', /one Cierre last/);
   assert.match(first || '', /code-review once/);
+  // 2.0.20 point 31: the order that stops the proofs going stale (a finding of the review changes the code) and the Cierre being written over a running review
+  assert.match(first || '', /code-review \(wait for its result: never write a Cierre while it runs[^)]*\), apply its findings, then the final gate, the build of every repo you changed, and write the one Cierre last/);
   assert.doesNotMatch(first || '', /eyes/, 'a logic file owes no look at the screen');
   const second = await packContext(call('b.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
   assert.doesNotMatch(second || '', /At L2 and above/, 'once per task, with the first change');
@@ -266,4 +268,5 @@ test('owed at the end: the first change of a task hands what the close asks, onc
   const small = await packContext({ ...call('a.mjs', 's-owed-l1'), transcript_path: l1 }, claude, path.join(home, 'packed-owed.json'));
   assert.doesNotMatch(small || '', /At L2 and above/, 'an L1 is not handed a list it does not owe');
   assert.match(ui || '', /eyes: look at what you built in the browser/, 'a styles file adds the look');
+  assert.match(ui || '', /the build of every repo you changed and the eyes on the final code, and write the one Cierre last/, 'and the order puts the eyes after the review');
 });

@@ -105,6 +105,8 @@ export {
   taskInProgress,
   pinnedCwd,
   taskLines,
+  taskBlocks,
+  noteTaskBlock,
   taskOffer,
   taskStart,
   taskStartMark,

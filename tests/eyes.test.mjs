@@ -445,3 +445,44 @@ test('18 (review): a red typecheck beside a command the machine cannot run still
   assert.equal(eyes(redAndMissing).pass, false, 'a typecheck that really failed is not excused by a lint that could not run');
   assert.equal(eyes(judge([...bare(2, CSS), ...GATE_MISSING, ...ego(MEASURE)])).pass, true, 'counter-example: only a missing tool');
 });
+
+// ---- 2.0.20 point 29, from the first real task of checkpoint B: 151 of 434 real ego calls handed the script by stdin ----
+const SCRIPT = 'const page = (await taskSpace("x")).page("p1");\nconsole.log(await page.evaluate(() => document.querySelector("b").getBoundingClientRect().width));';
+const QEGO = '"' + EGO_EXE + '"';
+
+test('29: a script written by Write and given to ego by stdin redirect (absolute path) counts as a measurement', () => {
+  const file = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run/round-50.mjs';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < "${file}" 2>&1 | head -8` })];
+  const g = judge(lines);
+  assert.equal(g.observed.eyes.measures, 1, JSON.stringify(g.observed.eyes));
+  assert.equal(eyes(g).pass, true);
+});
+
+test('29: the same by a relative path after cd, and by `cat file |`', () => {
+  const dir = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run';
+  const write = call('Write', { file_path: `${dir}/round-51.mjs`, content: SCRIPT });
+  const rel = judge([...head(2, CSS), ...write, ...call('Bash', { command: `cd "${dir}" && ${QEGO} nodejs < round-51.mjs 2>&1 | head -3` })]);
+  assert.equal(rel.observed.eyes.measures, 1, 'relative to the folder the command went to');
+  const cat = judge([...head(2, CSS), ...write, ...call('Bash', { command: `cat "${dir}/round-51.mjs" | ${QEGO} nodejs` })]);
+  assert.equal(cat.observed.eyes.measures, 1, 'a script piped in');
+});
+
+test('29: a script rewritten under the same name is read as it stood at that call', () => {
+  const file = 'C:/Users/u/scratch/ego-run/round.mjs';
+  const look = 'await page.goto("http://localhost:4200/"); console.log(await page.snapshot());';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: look }), ...call('Bash', { command: `${QEGO} nodejs < "${file}"` }), ...call('Write', { file_path: file, content: SCRIPT })];
+  assert.equal(judge(lines).observed.eyes.measures, 0, 'the measuring version was written after the call');
+});
+
+test('29: counter-examples — a redirect to a file nobody wrote, and a heredoc, are not a script read from the file', () => {
+  const missing = judge([...head(2, CSS), ...call('Bash', { command: `${QEGO} nodejs < "C:/Users/u/never-written.mjs"` })]);
+  assert.equal(missing.observed.eyes.measures, 0);
+  const heredoc = judge([...head(2, CSS), ...ego(MEASURE)]);
+  assert.equal(heredoc.observed.eyes.measures, 1, 'the heredoc form still counts from its own body');
+});
+
+test('29: references — "<element> (captura 1): parecido." and the other separators count; a word in prose does not', () => {
+  const reply = CIERRE + '\n- **Turno sin iniciar (captura 1)**: parecido. Ahora muestra el reloj\n- título: igual, 26 px\n- pill: falta (la etiqueta de IA)\n- botón: igual — 28x28\n- cierre: parecido\nel botón es igual al diseño y falta el hover';
+  const g = judge([...head(2, CSS), ...ego(MEASURE)], {}, reply);
+  assert.equal(g.observed.eyes.references, 5, 'the five lines, not the prose');
+});

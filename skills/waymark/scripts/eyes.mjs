@@ -105,22 +105,35 @@ export function shellScripts(command) {
   return /<<|@['"]/.test(c) ? [HEREDOC_FILE, HERE_PIPE, HERE_VALUE].flatMap((re) => [...c.matchAll(re)].map((m) => [m.groups.file, m.groups.body])) : [];
 }
 
-// The ego-browser script behind a call: the command, and the files it imports (a file given to `ego-browser nodejs -e` by a file:/// URL) written earlier in the turn.
-function scriptOf(t, writes) {
+// A written file's key: forward slashes, a Git Bash path (/c/…) as C:/…, lower case.
+const fileKey = (file) => String(file).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').toLowerCase();
+const STDIN_FILE = /(?<![<\d&])<(?![<(&=])\s*(?:"([^"\n]+)"|'([^'\n]+)'|([^\s|;&<>]+))/g; // ego-browser nodejs < file (never a heredoc <<, a process substitution <( or 2<)
+const CAT_FILE = /\bcat\s+(?:"([^"\n]+)"|'([^'\n]+)'|([^\s|;&<>]+))\s*\|/g; // cat file | ego-browser nodejs
+const CD_DIR = /(?:^|[;&|(]\s*)cd\s+(?:"([^"\n]+)"|'([^'\n]+)'|([^\s;&|]+))/;
+// The ego-browser script behind a call: the command, the files it imports (a file given to `ego-browser nodejs -e` by a file:/// URL) written earlier in the turn, and the
+// file handed to its stdin (`< file`, `cat file |`) as it stood at that call: a relative path is read from the folder the command went to (`cd dir && …`).
+function scriptOf(t, writes, log = [], at = Infinity) {
   const cmd = text(t), files = [...cmd.matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => decodeURI(m[1]).replace(/\\/g, '/').toLowerCase());
-  return cmd + '\n' + files.map((f) => writes.get(f) || [...writes].find(([k]) => k.endsWith(f) || f.endsWith(k))?.[1] || '').join('\n');
+  const cd = CD_DIR.exec(cmd), dir = cd ? fileKey(cd[1] || cd[2] || cd[3]) : '';
+  const stdin = [...cmd.matchAll(STDIN_FILE), ...cmd.matchAll(CAT_FILE)].map((m) => fileKey(m[1] || m[2] || m[3])).map((f) => {
+    const abs = /^([a-z]:)?\//.test(f), rel = f.replace(/^\.\//, '');
+    const key = abs ? f : /^([a-z]:)?\//.test(dir) ? `${dir.replace(/\/$/, '')}/${rel}` : null;
+    const hit = [...log].reverse().find((w) => w.i < at && (key ? w.key === key : w.key.endsWith(`/${rel}`)));
+    return hit?.body || '';
+  });
+  return cmd + '\n' + files.map((f) => writes.get(f) || [...writes].find(([k]) => k.endsWith(f) || f.endsWith(k))?.[1] || '').join('\n') + '\n' + stdin.join('\n');
 }
 
 // What the turn's tool calls show of the eyes. `from`: the index of the task's last change; only a call after it counts. `gateAt`: the index of the first project gate that passed after it
 // (Infinity: none did): a look before it saw a version nobody had compiled, so it does not count (`beforeGate`). -1: no gate is required (it could not run here).
 // → { provider, calls, measures, afterLastChange, beforeGate, references }. Nothing of the page is kept: no URL, no text.
 export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, provider = null, reply = '', allowed = [] } = {}) {
-  const writes = new Map();
-  const keep = (file, body) => writes.set(String(file).replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').toLowerCase(), body); // a Git Bash path (/c/…) is the file:///C:/… the import names
-  for (const t of tools) {
-    if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content);
-    else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body);
-  }
+  const writes = new Map(), log = []; // log: every script write in the order of the calls, so a file rewritten under one name is read as it stood at each call
+  const keep = (file, body, i) => { writes.set(fileKey(file), body); log.push({ i, key: fileKey(file), body }); }; // a Git Bash path (/c/…) is the file:///C:/… the import names
+  tools.forEach((t, i) => {
+    if (/^(Write|Edit)$/.test(t.name) && t.input?.file_path && typeof t.input.content === 'string') keep(t.input.file_path, t.input.content, i);
+    else if (/^(Bash|PowerShell|shell)$/.test(t.name)) for (const [file, body] of shellScripts(text(t))) keep(file, body, i);
+  });
   let calls = 0, measures = 0, early = 0, used = null, offHost = 0, design = 0, panelAt = 'local', returns = 0, sinceChange = false;
   const captures = [], spaces = new Map(); // spaces: the ego task spaces by name, { opened: times a script took it, finished }
   tools.forEach((t, i) => {
@@ -137,14 +150,14 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     } else if (t.name === 'Bash' || t.name === 'PowerShell' || t.name === 'shell') {
       if (RUNS_EGO.test(text(t))) {
         kind = 'ego';
-        const s = scriptOf(t, writes), places = (s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
+        const s = scriptOf(t, writes, log, i), places = (s.match(URL_RE) || []).map((u) => whereTo(u, allowed));
         measuring = MEASURES.test(s);
         where = places.includes('off') ? 'off' : places.includes('local') || !places.length ? 'local' : 'design'; // a script that compares the design with the local build looks at the build
       } else if (RUNS_PLAYWRIGHT.test(text(t))) { kind = 'playwright'; measuring = true; where = (text(t).match(URL_RE) || []).some((u) => whereTo(u, allowed) === 'off') ? 'off' : 'local'; }
     }
     if (!kind) { if (isChange?.(t, i)) sinceChange = true; return; }
     if (kind === 'ego') { // one space per task: which one the script takes, whether it closes it, and a return to ego after the code changed
-      const s = scriptOf(t, writes), names = [...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+      const s = scriptOf(t, writes, log, i), names = [...s.matchAll(/taskSpace\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
       for (const n of names) spaces.set(n, { opened: (spaces.get(n)?.opened || 0) + 1, finished: false });
       const last = names[names.length - 1] || [...spaces.keys()].pop();
       if (/\bfinish\s*\(/.test(s) && last && spaces.has(last)) spaces.get(last).finished = true;
@@ -154,12 +167,12 @@ export function observeEyes(tools, { from = -1, gateAt = -1, isChange = null, pr
     if (where === 'off') offHost++;
     if (where === 'design') design++;
     if (where !== 'local') measuring = false; // only the local build is the change; the design is a reference
-    if (kind === 'ego') for (const m of scriptOf(t, writes).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
+    if (kind === 'ego') for (const m of scriptOf(t, writes, log, i).matchAll(/screenshot\(\s*\{[^}]*?path:\s*["'`]([^"'`]+)["'`]/g)) { const p = slash(m[1]); if (p.toLowerCase().startsWith(slash(eyesRoot()).toLowerCase() + '/') && captures.length < 8 && !captures.includes(p)) captures.push(p); } // only what lands in Waymark's own folder
     calls++;
     used = used || kind;
     if (measuring && i > from) { if (i > gateAt) measures++; else early++; }
   });
-  const verdicts = (String(reply).match(/:\s*(?:igual|parecido|falta)\b\s*[—–-]/gi) || []).length; // "<element>: igual — <measurement>", never the word in prose
+  const verdicts = (String(reply).match(/:[ \t]*(?:igual|parecido|falta)\b[ \t]*(?:[—–.,(-]|$)/gim) || []).length; // "<element>: igual — <measurement>" (or after the word a dot, a comma, a parenthesis, the end of the line), never the word in prose
   return { provider: used || provider, calls, measures, afterLastChange: measures > 0, ...(early ? { beforeGate: true } : {}), references: verdicts, captures, offHost, design, ...(spaces.size ? { spaces: [...spaces].map(([name, v]) => ({ name, ...v })), returns } : {}) };
 }
 

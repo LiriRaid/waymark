@@ -396,6 +396,8 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0048 · A cut turn is not a failed task, and an agent that cannot carry the chain yet is coming soon](docs/adr/0048-a-cut-turn-is-not-a-failed-task-and-an-agent-that-cannot-yet-is-coming-soon.md)
 - [0049 · The scorecard reads real use, and the records prepare clean data](docs/adr/0049-the-scorecard-reads-real-use-and-the-records-prepare-clean-data.md)
 - [0050 · No task closes parcial, and the hooks do not repeat work](docs/adr/0050-no-task-closes-parcial-and-the-hooks-do-not-repeat-work.md)
+- [0051 · What the first real tasks of checkpoint B showed, and the measures of the card](docs/adr/0051-the-first-real-tasks-of-checkpoint-b-and-the-measures-of-the-card.md)
+- [0052 · Machine learning: patterns of use, never cases (design, no model code)](docs/adr/0052-machine-learning-from-patterns-of-use-never-from-cases.md)
 <!-- adr-index:end -->
 
 ## Contributing back

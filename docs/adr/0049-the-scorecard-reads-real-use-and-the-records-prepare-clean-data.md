@@ -29,7 +29,7 @@ Two more gaps showed in that reading. A task's cost depends on the model (Opus a
 ## Consequences
 
 - Criterion 9 reads below its target while every task is closed by one agent, and criterion 13 reads the share of `parcial` as it is: both say what the 2.0.18 numbers hid. The README lists every criterion below its target as it is.
-- The median-tokens check is `pending` until 2.0.20 freezes it.
+- The median-tokens check is `pending` until 2.0.20 freezes it. [Corrected 2026-10-30: it was already frozen at 15 M tokens in 2.0.19 (`ebd3e97`); 8.9 is a measured check, not pending.]
 - A session that changes model keeps its cost in the record but out of the routine share, so a lever on the routine is not judged by a model switch.
 
 ## Result at the close of 2.0.19
@@ -45,7 +45,7 @@ Two more gaps showed in that reading. A task's cost depends on the model (Opus a
 | 5 Enforcement | 98.6 | 93 | 5.1: the recent tasks passed 0.875 of their testigos (≥ 0.95) |
 | 6 Inputs and dependencies pinned | 100 | 95 | |
 | 7 Distribution of the records | 100 | 95 | |
-| 8 Token efficiency | 81.3 | 96 | 8.7: the routine share of the last 5 L1 tasks is 0.188 (≤ 0.065); 8.9: the median tokens, 18.2 M, pending; 8.2 and 8.3: 11,005 and 225 characters (≤ 11,000 and ≤ 220) with the work in progress on the card |
+| 8 Token efficiency | 81.3 | 96 | 8.7: the routine share of the last 5 L1 tasks is 0.188 (≤ 0.065); 8.9: the median tokens, 18.2 M, pending then (frozen at 15 M in 2.0.19); 8.2 and 8.3: 11,005 and 225 characters (≤ 11,000 and ≤ 220) with the work in progress on the card |
 | 9 Agnostic and adaptive | 94.4 | 96 | 9.9: one agent closed the recent tasks (≥ 2) |
 | 10 Reuse of earlier evidence | 97.4 | 93 | 10.3: precision@3 0.722 (≥ 0.85) |
 | 11 No hallucination, good decisions | 97.1 | 95 | 11.2: 0.813 of cited facts backed (≥ 0.95) |

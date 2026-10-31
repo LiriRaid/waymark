@@ -13,23 +13,24 @@ import { readStdin } from './lib/stdin.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { currentTurn, routedLevel, routedDept, inheritedRoute, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
+import { currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
 import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
 import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
 import { spawnSync } from 'node:child_process';
 import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './runs.mjs';
-import { taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
+import { pinnedCwd, taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm, exemptPath, repoOf, nameIn } from './lib/paths.mjs';
+import { norm, exemptPath, repoOf, nameIn, repoNamedIn } from './lib/paths.mjs';
 import { inRoot } from './copy.mjs';
 import { census, groupOf, judgeMove } from './convention.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
 import { addDenied } from './lib/denied.mjs';
 import { commandSensitive, expandHome } from './lib/guard.mjs';
 import { grantsIn, recordGrants, WINDOW } from './lib/grants.mjs';
-import { PACKED, readPacked, packedFiles, procDelivered } from './lib/packed.mjs';
+import { PACKED, readPacked, packedFiles, packedAny, procDelivered } from './lib/packed.mjs';
+import { tagLatency } from './lib/latency.mjs';
 export { PACKED, packedFiles, procDelivered }; // moved to lib/packed.mjs; kept for existing importers
 
 
@@ -44,7 +45,8 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
   if (target && typeof target === 'object') { if (!changesProject(target.command)) return null; }
   else if (!target || exempt(target, cwd)) return null;
   const turn = currentTurn(lines);
-  const level = routedLevel(turn.texts, turn.tools) || inheritedRoute(lines)?.level || 0, q = level === 'Q';
+  // a reply that continues the open task is that task's: a Q line on it is gated at the task's level, not as a question
+  const said = routedLevel(turn.texts, turn.tools), level = (said === 'Q' && openTaskRoute(lines)?.level) || said || inheritedRoute(lines)?.level || 0, q = level === 'Q';
   if (!turn.found || !level) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
@@ -56,6 +58,7 @@ export function checkDecision(target, lines, session = 'unknown', stateFile = pa
     try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); return true; } catch { return false; }
   };
   if (q && once('q')) return 'Waymark: this turn was routed as a question (Q) but is about to change project files. A question that becomes a change is a task: re-route with a tool call — invoke the owner dept-* skill with args "L<n>" (e.g. Skill dept-frontend, args "L2"); a routing line written mid-turn is not persisted — then the opener, and put the decision to the user with the optimal options before changing anything.';
+  if (level === 1 && caminoSaid(turn)) return null; // an L1 with its `Camino:` line owes no window: the reading the end-of-turn hook has (Rule 0)
   // Strict gate (user's decision 2026-10-02): no change until the user was asked in the choice window in this task.
   // The task starts after this session's last close: the previous task's question never opens it (the ID is not known
   // yet, so a follow-up asks or confirms again).
@@ -165,15 +168,32 @@ const GH_API_PR = new RegExp(`${GH_START}api\\b(?=[^\\n;&|]*(?:-X|--method)[ =]?
 // What the request says about a pull request, with what it denies left out ("no abras el PR").
 const asking = (text, words) => new RegExp(String.raw`\b(?:${words})\b`, 'i').test(String(text).replace(/\b(?:no|sin|nunca|don't|do not|never)\b[^.\n]{0,30}\b(?:pull requests?|PRs?|merge)\b/gi, ' '));
 // The project's rule of who opens pull requests (Conventions: "PRs: the user" or "Pull requests: the agent, when asked"), never an account. → the line, or null.
+// "PRs: the user", "Push: el usuario": the rule gives the step to the user (the project's own words, in English or Spanish).
+const USER_RULE = /:\s*(?:(?:the|el)\s+)?(?:user|usuario)\b/i;
 const prRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*((?:PRs?|Pull requests?):[ \t]*[^\n]+)$/im)?.[1]?.trim() || null;
 export function checkGh(command, asked = '', memory = '') {
   const sk = shellSkeleton(command, { quotes: false });
   if (GH_AUTH.test(sk)) return 'Waymark: changing the gh account (auth switch, login, logout, refresh, setup-git) is the user\'s: it decides which of their accounts every later command uses, and it is not undone by switching back. Read which one is active with `gh auth status` and tell the user if it is not the one the task needs; never write the account or an address anywhere.';
   const api = sk.match(GH_API_PR)?.[1];
   const pr = sk.match(GH_PR)?.[1] || (api !== undefined ? (/\/merge\b/.test(api) ? 'merge' : 'create') : undefined), rule = prRule(memory);
-  if (pr && rule && /:\s*(?:the\s+)?(?:user|usuario)\b/i.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
+  if (pr && rule && USER_RULE.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": opening or merging a pull request here is the user's, even when the request names it. Leave the branch pushed if they said so and tell them it is ready; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
   // opening one needs the words "pull request" or "PR"; merging one also takes "merge" ("resuelve el conflicto de merge" opens nothing)
   if (pr && !asking(asked, pr === 'merge' ? 'pull requests?|PRs?|merge|mergea\\w*|fusiona\\w*' : 'pull requests?|PRs?')) return 'Waymark: opening or merging a pull request is the user\'s (they open and merge every one), and this task\'s request does not ask for one. Leave the branch pushed if they said so and tell them it is ready; if they do want it opened, they say so in the request.';
+  return null;
+}
+
+// What leaves the machine is the user's to publish: a `git push` (with or without a tag or a force) and a `gh release` are denied when the project's
+// Conventions say "Push: the user" (the line the user wrote, read like the PRs rule above), and on a turn routed Q that continues no task: a question never publishes.
+// Read on the skeleton, so a message or a heredoc that mentions the words is no push.
+const GIT_PUSH = /(?:^|[;&|(]\s*|\n\s*)(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|&|command|sudo|env|exec)\s+)*git(?:\.exe)?(?:\s+(?:-c\s+\S+|-C\s+\S+|--[\w-]+(?:=\S+)?))*\s+push(?![\w-])/;
+const GH_RELEASE = new RegExp(`${GH_START}release\\s+(?:create|upload|delete|edit)\\b`);
+const pushRule = (memory) => String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*(Push:[ \t]*[^\n]+)$/im)?.[1]?.trim() || null;
+export function checkPush(command, memory = '', question = false) {
+  const sk = shellSkeleton(command, { quotes: false });
+  if (!GIT_PUSH.test(sk) && !GH_RELEASE.test(sk)) return null;
+  const rule = pushRule(memory);
+  if (rule && USER_RULE.test(rule)) return `Waymark: this project's Conventions say "${rule.slice(0, 80)}": publishing is the user's, even when the request names it. Leave the work committed here, say what is ready to push and tell them; the rule changes only where it is written (.waymark/memory.md → Conventions).`;
+  if (question) return 'Waymark: this turn is routed as a question (Q) and a question never publishes: nothing leaves the machine from it. If the user asked for the push, say so in a routed task (invoke the owner dept-* skill with args "L<n>"), or leave it to them.';
   return null;
 }
 
@@ -189,16 +209,19 @@ export function namedRepos(lines) {
   }
   return text.join('\n').toLowerCase();
 }
-export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json'), task = '') {
+// What the user chose in the choice window, and nothing else of the conversation: the only text a role word ("API") may stand in for a repo's folder name.
+const windowAnswers = (lines) => (lines || []).flatMap((d) => (d.type === 'user' && d.toolUseResult && Array.isArray(d.toolUseResult.questions) && d.toolUseResult.answers ? Object.values(d.toolUseResult.answers).map(String) : [])).join('\n');
+export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
   if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
-  if (nameIn(path.basename(root), namedRepos(lines))) return null;
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
-  const key = `${session}:${task}:${norm(root)}`; // once per task and repo
-  if (seen[key]) return null; // asked once; the same repo again goes through
+  const key = `${session}:${norm(root)}`; // once per session and repo: what the user said about the job (the repo, in their request or their answer) holds for its next tasks
+  if (seen[key]) return null; // asked or named once; the same repo again goes through
+  const named = nameIn(path.basename(root), namedRepos(lines)) || repoNamedIn(path.basename(root), windowAnswers(lines));
   for (const [k, at] of Object.entries(seen)) if (Date.now() - at > 7 * 86400000) delete seen[k];
   seen[key] = Date.now();
   try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+  if (named) return null;
   return `Waymark: this change is in ${path.basename(root)}, a repository the task's request does not name (the session works in ${path.basename(cwdRoot)}). Ask the user in your choice window whether to change it, then name it in the Pedido line ("Repos: <each repo this task touches>"). Sent again after that, it goes through.`;
 }
 
@@ -288,9 +311,23 @@ export function checkMove(command, cwd, session, task = '', stateFile = path.joi
 
 // An ego-browser script, with the files it imports by file:/// URL, checked before it runs (docs/adr/0047): the local dev server and the design
 // link the user wrote in the request are the only hosts; a profile-wide clear and a typed password never run. → the deny reason, or null.
-function checkEyes(command, turns) {
+// The design link is the user's for the whole job: the hosts of the links they wrote are kept per session (a small file, read and written only on an ego call), so a
+// later task of the same job, whose own prompts do not repeat the link, still may look at it.
+const EYES_HOSTS = () => path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.eyes-hosts.json');
+function sessionHosts(session, written, file = EYES_HOSTS()) {
+  let all = {};
+  try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const kept = new Set([...(all[session]?.hosts || []), ...written]);
+  if (written.some((h) => !(all[session]?.hosts || []).includes(h))) {
+    for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
+    all[session] = { at: Date.now(), hosts: [...kept] };
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch {}
+  }
+  return [...kept];
+}
+function checkEyes(command, turns, session = 'unknown') {
   const files = [...String(command).matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => { try { return fs.readFileSync(decodeURI(m[1]), 'utf8'); } catch { return ''; } });
-  const why = eyesRefusal([command, ...files].join('\n'), requestRefs(turns().filter(isPrompt)).hosts);
+  const why = eyesRefusal([command, ...files].join('\n'), sessionHosts(session, requestRefs(turns().filter(isPrompt)).hosts));
   return why ? `Waymark: this ego-browser script was not run: ${why}. The eyes look at the local dev server as the user, already signed in (docs/adr/0047).` : null;
 }
 
@@ -307,44 +344,52 @@ function checkMemorySave(text, cwd, session) {
 
 export function gate(hook, agent) {
   const c = agent.call(hook), cwd = hook.cwd || process.cwd();
+  const project = pinnedCwd(hook.session_id, cwd, Date.now(), { write: false }); // the session's project (its first prompt's folder), read only: the shell's folder still resolves relative paths
   if (!c) return null;
   if (c.memory !== undefined) return checkMemorySave(c.memory, cwd, hook.session_id);
   // The guard that cannot judge a command denies it: failing open there let a command with a bracket in it read what the guard exists to stop.
   let sensitive;
-  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(cwd).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
+  const turns = () => { let since = 0; try { since = taskStart(readRecords(projectHome(project).log), hook.session_id); } catch {} return readTurns((b) => agent.read(hook, b), 3, undefined, undefined, since); };
   try { sensitive = checkSensitive(c, cwd, hook.session_id, turns); } catch (e) {
     logHookError('tool-hook guard', e);
     sensitive = `Waymark: the sensitive-path guard could not read this call (${String(e?.message || e).slice(0, 100)}), so it was not run. Rephrase it (one command, no pattern text in brackets) and run it again; the cause is in ~/.waymark/hook-errors.log.`;
   }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
-  const taskKey = () => { try { return String(taskStart(readRecords(projectHome(cwd).log), hook.session_id)); } catch { return ''; } }; // the task's start: the repo question is asked once per task
+  const taskKey = () => { try { return String(taskStart(readRecords(projectHome(project).log), hook.session_id)); } catch { return ''; } }; // the task's start, for the structural-move question
   // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
     const link = checkLink(c.command);
     if (link) return link;
-    if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
-    const trailer = checkTrailer(c.command, cwd) || missingTrailer(c.command, hook.session_id, cwd);
+    if (/\bgh(?:\.exe)?\s/.test(c.command)) { let mem = ''; try { mem = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {} const gh = checkGh(c.command, turns().filter(isPrompt).map(promptText).join('\n'), mem); if (gh) return gh; } // the user's account and pull requests, and the project's rule of who opens them
+    if (/\bpush\b|\brelease\b/.test(c.command)) { // nothing leaves the machine from a question, or against the project's "Push: the user"
+      let mem = '';
+      try { mem = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {}
+      const lines = turns(), turn = currentTurn(lines);
+      const push = checkPush(c.command, mem, routedLevel(turn.texts, turn.tools) === 'Q' && !openTaskRoute(lines));
+      if (push) return push;
+    }
+    const trailer = checkTrailer(c.command, project) || missingTrailer(c.command, hook.session_id, project);
     if (trailer) return trailer;
-    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
+    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
     if (/(?:^|[;&|(\s])(?:mv|move|Move-Item)\s/i.test(c.command)) { // a census that cannot run leaves the move to the decision gate below
       let move = null;
       try { move = checkMove(c.command, cwd, hook.session_id, taskKey()); } catch (e) { logHookError('tool-hook move', e); }
       if (move) return withNote(move);
     }
-    const lines = turns(), own = projectHome(cwd).root;
-    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, taskKey()); if (deny) return withNote(deny); }
-    return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, cwd));
+    const lines = turns(), own = projectHome(project).root;
+    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id); if (deny) return withNote(deny); }
+    return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, project));
   }
   const files = (c.files || []).filter((f) => !exempt(f, cwd));
   if (!files.length) return null;
   const lines = turns(); // a long session (pasted images) keeps the turn's prompt in view
-  const own = projectHome(cwd).root;
+  const own = projectHome(project).root;
   let memory = '';
-  try { memory = fs.readFileSync(projectHome(cwd).memory, 'utf8'); } catch {}
+  try { memory = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {}
   for (const f of files) {
-    const deny = checkRepo(repoOf(f), own, lines, hook.session_id, undefined, taskKey()) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, cwd);
+    const deny = checkRepo(repoOf(f), own, lines, hook.session_id) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, project);
     if (deny) return withNote(deny);
   }
   return null;
@@ -398,16 +443,25 @@ export function commandRepos(command, cwd = process.cwd()) {
 // The department the task is routed to comes first: the line "Waymark → L<n> · dept-X" of the turn, or a re-route by Skill call with args. A session
 // that loaded dept-frontend and now routes a backend task by the line alone owns a backend task, not a frontend one. The line is not in the transcript
 // for a second or two after it is written, so until it shows the last department the session invoked stands in (the next edit hands the right one).
-function ownerDept(hook, agent) {
-  if (!hook.transcript_path) return null;
+// The task's route as the transcript shows it: the owner department and the declared level (null when none).
+// The route is read back to the task's start (the same reach as the gate): a task whose routing line sits under megabytes of screenshots and tool output is not
+// routed from a tail alone. `kept`: the route this task's state already holds, so a long transcript is read once per task, not once per edit.
+function routeOf(hook, agent, since = 0, kept = null) {
+  if (!hook.transcript_path) return { dept: null, level: null };
   try {
-    const lines = agent.read(hook, 512 * 1024), turn = currentTurn(lines);
-    const routed = routedDept(turn.texts, turn.tools) || inheritedRoute(lines)?.dept; // a later prompt of the task keeps the route of the one before
-    if (routed) return routed;
+    const read = (s) => readTurns((b) => agent.read(hook, b), 1, 512 * 1024, undefined, s);
+    let lines = read(0), turn = currentTurn(lines); // the tail first: a re-route inside the task shows there and wins over the route kept
+    if (kept && (kept.level || kept.dept) && !routedLevel(turn.texts, turn.tools) && !routedDept(turn.texts, turn.tools) && !inheritedRoute(lines)) return { dept: kept.dept || null, level: kept.level || null };
+    if (since && !routedLevel(turn.texts, turn.tools) && !routedDept(turn.texts, turn.tools)) { lines = read(since); turn = currentTurn(lines); } // not there: back to the task's start
+    const inherited = inheritedRoute(lines); // a later prompt of the task keeps the route of the one before
+    const level = routedLevel(turn.texts, turn.tools) || inherited?.level || null;
+    const routed = routedDept(turn.texts, turn.tools) || inherited?.dept;
+    if (routed) return { dept: routed, level };
     const calls = sessionTools(lines).filter((t) => t.name === 'Skill' && /^dept-/.test(String(t.input?.skill || '')));
-    return calls.length ? String(calls.at(-1).input.skill) : null;
-  } catch { return null; }
+    return { dept: calls.length ? String(calls.at(-1).input.skill) : null, level };
+  } catch { return { dept: null, level: null }; }
 }
+const ownerDept = (hook, agent) => routeOf(hook, agent).dept;
 
 // Procedures by the hook (docs/adr/0027): at the task's first change the owner department's procedures.md goes in as
 // context, once per task and department, so the agent spends no response reading it. The delivery is kept with the packed
@@ -429,7 +483,7 @@ export function deptLoaded(c) {
 // first edit hands them, and a turn that changes nothing is handed nothing.
 function handOnLoad(dept, session, since, file) {
   const all = readPacked(file), st = all[session]?.since === since ? all[session] : null;
-  if (!st?.files?.length) return null;
+  if (!st) return null; // no change happened in this task yet: the first one hands them (a change by shell that named no file leaves a state with no files)
   const procsDone = procDelivered(session, since, file);
   const text = procsDone.has(dept) ? null : procedureText(dept);
   if (!text) return null;
@@ -449,7 +503,8 @@ export async function packContext(hook, agent, file = PACKED()) {
     return handOnLoad(loaded, hook.session_id || 'unknown', taskStart(recs, hook.session_id || 'unknown'), file);
   }
   // a shell command that changes files: the files it names (what it will change is known only after it runs)
-  const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd) } : null) : c0;
+  // a shell change names the files it can (a script, a variable, a new folder may name none): the procedures go in all the same, before it runs
+  const c = c0?.command !== undefined ? (changesProject(c0.command) ? { files: commandFiles(c0.command, cwd), shell: true } : null) : c0;
   const home = projectHome(cwd);
   if (!home.dir || home.legacy) return null; // a project with Waymark's memory
   // Each file's own repo: the session's project, or another repo it edits (a front's session fixing the API). Not
@@ -461,25 +516,36 @@ export async function packContext(hook, agent, file = PACKED()) {
     return h.dir && !h.legacy && (fs.existsSync(path.join(h.root, '.git')) || fs.existsSync(h.memory)) ? h.root : null;
   };
   const files = (c?.files || []).map((f) => path.resolve(cwd, f)).filter((p) => !/\/\.(waymark|engram)\//.test(norm(p)) && repoOf(p));
-  if (!files.length) return null;
+  if (!files.length && !c?.shell) return null;
   let records = [];
   try { records = readRecords(home.log); } catch {}
   const session = hook.session_id || 'unknown', since = taskStart(records, session);
   const done = packedFiles(session, since, file), fresh = files.filter((f) => !done.has(norm(f)));
-  const dept = ownerDept(hook, agent), procsDone = procDelivered(session, since, file);
+  const state = readPacked(file)[session], route = routeOf(hook, agent, since, state?.since === since ? state.route : null), dept = route.dept, procsDone = procDelivered(session, since, file);
   const procText = dept && !procsDone.has(dept) ? procedureText(dept) : null;
-  if (!fresh.length && !procText) return null;
+  // a change by shell that names no file and has no owner to hand yet still leaves the task's state, so a department that loads after it is handed its procedures at the load
+  if (!fresh.length && !procText && !(c?.shell && !packedAny(session, since, file))) return null;
   const { pack } = await import('./pack.mjs');
   const byRepo = new Map();
   for (const f of fresh) { const r = repoOf(f); byRepo.set(r, [...(byRepo.get(r) || []), f]); }
   const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], late: all[session]?.since === since ? all[session].late || [] : [] };
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], ...(route.level || route.dept ? { route } : {}), late: all[session]?.since === since ? all[session].late || [] : [] };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';
-  return [memory, procs].filter(Boolean).join('\n\n');
+  const owed = fresh.length && !done.size && Number(route.level) >= 2 ? owedAtClose(fresh) : ''; // with the first change of an L2+ task, never again; an L1 owes none of it
+  return [memory, procs, owed].filter(Boolean).join('\n\n') || null;
+}
+
+// What the close of an L2+ task asks, handed once with the first change (the level is the agent's to declare, so not earlier): the Cierre is then written last and
+// no turn is spent on a list the hook already knew. A styles or template file adds the look at the screen.
+const UI_FILE = /\.(?:html?|css|scss|sass|less|vue|svelte|jsx|tsx)$|\.component\./i;
+function owedAtClose(files) {
+  const items = ['the project gate after your last change (typecheck, lint of the touched files; the full gate and the build once, at the very end)', 'a spec next to the code you change, run before the code it tests',
+    'code-review once, when the whole task is complete', ...(files.some((f) => UI_FILE.test(f)) ? ['eyes: look at what you built in the browser, one line per element of a screenshot, in ONE ego space for the whole task (the first look is the reference; go back to the same space at every big step and for every doubt or divergence, end with a full test of operation, and close it once yourself, only when the task is complete); the session is the user\'s: never type credentials, and if a page asks for a login stop and tell them'] : []), 'the Pedido answered item by item in the Cierre'];
+  return `At L2 and above the close also asks for: ${items.join(' · ')}. Order: the code and its spec, then code-review (wait for its result: never write a Cierre while it runs, its result brings you back), apply its findings, then the final gate, the build of every repo you changed${files.some((f) => UI_FILE.test(f)) ? ' and the eyes on the final code' : ''}, and write the one Cierre last, only when all of it is done (a Cierre is never "parcial"; what the user finds later is a follow-up T<n>b). A step only the user can do (restart the API after a change it must load, sign in to the ego tab) is asked and waited for in the same turn, with no Cierre; a migration is asked in the choice window and on a yes you run it. A user message that arrives mid-task is answered in one line and the work goes on: it is not the end.`;
 }
 
 if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
@@ -491,6 +557,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     try {
       const hook = parseHook(input, agent);
       if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+      tagLatency(hook, hook.cwd);
       const after = /^(PostToolUse|AfterTool)$/.test(hook.hook_event_name || '');
       if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
       // a session with no status line (the desktop app): what it spent so far, so a rise read mid-turn is split with it

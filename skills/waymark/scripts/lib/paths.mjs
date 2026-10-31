@@ -44,8 +44,13 @@ const tmpReal = () => { const t = os.tmpdir(); if (realTmp?.t !== t) realTmp = {
 // A relative path is read as written: resolving it against the process's own folder would make it scratch whenever
 // that folder is under temp.
 const realOf = (p) => (path.isAbsolute(String(p)) ? norm(real(p)) : norm(p));
+// An ego-browser script (a .mjs, .cjs or .js in a folder named ego, .ego, ego-scripts, ego-rounds or ego-tmp) written outside the project's root is a tool of the eyes,
+// never a change of the project: denying its write sent the agent to a heredoc, and counting it made a turn of only ego calls a task. A repository whose name merely
+// starts with ego (ego-web) is a project and stays one.
+const EGO_SCRIPT = /(?:^|\/)\.?ego(?:-(?:scripts?|rounds?|tmp))?\/(?:[^/]+\/)*[^/]+\.(?:mjs|cjs|js)$/;
 export const exemptPath = (file, root = '') => {
   const f = norm(file), F = realOf(file), home = norm(os.homedir()), tmp = norm(os.tmpdir()), TMP = tmpReal();
+  if (EGO_SCRIPT.test(f) && !(root && (f.startsWith(`${norm(root)}/`) || F.startsWith(`${realOf(root)}/`)))) return true;
   // a directory entry (git lists an untracked folder alone) is matched like the files in it
   if ([`${f}/`, `${F}/`].some((d) => d.startsWith(`${home}/.waymark/`) || d.includes('/.waymark/') || d.includes('/.claude/projects/'))) return true;
   const scratch = (x) => x.includes('/appdata/local/temp/') || x.startsWith('/tmp/') || (tmp && x.startsWith(`${tmp}/`)) || (TMP && x.startsWith(`${TMP}/`)) || x.includes('/scratchpad/');
@@ -75,3 +80,10 @@ export function repoOf(p) {
 
 // A repo's name as a whole word of a text ("api" is not in "api-gateway").
 export const nameIn = (name, text) => new RegExp(`(?<![\\w-])${String(name).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(String(text).toLowerCase());
+// What the user says of a job names a repo by its role as often as by its folder: "FE primero y API donde falte" names the API repo. A folder that ends in a role
+// word (-api, -web, -front, -backend…) is named by that word too; a folder with no role in its name is named only by itself.
+const ROLE = /^(?:api|web|front|frontend|backend|server|client|worker|admin)$/i;
+export const repoNamedIn = (name, text) => {
+  const parts = String(name).split(/[-_.]/), role = parts.length > 1 ? parts[parts.length - 1] : '';
+  return nameIn(name, text) || (ROLE.test(role) && nameIn(role, text));
+};

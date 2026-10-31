@@ -2,6 +2,7 @@
 // Offline and read-only. A "prompt" is a message the user typed: tool results, command echoes, system reminders,
 // interruptions and background-task notifications (<task-notification>) are not prompts.
 import fs from 'node:fs';
+import { shellRuns } from './runs.mjs';
 
 const TAIL = 2 * 1024 * 1024; // bytes read from the end of a transcript by the hooks
 
@@ -20,9 +21,12 @@ export function readTail(file, bytes = TAIL) {
   return parseLines(rows.join('\n'));
 }
 
+// A status note the app adds to the user's message (<system-reminder>…</system-reminder>) is not the ask: the words around it are.
+const NOTE = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 export const promptText = (d) => {
   const c = d.message?.content;
-  return typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
+  const text = typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join(' ');
+  return text.includes('<system-reminder>') ? text.replace(NOTE, ' ').trim() : text;
 };
 
 // The summary a context compaction writes to continue the session is no prompt either. Its shape is not documented
@@ -74,17 +78,43 @@ const turnStart = (lines, since = 0) => {
 // either releases it (a notification may carry no tool-use-id). A launch older than
 // BACKGROUND_WAIT_MS with no notification is a dead agent, not waited for: the turn is judged.
 export const BACKGROUND_WAIT_MS = 30 * 60000;
-export function pendingBackground(lines, since = 0, now = Date.now()) {
+// A gate, a build or a test run the shell left in the background is waited for too: it ends and notifies, and the turn that ends before it was
+// judged without its result. A watcher or a server never ends, so it is not waited for. The shell's launch names its id in its result ("…with ID: bg1").
+export const SHELL_WAIT_MS = 10 * 60000;
+const NEVER_ENDS = /(?:^|\s)(?:--watch|--watchAll|-w|watch|serve|dev|start)(?=\s|$)/;
+const isShellCall = (c) => c.type === 'tool_use' && /^(Bash|PowerShell|shell)$/.test(c.name) && c.input?.run_in_background;
+const finiteCheck = (command) => !NEVER_ENDS.test(String(command || '')) && shellRuns(String(command || '')).some((p) => p.build || p.test || p.gate);
+export function pendingBackground(lines, since = 0, now = Date.now(), agentWait = BACKGROUND_WAIT_MS) {
   const { from } = turnStart(lines, since);
-  const launched = [];
+  const launched = [], shellLaunch = new Map(), monitors = new Set();
   for (const d of lines.slice(from)) {
-    if (d.type !== 'user' || d.isSidechain || !(d.toolUseResult?.background || d.toolUseResult?.isAsync)) continue;
     const at = Date.parse(d.timestamp || '') || 0;
-    for (const c of Array.isArray(d.message?.content) ? d.message.content : []) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
+    if (d.type === 'assistant' && !d.isSidechain) for (const c of d.message?.content || []) { if (isShellCall(c) && finiteCheck(c.input.command)) shellLaunch.set(c.id, at); if (c.type === 'tool_use' && c.name === 'Monitor') monitors.add(c.id); }
+    if (d.type !== 'user' || d.isSidechain) continue;
+    const parts = Array.isArray(d.message?.content) ? d.message.content : [];
+    // a Monitor that watches for a gate to end is waited for until its own timeout (a persistent one watches forever: never waited for); its <task-notification> names its task id
+    const mon = d.toolUseResult;
+    if (mon?.taskId && mon.timeoutMs && !mon.persistent) for (const c of parts) if (c.type === 'tool_result' && monitors.has(c.tool_use_id)) launched.push({ id: c.tool_use_id, agent: mon.taskId, at, wait: Math.min(Number(mon.timeoutMs), BACKGROUND_WAIT_MS) });
+    if (d.toolUseResult?.background || d.toolUseResult?.isAsync) for (const c of parts) if (c.type === 'tool_result') launched.push({ id: c.tool_use_id, agent: d.toolUseResult.agentId || null, at });
+    for (const c of parts) if (c.type === 'tool_result' && shellLaunch.has(c.tool_use_id)) {
+      const text = typeof c.content === 'string' ? c.content : JSON.stringify(c.content || '');
+      launched.push({ id: c.tool_use_id, agent: text.match(/\bID:\s*([\w-]+)/)?.[1] || null, at: shellLaunch.get(c.tool_use_id), shell: true });
+    }
   }
   if (!launched.length) return [];
   const notified = lines.filter((d) => d.type === 'user' && /<task-notification>/.test(promptText(d))).map(promptText).join('\n');
-  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > BACKGROUND_WAIT_MS)).map((l) => l.id);
+  // a shell run the agent read to its end itself (its output call shows an exit code or a final status) needs no notification
+  const polled = (id) => {
+    const calls = new Set();
+    for (const d of lines.slice(from)) {
+      for (const c of Array.isArray(d.message?.content) ? d.message.content : []) {
+        if (d.type === 'assistant' && c.type === 'tool_use' && [c.input?.bash_id, c.input?.task_id, c.input?.shell_id].includes(id)) calls.add(c.id);
+        if (d.type === 'user' && c.type === 'tool_result' && calls.has(c.tool_use_id) && /<exit_code>|<status>(?:completed|failed|killed)|exit code:?\s*\d/i.test(typeof c.content === 'string' ? c.content : JSON.stringify(c.content || ''))) return true;
+      }
+    }
+    return false;
+  };
+  return launched.filter((l) => !notified.includes(`<tool-use-id>${l.id}</tool-use-id>`) && !(l.agent && notified.includes(`<task-id>${l.agent}</task-id>`)) && !(l.at && now - l.at > (l.wait || (l.shell ? SHELL_WAIT_MS : agentWait))) && !(l.shell && l.agent && polled(l.agent))).map((l) => l.id);
 }
 
 // A tool call as the core reads it: a skill invoked through the Claude Code plugin ("waymark:dept-qa") under its own
@@ -322,19 +352,41 @@ export function routedLevel(texts, tools) {
 // is not one (a Q answer that names it is not a closed task).
 export const CIERRE = /^[ \t]*##\s*Cierre\b/m;
 
+// An L1 with one real way says it in a `Camino: <it>` line before its first change and owes no choice window (Rule 0). One reading for the decision gate
+// (tool-hook.mjs) and the Decision testigo (stop-hook.mjs). `before`: the index of the turn's first change; the line counts when it was said before that call.
+export const CAMINO = /^[ \t]*(?:[-*][ \t]*)?Camino:[ \t]*\S/m;
+export const caminoSaid = (turn, before = Infinity) => (turn?.textAt || []).some(([at, t]) => at <= before && CAMINO.test(String(t).replace(/\*\*|__/g, '')));
+
 // A turn with no routing at all inherits the routing of the task's last routed turn (L1–L3) while that turn has not
 // written its Cierre: a reply to a question asked in the chat (Codex) opens a new unrouted turn, which would read as L0
 // and skip the gate. Looks back within the task (the two prompts before this one); an
 // explicit "Waymark → L0" or a Q turn never passes its routing on. → { level, dept } or null.
 export function inheritedRoute(lines, prompts = 2) {
+  const now = currentTurn(lines);
+  if (!lines.some(isPrompt) || routes(now.texts).length || reroute(now.tools)) return null;
+  return openTaskRoute(lines, prompts);
+}
+// The highest level any turn of these lines (a task's stretch) routed itself at: a short turn that continues the task ("do the migrate") keeps the task's level,
+// never lowers it, whether or not an earlier turn of the stretch already wrote a Cierre (a blocked one records nothing, so the task is still open).
+export function taskLevel(lines) {
+  const starts = [];
+  lines.forEach((d, i) => { if (isPrompt(d)) starts.push(i); });
+  if (!starts.length) starts.push(0);
+  let top = 0;
+  starts.forEach((s, k) => {
+    const t = currentTurn(lines.slice(0, starts[k + 1] ?? lines.length).slice(s));
+    const level = routedLevel(t.texts, t.tools);
+    if (typeof level === 'number' && level > top) top = level;
+  });
+  return top;
+}
+// The route (level and department) of the task still open before this turn: the last numerically routed turn since the task's start that has not written its Cierre,
+// whatever this turn says. A reply that continues the task is that task's, so a Q line on a reply that changes files is judged and gated at its level.
+export function openTaskRoute(lines, prompts = 2) {
   const starts = [];
   for (let i = lines.length - 1; i >= 0 && starts.length <= prompts; i--) if (isPrompt(lines[i])) starts.push(i);
-  if (!starts.length) return null;
-  const turnAt = (k) => currentTurn(lines.slice(0, k === 0 ? lines.length : starts[k - 1]));
-  const now = turnAt(0);
-  if (routes(now.texts).length || reroute(now.tools)) return null;
   for (let k = 1; k < starts.length; k++) {
-    const t = turnAt(k);
+    const t = currentTurn(lines.slice(0, starts[k - 1]));
     if (t.texts.some((x) => CIERRE.test(x.replace(/\*\*|__/g, '')))) return null; // the task closed
     if (!routes(t.texts).length && !reroute(t.tools)) continue; // another unrouted reply: keep looking back
     const level = routedLevel(t.texts, t.tools);

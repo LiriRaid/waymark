@@ -105,12 +105,17 @@ test('11: logic — a change in a repo the Pedido does not name is denied once, 
   assert.equal(T.checkRepo('/work/api', '/work/web', lines(answered('¿Toco también api?', ['Sí, api', 'No'], 'Sí, api')), 's4', stateFile()), null, 'the user named it in the window');
   assert.ok(T.checkRepo('/work/api', '/work/web', lines(say('Repos: api-gateway')), 's5', stateFile()), 'a longer name is not this name');
 });
-test('11: the repo question is asked once per task, Waymark\'s own copies and a submodule are no other repository', () => {
+test('11: the repo question is asked once per session and repo (2.0.20 point 22), Waymark\'s own copies and a submodule are no other repository', () => {
   const lines = [prompt('ajusta el servicio'), say('Waymark → L2 · dept-backend')];
   const f = stateFile();
   assert.ok(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '1000'));
   assert.equal(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '1000'), null, 'the same task: once');
-  assert.ok(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '2000'), 'a later task of the session asks again');
+  assert.equal(T.checkRepo('/work/api', '/work/web', lines, 's1', f, '2000'), null, 'a later task of the same job does not ask again');
+  assert.ok(T.checkRepo('/work/api', '/work/web', lines, 's-other', f, '2000'), 'counter-example: another session asks');
+  assert.ok(T.checkRepo('/work/db', '/work/web', lines, 's1', f, '2000'), 'counter-example: another repo of the same session asks');
+  const named = [prompt('haz el cambio en api'), say('Repos: web, api')];
+  assert.equal(T.checkRepo('/work/api', '/work/web', named, 's-named', f, '1'), null, 'named in the request');
+  assert.equal(T.checkRepo('/work/api', '/work/web', lines, 's-named', f, '2'), null, 'and a later task, whose prompts do not repeat the name, keeps it');
   const C = path.join(process.env.WAYMARK_HOME, 'tmp', '1');
   assert.equal(T.checkRepo(C, '/work/web', lines, 's9', stateFile(), '1'), null, 'a clean copy Waymark made is not the user\'s repository');
   const a = mk({ 'src/a.mjs': 'a\n' }), sub = path.join(a, 'vendor', 'lib');
@@ -137,6 +142,21 @@ test('11: the end-of-turn hook records a changed repo the Pedido never named, an
   assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], '¿Toco sibling? Sí'), [], 'named in the window');
   assert.deepEqual(reposNotNamed([path.join(a, 'src', 'a.mjs')], a, []), [], 'counter-example: only the own repo');
   assert.deepEqual(namedRepos(['Repos: web, api y gateway']), ['web', 'api', 'gateway']);
+});
+test('33: a repo whose folder ends in its role (chat-api) is named by that role in what the user chose in the window: "FE primero y API donde falte"', () => {
+  const lines = (...more) => [prompt('rehaz la pantalla de turnos'), say('Waymark → L2 · dept-frontend'), ...more];
+  const pick = 'Los 7 estados, FE primero y API donde falte';
+  assert.equal(T.checkRepo('/work/chat-api', '/work/chat', lines(answered('¿Cuánto hago?', [pick, 'Solo FE'], pick)), 's33a', stateFile()), null, 'the role the user chose covers the repo');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(), 's33b', stateFile()), 'counter-example: no answer, denied');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(answered('¿Cómo?', ['Con pruebas', 'Sin pruebas'], 'Con pruebas')), 's33c', stateFile()), 'counter-example: an answer that never says the role');
+  assert.ok(T.checkRepo('/work/notes', '/work/chat', lines(answered('¿Cuánto hago?', [pick, 'Solo FE'], pick)), 's33d', stateFile()), 'counter-example: a repo with no role in its name is not covered by a word');
+  // review of level 3: the role word covers a repo only when it is in what the user chose in the window, not in any text of the conversation
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', [prompt('rehaz la pantalla y revisa la api de pagos'), say('Waymark → L2 · dept-frontend')], 's33e', stateFile()), 'counter-example: the word in the user\'s own prompt');
+  assert.ok(T.checkRepo('/work/chat-api', '/work/chat', lines(say('Repos: chat, api')), 's33f', stateFile()), 'counter-example: the agent\'s own Pedido line with the role is not the user\'s answer; the folder name is what a Pedido must give');
+  const a = mk({ 'src/a.mjs': 'a\n' }), b = path.join(a, 'chat-api');
+  fs.mkdirSync(path.join(b, 'src'), { recursive: true }); gitT(b, 'init', '-q'); fs.writeFileSync(path.join(b, 'src', 'b.mjs'), 'b\n');
+  assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], pick), [], 'the end-of-turn finding agrees');
+  assert.deepEqual(reposNotNamed([path.join(b, 'src', 'b.mjs')], a, [], 'Con pruebas'), ['chat-api'], 'counter-example: still a finding when nothing covers it');
 });
 
 // ---- the project's own migration script comes first ----

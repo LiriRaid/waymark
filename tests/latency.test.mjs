@@ -163,6 +163,16 @@ test('latency: the memory an edit carries loads from pack.mjs, not from the whol
   assert.match(light.pack(d, ['app.css']), /^app\.css:/, 'a file with a commit and no task record is listed');
 });
 
+// ---- point 17(a): each run is tied to its project, its session and the size of its transcript, so a slow Stop can be read against a long session ----
+test('latency: every hook tags its run with project, session and the transcript\'s size in KB; a row with no tag is still read', () => {
+  const p = project('tag');
+  const runs = [['PreToolUse', 'tool-hook.mjs', { tool_name: 'Read', tool_input: { file_path: path.join(p.d, 'a.ts') } }], ['UserPromptSubmit', 'rule0-hook.mjs', { prompt: 'arregla el cálculo' }], ['Stop', 'stop-hook.mjs', { stop_hook_active: false }], ['SessionStart', 'session-hook.mjs', { source: 'startup' }]];
+  for (const [event, hook, input] of runs) spawnsOf(event, hook, input, p);
+  const log = fs.readFileSync(path.join(p.home, 'latency.log'), 'utf8').trim().split('\n').map((l) => l.split('\t'));
+  assert.equal(log.length, 4);
+  for (const row of log) assert.match(row[3] || '', new RegExp(`^${path.basename(p.d)}:lat:[1-9]\\d*$`), `${row[1]}: ${row[3]}`);
+});
+
 // ---- the milliseconds of real use: hook-run.cjs writes each run, `check` names an event over its cap ----
 test('latency: hook-run.cjs writes the hook and its milliseconds; check warns only for an event whose p95 passes its cap', async () => {
   const p = project('log');
@@ -177,10 +187,27 @@ test('latency: hook-run.cjs writes the hook and its milliseconds; check warns on
   process.env.WAYMARK_HOME = p.home;
   try {
     write([...Array(20).fill(['rule0-hook', 900]), ...Array(20).fill(['tool-hook', 120])]);
-    assert.equal(W.latencyLine(now), '', 'counter-example: within the caps nothing is said');
+    assert.equal(W.latencyLine(now, 0), '', 'counter-example: within the caps nothing is said'); // since 0: the window must not depend on when this checkout was made (a fresh CI checkout postdates the rows)
     write([...Array(19).fill(['rule0-hook', 900]), ['rule0-hook', 4000], ...Array(20).fill(['stop-hook', 3000])]);
-    const line = W.latencyLine(now);
+    const line = W.latencyLine(now, 0);
     assert.match(line, /Stop p95 3\.0 s > 2\.3 s/);
     assert.doesNotMatch(line, /UserPromptSubmit/, 'one slow run in twenty is not the p95');
+  } finally { delete process.env.WAYMARK_HOME; }
+});
+
+// ---- 2.0.20 finding 62: the window is the installed version's own, not seven days across a reinstall ----
+test('latency: runs from before the installed copy was made are another version\'s and are not counted against it', async () => {
+  const p = project('since');
+  const W = await import(`file://${SCRIPTS}/waymark.mjs`);
+  const now = Date.now(), before = new Date(now - 3 * 3600000).toISOString(), after = new Date(now - 60000).toISOString(), installed = now - 2 * 3600000;
+  const rows = [...Array(20).fill([before, 'stop-hook', 40000]), ...Array(12).fill([after, 'stop-hook', 700])];
+  process.env.WAYMARK_HOME = p.home;
+  try {
+    fs.writeFileSync(path.join(p.home, 'latency.log'), rows.map(([at, h, ms]) => `${at}\t${h}\t${ms}\n`).join(''));
+    assert.match(W.latencyLine(now, 0), /Stop p95 40\.0 s/, 'with no install time, the old runs are counted (the 7-day window)');
+    assert.equal(W.latencyLine(now, installed), '', 'since the install: 12 runs, all fast: nothing is said');
+    assert.equal(W.latencyLine(now, now - 30000), '', 'counter-example: fewer than 10 runs of this install say nothing, either way');
+    fs.writeFileSync(path.join(p.home, 'latency.log'), [...Array(20).fill([after, 'stop-hook', 5000])].map(([at, h, ms]) => `${at}\t${h}\t${ms}\n`).join(''));
+    assert.match(W.latencyLine(now, installed), /Stop p95 5\.0 s > 2\.3 s \(20 runs\)/, 'a slow install is still named');
   } finally { delete process.env.WAYMARK_HOME; }
 });

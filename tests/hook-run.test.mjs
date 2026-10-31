@@ -18,6 +18,7 @@ after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true
 const tmp = (name) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `wm-run-${name}-`)); temps.push(d); return d; };
 const I = await import(`file://${SCRIPTS}/install-hooks.mjs`);
 const W = await import(`file://${SCRIPTS}/waymark.mjs`);
+const { release } = await import(`file://${SCRIPTS}/lib/version.mjs`);
 
 // A hook that says who ran it: its pid and its parent's, what it was given and what it read; and a mark file, so a hook that did not run shows.
 const dir = tmp('stub');
@@ -146,7 +147,7 @@ const serve = (body, status = 200) => new Promise((resolve) => {
 });
 const noticeFor = async (url) => { process.env.WAYMARK_UPDATE_URL = url; try { return await W.update(); } finally { delete process.env.WAYMARK_UPDATE_URL; } };
 const INSTALLED = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
-const bump = (v, by) => { const [a, b, c] = v.split('.').map(Number); return `${a}.${b}.${c + by}`; };
+const bump = (v, by) => { const [a, b, c] = release(v).split('.').map(Number); return `${a}.${b}.${c + by}`; }; // a pre-release (2.0.20-dev) bumps from the release it leads to
 
 test('update notice: a newer version on main is offered with its three answers; the same, an older one, an error page and no server say nothing', async () => {
   const newer = await serve(`${bump(INSTALLED, 1)}\n`);
@@ -170,4 +171,12 @@ test('update notice: it is part of check, which the session hook points to; INST
   const nine = install.slice(install.indexOf('## 9. Update'), install.indexOf('## 10. Uninstall'));
   assert.match(nine, /verify --install --require-signature/);
   assert.ok(nine.indexOf('verify --install --require-signature') < nine.indexOf('Report with the same list'), 'the verification comes before the report');
+});
+
+test('update notice (2.0.20): a pre-release is older than the release it leads to, and the same pre-release is not an update', () => {
+  assert.equal(W.newer('2.0.20', '2.0.20-dev'), true, 'the release is offered to a dev install of it');
+  assert.equal(W.newer('2.0.20-dev', '2.0.20'), false, 'counter-example: a dev build is never newer than its release');
+  assert.equal(W.newer('2.0.20-dev', '2.0.20-dev'), false, 'the same pre-release: nothing to update');
+  assert.equal(W.newer('2.0.21', '2.0.20-dev'), true);
+  assert.equal(W.newer('2.0.20', '2.0.20'), false);
 });

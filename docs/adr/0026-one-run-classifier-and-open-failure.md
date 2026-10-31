@@ -4,11 +4,11 @@
 
 ## Context
 - **Every release since 2.0.7 patched a different testigo for a false ✘ or ⚠.** Review (2.0.7), Evidencia (2.0.9, 2.0.10), the spec red first (2.0.11), the build per repo (2.0.13), the gate cell, lint warnings and the clean copy (2.0.14). Each patch added a regex over a command's text inside `cierreGaps`, and the next command shape slipped past it.
-- **The nearest case:** YaloAtiendo 2026-10-15 · T1 closed 11/12 because its last «gate» was a PowerShell script run from a scratch folder (`$T = "…\Temp\claude\…"`, `Push-Location $T; pnpm exec eslint …`). The hook saw `eslint` and counted a gate that was not the task's.
+- **The nearest case:** the real-use project 2026-10-15 · T1 closed 11/12 because its last «gate» was a PowerShell script run from a scratch folder (`$T = "…\Temp\claude\…"`, `Push-Location $T; pnpm exec eslint …`). The hook saw `eslint` and counted a gate that was not the task's.
 - **No safety net.** `tests/false-fails.test.mjs` had nine hand-made cases and none came from a transcript.
 
 ## Decision
-- **A regression corpus first.** `tests/corpus/*.json` holds real turns (YaloAtiendo T1, five waymark turns with a false ⚠), trimmed to what the testigos read, plus the synthetic command shapes in `tests/corpus.test.mjs`. `tests/corpus.test.mjs` replays each through `cierreGaps`. A case that fails today is marked `redUntil` and runs as a todo, never hidden.
+- **A regression corpus first.** `tests/corpus/*.json` holds real turns (the real-use project T1, five waymark turns with a false ⚠), trimmed to what the testigos read, plus the synthetic command shapes in `tests/corpus.test.mjs`. `tests/corpus.test.mjs` replays each through `cierreGaps`. A case that fails today is marked `redUntil` and runs as a todo, never hidden.
 - **One module reads commands: `scripts/runs.mjs`.** `shellSkeleton`, `shellRuns`, `mutatesFiles` and `changesProject` moved there from `provenance.mjs` (which re-exports them). It adds the clean-copy detection (`copyPaths`, `inCopy`) and `commandKind(command, copies)`, which answers the one question the testigos ask: `copy`, `unknown`, `build`, `gate`, `test` or `aux`. The stop hook, the tool hook and `learn.mjs` import from it.
 - **Open failure.** The hook blocks or lowers the result only on evidence it can read: the tool's output or the exit of the task's own gate. A gate or test run whose place it cannot tell is `apart`:
   - in a clean copy (`git worktree add …` or a later call naming its path), or from a temp/scratch folder (`cd`/`Push-Location` to it, a variable resolved from its assignment in the same command): `copy`;

@@ -27,6 +27,7 @@ import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
 import { newProposals } from './learn.mjs';
 import { waymarkHome } from './lib/paths.mjs';
+import { tagLatency } from './lib/latency.mjs';
 import { read } from './lib/fs.mjs';
 
 const HOME = waymarkHome();
@@ -72,8 +73,6 @@ export const openList = (ids) => {
   const shown = ids.slice(0, OPEN_MAX).map((id) => { const [d, t] = id.split(' · '); if (t && d === day) return t; day = t ? d : null; return id; });
   return shown.join(', ') + (ids.length > OPEN_MAX ? ` +${ids.length - OPEN_MAX} (W tasks)` : '');
 };
-export const HELD_MAX = 520; // characters of the held message the card carries; a longer one is kept whole in held-full.md
-export const HELD_MORE = ' … (the rest: .waymark/held-full.md)';
 export function digest(cwd, agentName = 'claude') {
   const out = [];
   const env = section('\n' + read(path.join(HOME, 'profile.md')), 'Environment').filter((l) => l.startsWith('-'));
@@ -87,8 +86,12 @@ export function digest(cwd, agentName = 'claude') {
     return out.join('\n');
   }
   // the template's Architecture placeholder becomes what the repo itself shows (docs/adr/0043), never over a line somebody wrote
-  if (!home.legacy && /^- Architecture:\s*<slug/m.test(best.text)) {
-    try { if (fillMemory(home.memory, census(home.root))) best.text = read(home.memory); } catch (e) { logHookError('session-hook convention', e); }
+  // with it, the Stack, Source root, Path aliases, Related projects and Reusables placeholders the repo answers by itself, each "(to confirm)"
+  if (!home.legacy && /^- (?:Architecture|Stack|Source root and layout|Path aliases|Related projects):\s*<(?!\s*$)/m.test(best.text)) {
+    try {
+      const related = workspaceSiblings(home.root).slice(0, 4).map((h) => `${h.slug} (${path.relative(home.root, h.root).split(path.sep).join('/')})`);
+      if (fillMemory(home.memory, census(home.root), { related })) best.text = read(home.memory);
+    } catch (e) { logHookError('session-hook convention', e); }
   }
   // the template's Package manager placeholder becomes the repo's own (lockfile or packageManager), marked to confirm
   if (!home.legacy && PM_PLACEHOLDER.test(best.text)) {
@@ -119,7 +122,7 @@ export function digest(cwd, agentName = 'claude') {
     // the Handoff of the same task carries its Aprendido whole: the line does not repeat it
     const learned = relay.startsWith(`Relevo de ${last.id} `) ? '' : aprendidoOf(String(last.cierre || '').replace(/\*\*|__/g, ''));
     const result = String(last.cierre || '').match(/Resultado:[ \t]*([A-Za-zÀ-ÿ]+)/)?.[1] || '?';
-    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 90)}` : ''} (whole record: W tasks "${last.id}")`);
+    out.push(`Last closed: ${last.id} · ${last.agent || '?'} · ${result}${learned ? ` · ${clip(learned, 75)}` : ''} (whole record: W tasks "${last.id}")`);
   }
   const wipAll = section('\n' + best.text, 'Work in progress').filter((l) => l.startsWith('-'));
   const open = openIds(wipAll);
@@ -128,7 +131,7 @@ export function digest(cwd, agentName = 'claude') {
   // the card's line is bounded: the head clipped, the Aprendido's tail kept (its next step and the plan's ✔1 · ▶2 are there), the whole in the file
   if (relay) {
     const [head, ...rest] = relay.split(/\n+/), tail = [...rest.join(' · ')]; // by code point: a cut never splits an emoji
-    const short = `${clip(head, 110)}${tail.length ? ` · ${tail.length > 150 ? `…${tail.slice(-149).join('').trimStart()}` : tail.join('')}` : ''}`;
+    const short = `${clip(head, 90)}${tail.length ? ` · ${tail.length > 70 ? `…${tail.slice(-69).join('').trimStart()}` : tail.join('')}` : ''}`;
     out.push(`Handoff (the user's request comes first): ${short}${short.length < relay.length ? ' (whole: .waymark/next-prompt.md)' : ''}`);
   }
   // lines with no task ID at their head (notes, or a memory in the older format) are kept, short
@@ -144,9 +147,9 @@ export function digest(cwd, agentName = 'claude') {
   try { const inc = incidentsLine(incidents(all), 'W'); if (inc) out.push(inc); } catch {}
   // the learned layer (docs/adr/0015): what any agent learned here, newest first; the end-of-turn hook writes it
   let learned = [];
-  try { if (!home.legacy) learned = learnedLines(home, 2, 90, last?.id); } catch {} // the last closed is already above
+  try { if (!home.legacy) learned = learnedLines(home, 2, 75, last?.id); } catch {} // the last closed is already above
   if (learned.length) out.push(`Learned (engram search "<words>" --project ${home.slug} for more):\n${learned.map((l) => `- ${l}`).join('\n')}`);
-  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); on demand: W memory <section> (Conventions · Identity), W tasks.`);
+  out.push(`Commands: the hook hands you W pack at a file's first edit (never run it); W memory <section>, W tasks on demand.`);
   // the other projects of the workspace (an API and its FE): what they left open and what they last closed; last, so
   // the card's cap trims this before the commands
   try {
@@ -161,6 +164,7 @@ export function digest(cwd, agentName = 'claude') {
   return out.join('\n');
 }
 
+export const HELD_MAX_CHARS = 20000; // a held message longer than this is a pasted document, not a request: it is bounded
 // The message the context brake kept in .waymark/next-prompt.md, if under a day old; the file is removed once read.
 export function heldPrompt(home, now = Date.now()) {
   const file = path.join(home.dir, 'next-prompt.md');
@@ -172,10 +176,9 @@ export function heldPrompt(home, now = Date.now()) {
     if (now - fs.statSync(file).mtimeMs < 86400000) text = whole.replace(/^<!--[^\n]*-->\n/, '').trim();
     if (cut < 0) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, content.slice(cut + 1));
   } catch {}
-  if (text.length <= HELD_MAX) return text;
-  // the user's words are never lost to the cap: the whole message stays in a file the agent reads on demand
-  try { fs.writeFileSync(path.join(home.dir, 'held-full.md'), text + '\n'); } catch {}
-  return text.slice(0, HELD_MAX) + HELD_MORE;
+  try { fs.rmSync(path.join(home.dir, 'held-full.md'), { force: true }); } catch {} // the file 2.0.19 kept the rest of a long message in: the card now carries it whole
+  // the user's words arrive whole, after the card's cap (EXTRA.held), once: a message of a few thousand characters is theirs entire; only a pasted document bounds it, and the card says how much was cut
+  return text.length > HELD_MAX_CHARS ? `${text.slice(0, HELD_MAX_CHARS)} … (${text.length - HELD_MAX_CHARS} more characters were cut: ask the user for the rest)` : text;
 }
 
 // One line when neither a check nor this pointer happened in the last week.
@@ -215,6 +218,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     let cwd = process.cwd(), sessionId = null;
     const h = parseHook(input, agent, { lenient: true });
     if (!h) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+    tagLatency(h, h.cwd);
     if (h.waymark_probe) { process.stdout.write(PROBE_OK); return; }
     cwd = h.cwd || cwd; sessionId = h.session_id || null;
     let text = '', held = '';

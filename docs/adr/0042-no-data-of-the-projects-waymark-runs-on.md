@@ -6,7 +6,7 @@
 
 On 2026-10-19 the author found two things on the public `LiriRaid/waymark` that should never have left the machine:
 
-- **A recorded turn from a client's project.** `tests/corpus/yalo-t1-clean-copy.json` was a session on YaloAtiendo, a private CIT project, trimmed for the regression corpus, and it still held parts of that project's source (`auth.controller.ts`, `sessions.service.ts`, `package.json`) and its paths. Four more cases held the author's prompts and the paths of their CIT folders.
+- **A recorded turn from a client's project.** a file under `tests/corpus/` was a session on the real-use project, a private CIT project, trimmed for the regression corpus, and it still held parts of that project's source (`auth.controller.ts`, `sessions.service.ts`, `package.json`) and its paths. Four more cases held the author's prompts and the paths of their CIT folders.
 - **The task records, prompts included.** The end-of-turn hook pushed `refs/notes/waymark*` to the remote on **every** push the agent made, without the per-project yes of ADR 0035: that yes only covered the push at each close (`autoPushNotes`). The author's preferences had no `Notes push:` line, and the notes reached GitHub anyway.
 
 Waymark is an open-source supply-chain tool. If it collects the projects it runs on, nobody can contribute to it or install it without exposing their own work.

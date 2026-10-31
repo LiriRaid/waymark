@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REMINDER, taskLine, gitLine } from './rule0-hook.mjs';
-import { CARD_HEAD, digest, EXTRA, HELD_MAX, HELD_MORE, coexistence } from './session-hook.mjs';
+import { CARD_HEAD, digest, EXTRA, coexistence } from './session-hook.mjs';
 import { found, unprepared, agentLabel, instructionsBlock } from './connect-agents.mjs';
 import { proposals } from './learn.mjs';
 import { MAX_CHARS } from './precedent.mjs';
@@ -33,18 +33,23 @@ export const README_ROWS = [
   ['reminder (short)', 'every prompt after a reply that followed the routine', 'the short reminder'],
   ['protocol L2', 'an L2 task', 'the protocol an L2 reads'],
   ['protocol L3', 'an L3 task', 'the protocol an L3 reads (L2 and L3 parts)'],
-  ['held message (max)', 'only after the context brake', 'the largest line the session hook adds for a held message'],
+  ['held message (frame)', 'only after the context brake', 'the line the session hook adds for a held message, before the user\'s own words (carried whole, once)'],
 ];
 export const readmeTable = (rows) => ['| Part | Loaded | What it is | Characters |', '|---|---|---|---|', ...README_ROWS.map(([name, when, what]) => `| ${name} | ${when} | ${what} | ${(rows.find((r) => r.name === name)?.chars || 0).toLocaleString('en-US')} |`)].join('\n');
 
-export function sizes(cwd) {
+// The skills Waymark answers for: itself, the dept-* and the tool skills its skill-map marks as owned. A skill another agent or the user put in the same folder lists
+// its description in every session too, but it is not Waymark's context to measure (check 8.2).
+export const ownSkills = (dirs, map) => dirs.filter((d) => d === 'waymark' || /^dept-/.test(d) || map?.skills?.[d]?.owned);
+export function sizes(cwd, { pinned = !!process.env.WAYMARK_SIZE_PINNED } = {}) {
   const home = projectHome(cwd);
-  const dirs = fs.readdirSync(SKILLS).sort();
+  let map = null;
+  try { map = JSON.parse(read(path.join(CORE, 'skill-map.json'))); } catch {}
+  const dirs = ownSkills(fs.readdirSync(SKILLS).sort(), map);
   const descriptions = dirs.map((d) => (read(path.join(SKILLS, d, 'SKILL.md')).match(/^description:.*$/m) || [''])[0].length).reduce((a, b) => a + b, 0);
   const real = () => {
     const repo = stackLine(home.root);
     // WAYMARK_SIZE_PINNED: the tests measure the reminder with a typical task line and git line, not this working tree's (the number of changed files and the length of their names moved it by a few characters between runs)
-    if (process.env.WAYMARK_SIZE_PINNED) return REMINDER.full + ' ID: new 2026-01-01 · T1.' + (repo ? ` Repo: ${repo}.` : '') + ' Git: main · 2 changed: M a-file.ts, M b-file.ts, ….';
+    if (pinned) return REMINDER.full + ' ID: new 2026-01-01 · T1.' + (repo ? ` Repo: ${repo}.` : '') + ' Git: main · 2 changed: M a-file.ts, M b-file.ts, ….';
     return REMINDER.full + taskLine(cwd) + (repo ? ` Repo: ${repo}.` : '') + gitLine(home.root);
   };
   const protocol = (part) => read(path.join(CORE, 'references', 'protocol', part)).length;
@@ -56,7 +61,7 @@ export function sizes(cwd) {
     { group: 'prompt', name: 'reminder (real)', chars: len(real) },
     { group: 'prompt', name: 'reminder (short)', chars: REMINDER.short.length },
     { group: 'outside cap', name: 'check pointer', chars: EXTRA.pointer('never', 'W').length },
-    { group: 'outside cap', name: 'held message (max)', chars: EXTRA.held('x'.repeat(HELD_MAX) + HELD_MORE).length },
+    { group: 'outside cap', name: 'held message (frame)', chars: EXTRA.held('').length }, // the user's own words add to it, once, whole
     { group: 'outside cap', name: 'precedent (max)', chars: MAX_CHARS },
     { group: 'outside cap', name: 'new agents', chars: len(() => { const names = found().filter(unprepared).map(agentLabel); return names.length ? EXTRA.agents(names, 'W') : ''; }) },
     { group: 'outside cap', name: 'proposals', chars: len(() => { const p = home.dir && !home.legacy ? proposals(home, readTaskRecords(home)) : []; return p.length ? EXTRA.proposals(p.map((x) => x.text), 'W') : ''; }) },
@@ -83,7 +88,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   const avg = (g) => Math.round(sum(g) / Math.max(1, rows.filter((r) => r.group === g).length));
   console.log('| Loaded | Part | Chars | ≈Tokens |\n|---|---|---|---|');
   for (const r of rows) console.log(`| ${r.group} | ${r.name} | ${r.chars} | ${tokens(r.chars)} |`);
-  const extra = sum('outside cap') - of('held message (max)') - of('instructions block (Cursor)');
-  console.log(`\nEvery session: ${sum('session')} chars (≈${tokens(sum('session'))} tokens), plus up to ${extra} after the card's cap here (a held message adds up to ${of('held message (max)')}; Cursor gets the block in the card) · every prompt: ${of('reminder (real)')} here (${REMINDER.short.length} after a reply that followed the routine) · an L2 reads ${of('protocol L2')} of protocol, an L3 ${of('protocol L3')} · a department when invoked: ${avg('department')} on average (≈${tokens(avg('department'))} tokens).`);
+  const extra = sum('outside cap') - of('held message (frame)') - of('instructions block (Cursor)');
+  console.log(`\nEvery session: ${sum('session')} chars (≈${tokens(sum('session'))} tokens), plus up to ${extra} after the card's cap here (a held message adds its own words, once; Cursor gets the block in the card) · every prompt: ${of('reminder (real)')} here (${REMINDER.short.length} after a reply that followed the routine) · an L2 reads ${of('protocol L2')} of protocol, an L3 ${of('protocol L3')} · a department when invoked: ${avg('department')} on average (≈${tokens(avg('department'))} tokens).`);
   console.log(`Tokens ≈ chars / 4. The real session figure, with the agent's own prompt and tools: measure.mjs.`);
 }

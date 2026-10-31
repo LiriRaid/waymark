@@ -1,6 +1,7 @@
 // Waymark hooks · scenario tests with synthetic transcripts. Run: node --test tests/*.test.mjs
 // Every test uses a temporary WAYMARK_HOME; nothing reads or writes the real ~/.waymark or ~/.claude.
 import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+process.env.WAYMARK_BRAKE_MODE = 'block'; // the cases here are the brake that stops a prompt (opt-in now); the default advice is tests/brake-advice.test.mjs
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -292,6 +293,18 @@ test('red by action: at L2+ a spec and code changed need the spec run before the
   assert.equal(step(turn(), why).pass, false, 'written before the block, it does not count');
 });
 
+test('red: a spec whose code is all new at HEAD needs no red proof (nothing to fail against); code that existed at HEAD still does', () => {
+  const { cwd } = fresh();
+  const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs');
+  const turn = () => currentTurn([prompt('agrega reintentos'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'),
+    call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'), call('Edit', { file_path: SPECF }), call('Edit', { file_path: FILE }),
+    call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test -- orders' }), call('Skill', { skill: 'code-review' }), MEM()]);
+  const red = (newAtHead) => cierreGaps(turn(), cierre(ids.next), undefined, undefined, { ...ctxFor(cwd), ...(newAtHead ? { newAtHead } : {}) }).steps.find((x) => x.id === 'red');
+  assert.equal(red(() => true).pass, true, 'every changed code file is new at HEAD: the spec cannot be shown red against nothing');
+  assert.equal(red(() => false).pass, false, 'counter-example: the code existed at HEAD, the spec must run before it');
+  assert.equal(red().pass, false, 'counter-example: nothing says it is new');
+});
+
 test('red per spec: a spec that adds cases runs before the code after it; one that only adjusts mocks only passes; a spec written by the shell counts', () => {
   const { cwd } = fresh();
   const ids = taskIds(cwd), SPECF = FILE.replace(/\.mjs$/, '.spec.mjs'), OLD = '/work/proj/src/auth.service.spec.mjs';
@@ -300,7 +313,7 @@ test('red per spec: a spec that adds cases runs before the code after it; one th
     call('Bash', { command: 'node --check src/orders.service.mjs && npm run build' }), call('Bash', { command: 'npm test' }), call('Skill', { skill: 'code-review' }), MEM()]);
   const red = (work) => cierreGaps(turn(work), cierre(ids.next), undefined, undefined, ctxFor(cwd));
   const mocks = call('Edit', { file_path: OLD, old_string: 'deleteMany: vi.fn()', new_string: 'deleteSessions: vi.fn()' });
-  // YaloAtiendo 2026-10-14 · T2: new specs written and run red by the shell, then code, then mocks adjusted
+  // the real-use project 2026-10-14 · T2: new specs written and run red by the shell, then code, then mocks adjusted
   const shellRed = ran('s1', `cat > src/orders.service.spec.mjs <<'EOF'\nit('retries', () => {})\nEOF\nnpm test -- orders`, true);
   const g = red([...shellRed, call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), mocks]);
   assert.equal(g.steps.find((x) => x.id === 'red').pass, true, 'the new spec ran red first; the mocks need no red');
@@ -353,14 +366,12 @@ test('2b: a .ts with a sibling template counts as UI; a service does not', () =>
   assert.equal(ui('articles.service.ts'), false);
 });
 
-test('Cierre: task ID missing or reused, Resultado missing', () => {
+test('Cierre: a task ID missing or reused blocks nothing (the record keeps the ID the prompt handed, 2.0.20 point 20); Resultado missing still does', () => {
   const { cwd } = fresh();
   record(cwd, `${taskIds(cwd).next}`);
   const ids = taskIds(cwd);
-  const noId = checkCierre(l2(), cierre('').replace('## Cierre · ', '## Cierre'), undefined, undefined, ctxFor(cwd));
-  assert.match(noId, /task ID in the heading/);
-  assert.ok(noId.includes(ids.next) && noId.includes(ids.followUp), 'it offers both IDs');
-  assert.match(checkCierre(l2(), cierre(ids.last), undefined, undefined, ctxFor(cwd)), /already recorded/);
+  assert.equal(checkCierre(l2(), cierre('').replace('## Cierre · ', '## Cierre'), undefined, undefined, ctxFor(cwd)), null, 'no ID in the heading');
+  assert.equal(checkCierre(l2(), cierre(ids.last), undefined, undefined, ctxFor(cwd)), null, 'an ID already recorded');
   assert.match(checkCierre(l2(), cierre(ids.followUp, undefined, ''), undefined, undefined, ctxFor(cwd)), /Resultado:/);
 });
 
@@ -509,7 +520,7 @@ test('Cierre: fields and claims are read from the Cierre block only, not the pro
 test('Cierre: an empty field does not take the next line as its value', () => {
   const { cwd } = fresh();
   const id = taskIds(cwd).next;
-  assert.match(checkCierre(l2(), cierre(id, undefined, 'Resultado:\n'), undefined, undefined, ctxFor(cwd)), /Resultado: hecho \| parcial/);
+  assert.match(checkCierre(l2(), cierre(id, undefined, 'Resultado:\n'), undefined, undefined, ctxFor(cwd)), /Resultado: hecho | bloqueado\| parcial/);
 });
 
 test('branches: the branch of each repo that holds a changed file', () => {
@@ -584,7 +595,7 @@ test('evaluation: one ✔/✘ per routine step, a score, tokens and the estimate
   assert.equal(ev.score, '9/10');
   assert.deepEqual([ev.quotaPct, ev.quotaBy], [null, 'none'], 'a model without calibration pairs: no %');
   assert.match(summaryLine(id, ev), /Recordar ✘ .* 9\/10 · 2\.70M tokens · ¿qué % marcó tu cuota/);
-  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/, 'one memory: Waymark\'s, with or without engram');
+  assert.match(checkCierre(noSearch, cierre(id), undefined, undefined, ctx), /the project memory was neither handed nor searched before the first change[^]*node ".*waymark\.mjs" memory/, 'one memory: Waymark\'s, with or without engram; the message agrees with the claim (the hook hands it)');
   assert.equal(checkCierre(l2(), cierre(id), undefined, undefined, ctx), null, 'waymark.mjs pack is the search');
   const viaEngram = currentTurn([prompt('x'), say('Waymark → L2 · dept-backend'), call('Skill', { skill: 'dept-backend' }), PROC('dept-backend'), call('mcp__engram__mem_search', { query: 'retries' }), call('AskUserQuestion', { questions: [] }), answered('¿Cómo?', ['Backoff', 'Cola'], 'Backoff'),
     call('Edit', { file_path: FILE }), call('Bash', { command: 'npm run build' }), call('Skill', { skill: 'code-review' }), MEM()]);
@@ -1071,7 +1082,12 @@ test('waymark check: skills never indexed or changed since the last sync, framew
   try { assert.ok((await check(repo)).some((t) => /^coexistence: another agent framework appeared .*acme-orch in /.test(t))); }
   finally { if (keep === null) fs.rmSync(agentMd); else fs.writeFileSync(agentMd, keep); }
   assert.equal(newer('2.1.0', '2.0.0-dev'), true);
-  assert.equal(newer('2.0.0', '2.0.0-dev'), false);
+  assert.equal(newer('2.0.0', '2.0.0-dev'), true, 'a dev install is offered its release');
+  assert.equal(newer('2.0.0-dev', '2.0.0'), false, 'counter-example: a pre-release is older than its release');
+  assert.equal(newer('2.0.0-rc.2', '2.0.0-rc.1'), true, 'two pre-releases compare by identifier');
+  assert.equal(newer('2.0.0-rc.1', '2.0.0-rc.2'), false);
+  assert.equal(newer('2.0.0-rc.1', '2.0.0-dev'), true, 'text identifiers compare as text: rc after dev');
+  assert.equal(newer('2.0.0-rc.10', '2.0.0-rc.9'), true, 'numeric identifiers compare as numbers');
   assert.equal(newer('1.9.9', '2.0.0'), false);
 });
 
@@ -1464,6 +1480,18 @@ test('2.0.7 background: an agent launched in the background (isAsync) holds the 
   assert.deepEqual(pendingBackground(turn), ['toolu_ag1']);
   const notified = [...turn, { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>a79f</task-id>\n<tool-use-id>toolu_ag1</tool-use-id>\n<status>completed</status>\n</task-notification>' } }, say('# Security review')];
   assert.deepEqual(pendingBackground(notified), []);
+});
+
+test('2.0.20 background: a Monitor watching a gate holds the close until its notification or its timeout; a persistent one never does', () => {
+  const watch = (persistent) => [prompt('corre el gate'), say('Waymark → L2 · dept-qa'), { type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: 'toolu_mon1', name: 'Monitor', input: { command: 'until grep -q EXIT gate.log; do sleep 10; done' } }] } },
+    { type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_mon1', content: 'Monitor started (task bz8)' }] }, toolUseResult: { taskId: 'bz8', timeoutMs: 600000, persistent } }, say('Espero el gate completo.')];
+  assert.deepEqual(pendingBackground(watch(false)), ['toolu_mon1'], 'the turn that waits for the gate is not over');
+  assert.deepEqual(pendingBackground(watch(true)), [], 'a persistent watch never ends: not waited for');
+  const notified = [...watch(false), { type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>bz8</task-id>\n<status>completed</status>\n</task-notification>' } }];
+  assert.deepEqual(pendingBackground(notified), [], 'its notification releases it');
+  assert.deepEqual(pendingBackground(watch(false), 0, Date.now() + 11 * 60000), [], 'past its timeout it is not waited for');
+  const long = watch(false); long[3].toolUseResult.timeoutMs = 4 * 3600000;
+  assert.deepEqual(pendingBackground(long, 0, Date.now() + 31 * 60000), [], 'a long watch is waited for no longer than a background agent');
 });
 
 test('T2o stop hook: no block and no task record while the background review runs, only an unevaluated record and a notice', () => {
@@ -1998,6 +2026,17 @@ test('Identity: the template\'s Package manager placeholder becomes the repo\'s 
   assert.match(fs.readFileSync(bareMem, 'utf8'), /build tool: <pnpm/);
 });
 
+test('2.0.20 context card: the Aprendido of the last close is cut to 75 characters, the whole stays in W tasks', () => {
+  const repo = memRepo('card-clip', '');
+  const long = 'x'.repeat(40) + ' ← ' + 'y'.repeat(300);
+  appendRecord(repo, { id: '2026-10-05 · T1', agent: 'claude', at: '2026-10-05T10:00:00Z', commits: [], cierre: `## Cierre · 2026-10-05 · T1\nResultado: hecho\nEvidencia: e\nAprendido: ${long}` });
+  const card = JSON.parse(spawnSync(process.execPath, [path.join(SCRIPTS, 'session-hook.mjs')], { input: JSON.stringify({ cwd: repo }), encoding: 'utf8', env: { ...process.env, WAYMARK_HOME: home } }).stdout).hookSpecificOutput.additionalContext;
+  const line = card.split('\n').find((l) => l.startsWith('Last closed:'));
+  const shown = line.match(/hecho · (.*) \(whole record/)[1];
+  assert.ok(shown.length <= 75, `the Aprendido shown is ${shown.length} characters`);
+  assert.ok(shown.endsWith('…'), 'a cut one says so');
+});
+
 test('context card: last closed with its agent, open tasks, notes, the repo stack, gates in the repo manager, incidents and the commands', () => {
   const repo = memRepo('card', '- ▶ [2026-10-04 · T3] waiting for the user\n- [2026-10-04 · T2] older pending: Pendiente: x\n- Gotcha: a note\n- ✔ [2026-10-05 · T1] done thing\n');
   fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.5.0' }));
@@ -2011,7 +2050,7 @@ test('context card: last closed with its agent, open tasks, notes, the repo stac
   assert.match(card, /Gates: build: pnpm run build/, 'memory rows shown in the repo manager');
   assert.match(card, /Incidents: open Enrutar ✘ \(2026-10-05 · T1\) \(W incidents\)/, 'the card says W, defined above');
   assert.match(card, /W = node "[^"]+waymark\.mjs"\./);
-  assert.match(card, /Commands: the hook hands you W pack at a file's first edit.*W memory <section> \(Conventions · Identity\)/);
+  assert.match(card, /Commands: the hook hands you W pack at a file's first edit.*W memory <section>, W tasks on demand/);
   assert.ok(!/done thing/.test(card), 'closed lines stay in tasks.md, not in the card');
 });
 
@@ -2030,11 +2069,13 @@ test('pack: per file, the last tasks that changed it (note, stub, no-commit reco
 
 test('incidents: a testigo ✘ stays open until it passes in a later task; 3 failures make a suggested rule; removed testigos are ignored', async () => {
   const { incidents, incidentsLine } = await import(`file://${SCRIPTS}/incidents.mjs`);
-  const r = (id, steps, unresolved = []) => ({ id, evaluation: { steps }, unresolved });
-  const recs = [r('T1', { Recordar: false, 'Índice': false }, ['no mem_search']), r('T2', { Recordar: true, Commit: false }), r('T3', { Commit: false }), r('T4', { Commit: false, Enrutar: false }, ['no routing line'])];
+  const r = (id, steps, unresolved = [], causes = undefined) => ({ id, evaluation: { steps }, unresolved, ...(causes ? { causes } : {}) });
+  const recs = [r('T1', { Recordar: false, 'Índice': false }, ['no mem_search']), r('T2', { Recordar: true, Commit: false }), r('T3', { Commit: false }), r('T4', { Commit: false, Enrutar: false }, ['no routing line'], { Enrutar: 'no routing line' })];
   const found = incidents(recs);
   assert.deepEqual(found.open.map((o) => [o.label, o.since, o.last, o.count]), [['Commit', 'T2', 'T4', 3], ['Enrutar', 'T4', 'T4', 1]], 'Recordar closed by T2; Índice is not a testigo any more');
   assert.equal(found.open.find((o) => o.label === 'Enrutar').cause, 'no routing line');
+  assert.equal(found.open.find((o) => o.label === 'Commit').cause, '', 'a reason that belongs to another testigo is never the cause of this one (2.0.20 point 28)');
+  assert.equal(incidents([r('T9', { Enrutar: false }, ['no routing line'])]).open[0].cause, 'no routing line', 'the only testigo that failed owns the first reason');
   assert.deepEqual(found.rules, [{ label: 'Commit', failures: 3, ids: ['T2', 'T3', 'T4'] }]);
   assert.match(incidentsLine(found), /^Incidents: open Commit ✘×3 \(T4\), Enrutar ✘ \(T4\); suggested rule: Commit failed 3× \(node ".*waymark\.mjs" incidents\)$/);
   assert.equal(incidentsLine(incidents([])), '');
@@ -2447,7 +2488,7 @@ test('Recordar at every level: an L1 change without pack (or mem_search) is bloc
     ...askWithId('q1', '¿Texto?', ['Enviar', 'Otra'], 'Enviar'), call('Edit', { file_path: FILE }), call('Bash', { command: 'npx tsc --noEmit' })];
   const judge = (l) => cierreGaps(currentTurn(l), cierre(ids.next), undefined, undefined, { ids, decisions: decisionsIn(l), taskTools: sessionTools(l) });
   const without = judge(lines(false));
-  assert.ok(without.missing.some((m) => /^the project memory was not searched before the first change: run node ".*waymark\.mjs" pack/.test(m)), JSON.stringify(without.missing));
+  assert.ok(without.missing.some((m) => /^the project memory was neither handed nor searched before the first change/.test(m)), JSON.stringify(without.missing));
   assert.equal(judge(lines(true)).steps.find((s) => s.id === 'memory').pass, true);
 });
 
@@ -2466,7 +2507,7 @@ test('review everywhere: waymark.mjs review on the task\'s files counts as the r
   assert.deepEqual(skills("Get-Content -Path 'C:\\Users\\u\\.claude\\skills\\dept-frontend\\SKILL.md'"), ['dept-frontend']);
 });
 
-// 2.0.7: YaloAtiendo's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
+// 2.0.7: the real-use project's T2 reviewed the API and the front in one command (`… review <api files> 2>&1 | tail; cd ../web
 // && … review <front files>`) and the testigo read only the first call.
 test('review: every waymark.mjs review in one command counts; the message names the code files left unreviewed', () => {
   const { cwd } = fresh();
@@ -2482,7 +2523,7 @@ test('review: every waymark.mjs review in one command counts; the message names 
   assert.equal(both.observed.review, true, 'the second call of the same command covers the front');
 });
 
-// 2.0.13: YaloAtiendo's T3 built the API and the front after changing both, then wrote only the front's main.spec.ts and
+// 2.0.13: the real-use project's T3 built the API and the front after changing both, then wrote only the front's main.spec.ts and
 // rebuilt only the front; the testigo wanted every repo built after the turn's last code change.
 test('build: each repo needs a build that passed after the last code change in that repo', () => {
   const { cwd } = fresh();
@@ -2501,7 +2542,7 @@ test('build: each repo needs a build that passed after the last code change in t
   assert.equal(built([...head, call('Edit', { file_path: api }), call('Edit', { file_path: web }), build('web')]), false, 'the API was never built');
 });
 
-// 2.0.13: YaloAtiendo's T4 wrote "conteos antes y después (29/86/326/15/1)" and the testigo read "29/86" and "326/15"
+// 2.0.13: the real-use project's T4 wrote "conteos antes y después (29/86/326/15/1)" and the testigo read "29/86" and "326/15"
 // as pass/total results no call showed.
 test('evidence facts: a chain of three or more numbers joined by / is not a pass/total', async () => {
   const { evidenceFacts } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
@@ -3059,7 +3100,7 @@ test('decision: the user\'s reply after rejecting the choice window is their dec
   assert.deepEqual(decisionsIn([ask, clarify, prompt('corrige las 4')]).map((d) => d.chosen), ['corrige las 4'], 'the user chose to clarify first (Claude Code 2.1.x)');
 });
 
-// A commit with no trailer leaves its task's record unlinked (YaloAtiendo-Chat 2026-10-12 · T2c): stopped once per task
+// A commit with no trailer leaves its task's record unlinked (the real-use project 2026-10-12 · T2c): stopped once per task
 // with the ID to add; sent again without it, it goes through (the user may not want one there).
 test('commit trailer: a commit with none is stopped once with the ID to add', async () => {
   const { missingTrailer } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
@@ -3077,7 +3118,7 @@ test('commit trailer: a commit with none is stopped once with the ID to add', as
 });
 
 // The turn's commits are looked for where they were made (`cd <repo> && git commit`), and an earlier recorded task's ID
-// counts: its work committed now (YaloAtiendo-Chat 2026-10-12 · T2c committed T2b's work in the API's repo).
+// counts: its work committed now (the real-use project 2026-10-12 · T2c committed T2b's work in the API's repo).
 test('commit trailer: a commit made in another repo with an earlier task\'s ID counts', async () => {
   const { turnCommits } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
   const session = memRepo('sess-commit'), api = tmpRepo('api-commit'), day = new Date().toLocaleDateString('sv');
@@ -3098,7 +3139,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>`); // both trailers in the last p
   assert.deepEqual(turnCommits(tools, session, `${day} · T1b`, ids, since), [sha], 'an ID never offered does not count');
 });
 
-// 2.0.14: YaloAtiendo 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
+// 2.0.14: the real-use project 2026-10-15 · T1, replayed. Its lint exited 0 with one warning and was judged failed; its clean copy
 // was made in one call and run in another (PowerShell), failed on pnpm's own TTY check, and was judged the task's gate.
 const ranOut = (id, name, command, out, failed = false) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: { command } }] } },
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: failed, content: out }] } }];
@@ -3187,15 +3228,17 @@ test('cost per link: a command that only names waymark.mjs (a syntax check, a gi
   assert.deepEqual([l.routine.responses, l.work.responses], [1, 1]);
 });
 
-test('held message: the card carries at most HELD_MAX characters of it and the whole message stays in held-full.md', async () => {
-  const { heldPrompt, HELD_MAX, HELD_MORE, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+test('held message (2.0.20): the card carries the whole message, no held-full.md is made, and one an earlier version left goes', async () => {
+  const { heldPrompt, EXTRA } = await import(`file://${SCRIPTS}/session-hook.mjs`);
   const repo = memRepo('held-long'), home2 = projectHome(repo);
   const long = 'pide algo muy largo '.repeat(80).trim();
   fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${long}\n`);
+  fs.writeFileSync(path.join(home2.dir, 'held-full.md'), 'left by 2.0.19\n');
   const got = heldPrompt(home2);
-  assert.equal(got, long.slice(0, HELD_MAX) + HELD_MORE);
-  assert.equal(fs.readFileSync(path.join(home2.dir, 'held-full.md'), 'utf8').trim(), long, 'the user\'s words are not lost to the cap');
-  assert.ok(EXTRA.held(got).length <= 700, 'the held message the card adds stays under 700 characters');
+  assert.equal(got, long, 'the user\'s words arrive whole: nothing is cut and nothing is kept in a file to read later');
+  assert.ok(!fs.existsSync(path.join(home2.dir, 'held-full.md')), 'no held-full.md, and the stale one is removed');
+  assert.ok(!fs.existsSync(path.join(home2.dir, 'next-prompt.md')), 'the held message is read once');
+  assert.ok(EXTRA.held(got).endsWith(long), 'the card adds it after its cap');
   fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), '<!-- x -->\ncorto\n');
   assert.equal(heldPrompt(home2), 'corto', 'a short one is carried as it is');
 });
@@ -3206,4 +3249,16 @@ test('commit trailer: only a real git commit asks for the trailer; git config, a
   const ask = (c) => missingTrailer(c, `s-${Math.random()}`, repo, path.join(home, `trailer-${Math.random()}.json`));
   for (const c of ['git config --get commit.gpgsign', 'git -c commit.gpgsign=false status', 'echo git commit', 'git log --format=%H -1 && git config user.signingkey']) assert.equal(ask(c), null, c);
   for (const c of ['git commit -m "x"', 'git -c user.name=t commit -m "x"', 'git -C ../api commit -m "x"', 'cd api && git add . && git commit -m "x"', 'GIT_AUTHOR_NAME=t git commit -m "x"']) assert.match(ask(c) || '', /Waymark-Task/, c);
+});
+
+test('held message (review of level 3): it is bounded at HELD_MAX_CHARS, and says what was cut; one under the bound arrives untouched', async () => {
+  const { heldPrompt, HELD_MAX_CHARS } = await import(`file://${SCRIPTS}/session-hook.mjs`);
+  const repo = memRepo('held-huge'), home2 = projectHome(repo);
+  const huge = 'x'.repeat(HELD_MAX_CHARS + 5000);
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${huge}\n`);
+  const got = heldPrompt(home2);
+  assert.ok(got.startsWith('x'.repeat(HELD_MAX_CHARS)) && got.length < HELD_MAX_CHARS + 200, 'the first HELD_MAX_CHARS and a notice');
+  assert.match(got, /5000 more characters were cut/);
+  fs.writeFileSync(path.join(home2.dir, 'next-prompt.md'), `<!-- x -->\n${'y'.repeat(HELD_MAX_CHARS)}\n`);
+  assert.equal(heldPrompt(home2), 'y'.repeat(HELD_MAX_CHARS), 'at the bound: whole');
 });

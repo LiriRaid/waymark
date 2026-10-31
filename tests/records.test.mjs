@@ -64,7 +64,7 @@ test('2a: an agent that never reports is not waited for past the limit', () => {
   assert.deepEqual(pendingBackground(recent), ['toolu_a3'], 'counter-example: a recent launch still holds');
 });
 for (const [kind, file, label] of [['logic', 'src/orders.service.mjs', 'a .mjs change'], ['CSS/HTML', 'src/app.css', 'a stylesheet change']]) {
-  test(`2a: ${kind} — a reply that carries its Cierre is judged while the review still runs (${label}); one that only waits is not`, async () => {
+  test(`2a: ${kind} — neither a reply that waits nor one that carries a Cierre is judged while the review still runs (${label})`, async () => {
     const dir = tmpRepo({ [file]: 'x\n' });
     const transcript = path.join(dir, 't.jsonl');
     const lines = (last) => [prompt('ajusta el servicio'), say('Waymark → L2 · dept-backend'), ...call('Edit', { file_path: path.join(dir, file) }), ...call('Agent', { run_in_background: true }), launch('toolu_bg', 'bg1'), say(last)];
@@ -72,7 +72,9 @@ for (const [kind, file, label] of [['logic', 'src/orders.service.mjs', 'a .mjs c
     const waiting = (await stop('Espero el review.', `rec-wait-${kind}`)).out;
     assert.doesNotMatch(waiting, /"decision":"block"/, 'waiting: no block');
     assert.match(waiting, /se evaluará cuando termine la tarea en segundo plano/, 'and a notice that says so (docs/adr/0044)');
-    assert.notEqual((await stop(CIERRE(), `rec-cierre-${kind}`)).out.trim(), '', 'a Cierre in the reply: the hook judges it (here it answers)');
+    const closing = (await stop(CIERRE(), `rec-cierre-${kind}`)).out;
+    assert.doesNotMatch(closing, /"decision":"block"/, '2.0.20 point 31: a Cierre written over a review that still runs is no close: no block');
+    assert.match(closing, /se evaluará cuando termine la tarea en segundo plano/, 'it is deferred to the turn the review brings the agent back to');
   });
 }
 
@@ -83,16 +85,16 @@ for (const [kind, file] of [['logic', 'src/orders.service.mjs'], ['CSS/HTML', 's
     const dir = tmpRepo({ [file]: 'a\n', 'src/other.mjs': 'a\n' });
     const prompt1 = (session, text) => hookRun('rule0-hook.mjs', { hook_event_name: 'UserPromptSubmit', prompt: text, cwd: dir, session_id: session });
     // interrupted: prompt 1, an edit, no close (the hook never ran), prompt 2
-    await prompt1('s-int', 'cambia el servicio');
+    await prompt1(`s-int-${kind}`, 'cambia el servicio');
     writeIn(dir, file, 'b\n');
-    await prompt1('s-int', 'continúa');
-    assert.ok(P.turnChanged('s-int', dir).some((f) => f.endsWith(path.basename(file))), 'the interrupted turn\'s edit is in the diff the next close reads');
+    await prompt1(`s-int-${kind}`, 'continúa');
+    assert.ok(P.turnChanged(`s-int-${kind}`, dir).some((f) => f.endsWith(path.basename(file))), 'the interrupted turn\'s edit is in the diff the next close reads');
     // counter-example: the turn closed (open entry removed), the next prompt starts clean
-    await prompt1('s-closed', 'cambia otra cosa');
+    await prompt1(`s-closed-${kind}`, 'cambia otra cosa');
     writeIn(dir, 'src/other.mjs', 'b\n');
-    P.closeOpen(P.projectHome(dir), 's-closed');
-    await prompt1('s-closed', 'otra tarea');
-    assert.ok(!P.turnChanged('s-closed', dir).some((f) => f.endsWith('other.mjs')), 'a closed turn\'s edit belongs to its own record, not the next');
+    P.closeOpen(P.projectHome(dir), `s-closed-${kind}`);
+    await prompt1(`s-closed-${kind}`, 'otra tarea');
+    assert.ok(!P.turnChanged(`s-closed-${kind}`, dir).some((f) => f.endsWith('other.mjs')), 'a closed turn\'s edit belongs to its own record, not the next');
   });
 }
 test('2c: an open turn older than the day limit is not carried over', () => {

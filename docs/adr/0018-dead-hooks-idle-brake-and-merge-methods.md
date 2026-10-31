@@ -1,6 +1,6 @@
 # 0018 · Dead hooks reported, an idle brake, merges that keep the notes
 
-**Status:** accepted (2026-10-12, Waymark 2.0.1). Every pick below is the user's (2026-10-12 · T2). It amends 0016 (the context brake) and 0017.
+**Status:** accepted (2026-10-12, Waymark 2.0.1). Every pick below is the user's (2026-10-12 · T2). It amends 0016 (the context brake) and 0017. **Amended by 0050 (2.0.20): the brake advises and saves the work's state, it no longer stops a prompt unless `WAYMARK_BRAKE_MODE=block`.**
 
 ## Context
 - **A dead hook is silent.** After the skills moved to `~/.agents/skills`, every hook exited without running for a day (0017, follow-up). Three tasks lost their record, and nothing told the user. When every hook is dead, nothing automatic runs: not the card, not the reminder, not the weekly pointer to `check`.

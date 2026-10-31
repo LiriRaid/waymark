@@ -16,8 +16,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { sessionState, closingQuestions } from './transcript.mjs';
-import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
+import { sessionState, closingQuestions, inheritedRoute } from './transcript.mjs';
+import { taskIds, saveSnapshot, ensureLocal, markOpen, openTurn, confirmTasks, appendRecord, refreshTasks, otherOpen, markTaskStart, taskStartMark, taskOffer, taskInProgress, pinnedCwd, pendingSteps, projectHome, workspaceSiblings, aprendidoOf, RELAY_MARK, readRecords, readTaskRecords, logHookError, PROBE_OK } from './provenance.mjs';
 import { precedentFor, keepPrecedent } from './precedent.mjs';
 import { changesProject } from './runs.mjs';
 import { commandFiles } from './tool-hook.mjs';
@@ -25,6 +25,7 @@ import { stackLine, directBins } from './stack.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { markStart } from './statusline.mjs';
 import { waymarkHome } from './lib/paths.mjs';
+import { tagLatency } from './lib/latency.mjs';
 
 const HOME = waymarkHome();
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // where this install's skills live
@@ -62,6 +63,9 @@ const END = '(?=$|[^\\p{L}\\p{N}_])';
 export const CONTINUES = new RegExp(`^\\s*(?:(?:sigue|contin[uú]a|retoma|seguimos|reanuda|continue|resume|go on)${END}(?!\\s+(?:con|with|el|la|los|las|the|to)\\s+(?!(?:eso|esto|ello|lo|it|that|this)${END}))|(?:dale|termina|acaba|finish)(?=\\s*(?:$|[,.!;:])|\\s+(?:lo|eso|esto|ello|it|that|this)${END}|\\s+T\\d))`, 'iu');
 const STOPPED = /(?:se\s+(?:interrumpi[oó]|cort[oó])|por\s+donde\s+(?:qued|ibas|iba)|donde\s+(?:te\s+)?qued|where\s+(?:you|we)\s+left\s+off|(?:was|got)\s+(?:interrupted|cut))/iu;
 export const REDO = /(?<![\p{L}\p{N}])(?:no\s+funciona|no\s+sirve|no\s+(?:se\s+)?(?:ve|aplic[oó]|cambi[oó]|guard[oó]|carga)|no\s+(?:era|es)\s+eso|no\s+qued[oó]|sigue\s+(?:fallando|igual|sin|mal|apareciendo|saliendo)|(?:todav[ií]a|a[uú]n)\s+(?:falla|sale|aparece|no\s+(?:funciona|se\s+ve|sale|aparece|cambia))|otra\s+vez|de\s+nuevo|rehaz|deshaz|revi[eé]rte|vuelve\s+a\s+(?:hacer|intentar)|still\s+(?:fails|broken|not)|does\s*n[o']?t\s+work|not\s+working|try\s+again|redo|undo)(?![\p{L}\p{N}])/iu;
+// The ask says something about what the last task produced: it does not show, it is missing, it came out wrong. Read by the shape (a negation before a verb of
+// the result, "you forgot", "came out wrong"), not by a fixed phrase: "dale un margen al botón" or "agrega el filtro" say nothing about the last result.
+export const ABOUT_RESULT = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(?:no|nunca|tampoco)\s+(?:(?:me|te|se|lo|la|le)\s+)*(?:ve[ns]?|veo|vi|muestra[ns]?|sale[ns]?|sali[oó]|queda[ns]?|qued[oó]|funcion[aó]|aparece[ns]?|aparec[ií]|cambi[aó]|guard[aó]|abre|abri[oó]|carg[aó]|aplic[aó]|hizo|hiciste|puso|pusiste|agregaste|a[ñn]adiste)|te\s+falt[oó]|faltaron|olvidaste|te\s+olvidaste|dejaste\s+(?:sin|de)|(?:qued[oó]|sali[oó])\s+(?:mal|raro|feo|cortado|desalineado)|(?:is|are|was|were)\s*n[o']?t\s+(?:showing|working|shown|saved|applied|visible)|you\s+(?:forgot|missed|didn'?t))(?![\p{L}\p{N}])`, 'iu');
 const replyText = (lines) => {
   const reply = [...(lines || [])].reverse().find((d) => d.type === 'assistant' && !d.isSidechain && (d.message?.content || []).some((c) => c.type === 'text' && c.text.trim()));
   return (reply?.message?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
@@ -90,9 +94,11 @@ export function taskTurn(cwd, now = new Date(), { session = null, prompt = '', r
   let last = null;
   try { last = session ? lastOfSession(cwd, session) : null; } catch {}
   const mine = !!last?.id && bare(last.id) === ids.last, external = mine && last.outcome?.cause === 'external';
-  const says = CONTINUES.test(text) || STOPPED.test(text) || REDO.test(text) || NO.test(text);
+  const says = CONTINUES.test(text) || STOPPED.test(text) || REDO.test(text) || ABOUT_RESULT.test(text) || NO.test(text);
   const unread = !text.trim() && !external; // an agent whose hook does not carry the ask (Antigravity): nothing to judge, both IDs offered
-  if (says || unread || (mine && !external && endsAsking(reply))) return { next: ids.next, followUp: ids.followUp, why: '' };
+  // a task left open (bloqueado, parcial, a plan step ahead) is one task: the user's next ask on it is its follow-up whatever the words (a cause outside the work is the exception)
+  const open = mine && !external && (/^(?:parcial|bloqueado)$/i.test(last.outcome?.result || '') || pendingSteps(aprendidoOf(String(last.cierre || ''))));
+  if (says || unread || open || (mine && !external && endsAsking(reply))) return { next: ids.next, followUp: ids.followUp, why: '' };
   // a parcial for a cause outside the work (the quota, a provider) is said, so the model knows why no follow-up is offered
   return { next: ids.next, followUp: null, why: external ? ` The last task (${last.id}) is parcial for a cause outside the work: this ask is a new task unless the user says it continues.` : '' };
 }
@@ -109,10 +115,12 @@ const OFFER = /\b(?:si quieres|si prefieres|quieres que|puedo|te parece|want me|
 const YES_IDS = /^\s*(?:s[ií]|yes|confirmo)(?=[\s,:])[\s,:]*((?:T\d+[a-z]?(?:\s*(?:,|y|and|&)\s*)?)+)\s*[.!]*\s*$/i;
 const YES_MANY = /^\s*(?:s[ií]|yes)[\s,]*(?:a\s+)?(?:las|los|both|all)?\s*(dos|tres|cuatro|ambas|ambos|todas|todos|\d+)\s*[.!]*\s*$/i;
 const NO = /^\s*no\s*[.!]*\s*$/i;
+// the user's free words for "close the rest of them": "cierra las otras tareas también", "close the other tasks too", "marca el resto como hecho"
+export const CLOSE_REST = /^\s*(?:s[ií][,.]?\s+)?(?:cierra|cierren|cerrar|marca|close|mark)\b[^.\n]{0,40}?\b(?:otras|otros|dem[aá]s|resto|todas|todos|others?|rest|all)\b[^.\n]{0,30}?\b(?:tareas?|tasks?)\b[^.\n]{0,30}$/iu;
 const COUNT = { dos: 2, ambas: 2, ambos: 2, tres: 3, cuatro: 4 };
 export function confirmation(hook, agent, cwd) {
   const prompt = String(hook.prompt || '');
-  const named = prompt.match(YES_IDS)?.[1], many = prompt.match(YES_MANY)?.[1], no = NO.test(prompt);
+  const named = prompt.match(YES_IDS)?.[1], many = prompt.match(YES_MANY)?.[1] || (CLOSE_REST.test(prompt) ? 'todas' : undefined), no = NO.test(prompt);
   if (!YES.test(prompt) && !named && !many && !no) return null;
   const session = hook.session_id || 'unknown';
   if (openTurn(cwd, session)) return null;
@@ -172,8 +180,8 @@ export function softCap(memory) {
 // The size of the task so far: its calls, the files it changed (by an edit or by a command that writes: sed -i, a script), and the minutes worked (a pause
 // longer than IDLE between two calls counts as IDLE). `user`: the line for the user at the close of a long turn, in their words, instead of the agent's.
 const IDLE = 15 * 60000;
-export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false } = {}) {
-  if (!mark) return ''; // no task in progress: nothing to measure
+export function softCapLine(hook, agent, cwd, mark, now = Date.now(), stateFile = path.join(HOME, '.soft-cap.json'), lines = null, { user = false, level = 0 } = {}) {
+  if (!mark || level >= 2) return ''; // no task in progress: nothing to measure; an L2 or L3 is one task however long, so it is never told to close
   const home = projectHome(cwd), cap = softCap((() => { try { return fs.readFileSync(home.memory, 'utf8'); } catch { return ''; } })());
   const files = new Set();
   let calls = 0, worked = 0, prev = mark;
@@ -238,11 +246,11 @@ export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
 
-// Context brake (docs/adr/0016): every response re-reads the whole session, so a new message to a session past
-// BRAKE_TOKENS is stopped before the model (0 tokens), once per BRAKE_STEP the context grows (300k, 400k, 500k…). The
-// message is kept in .waymark/next-prompt.md and the next session's card brings it; sending it again here continues
-// until the next step. Agents whose prompt hook cannot stop a prompt (no out.blockPrompt) get one line in the reminder
-// instead. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
+// Context brake (docs/adr/0016): every response re-reads the whole session, so a session past BRAKE_TOKENS is advised, once per
+// BRAKE_STEP the context grows (300k, 400k, 500k…): one line in the reminder says a new session is cheaper, after the job's state is
+// saved in .waymark/ (tasks.md names what is open). It never stops a prompt: a stopped prompt with screenshots is a message the user
+// cannot resend as it was. WAYMARK_BRAKE_MODE=block keeps the stop before the model, with the message kept in
+// .waymark/next-prompt.md for the next session's card. WAYMARK_BRAKE_TOKENS tunes it (0 = off); WAYMARK_BRAKE_STEP the step (0 = once per session).
 // Neither brake holds a message mid-task (no Cierre yet, or cut by the quota): a new session mid-task would rebuild what
 // this one holds, so past HARD_TOKENS the agent is told to offer one in its window. A task closed parcial or bloqueado is
 // between tasks and brakes like any other (docs/adr/0044).
@@ -256,6 +264,8 @@ export const HARD_TOKENS = Number(process.env.WAYMARK_HARD_TOKENS ?? 500000); //
 export const IDLE_TOKENS =Number(process.env.WAYMARK_IDLE_TOKENS ?? 100000);
 export const IDLE_MINUTES = Number(process.env.WAYMARK_IDLE_MINUTES ?? 60);
 export const NEXT_PROMPT = 'next-prompt.md';
+// What an advice to leave needs on disk first: tasks.md with the job still open (started, not closed) and the plan line of its last close.
+const saveState = (hook) => { try { const home = projectHome(hook.cwd || process.cwd()); if (home.dir && !home.legacy) refreshTasks(home, true); } catch {} };
 export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'), now = Date.now()) {
   const context = st.context || 0, idleMin = st.lastAt ? (now - st.lastAt) / 60000 : 0;
   const big = BRAKE_TOKENS && context >= BRAKE_TOKENS;
@@ -270,6 +280,7 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
     if (seen[key]) return null;
     seen[key] = now;
     try { fs.mkdirSync(path.dirname(stateFile), { recursive: true }); fs.writeFileSync(stateFile, JSON.stringify(seen)); } catch { return null; }
+    saveState(hook);
     return { line: ` Context: this session holds ~${k} tokens and every response re-reads all of it. Offer the user, in your choice window, to close this task and continue in a new session (the card, tasks.md and engram carry the work over).` };
   }
   // the idle stretch is named by the last response before it: a resend (no response since) finds it seen and continues.
@@ -290,7 +301,7 @@ export function brake(hook, agent, st, stateFile = path.join(HOME, '.brake.json'
   const why = idle
     ? `this session holds ~${k} tokens of context and was idle ${idleMin >= 120 ? `${Math.round(idleMin / 60)} h` : `${Math.round(idleMin)} min`}: its cache expired, so the next response re-writes all of it, which costs far more than a new session.`
     : `this session holds ~${k} tokens of context and every response re-reads all of it.`;
-  if (!agent.out.blockPrompt) return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper (the card, tasks.md and engram carry the work over).` };
+  if (!agent.out.blockPrompt || (process.env.WAYMARK_BRAKE_MODE || 'advice') !== 'block') { saveState(hook); return { line: ` Context: ${why} Before working, tell the user in one line that a new session is cheaper: the job's state is saved in .waymark/ (tasks.md) and the card, tasks.md and engram carry the work over.` }; }
   const home = projectHome(hook.cwd || process.cwd());
   let kept = '';
   try { if (home.dir && !home.legacy) { // a handoff already in the file follows the held message (the card takes the message, then leaves the handoff)
@@ -308,7 +319,7 @@ export const NOTIFICATION_NOTE = 'Waymark: this message is a background task\'s 
 export function reminder(hook, agent) {
   if (silent) return null;
   if (NOTIFICATION.test(String(hook.prompt || ''))) return agent.out.context('UserPromptSubmit', NOTIFICATION_NOTE + agent.note(SKILLS_DIR)); // no snapshot, no open turn, no new task start
-  const cwd = hook.cwd || process.cwd();
+  const cwd = pinnedCwd(hook.session_id, hook.cwd || process.cwd()); // the session's project is its first prompt's folder, not where a later `cd` left the shell
   let yes = null;
   try { yes = confirmation(hook, agent, cwd); } catch (e) { logHookError('rule0-hook confirmation', e); }
   const plural = yes?.ids?.length > 1;
@@ -355,7 +366,7 @@ export function reminder(hook, agent) {
   try { const line = stackLine(projectHome(cwd).root, { direct: directBins(agent.name) }); if (line) repo = ` Repo: ${line}.`; } catch {}
   try { repo += gitLine(projectHome(cwd).root); } catch {}
   let cap = '';
-  try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
+  try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines, { level: Number(inheritedRoute(lines)?.level) || 0 }); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
   let owned = '';
   try { owned = ownedOffer(hook.prompt, fs.readFileSync(projectHome(cwd).memory, 'utf8')); } catch {}
   const text = (st.openedWithWaymark ? short : full) + ids + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
@@ -373,6 +384,7 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     done = true;
     const hook = parseHook(input, agent, { lenient: true });
     if (!hook) return; // Claude Code's hook run by Cursor: Cursor's own hook does the work
+    tagLatency(hook, hook.cwd);
     if (hook.waymark_probe) { process.stdout.write(PROBE_OK); return; } // waymark.mjs check: this hook runs from where it is registered
     try { const out = reminder(hook, agent) || agent.out.pass?.('UserPromptSubmit'); if (out) answer(agent, out); } catch (e) { logHookError('rule0-hook', e); }
   };

@@ -22,8 +22,11 @@ export function openTurn(cwd, session, now = new Date()) {
 
 // Turns that other sessions have open in this project, started within `maxAge` (two hours: an older one was interrupted):
 // two sessions on one repo. → [{ session, ...entry }]
+// An agent whose turn the end-of-turn hook cannot close (OpenCode's plugin cannot stop the turn at idle) leaves its entry open for good: it counts for
+// OPEN_UNCLOSABLE_MS only, so it never raises the notice of "another session has an open turn" for two hours after it ended.
+const OPEN_UNCLOSABLE_MS = 10 * 60000;
 export function otherOpen(cwd, session, now = new Date(), maxAge = 2 * 3600000) {
-  return Object.entries(readOpen(projectHome(cwd))).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) < maxAge).map(([k, o]) => ({ session: k, ...o }));
+  return Object.entries(readOpen(projectHome(cwd))).filter(([k, o]) => k !== (session || 'unknown') && now - Date.parse(o.at || 0) < (o.agent === 'opencode' ? Math.min(maxAge, OPEN_UNCLOSABLE_MS) : maxAge)).map(([k, o]) => ({ session: k, ...o }));
 }
 
 // The ID for a new task and for a follow-up of the last one; `known` holds every ID already recorded, `committed` the IDs
@@ -42,6 +45,13 @@ export function taskIds(cwd, now = new Date(), records = knownRecords(cwd)) {
   const last = tasks.length ? base(tasks[tasks.length - 1].id) : null;
   return { next: `${day} · T${n + 1}`, last, followUp: last ? follow(last) : null, known, committed, follow };
 }
+
+// The plan's steps in an L3 Aprendido ("✔1 · ▶2 · 3"): a step not ticked is still ahead.
+export const pendingSteps = (aprendido) => {
+  // a plan is the part before the arrow made only of step marks joined by "·": "✔1 · ▶2 · 3". Anything else in it ("✔2 specs · 14 ← cause") is a sentence, not a plan.
+  const marks = String(aprendido || '').split('←')[0].split('·').map((s) => s.trim());
+  return marks.length > 0 && marks.every((m) => /^[✔▶]?\s*\d+$/.test(m)) && marks.some((m) => /^[✔▶]/.test(m)) && marks.some((m) => !m.startsWith('✔'));
+};
 
 // An ID is valid for this turn when it is the next new one, one only a commit's trailer holds (its task closing now), or
 // an unused follow-up letter of a recorded task.
@@ -118,13 +128,48 @@ export function taskOffer(session, offer) {
   writeOffers(all);
   return offer;
 }
+// How many times the end-of-turn hook blocked this task (~/.waymark/.task-blocks.json): the rule is one block per task, then what is missing is recorded in red and
+// nothing more stops the turn. It ends with the task's start mark, in clearTaskStart.
+const blocksFile = () => path.join(HOME(), '.task-blocks.json');
+const readBlocks = () => { try { return JSON.parse(fs.readFileSync(blocksFile(), 'utf8')) || {}; } catch { return {}; } };
+const writeBlocks = (all) => {
+  for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
+  fs.mkdirSync(HOME(), { recursive: true });
+  fs.writeFileSync(blocksFile(), JSON.stringify(all));
+};
+export const taskBlocks = (session) => readBlocks()[session || 'unknown']?.n || 0;
+export function noteTaskBlock(session) {
+  const all = readBlocks(), id = session || 'unknown';
+  all[id] = { n: (all[id]?.n || 0) + 1, at: Date.now() };
+  writeBlocks(all);
+  return all[id].n;
+}
 export function clearTaskStart(session) {
   const all = readStarts(), id = session || 'unknown';
+  const blocks = readBlocks();
+  if (id in blocks) { delete blocks[id]; writeBlocks(blocks); }
   const offers = readOffers();
   if (id in offers) { delete offers[id]; writeOffers(offers); }
   if (!all[id]) return;
   delete all[id];
   writeStarts(all);
+}
+
+// The folder a session's project is read from: the one of its first prompt, kept per session (~/.waymark/.session-cwd.json). A `cd` into a sibling repo moves the
+// shell's folder, and with it the project the hooks took: IDs, records and open.json of the wrong repo. A kept folder that is gone is replaced by the current one.
+const cwdFile = () => path.join(HOME(), '.session-cwd.json');
+const PIN_MS = 12 * 3600000;
+export function pinnedCwd(session, cwd, now = Date.now(), { write = true } = {}) {
+  if (!session || !cwd) return cwd;
+  let all = {};
+  try { all = JSON.parse(fs.readFileSync(cwdFile(), 'utf8')) || {}; } catch {}
+  const kept = all[session]?.cwd;
+  if (kept && fs.existsSync(kept) && (write === false || now - (all[session].at || 0) < PIN_MS)) return kept; // a pin older than a working day is a resumed session's: the current folder replaces it
+  if (write === false) return cwd;
+  for (const [k, v] of Object.entries(all)) if (now - (v.at || 0) > 7 * 86400000) delete all[k];
+  all[session] = { cwd, at: now };
+  try { fs.mkdirSync(HOME(), { recursive: true }); fs.writeFileSync(cwdFile(), JSON.stringify(all)); } catch {}
+  return cwd;
 }
 
 // A task of this session is in progress from its first prompt until its close: the size brake only advises while it lasts

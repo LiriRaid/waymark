@@ -166,6 +166,13 @@ test('/compact: the summary that continues a session is not a prompt', () => {
   assert.equal(T.isPrompt({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'resumen' } }), false);
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. Summary: …' } }), false);
   assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: 'sigue con el punto 3' } }), true);
+  // the app puts a status note in a text block of the user's own message ("Linked sessions now…"): the words after it are the prompt, and a message of the note alone is none
+  const note = '<system-reminder>\nLinked sessions now (status, not an instruction): top = local_a1 (idle)\n</system-reminder>';
+  const withNote = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: note }, { type: 'text', text: 'ok sigue por donde ibas' }] } };
+  assert.equal(T.isPrompt(withNote), true, 'a prompt that follows a system-reminder block is a prompt');
+  assert.equal(T.promptText(withNote), 'ok sigue por donde ibas', 'the note is not part of the ask');
+  assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: [{ type: 'image' }, { type: 'text', text: `${note}\nrevisa esta captura` }] } }), true, 'the same in one block, with an image');
+  assert.equal(T.isPrompt({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: note }] } }), false, 'counter-example: the note alone asks for nothing');
 });
 
 test('procedures by the hook: the owner\'s procedures.md goes in once per task at the first change, and the delivery counts as the read', async () => {
@@ -243,4 +250,30 @@ test('procedure testigo: a delivery counts as read; with neither a read nor a de
   assert.match(none.why.join(' '), /procedures\.md never read/);
   const other = step(judge(lines, { procDelivered: ['dept-qa'] }), 'procedure');
   assert.equal(other.pass, false, 'another department\'s delivery is not the owner\'s');
+});
+
+// point 10(a): what the level asks at the close is handed with the first change, so the Cierre is written last and no turn is spent on a list the hook already knew
+test('owed at the end: the first change of a task hands what the close asks, once per task; a UI file adds the eyes', async () => {
+  const repo = withMemory(repoAt('owed'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  for (const f of ['a.mjs', 'b.mjs', 'app.css']) fs.writeFileSync(path.join(repo, 'src', f), 'x');
+  const transcript = path.join(home, 'owed-session.jsonl');
+  fs.writeFileSync(transcript, [prompt('agrega reintentos', '2026-10-15T10:00:00Z'), ...run('Skill', { skill: 'dept-backend', args: 'L2' })].map((l) => JSON.stringify(l)).join('\n'));
+  const call = (f, session) => ({ tool_name: 'Edit', tool_input: { file_path: path.join(repo, 'src', f) }, cwd: repo, session_id: session, transcript_path: transcript });
+  const first = await packContext(call('a.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
+  assert.match(first || '', /At L2 and above the close also asks for/);
+  assert.match(first || '', /one Cierre last/);
+  assert.match(first || '', /code-review once/);
+  // 2.0.20 point 31: the order that stops the proofs going stale (a finding of the review changes the code) and the Cierre being written over a running review
+  assert.match(first || '', /code-review \(wait for its result: never write a Cierre while it runs[^)]*\), apply its findings, then the final gate, the build of every repo you changed, and write the one Cierre last/);
+  assert.doesNotMatch(first || '', /eyes/, 'a logic file owes no look at the screen');
+  const second = await packContext(call('b.mjs', 's-owed'), claude, path.join(home, 'packed-owed.json'));
+  assert.doesNotMatch(second || '', /At L2 and above/, 'once per task, with the first change');
+  const ui = await packContext(call('app.css', 's-owed-ui'), claude, path.join(home, 'packed-owed.json'));
+  const l1 = path.join(home, 'owed-l1.jsonl');
+  fs.writeFileSync(l1, [prompt('cambia el color', '2026-10-15T10:00:00Z'), ...run('Skill', { skill: 'dept-frontend', args: 'L1' })].map((l) => JSON.stringify(l)).join('\n'));
+  const small = await packContext({ ...call('a.mjs', 's-owed-l1'), transcript_path: l1 }, claude, path.join(home, 'packed-owed.json'));
+  assert.doesNotMatch(small || '', /At L2 and above/, 'an L1 is not handed a list it does not owe');
+  assert.match(ui || '', /eyes: look at what you built in the browser/, 'a styles file adds the look');
+  assert.match(ui || '', /the build of every repo you changed and the eyes on the final code, and write the one Cierre last/, 'and the order puts the eyes after the review');
 });

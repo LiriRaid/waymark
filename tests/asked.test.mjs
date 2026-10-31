@@ -114,7 +114,7 @@ const cierre = (id, mid) => `## Cierre · ${id}\n${mid}\nEvidencia: observada ti
 const runStop = (cwd, lines, reply, extra = {}) => {
   const transcript = path.join(home, `asked-${Math.random()}.jsonl`);
   fs.writeFileSync(transcript, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: 'sa1', last_assistant_message: reply, ...extra }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { input: JSON.stringify({ transcript_path: transcript, cwd, session_id: `sa1-${path.basename(path.dirname(cwd))}`, last_assistant_message: reply, ...extra }), env: { ...process.env, WAYMARK_HOME: home }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout || '{}');
 };
@@ -140,7 +140,8 @@ test('stop hook: an L2 whose ask has three items and whose Cierre answers two is
 test('stop hook: every item answered, the last one ✘ under parcial, is recorded as it says', () => {
   const cwd = cwdOf('answered'), id = `${day} · T1`;
   const reply = cierre(id, 'Resultado: parcial (falta documentar el límite)\nPedido: ✔1 reintentos · ✔2 log por intento · ✘3 sin documentar: no hay sección de límites');
-  const out = runStop(cwd, turn(PEDIDO), reply);
+  assert.match(runStop(cwd, turn(PEDIDO), reply).reason, /Resultado: parcial leaves work undone/, 'no task closes parcial: the work is finished or the Cierre says bloqueado, asked once');
+  const out = runStop(cwd, turn(PEDIDO), reply, { stop_hook_active: true }); // the reply after the block keeps parcial: the record says what the agent said
   assert.ok(out.systemMessage && !out.decision, JSON.stringify(out));
   const rec = P.readLog(cwd).pop();
   assert.deepEqual(rec.answered.map((a) => [a.n, a.ok]), [[1, true], [2, true], [3, false]]);

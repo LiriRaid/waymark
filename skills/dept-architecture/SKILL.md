@@ -1,6 +1,6 @@
 ---
 name: dept-architecture
-description: "Architecture. FIRST for structure and design: \"refactoriza\", \"dónde pongo esto\", \"estructura de carpetas\", \"nuevo módulo\", \"desacoplar\", \"migrar de X a Y\", ADR. Owns every L3."
+description: "Architecture. FIRST for structure and design: \"refactoriza\", \"dónde pongo esto\", \"estructura de carpetas\", \"nuevo módulo\", \"migrar de X a Y\", ADR. Owns every L3."
 ---
 
 # Software Architecture & Design

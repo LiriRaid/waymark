@@ -40,10 +40,12 @@ test('tokens: lower case, no accents, no stop words or tags, a path and a versio
 });
 
 test('search: the earlier task that shares the rarer words ranks first; nothing in common, nothing ranked', () => {
-  const [top, second] = P.search('arregla el backoff de reintentos del servicio de pedidos', corpus(), 3);
-  assert.match(top.record.prompt, /reintentos con backoff/);
-  assert.ok(!second || second.score < top.score);
-  assert.deepEqual(P.search('receta de arroz con coco', corpus()), []);
+  const found = P.search('arregla el backoff de reintentos del servicio de pedidos', corpus(), 3);
+  const best = found.reduce((a, x) => (x.score > a.score ? x : a));
+  assert.match(best.record.prompt, /reintentos con backoff/, 'the task that shares the words has the best score and is among the three');
+  assert.ok(found.every((x) => x === best || x.score < best.score));
+  assert.ok(P.search('receta de arroz con coco', corpus()).every((x) => x.score === 0), 'nothing in common: only the newest are listed, with no score, and none is ever handed over');
+  assert.equal(P.precedentFor('receta de arroz con coco', corpus(), 0.1), null);
 });
 
 test('precedentFor: hands over the best task with its files, gates and lesson, in at most 400 characters', () => {
@@ -108,6 +110,23 @@ test('evaluate: each task is searched with its own ask against the tasks before 
   assert.equal(e.detail[0].hit, true);
   assert.ok(e.maxChars <= P.MAX_CHARS);
   assert.equal(P.evaluate([c[0]], { root: '/p' }).eligible, 0, 'a lone task has nothing before it');
+});
+
+// ---- 2.0.20 point 24, check 10.3: a miss that is impossible by construction is no miss ----
+test('evaluate: the earlier tasks of the same session are not relevant, because the hand-over searches only the tasks of other sessions', () => {
+  n = 0;
+  const same = (prompt, files) => task(prompt, files, '', { session: 'one-session' });
+  const c = [
+    same('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.mjs']),
+    same('ajusta el timeout de los reintentos del servicio de pedidos', ['/p/src/orders.mjs']),      // its only precedent is in its own session
+    task('corrige el login con tokens vencidos', ['/p/src/auth.mjs']),
+    task('revisa el servicio de pedidos y sus reintentos', ['/p/src/orders.mjs']),                   // another session: findable
+  ];
+  const e = P.evaluate(c, { root: '/p' });
+  assert.equal(e.eligible, 1, 'the second task cannot find the first (same session): it is not eligible; the fourth can');
+  assert.equal(e.precisionAtK, 1, 'and the measure no longer carries a miss no search could avoid');
+  assert.equal(e.detail.length, 1);
+  assert.equal(e.detail[0].id, c[3].id);
 });
 
 test('usedOf: cited when the task names the earlier one, files when a call touched its files, otherwise null', () => {
@@ -190,4 +209,43 @@ test('a short ask is searched with its session\'s previous task, and the session
   assert.equal(P.queryOf(long, c, 'live'), long, 'counter-example: a long ask names enough by itself');
   const css = [task('ajusta el espaciado del header en styles.css', ['/p/src/styles.css']), task('cambia el color del header', ['/p/src/app.css'], 'los colores son tokens', { session: 'ui' })];
   assert.equal(P.precedentFor('y el espaciado también', css, 0, 'ui')?.task, css[0].id, 'CSS/HTML: the same for a stylesheet');
+});
+
+test('evaluate (review of level 3): the random baseline draws from the tasks of other sessions, the pool the search sees', () => {
+  n = 0;
+  const z = (prompt, files) => task(prompt, files, '', { session: 'z' });
+  const c = [
+    task('agrega reintentos con backoff al servicio de pedidos', ['/p/src/orders.mjs']),   // the only task of another session
+    z('corrige el login con tokens vencidos', ['/p/src/auth.mjs']),
+    z('actualiza el README con la tabla', ['/p/README.md']),
+    z('ajusta el timeout de los reintentos del servicio de pedidos', ['/p/src/orders.mjs']), // session z: its pool is the first task alone
+  ];
+  const e = P.evaluate(c, { root: '/p' });
+  assert.equal(e.eligible, 1);
+  assert.equal(e.randomAtK, 1, 'one candidate in the pool and it is the relevant one: chance is certain, not 3 in 4 of the whole history');
+  assert.equal(e.lift, 0, 'so the lift over chance is zero, not inflated by a baseline that counted tasks the search never sees');
+});
+
+test('10.3 (2.0.20): the files the ask names are a second ranking, fused by rank; a task found by its files alone is ranked but never handed over', () => {
+  const tasks = corpus();
+  const top = P.search('revisa receipt y deja todo igual', tasks, 3).find((x) => x.record.files[1] === '/p/src/receipt.mjs');
+  assert.ok(top, 'the ask names receipt: the task that changed receipt.mjs is found though few words match');
+  assert.equal(P.precedentFor('receipt', tasks, 0.5), null, 'one word names too little to hand anything over');
+  const byText = P.search('agrega reintentos con backoff al servicio de pedidos', tasks, 3).find((x) => /reintentos con backoff/.test(x.record.prompt));
+  assert.ok(byText && byText.score > 0, 'counter-example: an ask that names no file still finds the task by its words');
+});
+
+test('10.3 (2.0.20 completion): the folders a task touched are words of the task, the newer of two equal matches ranks first, and the hand-over is the first of the three that resembles the ask', () => {
+  n = 0;
+  const old = task('ajusta la validacion', ['/p/docs/plans/alpha.md'], 'nada');
+  const mid = task('revisa el parser', ['/p/src/payments/charge.mjs'], 'nada');
+  const recent = task('ajusta la validacion', ['/p/docs/plans/beta.md'], 'nada');
+  // the ask names an area, never a file: the folder words reach the task that touched it
+  assert.equal(P.search('arregla payments', [old, mid, recent], 1)[0].record, mid, 'a folder name is a word of the task');
+  // two equal text matches: the newer first
+  assert.equal(P.search('ajusta la validacion', [old, mid, recent], 1)[0].record, recent, 'the newer of two equal matches ranks first');
+  // a newer task with no word in common is ranked (recency) but never handed over; the hand-over is the first candidate that resembles the ask
+  const dull = task('otra cosa totalmente distinta', ['/p/x.mjs'], 'nada');
+  const p = P.precedentFor('ajusta la validacion del parser', [old, mid, recent, dull], 0.1);
+  assert.ok(p && [old.id, recent.id, mid.id].includes(p.task), 'the dull newest task is not what is handed over');
 });

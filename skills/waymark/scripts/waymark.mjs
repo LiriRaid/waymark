@@ -14,6 +14,8 @@
 //   node waymark.mjs done <ID…> [--note "…"]  the user confirmed these tasks work: ✔ in Work in progress + a chained {kind: "confirm"} record
 //   node waymark.mjs forget <ID> | --session <id> --reason "…" [--apply]  remove records without a commit the user asked to remove: the rest
 //                                           chained again and a rewrite anchor in git with the reason (docs/adr/0025); the plan without --apply
+//   node waymark.mjs close <ID> --evidencia "…" --aprendido "…" --reason "…" [--result hecho] [--apply]  close afterwards a task the hook recorded with no Cierre: one
+//                                           appended record (docs/adr/0055), its note and the chain untouched; the plan without --apply
 //   node waymark.mjs pack <file…>           per file, the last tasks that changed it (git log + their records): ID · agent · Aprendido · commit
 //   node waymark.mjs learned [--apply]      move memory.md's learned sections (Solved problems, Gotchas, Decisions) to engram (docs/adr/0015)
 //   node waymark.mjs review <file…>         the task's diff against HEAD and the review checklist (the review where the agent has no code-review)
@@ -37,7 +39,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readTail, sessionState } from './transcript.mjs';
-import { projectHome, workspaceSiblings, readTaskRecords, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
+import { projectHome, workspaceSiblings, readTaskRecords, tidyWip, refreshTasks, confirmTasks, hookErrorsFile, forget, closeLater, ensureLocal, LOCAL_DIRS, ID } from './provenance.mjs';
 import { incidentsAt, incidents } from './incidents.mjs';
 import { proposals, ownerOf } from './learn.mjs';
 import { openIds } from './session-hook.mjs';
@@ -51,10 +53,11 @@ import { claudeDir } from './agents/paths.mjs';
 import { engramBin, engramStatus, enginePin } from './engram.mjs';
 import { learnedEntries } from './learned.mjs';
 import { pack } from './pack.mjs';
+import { newer } from './lib/version.mjs';
 import { trackedProjectSkills } from './skill-links.mjs';
 import { waymarkHome as HOME, norm } from './lib/paths.mjs';
 import { makeCopy, removeCopy, orphans, cleanOrphans, copyRoot } from './copy.mjs';
-import { eyesLine } from './eyes.mjs';
+import { eyesLine, egoOffPath } from './eyes.mjs';
 import { read, readJson } from './lib/fs.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -67,11 +70,7 @@ const section = (text, title) => {
 const RESUME_TOKENS = 150000, CACHE_MINUTES = 60; // above this context, a resume after the prompt cache expired re-writes it all
 export const COMMANDS = { sync: 'sync.mjs', 'mcp-fit': 'mcp-fit.mjs', 'skill-fit': 'skill-fit.mjs', migrate: 'migrate-memory.mjs', connect: 'connect-agents.mjs', 'install-hooks': 'install-hooks.mjs', testigos: 'testigos.mjs', size: 'size.mjs', learned: 'learned.mjs', cost: 'cost.mjs', report: 'report.mjs', precedent: 'precedent.mjs', sign: 'sign.mjs', scorecard: 'scorecard.mjs', 'stack-new': 'stack-new.mjs', 'adapter-new': 'adapter-new.mjs', convention: 'convention.mjs', uninstall: 'uninstall.mjs' };
 
-export const newer = (a, b) => {
-  const pa = String(a).trim().split('.').map((x) => parseInt(x, 10) || 0), pb = String(b).trim().split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
-  return false;
-};
+export { newer };
 
 export async function update() {
   const repo = process.env.WAYMARK_REPO || 'LiriRaid/waymark';
@@ -366,6 +365,7 @@ export async function check(cwd = process.cwd(), agent = agentFrom()) {
   await add(() => gatesLine(cwd));
   await add(() => copiesLine());
   await add(() => eyesLine());
+  await add(() => (egoOffPath() ? 'eyes: ego is installed but not on the PATH (`ego-browser` is not recognized by the agent\'s shell): the block hands the absolute path meanwhile; add ~/.local/share/ego/active_version_dir to the PATH and start the agent again so it runs the bare command' : ''));
   await add(() => longpathsLine(cwd));
   await add(frameworks);
   await add(() => session(cwd, agent));
@@ -401,12 +401,15 @@ export function hookErrors(now = Date.now()) {
 // an event whose p95 passes its cap (with 10 runs or more) is named. The caps are 1.5 x the median measured on a real repo and
 // transcript on Windows (2026-10-26); tests/latency.test.mjs holds the git processes each event may start.
 export const LATENCY_CAPS = { 'session-hook': ['SessionStart', 2500], 'rule0-hook': ['UserPromptSubmit', 1600], 'tool-hook': ['PreToolUse', 300], 'stop-hook': ['Stop', 2300] };
-export function latencyLine(now = Date.now()) {
+// The window starts when the installed copy was made (its MANIFEST.json, written by the install): the runs before it belong to another version, and a reinstall that
+// fixed a slow hook must not be told about the old one for seven days. `since` is a time in ms; 0 reads the whole seven days.
+const installedSince = () => { try { return fs.statSync(path.join(SCRIPTS, '..', 'MANIFEST.json')).mtimeMs; } catch { return 0; } };
+export function latencyLine(now = Date.now(), since = installedSince()) {
   let rows = [];
   try { rows = fs.readFileSync(path.join(HOME(), 'latency.log'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return ''; }
   const slow = [];
   for (const [hook, [event, cap]] of Object.entries(LATENCY_CAPS)) {
-    const ms = rows.filter(([at, h]) => h === hook && now - (Date.parse(at) || 0) < 7 * 86400000).map((r) => Number(r[2])).filter((x) => x >= 0).sort((a, b) => a - b);
+    const ms = rows.filter(([at, h]) => h === hook && now - (Date.parse(at) || 0) < 7 * 86400000 && (Date.parse(at) || 0) >= since).map((r) => Number(r[2])).filter((x) => x >= 0).sort((a, b) => a - b);
     const p95 = ms.length >= 10 ? ms[Math.ceil(0.95 * ms.length) - 1] : null;
     if (p95 > cap) slow.push(`${event} p95 ${(p95 / 1000).toFixed(1)} s > ${(cap / 1000).toFixed(1)} s (${ms.length} runs)`);
   }
@@ -441,6 +444,7 @@ export function learnProposals(cwd) {
   if (!home.dir || home.legacy) return '';
   const all = proposals(home, readTaskRecords(home)), lines = [];
   for (const p of all.filter((x) => x.kind === 'skill')) lines.push(`procedure: ${p.text.replace(/^project skill for /, '')}. Offer a project skill for it with the user's yes; the count is in memory.md → Repeated procedures.`);
+  for (const p of all.filter((x) => x.kind === 'design' || x.kind === 'term')) lines.push(`${p.kind}: ${p.text}. Offer to write it with the user's yes; never write it on your own.`);
   for (const p of all.filter((x) => x.kind === 'preference')) lines.push(`preference: ${p.text.replace(/^preference /, '')}. The user corrected this more than once: offer to add it to ~/.waymark/preferences.md with their yes.`);
   return lines.join('\n');
 }
@@ -558,6 +562,13 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (r.error) console.log(`forget: ${r.error}\nUsage: ${W} forget "<task ID>" | --session <id> --reason "<why>" [--apply]`);
     else if (!apply) console.log(`forget (plan, nothing written): removes ${r.removed.join(', ')} from ${home.log} (${r.from.n} → ${r.to.n} records), chains the rest again and anchors the rewrite in git with the reason. Ask the user, then re-run with --apply.`);
     else { refreshTasks(home, true); console.log(`forgotten: ${r.removed.join(', ')} (${r.from.n} → ${r.to.n} records); rewrite anchor in refs/notes/waymark-anchor: "${reason}"`); }
+    process.exitCode = r.error ? 1 : 0;
+  } else if (sub === 'close') {
+    const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : ''; };
+    const apply = rest.includes('--apply'), id = rest.join(' ').match(ID)?.[0] || null;
+    const r = id ? closeLater(process.cwd(), id, { result: opt('--result') || 'hecho', evidencia: opt('--evidencia'), aprendido: opt('--aprendido'), reason: opt('--reason'), dryRun: !apply }) : { error: 'name the task ID' };
+    if (r.error) console.log([`close: ${r.error}`, `Usage: ${W} close "<task ID>" --evidencia "<…>" --aprendido "<…>" --reason "<why>" [--result hecho] [--apply]`].join('\n'));
+    else { if (apply) refreshTasks(projectHome(process.cwd()), true); console.log([`close ${apply ? 'written' : '(plan, nothing written)'}: ${r.id}`, r.cierre, ...(apply ? [] : ['Ask the user, then re-run with --apply'])].join('\n')); }
     process.exitCode = r.error ? 1 : 0;
   } else if (sub === 'gates') {
     const r = repairGates(process.cwd(), { apply: rest.includes('--apply') });

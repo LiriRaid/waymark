@@ -11,6 +11,11 @@ export function packedFiles(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];
   return new Set(st && st.since === since ? st.files : []);
 }
+// → true when the hook handed something over at this task's first change, even with no file to name (a script, a variable path, a new folder): nothing was left for the agent to search.
+export function packedAny(session, since = 0, file = PACKED()) {
+  const st = readPacked(file)[session || 'unknown'];
+  return !!st && st.since === since;
+}
 // → Set of department names whose procedures.md the hook already handed over in this session and task.
 export function procDelivered(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];

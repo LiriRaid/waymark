@@ -4,7 +4,7 @@ name: verify
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     tags: ['v*']
   pull_request:
 
@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   verify:
+    # a push to develop is checked by its own run; the pull request that same branch opens would run the whole gate a second time on the same commit
+    if: github.event_name != 'pull_request' || github.head_ref != 'develop'
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

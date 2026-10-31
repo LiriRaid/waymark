@@ -5,6 +5,17 @@ import { spawnSync } from 'node:child_process';
 
 export const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, timeout: 8000, maxBuffer: 32 * 1024 * 1024, ...opts });
 
+// The repo-relative paths HEAD never held under any name: files new to git and untracked ones, not a renamed or moved file (a rename pairs with its old path, and an
+// unstaged move of the same name leaves that name deleted). One diff and one listing; an empty set outside a repository or before the first commit, so nothing is called new.
+export function addedPaths(root) {
+  const run = (...a) => { try { return String(git(root, a, { encoding: 'utf8', timeout: 3000 }).stdout || ''); } catch { return ''; } };
+  const added = new Set(), gone = new Set();
+  for (const l of run('diff', '-M', '--name-status', 'HEAD').split('\n').filter(Boolean)) { const [st, ...p] = l.split('\t'); if (st === 'A') added.add(p[0]); else if (st === 'D') gone.add(path.basename(p[0])); }
+  if (!added.size && !gone.size && !run('rev-parse', '--verify', 'HEAD').trim()) return new Set(); // before the first commit nothing is known to be new
+  for (const f of run('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean)) added.add(f);
+  return new Set([...added].filter((f) => !gone.has(path.basename(f))));
+}
+
 // The repository root of a folder as git writes it, or null: asked once per folder in a run (a hook resolves the same folders from
 // several checks, 40-60 ms each on Windows). Only a found root is kept, so a folder that becomes a repository later is asked again.
 const TOPS = new Map();

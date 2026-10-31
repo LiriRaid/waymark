@@ -19,7 +19,7 @@ process.env.WAYMARK_AGENTS_HOME = home;
 process.env.WAYMARK_NO_GH = '1';
 const temps = [home];
 after(() => { for (const d of temps) fs.rmSync(d, { recursive: true, force: true }); });
-const { appendRecord, projectHome, readTaskRecords, taskIds, tasksMarkdown, readRecords, verifyChain, anchorsFor, forget } = await import(`file://${SCRIPTS}/provenance.mjs`);
+const { appendRecord, projectHome, readTaskRecords, taskIds, tasksMarkdown, readRecords, verifyChain, anchorsFor, forget, closeLater } = await import(`file://${SCRIPTS}/provenance.mjs`);
 const notes = await import(`file://${SCRIPTS}/notes.mjs`);
 const engram = await import(`file://${SCRIPTS}/engram.mjs`);
 const { questionRecord } = await import(`file://${SCRIPTS}/stop-hook.mjs`);
@@ -258,7 +258,7 @@ test('card: the last closed task\'s Aprendido shows once (not again under Learne
   ].join('\n'));
   const card = withEngram(fake.bin, () => digest(repo, 'claude'));
   assert.equal(card.split('la lección nueva').length - 1, 1, card);
-  assert.match(card, new RegExp(`- ${day} · T1 · una lección vieja y larga que el título recorta pero el cuerpo no`));
+  assert.match(card, new RegExp(`- ${day} · T1 · una lección vieja y larga que el título recorta pero el…`));
   assert.match(card, /- ADR 0001: \[2026-10-05\] ADR 0001 y tema|- \[2026-10-05\] ADR 0001 y tema/);
 });
 
@@ -345,4 +345,63 @@ test('2.0.14 no notes in git: the trailer commits are the records, per task ID; 
   const recs = readTaskRecords(projectHome(d)).filter((r) => r.id);
   assert.deepEqual(recs.map((r) => [r.id, !!r.fromCommit]), [[`${day} · T1`, true], [`${day} · T2`, false]]);
   assert.equal(taskIds(d).next, `${day} · T3`);
+});
+
+test('1.10 (2.0.20): a commit that only signs the manifest, with a task ID as its trailer, is no task; a commit that changes anything else with the same shape is', () => {
+  const base = tmp('signing'), repo = path.join(base, 'r'), day = new Date().toLocaleDateString('sv');
+  fs.mkdirSync(repo, { recursive: true });
+  gitT(repo, 'init', '-q');
+  fs.writeFileSync(path.join(repo, 'a.txt'), '1');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', 'base');
+  fs.mkdirSync(path.join(repo, 'skills', 'x'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json'), '{}'); fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json.sig'), 'sig');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', `release: the manifest is signed\n\nWaymark-Task: ${day} · T1`);
+  fs.writeFileSync(path.join(repo, 'a.txt'), '2'); fs.writeFileSync(path.join(repo, 'skills', 'x', 'MANIFEST.json'), '{"v":2}');
+  gitT(repo, 'add', '-A'); gitT(repo, 'commit', '-q', '-m', `feat: a change with the manifest\n\nWaymark-Task: ${day} · T2`);
+  const ids = readTaskRecords(projectHome(repo)).filter((r) => r.id).map((r) => r.id);
+  assert.deepEqual(ids, [`${day} · T2`], 'the signing commit leaves no phantom task; the commit that also changed code stays');
+});
+
+test('2.0.20 a task closed in red with no Cierre is closed afterwards by an appended record; its note and the chain stay as they were', () => {
+  const { a } = pair();
+  const id = `${day} · T7`, sha = commit(a, id);
+  const bare = { ...record(id, sha), cierre: '', outcome: { result: null }, unresolved: ['the "## Cierre · <task ID>" block (Resultado · Evidencia · Aprendido)'],
+    evaluation: { steps: { Decision: true, Verificar: false, Cierre: false }, score: '1/3', tokens: 10 } };
+  appendRecord(a, bare);
+  const home = projectHome(a), noteBefore = notes.readNotes(a).get(sha);
+  const read = () => readTaskRecords(home).find((r) => r.id === id);
+  assert.equal(read().cierre, '', 'before: no Cierre');
+  assert.match(closeLater(a, id, { evidencia: 'observada x', aprendido: 'y', reason: '' }).error, /reason/, 'a reason is required');
+  assert.match(closeLater(a, `${day} · T99`, { evidencia: 'x', aprendido: 'y', reason: 'z' }).error, /no record/, 'an unknown task');
+  assert.match(closeLater(a, id, { reason: 'z' }).error, /Evidencia|Aprendido/, 'the three fields are written by the user, never made up');
+  assert.equal(closeLater(a, id, { evidencia: 'observada x', aprendido: 'y', reason: 'z', dryRun: true }).dryRun, true);
+  assert.equal(read().cierre, '', 'the plan writes nothing');
+  assert.ok(!closeLater(a, id, { evidencia: 'observada el commit 3e0e4ec', aprendido: 'el hook no esperaba un Monitor', reason: 'el usuario pidió cerrarla' }).error);
+  const r = read();
+  assert.match(r.cierre, /Resultado: hecho[\s\S]*Evidencia: observada el commit[\s\S]*Aprendido: el hook/);
+  assert.equal(r.outcome.result, 'hecho');
+  assert.equal(r.evaluation.steps.Cierre, true, 'only the Cierre step changes');
+  assert.equal(r.evaluation.steps.Verificar, false, 'the other steps stay as the hook judged them');
+  assert.equal(r.evaluation.score, '2/3');
+  assert.deepEqual(r.unresolved, [], 'the Cierre is no longer owed');
+  assert.ok(r.closedLater.at && r.closedLater.reason, 'the record says it was closed afterwards, and why');
+  assert.equal(notes.readNotes(a).get(sha), noteBefore, 'the git note is untouched');
+  assert.equal(verifyChain(readRecords(home.log), notes.readNotes(a), anchorsFor(a)).ok, true, 'the chain holds');
+  assert.match(closeLater(a, id, { evidencia: 'x', aprendido: 'y', reason: 'z' }).error, /already/, 'a task with a Cierre is not closed twice');
+});
+
+test('2.0.20 a late close is for one result of hecho|parcial|bloqueado and for the session that made the task', () => {
+  const { a } = pair();
+  const id = `${day} · T8`, sha = commit(a, id);
+  appendRecord(a, { ...record(id, sha), cierre: '', outcome: { result: null }, session: 'maquina-1' });
+  assert.match(closeLater(a, id, { result: 'algo', evidencia: 'x', aprendido: 'y', reason: 'z' }).error, /hecho, parcial or bloqueado/);
+  assert.ok(!closeLater(a, id, { evidencia: 'x', aprendido: 'y', reason: 'z' }).error);
+  // the same ID made by another machine's session is another task: the close does not reach it
+  const other = { id, session: 'maquina-2', cierre: '', outcome: { result: null } };
+  const home = projectHome(a);
+  const closed = readTaskRecords(home).find((r) => r.id === id && r.session === 'maquina-1');
+  assert.ok(closed.cierre && closed.closedLater);
+  appendRecord(a, { ...other, agent: 'claude', at: new Date().toISOString(), files: [], commits: [] });
+  const again = readTaskRecords(home).filter((r) => r.id === id);
+  assert.equal(again.find((r) => r.session === 'maquina-2').cierre, '', 'the task of the other session stays open');
 });

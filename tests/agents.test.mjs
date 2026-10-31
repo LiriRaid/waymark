@@ -26,6 +26,7 @@ Object.assign(process.env, {
 });
 const P = await import(`file://${SCRIPTS}/provenance.mjs`);
 const T = await import(`file://${SCRIPTS}/transcript.mjs`);
+const { release } = await import(`file://${SCRIPTS}/lib/version.mjs`);
 
 const gitT = (repo, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8' });
 // outside the temp folder: the hooks exempt temp paths from the routine
@@ -43,7 +44,7 @@ const write = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: tr
 test('plugin: plugin.json and the CHANGELOG\'s newest section carry VERSION; a skill invoked as waymark:dept-qa counts as dept-qa', () => {
   const version = fs.readFileSync(path.join(ROOT, 'skills', 'waymark', 'VERSION'), 'utf8').trim();
   assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version, version);
-  assert.equal(fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1], version, 'CHANGELOG.md opens with the VERSION');
+  assert.equal(fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1], release(version), 'CHANGELOG.md opens with the release the VERSION leads to');
   const lines = [{ type: 'user', uuid: 'p1', message: { role: 'user', content: 'escribe tests' } },
     { type: 'assistant', message: { content: [{ type: 'text', text: 'Waymark → L2 · dept-qa' }, { type: 'tool_use', id: 's1', name: 'Skill', input: { skill: 'waymark:dept-qa', args: 'L2' } }] } }];
   const turn = T.currentTurn(lines);
@@ -146,7 +147,7 @@ test('check: each agent on the machine without Waymark hooks is offered install-
 
 test('instructions block: the "no card, no hook line" alarm only applies to an agent whose hooks run Waymark', () => {
   const block = fs.readFileSync(path.join(SCRIPTS, '..', 'templates', 'instructions.md'), 'utf8');
-  assert.match(block, /Hooks installed but no card and no hook line → they are not running/);
+  assert.match(block, /Hooks installed, no card and no hook line → not running/);
   assert.ok(block.length <= 6500, `the block stays within its size (${block.length})`);
 });
 

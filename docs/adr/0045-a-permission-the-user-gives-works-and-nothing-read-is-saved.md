@@ -36,3 +36,7 @@ The sensitive-path guard blocks `.env*`, keys and credentials. Real use showed f
 - The end-of-turn detection (ADR 0037) still records what reached the agent although no hook stopped it; this ADR only lets the allowed and the harmless through.
 - Masking exact values needs the sensitive file to be readable by Waymark at the project's root; a value set elsewhere is masked only if its format is known.
 - A quoted value shorter than six characters, or a trivial one (`true`, `localhost`, a port), is not masked: it would mask the prose around it.
+
+## Addendum (2.0.20): the answer the user types
+
+The window always offers "Otra cosa". A user who typed a plain yes there ("ok, puedes verla y usarla") had given the permission in their own words, and the guard kept blocking because only the four labels counted. Now an answer that is none of the options and opens with a yes (`ok`, `sí`, `dale`, `hazlo`, `puedes`, `yes`…) counts as "Solo esta tarea": the line ends with the task, and nothing is learned from the case (no key path, name or value reaches memory, an Aprendido or engram; a pattern, never the case). An answer that opens with no, or with no yes, grants nothing, and the agent's own text still grants nothing.

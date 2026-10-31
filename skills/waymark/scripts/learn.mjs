@@ -73,6 +73,22 @@ export function learnGates(text, rec, date) {
   });
 }
 
+// The eyes row written as 'to confirm' becomes confirmed once a task's look measured or clicked the page after its last change (the screen answered at that host).
+export function learnEyes(text, rec, date) {
+  const eyes = rec?.observed?.eyes;
+  if (!eyes?.afterLastChange) return text;
+  // the look has to be at the server the row names: its port is among the ports the counted looks measured
+  const looked = (l) => { const port = cells(l)[1]?.match(/:(\d{2,5})\b/)?.[1]; return !port || (eyes.ports || []).includes(port); };
+  return editSection(text, 'Quality gates', (body) => body.split('\n').map((l) => (isRow(l) && cells(l)[0] === 'eyes' && /to confirm/i.test(l) && looked(l) ? `| eyes | ${cells(l)[1]} | confirmed ${date} by a task's look |` : l)).join('\n'));
+}
+
+// The Placement line proposed as 'to confirm' is confirmed with the Architecture it was detected with: once the user confirmed that (the line no longer ends in '(to confirm)'),
+// the placement rules of the same census stand on the same word, with the date of the task that saw it.
+export function learnPlacement(text, date) {
+  if (!/^- Architecture:/m.test(text) || /^- Architecture:[^\n]*\(to confirm\)\s*$/m.test(text)) return text;
+  return text.replace(/^(- Placement) \(to confirm, detected ([^)]*)\):/m, `$1 (confirmed ${date}, detected $2):`);
+}
+
 // ---------- Project map ----------
 
 const AREAS = '- Areas (hook: last task per folder):';
@@ -184,7 +200,7 @@ export function learnProcedures(text, procs) {
 
 // ---------- Corrections → preferences ----------
 
-const CORRECTION = /(^|[^\p{L}])(siempre|nunca|jam[aá]s|no (vuelvas a|hagas|uses|pongas|cambies|toques|agregues|borres|quites|abras)|te dije|ya te dije|deja de|otra vez|de ahora en adelante|recuerda que|always|never|don'?t|do not|stop (doing|using)|from now on|i told you)(?=$|[^\p{L}])/iu;
+const CORRECTION = /(^|[^\p{L}])(siempre|nunca|jam[aá]s|no (vuelvas a|hagas|uses|pongas|cambies|toques|agregues|borres|quites|abras)|te dije|ya te dije|deja de|otra vez|de ahora en adelante|recuerda que|reutiliza|reusa|ya existe|en vez de|en lugar de|por defecto|por default|always|never|don'?t|do not|stop (doing|using)|from now on|i told you|reuse|already exists|instead of|by default)(?=$|[^\p{L}])/iu;
 const STOP = new Set(['que', 'los', 'las', 'del', 'por', 'para', 'con', 'una', 'uno', 'como', 'esto', 'esta', 'este', 'eso', 'pero', 'porque', 'sin', 'mas', 'muy', 'the', 'and', 'for', 'with', 'that', 'this', 'from', 'you', 'your', 'not', 'are', 'siempre', 'nunca', 'jamas', 'dije', 'deja', 'otra', 'vez', 'ahora', 'adelante', 'recuerda', 'always', 'never', 'dont', 'stop', 'told']);
 const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const keys = (s) => new Set(norm(s).match(/[a-z0-9]{3,}/g)?.filter((w) => !STOP.has(w)) || []);
@@ -235,10 +251,41 @@ export function proposals(home, records) {
     const owner = ownerOf(records, r.ids);
     out.push({ kind: 'rule', key: `rule:${r.label}`, text: `Learned rule for ${owner || 'the owner department'} (${owner ? `${owner}/SKILL.md → ## Learned rules` : 'its SKILL.md → ## Learned rules'}): ${r.label} failed ${r.failures}× (last ${r.ids[r.ids.length - 1]}; waymark.mjs incidents shows the causes)` });
   }
-  for (const c of corrections(records, read(PREFS()))) {
-    out.push({ kind: 'preference', key: `pref:${[...keys(c.first)].sort().join(' ')}`, text: `preference "${c.text}" (${c.ids.length}×: ${c.ids.slice(-3).join(', ')}) → ~/.waymark/preferences.md` });
+  // what the user says twice is the project's convention first; a line already in its Conventions or in preferences.md is not proposed again
+  const conventions = (('\n' + read(home.memory)).match(/\n## Conventions[^\n]*\n([\s\S]*?)(?=\n## |$)/)?.[1] || '');
+  for (const c of corrections(records, `${read(PREFS())}\n${conventions}`)) {
+    out.push({ kind: 'preference', key: `pref:${[...keys(c.first)].sort().join(' ')}`, text: `preference "${c.text}" (${c.ids.length}×: ${c.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md, or ~/.waymark/preferences.md if it holds in every project of yours (the user decides)` });
   }
+  for (const d of designLinks(records, conventions)) out.push({ kind: 'design', key: `design:${d.host}`, text: `design link ${d.host} (the user wrote it in ${d.ids.length} tasks: ${d.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md, so the eyes look at it without it being written again (the user decides)` });
+  for (const t of terms(records, conventions)) out.push({ kind: 'term', key: `term:${norm(t.term)}`, text: `term "${t.term}" means "${t.meaning}" for this user (${t.ids.length}×: ${t.ids.slice(-3).join(', ')}) → this project's Conventions in .waymark/memory.md (the user decides)` });
   return out;
+}
+
+const LINK = /https?:\/\/[^\s'"`)<>\]]+/gi;
+// The hosts of design tools: a docs or repository link written twice is not a design the user works from
+const DESIGN_HOST = /(?:^|\.)(?:figma\.com|claude\.ai|penpot\.app|sketch\.com|zeplin\.io|canva\.com|framer\.(?:com|app)|miro\.com|invisionapp\.com|whimsical\.com|excalidraw\.com|v0\.dev|stitch\.withgoogle\.com|adobe\.com)$/i;
+const LOCAL = /^(?:localhost|127\.0\.0\.1|\[::1\]|[\w.-]+\.localhost|[\w.-]+\.test)$/i;
+// A design link (the host of a design tool, not a local one) the user wrote in 2 tasks or more and the project's Conventions do not hold yet. → [{ host, ids }]
+export function designLinks(records, conventions = '') {
+  const by = new Map();
+  for (const r of records.filter((x) => x.id && x.kind !== 'Q')) {
+    const hosts = new Set();
+    for (const t of r.prompts?.length ? r.prompts : [r.prompt]) for (const u of String(t || '').match(LINK) || []) { try { const h = new URL(u).hostname.toLowerCase(); if (!LOCAL.test(h) && DESIGN_HOST.test(h)) hosts.add(h); } catch {} }
+    for (const h of hosts) by.set(h, [...(by.get(h) || []), r.id]);
+  }
+  return [...by].filter(([h, ids]) => ids.length >= 2 && !conventions.toLowerCase().includes(h)).map(([host, ids]) => ({ host, ids }));
+}
+
+// "when I say X I mean Y": a word with a meaning of its own, said in 2 tasks or more. → [{ term, meaning, ids }]
+const TERM = /(?:cuando\s+(?:te\s+)?(?:digo|dije|hablo de|escribo)|when\s+i\s+say)\s+["«“']?([^"»”',.;:]{2,30}?)["»”']?\s*,?\s*(?:me refiero a|quiero decir|es decir|significa|i mean)\s+([^.,;\n]{3,80})/giu;
+export function terms(records, conventions = '') {
+  const by = new Map();
+  for (const r of records.filter((x) => x.id)) {
+    for (const t of [r.prompt, ...(r.prompts || []), ...(r.decisions || []).filter((d) => d.source === 'reply').map((d) => d.chosen)]) {
+      for (const m of String(t || '').matchAll(TERM)) { const k = norm(m[1]).trim(), g = by.get(k) || { term: m[1].trim(), meaning: m[2].trim(), ids: new Set() }; g.ids.add(r.id); g.meaning = m[2].trim(); by.set(k, g); }
+    }
+  }
+  return [...by].filter(([k, g]) => g.ids.size >= 2 && !norm(conventions).includes(k)).map(([, g]) => ({ term: g.term, meaning: g.meaning, ids: [...g.ids] }));
 }
 
 // The proposals never said before in this project (.waymark/proposals-seen.json): the session card says them once.
@@ -258,8 +305,8 @@ export function newProposals(home, records) {
 export function learn(home, rec, records, now = new Date()) {
   if (!home?.dir || home.legacy || !rec?.id || rec.kind === 'Q' || !fs.existsSync(home.memory)) return false;
   const text = fs.readFileSync(home.memory, 'utf8');
-  let next = learnGates(text, rec, now.toLocaleDateString('sv'));
-  next = learnAreas(next, rec, home.root);
+  let next = learnEyes(learnGates(text, rec, now.toLocaleDateString('sv')), rec, now.toLocaleDateString('sv'));
+  next = learnPlacement(learnAreas(next, rec, home.root), now.toLocaleDateString('sv'));
   next = learnProcedures(next, procedures(records));
   if (next === text) return false;
   fs.writeFileSync(home.memory, next);

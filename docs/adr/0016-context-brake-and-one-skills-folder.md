@@ -1,6 +1,6 @@
 # 0016 · Context brake, one project-skills folder, no-change tasks recorded
 
-**Status:** accepted (2026-10-06, Waymark 2.0.0-dev). Every pick below is the user's (2026-10-06 · T8). It amends 0015.
+**Status:** accepted (2026-10-06, Waymark 2.0.0-dev). Every pick below is the user's (2026-10-06 · T8). It amends 0015. **Amended by 0050 (2.0.20): the brake advises and saves the work's state, it no longer stops a prompt unless `WAYMARK_BRAKE_MODE=block`.**
 
 ## Context
 - **Large sessions cost the most.** A session past ~150k tokens took about 8% of the plan quota per task. Every response re-reads the whole session, even when the new task has nothing to do with the old ones. The card, tasks.md, engram and the git notes already carry the work over, so a new session loses nothing.
@@ -12,7 +12,7 @@
 
 Amended in 2.0.8 at the user's request (2026-10-14 · T1): the brake fires once per 100k step, not once per session (300k, 400k, 500k…). A resend continues until the next step. With a 1M-token window, the status line showed `contexto 43%` (426k), and nothing stopped the session after its first brake at 371k. `WAYMARK_BRAKE_STEP` tunes the step, and 0 brings back once per session. The first step keeps the bare session id in `~/.waymark/.brake.json`, so a session braked before 2.0.8 continues in its 300k step.
 
-Amended in 2.0.12 at the user's request (2026-10-14 · T1m, the user's pick): both brakes (size and idle, 0018) wait for the task. While this session's task is in progress, no message is braked at any size: its start is marked and it has no Cierre yet (a turn the quota cut, a reply waiting on the user), or its last Cierre says `Resultado: parcial` or `bloqueado`. The brake fires on the first message after a Cierre `hecho`, or in a session with no task. A YaloAtiendo task was braked mid-work, and resumed after the quota ran out it was braked again. A new session there would rebuild what the old one held, so continuing is the cheaper path until the task is done, at 600k or 800k (`provenance.taskInProgress`).
+Amended in 2.0.12 at the user's request (2026-10-14 · T1m, the user's pick): both brakes (size and idle, 0018) wait for the task. While this session's task is in progress, no message is braked at any size: its start is marked and it has no Cierre yet (a turn the quota cut, a reply waiting on the user), or its last Cierre says `Resultado: parcial` or `bloqueado`. The brake fires on the first message after a Cierre `hecho`, or in a session with no task. A the real-use project task was braked mid-work, and resumed after the quota ran out it was braked again. A new session there would rebuild what the old one held, so continuing is the cheaper path until the task is done, at 600k or 800k (`provenance.taskInProgress`).
 
 How each agent stops the message, verified at the installed versions:
 

@@ -27,6 +27,8 @@ export const dumpDir = () => path.join(process.env.WAYMARK_HOME || path.join(os.
 
 const textOf = (parts) => (parts || []).filter((p) => p.type === 'text' && !p.synthetic).map((p) => p.text || '').join('\n');
 
+const BLOCK_REASON = /^\s*Waymark: this L\d/; // the first words of stop-hook's blockReason (the plugin skips the same message in chat.message)
+
 // The dumped messages → the core's lines (Claude Code .jsonl shape, canonical tool names).
 export function toLines(rows, cwd = process.cwd(), version = null) { // version: OpenCode's, from the plugin (agent_version)
   const lines = [];
@@ -36,6 +38,7 @@ export function toLines(rows, cwd = process.cwd(), version = null) { // version:
     const ts = info.time?.created ? new Date(info.time.created).toISOString() : undefined;
     if (info.role === 'user') {
       const text = textOf(parts);
+      if (BLOCK_REASON.test(text)) continue; // the end-of-turn hook's block, sent back as a message: it continues the turn it stops, as in Claude Code, and opens no turn of its own
       if (text.trim()) lines.push({ type: 'user', uuid: info.id, timestamp: ts, ...(version ? { version } : {}), message: { role: 'user', content: text } });
       continue;
     }

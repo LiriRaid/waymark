@@ -94,9 +94,26 @@ test('size: the real reminder, the skill descriptions, what goes outside the car
   const SKILLS = path.join(ROOT, 'skills');
   const descriptions = fs.readdirSync(SKILLS).map((d) => (read(path.join(SKILLS, d, 'SKILL.md')).match(/^description:.*$/m) || [''])[0].length).reduce((a, b) => a + b, 0);
   assert.deepEqual([by['skill descriptions'].group, by['skill descriptions'].chars], ['session', descriptions]);
-  for (const name of ['check pointer', 'held message (max)', 'new agents', 'proposals', 'coexistence', 'instructions block (Cursor)']) assert.equal(by[name]?.group, 'outside cap', name);
-  assert.equal(by['held message (max)'].chars <= 700, true, 'point 5: the held message stays under 700 characters');
+  for (const name of ['check pointer', 'held message (frame)', 'new agents', 'proposals', 'coexistence', 'instructions block (Cursor)']) assert.equal(by[name]?.group, 'outside cap', name);
+  assert.equal(by['held message (frame)'].chars <= 100, true, '2.0.20: the held message adds only its frame; the user\'s own words go whole after it');
   assert.equal(by['instructions block (Cursor)'].chars, read(path.join(CORE, 'templates', 'instructions.md')).trim().length);
   const l2 = read(path.join(CORE, 'references', 'protocol', 'l2.md')).length, l3 = read(path.join(CORE, 'references', 'protocol', 'l3.md')).length;
   assert.deepEqual([by['protocol L2'].group, by['protocol L2'].chars, by['protocol L3'].chars], ['level', l2, l2 + l3]);
+});
+
+// ---- 2.0.20 point 24: check 8.2 measures Waymark's own skills, not every skill the machine has ----
+test('24: the fixed context counts waymark, the dept-* and the owned tool skills; a skill another agent or the user installed is not Waymark\'s to answer for', async () => {
+  const { ownSkills } = await import(`file://${SCRIPTS}/size.mjs`);
+  const map = { skills: { 'ui-build': { owned: true }, 'library-docs': { owned: true }, 'code-review': {}, 'ego-browser': {} } };
+  assert.deepEqual(ownSkills(['waymark', 'dept-qa', 'ui-build', 'ego-browser', 'pdf', 'code-review', 'library-docs'], map), ['waymark', 'dept-qa', 'ui-build', 'library-docs']);
+  assert.deepEqual(ownSkills(['waymark', 'pdf'], null), ['waymark'], 'no skill-map: only the core');
+});
+
+test('24: check 8.3 measures the reminder with a typical task and git line: a dirty working tree does not move it', async () => {
+  const { sizes } = await import(`file://${SCRIPTS}/size.mjs`);
+  const clean = memRepo('prompt-clean'), dirty = memRepo('prompt-dirty');
+  for (const i of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) fs.writeFileSync(path.join(dirty, `a-very-long-file-name-to-make-the-git-line-longer-${i}.mjs`), 'x\n');
+  const real = (cwd, opts) => sizes(cwd, opts).find((r) => r.name === 'reminder (real)').chars;
+  assert.notEqual(real(clean, {}), real(dirty, {}), 'live, the git line follows the tree (why the card must not read it live)');
+  assert.equal(real(clean, { pinned: true }), real(dirty, { pinned: true }), 'pinned, it does not');
 });

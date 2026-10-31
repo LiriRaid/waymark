@@ -3,7 +3,7 @@
 **Status:** accepted (2026-10-12). Every pick below is the user's (2026-10-12 · T4). It amends the quota estimate of `calibrate.mjs` (2.0.0).
 
 ## Context
-- **The % was always a guess.** The end-of-turn line estimated a task's share of the quota from the user's own pairs, which were the tokens of a closed task and the % the user read and typed. With no pairs there is no %, only the question. A clean reinstall moved `~/.waymark/calibration.jsonl` to the backup, and the next task (YaloAtiendo-Chat, 2026-10-12 · T1, 2.93M tokens) showed no % at all.
+- **The % was always a guess.** The end-of-turn line estimated a task's share of the quota from the user's own pairs, which were the tokens of a closed task and the % the user read and typed. With no pairs there is no %, only the question. A clean reinstall moved `~/.waymark/calibration.jsonl` to the backup, and the next task (the real-use project, 2026-10-12 · T1, 2.93M tokens) showed no % at all.
 - **Claude Code knows the real value.** The JSON it passes to a status line holds `rate_limits.five_hour.used_percentage` and `resets_at`, plus the 7-day window. They are present for claude.ai Pro and Max, after the session's first response (code.claude.com/docs/en/statusline). Hooks do not get them.
 - **The window is the account's.** Every session, and claude.ai itself, spends from the same 5 hours, so a difference between two readings holds whatever ran in between.
 

@@ -24,7 +24,9 @@ const at = () => new Date().toISOString();
 const prompt = (text) => ({ type: 'user', uuid: `p${Math.random()}`, timestamp: at(), message: { role: 'user', content: text } });
 const say = (text) => ({ type: 'assistant', timestamp: at(), message: { content: [{ type: 'text', text }] } });
 const call = (name, input, out = 'ok', error = false) => { const id = `u${++ids}`; return [{ type: 'assistant', timestamp: at(), message: { content: [{ type: 'tool_use', id, name, input }] } }, { type: 'user', timestamp: at(), message: { content: [{ type: 'tool_result', tool_use_id: id, content: out, is_error: error }] } }]; };
-const head = (level, ...files) => [prompt('ajusta el botón'), say(`Waymark → L${level} · dept-frontend`), ...call('Skill', { skill: 'dept-frontend' }), ...files.flatMap((f) => call('Edit', { file_path: f }))];
+const bare = (level, ...files) => [prompt('ajusta el botón'), say(`Waymark → L${level} · dept-frontend`), ...call('Skill', { skill: 'dept-frontend' }), ...files.flatMap((f) => call('Edit', { file_path: f }))];
+// the usual task: the edits, then the project's typecheck passing, then whatever the case does; `bare` is the same with no gate
+const head = (level, ...files) => [...bare(level, ...files), ...call('Bash', { command: 'pnpm exec tsc --noEmit' })];
 const CIERRE = '## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: observada ancho 40\nAprendido: x ← y';
 const judge = (lines, ctx = {}, reply = CIERRE) => cierreGaps(currentTurn(lines), reply, undefined, undefined, { ids: P.taskIds('/nowhere'), decisions: [{ question: '¿Cómo?', chosen: 'A', discarded: [] }], cwd: '/work/proj', procDelivered: ['dept-frontend'], eyes: { provider: 'ego' }, ...ctx });
 const eyes = (g) => g.steps.find((s) => s.id === 'eyes');
@@ -108,7 +110,7 @@ test('8: the provider is what the machine has: ego first, Playwright where the p
 test('8: the record keeps the eyes: provider, calls, measures, and nothing of the page', () => {
   const g = judge([...head(2, CSS), ...ego(MEASURE)]);
   const o = g.observed.eyes;
-  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references'].sort());
+  assert.deepEqual(Object.keys(o).sort(), ['afterLastChange', 'calls', 'captures', 'design', 'measures', 'offHost', 'provider', 'references', 'returns', 'skillRead', 'spaces'].sort()); // the ego task space(s) and the returns to ego are kept by name and count only, and whether ego's own skill was read first (2.0.20 point 15)
   assert.ok(!JSON.stringify(o).includes('localhost'), 'no URL, no text of the page');
 });
 
@@ -312,4 +314,284 @@ test('8: no department, tool skill or audit note keeps "the browser only when th
   const old = /browser only if the user asks|`run` \/ `browser-verify` only when the user asks|`browser-verify` only when the user asks\)|^\| "Never offer browser verification" \|/im;
   for (const f of files) assert.doesNotMatch(fs.readFileSync(path.join(root, f), 'utf8'), old, f);
   assert.match(fs.readFileSync(path.join(root, 'skills/dept-devops/SKILL.md'), 'utf8'), /post-deploy smoke test of a deployed host only when the user asks/, 'counter-example: a deployed host is beyond the eyes and stays on request');
+});
+
+// ---- 2.0.20 · point 1 (rows 11, 29, 30): the forms of the ego command the agents really ran, copied as patterns (no path, name or script of a real project) ----
+const EGO_EXE = 'C:/Users/dev/.local/share/ego/active_version_dir/ego-browser.exe';
+const FORMS = {
+  'bare': `ego-browser nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'unquoted absolute path': `${EGO_EXE} nodejs -e "${MEASURE.replace(/"/g, "'")}"`,
+  'quoted absolute path (the form the 2.0.19 message recommended: 75 of 130 misses)': `"${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'single-quoted path': `'${EGO_EXE}' nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'quoted path with a space': `"C:/Program Files/ego/ego-browser.exe" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'a variable': `"$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'an unquoted variable': `$EGO nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'a braced variable': `"\${EGO}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'the variable assigned in the same command': `EGO="${EGO_EXE}"; "$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with a quoted path': `& "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with a variable': `& $exe nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'PowerShell & with an environment variable': `& "$env:EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after cd &&': `cd web && "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after touch && sleep &&': `touch ready.flag && sleep 1 && "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'after mkdir && cd &&': `mkdir -p out && cd out && "$EGO" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'behind timeout': `timeout 120 "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+  'behind an environment assignment': `EGO_QUIET=1 "${EGO_EXE}" nodejs <<'EOF'\n${MEASURE}\nEOF`,
+};
+test('1: every form of the ego command the agents ran is a call, and its measurement counts (one case per form)', () => {
+  for (const [form, command] of Object.entries(FORMS)) {
+    assert.equal(Eyes.RUNS_EGO.test(command), true, `recognised: ${form}`);
+    const g = judge([...head(2, CSS), ...call('Bash', { command })]);
+    assert.equal(g.observed.eyes.calls, 1, `calls: ${form}`);
+    assert.equal(eyes(g).pass, true, `measured after the last change: ${form}`);
+  }
+});
+
+test('1: counter-example — a variable or a path that is not ego, or ego named inside text, is no call', () => {
+  for (const command of ['echo "$EGO nodejs"', 'grep -rn "$EGO nodejs" notes.md', '$NODE script.js', '"$EGO" skill', `"${EGO_EXE}" skill`, 'cat ego-browser-nodejs.md', 'node nodejs.js', 'echo ok && echo "ego-browser nodejs"']) {
+    assert.equal(Eyes.RUNS_EGO.test(command), false, command);
+  }
+});
+
+test('1: the browser the task tried names ego for every form, not only the bare one', () => {
+  const g = judge([...head(2, CSS), ...call('Bash', { command: FORMS['quoted absolute path (the form the 2.0.19 message recommended: 75 of 130 misses)'] })]);
+  assert.ok(g.observed.browser.tried.includes('ego-browser'));
+});
+
+test('1: a script the shell wrote (heredoc or PowerShell here-string) and ego imported later is read: its measurement counts; a look-only one does not', () => {
+  const run = `"${EGO_EXE}" nodejs -e "await import('file:///home/u/ego/round-02.mjs')"`;
+  const body = `const page = (await taskSpace("x")).page("p1");\n${MEASURE}`;
+  const written = {
+    'cat > f <<EOF': `cat > /home/u/ego/round-02.mjs <<'EOF'\n${body}\nEOF`,
+    'cat >> f <<EOF': `cat >> /home/u/ego/round-02.mjs <<'EOF'\n${body}\nEOF`,
+    'tee f <<EOF': `tee /home/u/ego/round-02.mjs <<EOF\n${body}\nEOF`,
+    'here-string piped to Set-Content': `@'\n${body}\n'@ | Set-Content -Path /home/u/ego/round-02.mjs`,
+    'Set-Content -Value here-string': `Set-Content -Path "/home/u/ego/round-02.mjs" -Value @'\n${body}\n'@`,
+  };
+  for (const [how, command] of Object.entries(written)) {
+    const tool = how.includes('here-string') || how.includes('-Value') ? 'PowerShell' : 'Bash';
+    assert.equal(eyes(judge([...head(2, CSS), ...call(tool, { command }), ...call('Bash', { command: run })])).pass, true, how);
+  }
+  const look = `cat > /home/u/ego/round-02.mjs <<'EOF'\nconst page = (await taskSpace("x")).page("p1");\n${LOOK}\nEOF`;
+  assert.equal(eyes(judge([...head(2, CSS), ...call('Bash', { command: look }), ...call('Bash', { command: run })])).pass, false, 'counter-example: a script that only looks');
+});
+
+test('1: the pre-tool guard of the ego host and profile runs for every form of the command (it shared the detector that missed 130 of 182 real calls)', async () => {
+  const { gate } = await import(`file://${SCRIPTS}/tool-hook.mjs`);
+  const claude = await import(`file://${SCRIPTS}/agents/claude.mjs`);
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-eyes-forms-'));
+  const transcript = path.join(proj, 't.jsonl');
+  fs.writeFileSync(transcript, [prompt(`ajusta el botón como en ${DESIGN}`)].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const run = (program, script) => gate({ tool_name: 'Bash', tool_input: { command: `${program} nodejs -e '${script}'` }, cwd: proj, session_id: 's-eyes-forms', transcript_path: transcript }, claude);
+  const programs = [`"${EGO_EXE}"`, '"$EGO"', '& $exe', `cd web && "${EGO_EXE}"`, `timeout 60 "${EGO_EXE}"`];
+  for (const p of programs) {
+    assert.match(run(p, 'await page.goto("https://prod.example.com/")') || '', /neither the local dev server/, `an off host is refused: ${p}`);
+    assert.match(run(p, 'await page.cdp("Network.clearBrowserCookies")') || '', /whole browser profile/, `the profile wipe is refused: ${p}`);
+    assert.equal(run(p, `await page.goto("${DESIGN}")`), null, `the design link the user wrote passes: ${p}`);
+  }
+  fs.rmSync(proj, { recursive: true, force: true });
+});
+
+// ---- point 18 (2.0.20): the typecheck goes before the eyes ----
+const GATE = call('Bash', { command: 'pnpm exec tsc --noEmit' });
+const GATE_FAIL = call('Bash', { command: 'pnpm exec tsc --noEmit' }, "src/app/shared/button/button.component.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.", true);
+const GATE_MISSING = call('Bash', { command: 'pnpm exec tsc --noEmit' }, 'tsc: command not found', true);
+
+test('18: a look counts only after the project\'s typecheck or build passed since the last change; the message says it in those words', () => {
+  const ok = judge([...bare(2, CSS, HTML), ...GATE, ...ego(MEASURE)]);
+  assert.equal(eyes(ok).pass, true, 'gate, then the look');
+  const before = judge([...bare(2, CSS, HTML), ...ego(MEASURE), ...GATE]);
+  assert.equal(eyes(before).pass, false, 'the look came before the gate: it saw a version nobody had compiled');
+  assert.equal(before.observed.eyes.beforeGate, true, 'the record says why the look did not count');
+  assert.match(before.missing.find((m) => /browser|ego/i.test(m)), /typecheck or build first[^;]*cannot be seen until it is fixed/, 'the instruction, in its words');
+  const failed = judge([...bare(2, CSS), ...GATE_FAIL, ...ego(MEASURE)]);
+  assert.equal(eyes(failed).pass, false, 'a gate that failed is no gate that passed');
+  const none = judge([...bare(2, CSS), ...ego(MEASURE)]);
+  assert.equal(eyes(none).pass, false, 'no gate at all since the change');
+  assert.equal(none.observed.eyes.beforeGate, true);
+});
+
+test('18: counter-examples — a gate the machine cannot run does not hold the look back; a gate after an earlier look and before a later one counts that later look', () => {
+  assert.equal(eyes(judge([...bare(2, CSS), ...GATE_MISSING, ...ego(MEASURE)])).pass, true, 'the tool is not installed: not the code\'s failure');
+  assert.equal(eyes(judge([...bare(2, CSS), ...ego(MEASURE), ...GATE, ...ego(CLICK)])).pass, true, 'the second look came after the gate');
+});
+
+// ---- point 15 (2.0.20): one ego space per task, closed by the agent when the task is complete; the returns to it are counted ----
+const egoIn = (name, body) => call('Bash', { command: `ego-browser nodejs <<'EOF'\nconst task = await taskSpace("${name}");\nconst page = task.page("p1");\n${body}\nEOF` });
+const FINISH = 'await task.finish({ keep: [] });';
+const edit = (f) => call('Edit', { file_path: f });
+const OPEN_TASK = '## Cierre · 2026-10-25 · T1\nResultado: parcial (falta el paso 3)\nEvidencia: observada ancho 40\nAprendido: ✔1 · ▶2 · 3 ← pasos';
+
+test('15: the record keeps the spaces (opened, finished) and how many times the agent went back to ego after a change', () => {
+  const g = judge([...head(2, CSS), ...egoIn('pedidos', MEASURE), ...edit(HTML), ...call('Bash', { command: 'pnpm exec tsc --noEmit' }), ...egoIn('pedidos', CLICK), ...edit(CSS), ...call('Bash', { command: 'pnpm exec tsc --noEmit' }), ...egoIn('pedidos', MEASURE + FINISH)]);
+  assert.deepEqual(g.observed.eyes.spaces, [{ name: 'pedidos', opened: 3, finished: true }], 'one space, resumed, finished once');
+  assert.equal(g.observed.eyes.returns, 3, 'each look that followed a change');
+  assert.equal(eyes(g).pass, true);
+});
+
+test('15: a space closed while the task is open, or opened anew inside one task, is a finding (recorded, never a block); one closed at the end of a complete task is not', () => {
+  const finished = [...head(2, CSS), ...egoIn('pedidos', MEASURE + FINISH)];
+  const open = judge(finished, {}, OPEN_TASK);
+  assert.ok(open.findings.some((f) => /ego space was closed while the task is still open/.test(f)), JSON.stringify(open.findings));
+  assert.deepEqual(open.missing.filter((m) => /ego space/.test(m)), [], 'a look, never a block');
+  assert.ok(!judge(finished).findings.some((f) => /ego space/.test(f)), 'counter-example: a complete task closes its space');
+  const anew = judge([...head(2, CSS), ...egoIn('uno', MEASURE), ...egoIn('dos', MEASURE)]);
+  assert.ok(anew.findings.some((f) => /ego was opened 2 times in one task \(uno, dos;/.test(f)), JSON.stringify(anew.findings));
+  assert.ok(!judge([...head(2, CSS), ...egoIn('uno', MEASURE), ...egoIn('uno', CLICK)]).findings.some((f) => /ego was opened/.test(f)), 'counter-example: the same space resumed is one');
+});
+
+// ---- review of level 2: the gate rule in a turn that changed nothing, and with a real failure beside a missing tool ----
+test('18 (review): a red typecheck beside a command the machine cannot run still holds the look back; the missing tool alone does not', () => {
+  const redAndMissing = judge([...bare(2, CSS), ...GATE_FAIL, ...call('Bash', { command: 'pnpm exec eslint src' }, 'eslint: command not found', true), ...ego(MEASURE)]);
+  assert.equal(eyes(redAndMissing).pass, false, 'a typecheck that really failed is not excused by a lint that could not run');
+  assert.equal(eyes(judge([...bare(2, CSS), ...GATE_MISSING, ...ego(MEASURE)])).pass, true, 'counter-example: only a missing tool');
+});
+
+// ---- 2.0.20 point 29, from the first real task of checkpoint B: 151 of 434 real ego calls handed the script by stdin ----
+const SCRIPT = 'const page = (await taskSpace("x")).page("p1");\nconsole.log(await page.evaluate(() => document.querySelector("b").getBoundingClientRect().width));';
+const QEGO = '"' + EGO_EXE + '"';
+
+test('29: a script written by Write and given to ego by stdin redirect (absolute path) counts as a measurement', () => {
+  const file = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run/round-50.mjs';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < "${file}" 2>&1 | head -8` })];
+  const g = judge(lines);
+  assert.equal(g.observed.eyes.measures, 1, JSON.stringify(g.observed.eyes));
+  assert.equal(eyes(g).pass, true);
+});
+
+test('29: the same by a relative path after cd, and by `cat file |`', () => {
+  const dir = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run';
+  const write = call('Write', { file_path: `${dir}/round-51.mjs`, content: SCRIPT });
+  const rel = judge([...head(2, CSS), ...write, ...call('Bash', { command: `cd "${dir}" && ${QEGO} nodejs < round-51.mjs 2>&1 | head -3` })]);
+  assert.equal(rel.observed.eyes.measures, 1, 'relative to the folder the command went to');
+  const cat = judge([...head(2, CSS), ...write, ...call('Bash', { command: `cat "${dir}/round-51.mjs" | ${QEGO} nodejs` })]);
+  assert.equal(cat.observed.eyes.measures, 1, 'a script piped in');
+});
+
+test('29: a script rewritten under the same name is read as it stood at that call', () => {
+  const file = 'C:/Users/u/scratch/ego-run/round.mjs';
+  const look = 'await page.goto("http://localhost:4200/"); console.log(await page.snapshot());';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: look }), ...call('Bash', { command: `${QEGO} nodejs < "${file}"` }), ...call('Write', { file_path: file, content: SCRIPT })];
+  assert.equal(judge(lines).observed.eyes.measures, 0, 'the measuring version was written after the call');
+});
+
+test('29: counter-examples — a redirect to a file nobody wrote, and a heredoc, are not a script read from the file', () => {
+  const missing = judge([...head(2, CSS), ...call('Bash', { command: `${QEGO} nodejs < "C:/Users/u/never-written.mjs"` })]);
+  assert.equal(missing.observed.eyes.measures, 0);
+  const heredoc = judge([...head(2, CSS), ...ego(MEASURE)]);
+  assert.equal(heredoc.observed.eyes.measures, 1, 'the heredoc form still counts from its own body');
+});
+
+test('29: references — "<element> (captura 1): parecido." and the other separators count; a word in prose does not', () => {
+  const reply = CIERRE + '\n- **Turno sin iniciar (captura 1)**: parecido. Ahora muestra el reloj\n- título: igual, 26 px\n- pill: falta (la etiqueta de IA)\n- botón: igual — 28x28\n- cierre: parecido\nel botón es igual al diseño y falta el hover';
+  const g = judge([...head(2, CSS), ...ego(MEASURE)], {}, reply);
+  assert.equal(g.observed.eyes.references, 5, 'the five lines, not the prose');
+});
+
+// ---- review of level 3: the script ego reads is the one the agent edited, and a bare file name that two folders hold is not guessed ----
+test('29 (review): an Edit of the script after its Write is applied before the call that reads it', () => {
+  const file = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-run/round-7.mjs';
+  const look = 'await page.goto("http://localhost:4200/"); console.log(await page.snapshot());';
+  const lines = [...head(2, CSS), ...call('Write', { file_path: file, content: look }),
+    ...call('Edit', { file_path: file, old_string: 'console.log(await page.snapshot());', new_string: 'console.log(await page.evaluate(() => document.querySelector("b").getBoundingClientRect().width));' }),
+    ...call('Bash', { command: `${QEGO} nodejs < "${file}"` })];
+  assert.equal(judge(lines).observed.eyes.measures, 1, 'the measurement the Edit added counts');
+  const removed = [...head(2, CSS), ...call('Write', { file_path: file, content: SCRIPT }),
+    ...call('Edit', { file_path: file, old_string: 'getBoundingClientRect()', new_string: 'toString()' }),
+    ...call('Bash', { command: `${QEGO} nodejs < "${file}"` })];
+  assert.equal(judge(removed).observed.eyes.measures, 0, 'counter-example: an Edit that took the measurement out is read too');
+});
+
+test('29 (review): a relative file name with no cd that two folders hold is ambiguous and credits nothing; one folder holding it is read', () => {
+  const a = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-a/round.mjs', b = 'C:/Users/u/AppData/Local/Temp/claude/proj/scratchpad/ego-b/round.mjs';
+  const look = 'await page.goto("http://localhost:4200/");';
+  const ambiguous = [...head(2, CSS), ...call('Write', { file_path: a, content: look }), ...call('Write', { file_path: b, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < round.mjs` })];
+  assert.equal(judge(ambiguous).observed.eyes.measures, 0, 'two folders: not guessed');
+  const single = [...head(2, CSS), ...call('Write', { file_path: b, content: SCRIPT }), ...call('Bash', { command: `${QEGO} nodejs < round.mjs` })];
+  assert.equal(judge(single).observed.eyes.measures, 1, 'one folder: read');
+});
+
+test('2.0.20 point 1: the block hands the bare ego command while the PATH has it and the absolute path only while it lacks it; check says so', () => {
+  const dirHome = fs.mkdtempSync(path.join(home, 'eh-'));
+  const bin = path.join(dirHome, '.local', 'share', 'ego', 'active_version_dir');
+  fs.mkdirSync(bin, { recursive: true });
+  const exe = path.join(bin, process.platform === 'win32' ? 'ego-browser.exe' : 'ego-browser');
+  fs.writeFileSync(exe, '');
+  const off = { HOME: dirHome, USERPROFILE: dirHome, PATH: '' };
+  assert.match(Eyes.egoCommand(off), /^".*ego-browser(\.exe)?"$/, 'off the PATH: the quoted absolute path');
+  assert.ok(Eyes.egoOffPath(off));
+  assert.match(Eyes.eyesGaps({}, 'ego', null, off)[0], /"[^"]*ego-browser(\.exe)? " ?nodejs|ego-browser(\.exe)?" nodejs/, 'the block carries the path');
+  const on = { ...off, PATH: bin };
+  assert.equal(Eyes.egoCommand(on), 'ego-browser', 'counter-example: on the PATH the bare command is handed, not the path');
+  assert.equal(Eyes.egoOffPath(on), false);
+  assert.match(Eyes.eyesGaps({}, 'ego', null, on)[0], /ego-browser nodejs \(read `ego-browser skill` first/);
+  assert.match(Eyes.eyesGaps({}, 'ego', null, on)[0], /dev server's own compile output/);
+});
+
+test('2.0.20 point 1: the record says whether the agent read ego\'s own skill before its first script', () => {
+  const run = (cmd) => ({ name: 'Bash', input: { command: cmd } });
+  const script = run(`ego-browser nodejs <<'EOF'\nconst task = await taskSpace("t");\nconsole.log(1);\nEOF`);
+  assert.equal(Eyes.observeEyes([run('ego-browser skill'), script]).skillRead, true, 'read first');
+  assert.equal(Eyes.observeEyes([{ name: 'Skill', input: { skill: 'ego-browser' } }, script]).skillRead, true, 'the skill through the Skill tool');
+  assert.equal(Eyes.observeEyes([run('"C:/Users/dev/.local/share/ego/active_version_dir/ego-browser.exe" skill'), script]).skillRead, true, 'by the absolute path');
+  assert.equal(Eyes.observeEyes([script, run('ego-browser skill')]).skillRead, false, 'counter-example: read after the first script');
+  assert.equal('skillRead' in Eyes.observeEyes([run('ls')]), false, 'no ego call: nothing to say');
+});
+
+test('2.0.20 point 15: the card records returns against steps, an ego run without its skill and a Cierre that guessed; none blocks', () => {
+  const lines = [...head(2, CSS), ...egoIn('t', `${LOOK}\n${MEASURE}`)];
+  const cierre = (aprendido, evid = 'observada ancho 40') => `## Cierre · 2026-10-25 · T1\nResultado: hecho\nEvidencia: ${evid}\nAprendido: ${aprendido}`;
+  const g = judge(lines, {}, cierre('✔1 modal · ✔2 tabla · ✔3 filtros ← x'));
+  assert.ok(g.findings.some((f) => /revisited 1 time for 3 steps done \(recorded, not blocked\)/.test(f)), 'three steps, one return');
+  assert.ok(g.findings.some((f) => /ego was run without reading its own skill/.test(f)), 'the skill was not read');
+  assert.ok(g.findings.some((f) => /names a doubt or an assumption/.test(f)) === false, 'counter-example: no doubt written');
+  assert.ok(judge(lines, {}, cierre('x ← y', 'observada ancho 40; asumí el color del hover')).findings.some((f) => /names a doubt or an assumption/.test(f)), 'a guess named in the Cierre');
+  assert.equal(eyes(g)?.pass, true, 'recorded, never a block');
+  const ok = judge([...head(2, CSS), ...call('Bash', { command: 'ego-browser skill' }), ...egoIn('t', `${LOOK}\n${MEASURE}`)], {}, cierre('✔1 modal ← x'));
+  assert.ok(!ok.findings.some((f) => /without reading its own skill|revisited/.test(f)), 'skill read, one step, one return');
+});
+
+test('2.0.20 review: no HOME means no ego; the ego skill is read by name only; read earlier in the task counts; a counted look keeps its local port', () => {
+  assert.equal(Eyes.eyesProvider({ root: '/nowhere', env: { PATH: '' } }), null, 'no HOME and no ego on the PATH: no provider (it was "ego")');
+  assert.equal(Eyes.egoOffPath({ PATH: '' }), false);
+  assert.equal(Eyes.egoCommand({ PATH: '' }), 'ego-browser');
+  const sh = (command) => ({ name: 'Bash', input: { command } });
+  assert.equal(Eyes.readsEgoSkill(sh('ego-browser skill')), true);
+  assert.equal(Eyes.readsEgoSkill(sh('"$EGO" skill')), true, 'a variable named for ego');
+  assert.equal(Eyes.readsEgoSkill(sh('$EDITOR skill')), false, 'counter-example: any other variable');
+  assert.equal(Eyes.readsEgoSkill(sh('git log --skill')), false);
+  assert.equal(Eyes.readsEgoSkill({ name: 'Skill', input: { skill: 'ego-browser' } }), true);
+  const script = sh(`ego-browser nodejs <<'EOF'\nconst task = await taskSpace("t");\nawait page.goto("http://localhost:4200/");\nconsole.log(await page.evaluate(() => document.querySelector("a").getBoundingClientRect().width));\nEOF`);
+  assert.equal(Eyes.observeEyes([script], { skillSeen: true }).skillRead, true, 'read in an earlier turn of the task');
+  assert.equal(Eyes.observeEyes([script]).skillRead, false, 'counter-example: read nowhere');
+  assert.deepEqual(Eyes.observeEyes([script]).ports, ['4200'], 'the port of the page that was measured');
+  assert.equal('ports' in Eyes.observeEyes([sh('ls')]), false);
+});
+
+test('2.0.20 point 18: the dev server\'s own compile output is the second signal; an error after the last change means the page is the old version', () => {
+  const edit = { name: 'Edit', id: 'e1', input: { file_path: 'src/app/a.ts' } };
+  const start = { name: 'Bash', id: 's1', input: { command: 'pnpm run start', run_in_background: true } };
+  const outs = { s1: 'Command running in background with ID: bg7. Output is being written to: /tmp/o.txt', r1: 'Application bundle generation complete. [1.2 seconds]', r2: 'Error: src/app/a.ts:3 [ERROR] TS2304: Cannot find name x\nApplication bundle generation failed.' };
+  const read = (id) => ({ name: 'BashOutput', id, input: { bash_id: 'bg7' } });
+  const outOf = (t) => outs[t.id] || '';
+  const look = { name: 'Bash', id: 'l1', input: { command: `ego-browser nodejs <<'EOF'\nconst r = await page.evaluate(() => document.querySelector('h1').getBoundingClientRect());\nconsole.log(r);\nEOF` } };
+  const ok = Eyes.observeEyes([start, edit, read('r1'), look], { from: 1, outOf });
+  assert.equal(ok.server, 'ok');
+  assert.equal(ok.afterLastChange, true, 'a clean compile leaves the look standing');
+  const bad = Eyes.observeEyes([start, edit, read('r2'), look], { from: 1, outOf });
+  assert.equal(bad.server, 'failed');
+  assert.equal(bad.afterLastChange, false, 'counter-example: a compile error after the change makes the look a look at the old page');
+  assert.match(Eyes.eyesGaps(bad, 'ego')[0], /dev server you started printed a compile error/);
+  assert.equal(Eyes.observeEyes([start, edit, look], { from: 1, outOf }).server, 'unread', 'a server nobody read after the change says nothing');
+  assert.equal(Eyes.observeEyes([edit, look], { from: 0, outOf }).server, undefined, 'no server started: no signal');
+});
+
+test('2.0.20 review: a compile error is read ("Found 3 errors"), and one server\'s error is not hidden by another\'s clean compile', () => {
+  const edit = { name: 'Edit', id: 'e1', input: { file_path: 'src/a.ts' } };
+  const srv = (id, bg) => ({ name: 'Bash', id, input: { command: 'pnpm run start:dev', run_in_background: true } });
+  const read = (id, bg) => ({ name: 'BashOutput', id, input: { bash_id: bg } });
+  const outs = { s1: 'ID: bgA', s2: 'ID: bgB', r1: 'Found 3 errors. Watching for file changes.', r2: 'Found 0 errors. Watching for file changes.' };
+  const outOf = (t) => outs[t.id] || '';
+  const r = Eyes.devServerCompile([srv('s1'), srv('s2'), edit, read('r1', 'bgA'), read('r2', 'bgB')], outOf, 2);
+  assert.equal(r.compile, 'failed');
+  assert.equal(Eyes.devServerCompile([srv('s2'), edit, read('r2', 'bgB')], outOf, 1).compile, 'ok');
 });

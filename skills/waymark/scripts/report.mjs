@@ -42,7 +42,8 @@ export function revertedCommits(root) {
   const r = spawnSync('git', ['log', '-n', '2000', '--format=%B'], { cwd: root, encoding: 'utf8', timeout: 10000, maxBuffer: 64 * 1024 * 1024 });
   return new Set(r.status === 0 ? [...r.stdout.matchAll(/This reverts commit ([0-9a-f]{7,40})/g)].map((m) => m[1]) : []);
 }
-const isReverted = (commits, reverted) => (commits || []).some((c) => [...reverted].some((x) => x.startsWith(String(c)) || String(c).startsWith(x)));
+// A commit id matches by prefix only from 7 characters (git's shortest abbreviation); a shorter one would match any sha that happens to start with it.
+const isReverted = (commits, reverted) => (commits || []).some((c) => String(c).length >= 7 && [...reverted].some((x) => x.startsWith(String(c)) || String(c).startsWith(x)));
 
 // The verdict of a task, read from what happened after it and never stored (a chained record cannot be edited): `reverted` when a commit of it was reverted,
 // `reworked` when a later task changed the same files, `continued` when it has a follow-up; null when nothing happened, never invented.

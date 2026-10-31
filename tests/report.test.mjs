@@ -98,8 +98,15 @@ test('13: the verdict is derived from what happened after: a revert, a rework, a
   assert.equal(R.verdictOf(rec('2026-10-20 · T1', { commits: [sha] }), [], reverted), 'reverted');
   assert.equal(R.verdictOf(rec('2026-10-20 · T2'), [rec('2026-10-21 · T3', { reworks: ['2026-10-20 · T2'] })], new Set()), 'reworked');
   assert.equal(R.verdictOf(rec('2026-10-20 · T4'), [rec('2026-10-20 · T4b')], new Set()), 'continued');
-  assert.equal(R.verdictOf(rec('2026-10-20 · T5', { commits: ['abc'] }), [rec('2026-10-21 · T6')], reverted), null, 'counter-example: no signal, no verdict — never invented');
+  assert.equal(R.verdictOf(rec('2026-10-20 · T5', { commits: ['0000000'] }), [rec('2026-10-21 · T6')], reverted), null, 'counter-example: no signal, no verdict — never invented');
   assert.equal(R.verdictOf(rec('2026-10-20 · T7', { commits: [sha] }), [rec('2026-10-20 · T7b')], reverted), 'reverted', 'the strongest signal wins');
+});
+
+test('13: counter-example — a commit id shorter than git\'s shortest abbreviation never matches a reverted sha by prefix, whatever the sha is', () => {
+  const reverted = new Set(['abcdef0123456789abcdef0123456789abcdef01']);
+  assert.equal(R.verdictOf({ id: '2026-10-20 · T5', commits: ['abc'] }, [], reverted), null, 'three characters name nothing');
+  assert.equal(R.verdictOf({ id: '2026-10-20 · T5', commits: ['abcdef0'] }, [], reverted), 'reverted', 'seven characters are a real abbreviation');
+  assert.equal(R.verdictOf({ id: '2026-10-20 · T5', commits: ['abcdef0123456789abcdef0123456789abcdef01'] }, [], reverted), 'reverted');
 });
 
 test('13: the project kind is a label: the stack family and a size bucket; nothing else', () => {

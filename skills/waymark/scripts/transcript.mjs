@@ -39,7 +39,7 @@ export const isPrompt = (d) => {
   if (Array.isArray(c) && c.some((x) => x.type === 'tool_result')) return false;
   const text = promptText(d);
   // A Stop-hook block reason fed back to the agent is not the user's prompt (the blocked turn's edits stay in its turn).
-  return !!text.trim() && !COMPACTED.test(text) && !/^\s*<(local-command|command-|system-reminder|task-notification)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
+  return !!text.trim() && !COMPACTED.test(text) && !/^\s*<(local-command|command-|system-reminder|task-notification|send_user_message_question_reply)/.test(text) && !/^\[Request interrupted/.test(text) && !/^\s*(Stop hook feedback|Waymark: this L)/.test(text);
 };
 
 // Reads the transcript tail, doubling it until it holds `prompts` user prompts and, with `since` (ms, the task's start),
@@ -84,6 +84,36 @@ export const SHELL_WAIT_MS = 10 * 60000;
 const NEVER_ENDS = /(?:^|\s)(?:--watch|--watchAll|-w|watch|serve|dev|start)(?=\s|$)/;
 const isShellCall = (c) => c.type === 'tool_use' && /^(Bash|PowerShell|shell)$/.test(c.name) && c.input?.run_in_background;
 const finiteCheck = (command) => !NEVER_ENDS.test(String(command || '')) && shellRuns(String(command || '')).some((p) => p.build || p.test || p.gate);
+
+// Where the stop hook counts a turn from: the session's last record, except a deferral. A turn deferred for a background run is no close, so the turn that
+// follows its notification still reaches back to the task's prompt and judges the whole task (a deferral counted as the last record cut the task's files out of it).
+export const sessionStart = (records, session) => Date.parse((records || []).filter((r) => r.session === session && !(r.kind === 'unevaluated' && /^unevaluated:deferred/.test(String(r.cause || '')))).pop()?.at || '') || 0;
+
+// The deferral of this session that still holds a task open: it changed files, no close of the session came after it and it is under a day old (failure 7b: the prompts
+// that follow it, with no notice, would otherwise start turns of their own and the deferred task's files would never be judged). The earliest one: the stretch starts there.
+export const DEFERRAL_MAX_MS = 24 * 3600000;
+export const unclosedDeferral = (records, session, now = Date.now()) => {
+  const mine = (records || []).filter((r) => r.session === session);
+  return mine.find((r, k) => r.kind === 'unevaluated' && /^unevaluated:deferred/.test(String(r.cause || '')) && r.files?.length && now - Date.parse(r.at) < DEFERRAL_MAX_MS && !mine.slice(k + 1).some((x) => x.id)) || null;
+};
+
+// The notices Claude Code sends when a background command or agent ends: the agent is told not to read the output file, so the notice and that file are the
+// only proof a gate it launched passed. → [{ taskId, toolUseId, status, file, exit }]; exit is the number in "(exit code N)" of a shell's summary, else null.
+export function taskNotifications(lines) {
+  const out = [];
+  for (const d of lines || []) {
+    if (d?.type !== 'user') continue;
+    const text = promptText(d);
+    if (!text.includes('<task-notification>')) continue;
+    for (const m of text.match(/<task-notification>[\s\S]*?<\/task-notification>/g) || []) {
+      const tag = (name) => m.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1]?.trim() || null;
+      const exit = tag('summary')?.match(/exit code:?\s*(-?\d+)/i)?.[1];
+      out.push({ taskId: tag('task-id'), toolUseId: tag('tool-use-id'), status: tag('status'), file: tag('output-file'), exit: exit === undefined ? null : Number(exit) });
+    }
+  }
+  return out;
+}
+
 export function pendingBackground(lines, since = 0, now = Date.now(), agentWait = BACKGROUND_WAIT_MS) {
   const { from } = turnStart(lines, since);
   const launched = [], shellLaunch = new Map(), monitors = new Set();

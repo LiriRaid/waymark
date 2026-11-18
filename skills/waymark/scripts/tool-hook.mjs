@@ -14,7 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { currentTurn, routedLevel, routedDept, inheritedRoute, openTaskRoute, caminoSaid, readTurns, readTail, sessionTools, isPrompt, promptText } from './transcript.mjs';
-import { RUNS_EGO, eyesRefusal, requestRefs } from './eyes.mjs';
+import { RUNS_EGO, eyesRefusal, requestRefs, memoryHosts } from './eyes.mjs';
 import { findSecrets, maskSecrets } from './provenance/secrets.mjs';
 import { loadKnownValues, clearKnownValues } from './lib/known.mjs';
 import { spawnSync } from 'node:child_process';
@@ -22,7 +22,8 @@ import { changesProject, shellSkeleton, shellRuns, scriptWriteTargets } from './
 import { pinnedCwd, taskLines, taskStart, decisionsIn, askedChoice, addRepoSnapshot, projectHome, readRecords, taskIds, validId, taskFiles, openTurn, logHookError, PROBE_OK } from './provenance.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { recordSpend } from './statusline.mjs';
-import { norm, exemptPath, repoOf, nameIn, repoNamedIn } from './lib/paths.mjs';
+import { norm, exemptPath, repoOf, nameIn, repoNamedIn, confirmedRepos } from './lib/paths.mjs';
+export { confirmedRepos };
 import { inRoot } from './copy.mjs';
 import { census, groupOf, judgeMove } from './convention.mjs';
 import { loadRisk, isSensitive } from './lib/risk.mjs';
@@ -141,8 +142,9 @@ export function checkSensitive(c, cwd, session = 'unknown', lines = null) {
   if (!hit) return null;
   try { addDenied(session, { tool: c.command !== undefined ? 'shell' : c.reads ? 'read' : 'edit', path: String(hit).replace(/\\/g, '/') }); } catch {}
   const named = String(hit).replace(/\\/g, '/');
-  return `Waymark: ${named} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked, and only the user can allow it: a message in the chat does not. Ask them in a choice window whose question contains "Sensitive allow: ${named}" and whose options are exactly: ${WINDOW}. Their answer unblocks it (for this task, this session or always); or they write the line "Sensitive allow: ${named}" in ~/.waymark/preferences.md (or "allow" in the project's .waymark/risk.json). Do not look for another way to read it, and never write down what you read.`;
+  return `Waymark: ${named} is a sensitive path (secrets, keys or credentials): reading or editing it is blocked, and only the user can allow it: a message in the chat does not. Ask them in a choice window whose question contains "Sensitive allow: ${named}" and whose options are exactly: ${WINDOW}. Their answer unblocks it (for this task, this session or always); or they write the line "Sensitive allow: ${named}" in ~/.waymark/preferences.md (or "allow" in the project's .waymark/risk.json). Do not look for another way to read it, and never write down what you read.${ENV_FILE.test(path.basename(named)) ? ' To find a port, a URL or the names of the variables, read the project\'s .env.example instead: it holds no values.' : ''}`;
 }
+const ENV_FILE = /^\.env(?:\.|$)/i; // a project's .env file, the one whose ports and URLs the agent comes looking for
 
 // → the denial reason, or null.
 // A junction or symbolic link to a node_modules (mklink /J, New-Item -ItemType Junction|SymbolicLink, ln -s): the package manager of the
@@ -211,8 +213,9 @@ export function namedRepos(lines) {
 }
 // What the user chose in the choice window, and nothing else of the conversation: the only text a role word ("API") may stand in for a repo's folder name.
 const windowAnswers = (lines) => (lines || []).flatMap((d) => (d.type === 'user' && d.toolUseResult && Array.isArray(d.toolUseResult.questions) && d.toolUseResult.answers ? Object.values(d.toolUseResult.answers).map(String) : [])).join('\n');
-export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json')) {
+export function checkRepo(root, cwdRoot, lines, session, stateFile = path.join(process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark'), '.repo-gate.json'), confirmed = []) {
   if (!root || norm(root) === norm(cwdRoot) || path.basename(root).length < 2 || inRoot(root)) return null; // Waymark's own clean copies are no repository of the user's
+  if (Array.isArray(confirmed) && confirmed.includes(path.basename(root).toLowerCase())) return null; // the user confirmed it as a related project: no denial
   let seen = {};
   try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch {}
   const key = `${session}:${norm(root)}`; // once per session and repo: what the user said about the job (the repo, in their request or their answer) holds for its next tasks
@@ -325,9 +328,9 @@ function sessionHosts(session, written, file = EYES_HOSTS()) {
   }
   return [...kept];
 }
-function checkEyes(command, turns, session = 'unknown') {
+function checkEyes(command, turns, session = 'unknown', memory = '') {
   const files = [...String(command).matchAll(/file:\/\/\/?([^'"\s)]+)/g)].map((m) => { try { return fs.readFileSync(decodeURI(m[1]), 'utf8'); } catch { return ''; } });
-  const why = eyesRefusal([command, ...files].join('\n'), sessionHosts(session, requestRefs(turns().filter(isPrompt)).hosts));
+  const why = eyesRefusal([command, ...files].join('\n'), [...sessionHosts(session, requestRefs(turns().filter(isPrompt)).hosts), ...memoryHosts(memory)]);
   return why ? `Waymark: this ego-browser script was not run: ${why}. The eyes look at the local dev server as the user, already signed in (docs/adr/0047).` : null;
 }
 
@@ -356,6 +359,7 @@ export function gate(hook, agent) {
   }
   if (sensitive) return sensitive;
   const withNote = (deny) => (deny ? deny + agent.note(SKILLS_DIR) : null);
+  const projectMemory = () => { try { return fs.readFileSync(projectHome(project).memory, 'utf8'); } catch { return ''; } }; // what the user wrote in the project's memory.md: its design hosts and its confirmed related repositories
   const taskKey = () => { try { return String(taskStart(readRecords(projectHome(project).log), hook.session_id)); } catch { return ''; } }; // the task's start, for the structural-move question
   // turns(): read back to the task's start (its first prompt), so a task of many prompts keeps its first decision in view
   if (c.command !== undefined) {
@@ -371,15 +375,16 @@ export function gate(hook, agent) {
     }
     const trailer = checkTrailer(c.command, project) || missingTrailer(c.command, hook.session_id, project);
     if (trailer) return trailer;
-    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
+    if (RUNS_EGO.test(c.command)) { const eyes = checkEyes(c.command, turns, hook.session_id, projectMemory()); if (eyes) return eyes; } // the user's browser profile and the hosts the eyes may open
     if (!changesProject(c.command)) return null;
     if (/(?:^|[;&|(\s])(?:mv|move|Move-Item)\s/i.test(c.command)) { // a census that cannot run leaves the move to the decision gate below
       let move = null;
       try { move = checkMove(c.command, cwd, hook.session_id, taskKey()); } catch (e) { logHookError('tool-hook move', e); }
       if (move) return withNote(move);
     }
-    const lines = turns(), own = projectHome(project).root;
-    for (const d of commandRepos(c.command, cwd)) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id); if (deny) return withNote(deny); }
+    const lines = turns(), own = projectHome(project).root, other = commandRepos(c.command, cwd);
+    const confirmed = other.length ? confirmedRepos(projectMemory()) : []; // the memory is read only when the command reaches a repository
+    for (const d of other) { const deny = checkRepo(repoOf(d), own, lines, hook.session_id, undefined, confirmed); if (deny) return withNote(deny); }
     return withNote(checkDecision({ command: c.command }, lines, hook.session_id, undefined, project));
   }
   const files = (c.files || []).filter((f) => !exempt(f, cwd));
@@ -389,7 +394,7 @@ export function gate(hook, agent) {
   let memory = '';
   try { memory = fs.readFileSync(projectHome(project).memory, 'utf8'); } catch {}
   for (const f of files) {
-    const deny = checkRepo(repoOf(f), own, lines, hook.session_id) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, project);
+    const deny = checkRepo(repoOf(f), own, lines, hook.session_id, undefined, confirmedRepos(memory)) || checkMigration(f, memory, hook.session_id) || checkDecision(f, lines, hook.session_id, undefined, project);
     if (deny) return withNote(deny);
   }
   return null;
@@ -487,7 +492,7 @@ function handOnLoad(dept, session, since, file) {
   const procsDone = procDelivered(session, since, file);
   const text = procsDone.has(dept) ? null : procedureText(dept);
   if (!text) return null;
-  all[session] = { ...st, at: Date.now(), procs: [...procsDone, dept], late: [...(st.late || []), dept] };
+  all[session] = { ...st, at: Date.now(), procs: [...procsDone, dept], late: [...(st.late || []), dept], deliveries: [...(st.deliveries || []), { dept, by: 'load', late: true, at: Date.now() }].slice(-8) };
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   return `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook when ${dept} loaded: it counts as read, no need to open the file):\n${text}`;
 }
@@ -531,7 +536,9 @@ export async function packContext(hook, agent, file = PACKED()) {
   const text = fresh.length ? [...byRepo].map(([r, list]) => pack(r, list)).join('\n') : '';
   const all = readPacked(file);
   for (const [k, v] of Object.entries(all)) if (Date.now() - (v.at || 0) > 7 * 86400000) delete all[k];
-  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], ...(route.level || route.dept ? { route } : {}), late: all[session]?.since === since ? all[session].late || [] : [] };
+  const prev = all[session]?.since === since ? all[session] : null; // what this task's state already holds
+  all[session] = { since, at: Date.now(), files: [...done, ...fresh.map(norm)], procs: [...procsDone, ...(procText ? [dept] : [])], ...(route.level || route.dept ? { route } : {}), late: prev?.late || [],
+    first: prev?.first || { dept: route.dept || null, at: Date.now() }, deliveries: [...(prev?.deliveries || []), ...(procText ? [{ dept, by: 'edit', at: Date.now() }] : [])].slice(-8) }; // the route at the first change and each delivery (docs/adr/0065)
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch { return null; }
   const memory = fresh.length ? `Waymark memory for the file${fresh.length > 1 ? 's' : ''} you are changing (the project memory, handed over by the hook; earlier tasks there, newest first):\n${text}` : '';
   const procs = procText ? `Waymark procedures of ${dept} (${dept}/procedures.md, handed over by the hook: it counts as read, no need to open the file):\n${procText}` : '';

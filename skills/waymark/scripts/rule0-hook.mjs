@@ -242,6 +242,26 @@ export function siblingsLine(cwd, session, { now = Date.now(), stateFile = path.
   }
   return news.length ? ` Workspace (a sibling project did this since your last prompt; W tasks --workspace has it whole): ${news.slice(0, SIBLINGS_SHOWN).join(' | ')}.` : '';
 }
+// A request that asks for a change is no question (docs/adr/0062): the agent that routes it Q must re-route in the middle of the turn (21 of 247 real
+// tasks). Read from the prompt alone, by the verb that asks for the change; a plain question (how, why, what, where…) is left to the agent, and
+// "can you change…" is a request. The level: L3 for a refactor or a migration, L2 for several named files, else L1. The Q rule stays read-only.
+const CHANGE_VERB = /(?<![\p{L}\p{N}])(?:crea[rn]?|agrega[rn]?|a[ñn]ade|a[ñn]adir|corrige|corregir|arregla[rn]?|cambia[rn]?|modifica[rn]?|implementa[rn]?|construye|construir|elimina[rn]?|borra[rn]?|quita[rn]?|renombra[rn]?|mueve|mover|refactoriza[rn]?|actualiza[rn]?|ajusta[rn]?|reemplaza[rn]?|migra[rn]?|instala[rn]?|documenta[rn]?|add|create|fix|change|update|implement|remove|delete|rename|refactor|build|replace|move|install|migrate|rewrite)(?![\p{L}\p{N}])/iu;
+const ASKS_ONLY = /^[\s¿?¡!"'«]*(?:qu[eé]|c[oó]mo|por\s*qu[eé]|d[oó]nde|cu[aá]l(?:es)?|cu[aá]ndo|cu[aá]nt[oa]s?|expl[ií]ca(?:me)?|dime|what|how|why|where|which|when|does|do|is|are|explain|tell\s+me)(?![\p{L}\p{N}])/iu;
+const POLITE = /(?<![\p{L}\p{N}])(?:puedes|podr[ií]as|podr[ií]a|can\s+you|could\s+you|would\s+you|please|por\s+favor)(?![\p{L}\p{N}])/iu;
+const BIG = /(?<![\p{L}\p{N}])(?:refactoriza\w*|migra\w*|migrate|refactor|nuevo\s+(?:m[oó]dulo|proyecto)|new\s+(?:module|project)|reescribe|rewrite)(?![\p{L}\p{N}])/iu;
+const PATH_LIKE = /(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.(?:[mc]?[jt]sx?|json|md|css|scss|html|py|rb|go|rs|java|ya?ml|sql|prisma|vue|svelte)\b/gi;
+export function asksChange(prompt) {
+  const text = String(prompt || '').trim();
+  if (!text || text.length > 4000 || NOTIFICATION.test(text)) return false;
+  if (!CHANGE_VERB.test(text)) return false;
+  return !ASKS_ONLY.test(text) || POLITE.test(text.slice(0, 60));
+}
+export function changeLine(prompt) {
+  if (!asksChange(prompt)) return '';
+  const files = new Set(String(prompt).match(PATH_LIKE) || []).size;
+  const level = BIG.test(prompt) ? 3 : files >= 2 ? 2 : 1;
+  return ` The request asks for a change: route it as L${level} (not Q; Q is read-only) and re-route if it grows.`;
+}
 export const REMINDER = { full, short }; // measured by size.mjs
 const coexist = ' Coexistence: follow the injected Adopted/Fallback/Resolved rules; never edit the other framework\'s files.';
 const silent = ['guest', 'other-leads', 'skills-only'].includes(mode);
@@ -369,7 +389,9 @@ export function reminder(hook, agent) {
   try { cap = softCapLine(hook, agent, cwd, mark, Date.now(), undefined, lines, { level: Number(inheritedRoute(lines)?.level) || 0 }); } catch (e) { logHookError('rule0-hook soft cap', e); } // the task's start is the first prompt's mark, kept by later prompts of the same task
   let owned = '';
   try { owned = ownedOffer(hook.prompt, fs.readFileSync(projectHome(cwd).memory, 'utf8')); } catch {}
-  const text = (st.openedWithWaymark ? short : full) + ids + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
+  let change = '';
+  try { if (!started) change = changeLine(hook.prompt); } catch {} // a task in progress is routed already: only its first prompt is told
+  const text = (st.openedWithWaymark ? short : full) + ids + change + refuted + other + repo + (held?.line || '') + cap + owned + prec + (mode === 'waymark-leads' ? coexist : '') + agent.note(SKILLS_DIR);
   // an agent whose prompt hook cannot add context (Cursor) keeps it for the turn's first tool result
   return agent.deferPrompt ? agent.deferPrompt(hook, text) : agent.out.context('UserPromptSubmit', text);
 }

@@ -113,7 +113,7 @@ test('the stop hook leaves a sign-in-only gap unblocked and keeps the task open;
   const shot = run('Bash', { command: 'ego-browser nodejs <<\'EOF\'\nawait page.evaluate(() => document.body.getBoundingClientRect());\nEOF' }, { out: 'http://localhost:4200/login?returnUrl=%2F\n{}' });
   const last = '## Cierre · 2026-10-30 · T1\nResultado: hecho\nEvidencia: observada la página de login\nAprendido: x ← y';
   const transcript = path.join(dir, 'login.jsonl');
-  fs.writeFileSync(transcript, [prompt('ajusta el estilo', at()), say('Waymark → L2 · dept-frontend', at()), ...run('Edit', { file_path: path.join(dir, 'src', 'app.css'), old_string: 'a{}', new_string: 'a{color:red}' }), ...shot, say(last, at())].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  fs.writeFileSync(transcript, [prompt('ajusta el estilo y míralo en el navegador con ego', at()), say('Waymark → L2 · dept-frontend', at()), ...run('Edit', { file_path: path.join(dir, 'src', 'app.css'), old_string: 'a{}', new_string: 'a{color:red}' }), ...shot, say(last, at())].map((l) => JSON.stringify(l)).join('\n') + '\n');
   fs.writeFileSync(path.join(dir, 'src', 'app.css'), 'a{color:red}');
   const out = await new Promise((resolve) => {
     const c = spawn(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { env: { ...process.env, WAYMARK_HOME: home, HOME: fakeHome, USERPROFILE: fakeHome, Path: path.dirname(process.execPath) }, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -156,7 +156,7 @@ test('the stop hook with every other proof in place: a sign-in-only close is no 
   const look = run('Bash', { command: 'ego-browser nodejs <<\'EOF\'\nawait page.evaluate(() => document.body.getBoundingClientRect());\nEOF' }, { out: 'http://localhost:4200/login?returnUrl=%2F\n{}' });
   const last = '## Cierre · 2026-10-30 · T1\nResultado: hecho\nEvidencia: observada la página de login\nAprendido: x ← y';
   const transcript = path.join(dir, 'free.jsonl');
-  fs.writeFileSync(transcript, [prompt('ajusta el estilo', at()), say('Waymark → L1 · dept-frontend · skills: dept-frontend', at()), say('Camino: cambiar el color en app.css', at()), ...run('Skill', { skill: 'dept-frontend', args: 'L1' }), ...run('Bash', { command: 'node "C:/x/waymark/scripts/waymark.mjs" memory Identity' }), ...run('Read', { file_path: 'C:/x/skills/dept-frontend/procedures.md' }), ...run('Edit', { file_path: path.join(dir, 'src', 'app.css'), old_string: 'a{}', new_string: 'a{color:red}' }), ...gate, ...look, say(last, at())].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  fs.writeFileSync(transcript, [prompt('ajusta el estilo y míralo en el navegador con ego', at()), say('Waymark → L1 · dept-frontend · skills: dept-frontend', at()), say('Camino: cambiar el color en app.css', at()), ...run('Skill', { skill: 'dept-frontend', args: 'L1' }), ...run('Bash', { command: 'node "C:/x/waymark/scripts/waymark.mjs" memory Identity' }), ...run('Read', { file_path: 'C:/x/skills/dept-frontend/procedures.md' }), ...run('Edit', { file_path: path.join(dir, 'src', 'app.css'), old_string: 'a{}', new_string: 'a{color:red}' }), ...gate, ...look, say(last, at())].map((l) => JSON.stringify(l)).join('\n') + '\n');
   fs.writeFileSync(path.join(dir, 'src', 'app.css'), 'a{color:red}');
   const out = await new Promise((resolve) => {
     const c = spawn(process.execPath, [path.join(SCRIPTS, 'stop-hook.mjs')], { env: { ...process.env, WAYMARK_HOME: home, HOME: fakeHome, USERPROFILE: fakeHome, Path: path.dirname(process.execPath) }, stdio: ['pipe', 'pipe', 'pipe'] });

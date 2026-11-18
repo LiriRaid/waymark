@@ -102,12 +102,13 @@ export function handover(r) {
   return text.length <= MAX_CHARS ? text : `${text.slice(0, MAX_CHARS - 1)}…`;
 }
 
-// A short ask ("sigue con H4 del plan") names little: it is searched with the session's previous task beside it (its ask, its Aprendido and the
-// names of its files). The session's own tasks are never what is found: the agent has them in its context already.
+// A short ask ("sigue con H4 del plan") names little: it is searched with the session's last three tasks beside it (their asks, their Aprendido and the
+// names of their files). The session's own tasks are never what is found: the agent has them in its context already.
 export const SHORT_ASK = 10;
+const RECENT_OF_SESSION = 3; // the session's last three tasks: "sigue con el punto 2" continues the work of the session, not only its last task (docs/adr/0065)
 export function queryOf(prompt, records, session) {
-  const prev = session && tokens(prompt).length < SHORT_ASK ? records.filter((r) => r.id && !r.kind && r.session === session).pop() : null;
-  return prev ? `${prompt} ${prev.prompt || ''} ${aprendidoOf(String(prev.cierre || ''))} ${names(prev).join(' ')}` : prompt;
+  const prev = session && tokens(prompt).length < SHORT_ASK ? records.filter((r) => r.id && !r.kind && r.session === session).slice(-RECENT_OF_SESSION) : [];
+  return prev.length ? `${prompt} ${prev.map((p) => `${p.prompt || ''} ${aprendidoOf(String(p.cierre || ''))} ${names(p).join(' ')}`).join(' ')}` : prompt;
 }
 const othersOf = (records, session) => (session ? records.filter((r) => r.session !== session) : records);
 

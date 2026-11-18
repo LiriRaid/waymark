@@ -25,8 +25,10 @@ const stamp = (d = new Date()) => `${d.toLocaleDateString('sv')}-${String(d.getH
 // (Cursor keeps its User Rules in its settings, no file: its session hook brings the block). key: install-hooks --agent.
 // hooks: the file its hooks live in; adapter: the module that runs Waymark's hooks for it (null: none yet).
 export const AGENTS = () => KNOWN.filter((a) => !a.primary).map((a) => ({
-  name: a.name, key: a.key, dir: agentDir(a), file: a.instructions, hooks: a.hooks?.file || null, marks: a.marks, adapter: a.adapter, skills: a.skills,
+  name: a.name, key: a.key, dir: agentDir(a), file: a.instructions, hooks: a.hooks?.file || null, marks: a.marks, adapter: a.adapter, skills: a.skills, surface: a.surface,
 }));
+// Which surface of the agent Waymark's hooks reach (agents.json `surface`): the app and the CLI of one agent can read different files.
+export const surfaceLine = (a) => `${a.name}: ${a.surface || 'surface not stated'}`;
 // A folder that is not an agent's although it may look like one (the shared skills folder, Waymark's own).
 const NOT_AGENTS = new Set(['.agents', '.agent', '.waymark', '.waymark-backups', '.config', '.cache', '.local', '.git', '.ssh', 'agents']);
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };

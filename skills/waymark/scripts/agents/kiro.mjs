@@ -1,4 +1,6 @@
 // Waymark · Kiro adapter (docs/adr/0022). Same exports as claude.mjs, plus input() and emit().
+// The IDE (docs/adr/0063) reads the workspace's .kiro/hooks/*.kiro.hook and gives a runCommand hook only USER_PROMPT: no JSON on stdin, so the session is the
+// workspace's (a hash of the folder) and the prompt comes from the environment (kiro-workspace.mjs writes the files).
 // Hooks (kiro.dev/docs/hooks, /docs/hooks/types, /docs/hooks/actions, /docs/cli/v3/hooks-migration and
 // /docs/ide/whats-new-v1/hooks, checked 2026-10-13): ~/.kiro/hooks/waymark.json (KIRO_HOME moves the folder; global hooks
 // are documented for CLI V3, the IDE documents only the workspace's .kiro/hooks), {"version": "v1", "hooks": [{name,
@@ -16,6 +18,7 @@
 //   procedure and memory come from the tool calls. The tool result's field and the tool names of the V3 engine and the IDE
 //   are not documented: adapters/kiro.md lists what the first live session checks.
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { agentDir, known } from './paths.mjs';
 import { append, eventArg, journalOf, journals, stoppedAgain, toLines, SKILL_FILE } from './journal.mjs';
 import { readTail } from '../transcript.mjs';
@@ -52,7 +55,8 @@ const failed = (r) => {
 
 // The hook's stdin → the core's fields (the event from the command line, else from the payload), journaling it first.
 export function input(h) {
-  const session = h.session_id || 'unknown', cwd = h.cwd || process.cwd(), file = journalOf(name, session);
+  // The IDE's runCommand hook gives no JSON (docs/adr/0063): no session, so the workspace is the session, and the prompt comes from USER_PROMPT.
+  const cwd = h.cwd || process.cwd(), session = h.session_id || `ws-${createHash('sha1').update(path.resolve(cwd).toLowerCase()).digest('hex').slice(0, 10)}`, file = journalOf(name, session);
   const tool = h.tool_name || '';
   const event = eventArg() || EVENT[h.hook_event_name] || h.hook_event_name || (tool ? (h.tool_response !== undefined ? 'PostToolUse' : 'PreToolUse') : '');
   const hook = { ...h, session_id: session, cwd, hook_event_name: event, transcript_path: file, prompt: h.prompt ?? process.env.USER_PROMPT };

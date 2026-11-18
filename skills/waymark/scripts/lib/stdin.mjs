@@ -11,6 +11,7 @@ export function readStdin(done, { idle = 1000, max = Number(process.env.WAYMARK_
   });
   process.stdin.on('end', finish);
   process.stdin.resume();
-  if (process.stdin.isTTY) setTimeout(finish, idle).unref();
+  // a Kiro IDE hook carries no JSON (its prompt is in USER_PROMPT) and may leave stdin open: it is not waited for the full `max` (docs/adr/0063)
+  if (process.stdin.isTTY || /(?:^|\s)--agent\s+kiro(?:\s|$)/.test(process.argv.join(' '))) setTimeout(() => { if (!input.trim()) finish(); }, process.stdin.isTTY ? idle : 600).unref();
   setTimeout(finish, max).unref();
 }

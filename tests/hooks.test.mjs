@@ -319,13 +319,15 @@ test('red per spec: a spec that adds cases runs before the code after it; one th
   assert.equal(g.steps.find((x) => x.id === 'red').pass, true, 'the new spec ran red first; the mocks need no red');
   assert.deepEqual(g.observed.tests.notRed, undefined);
   const late = red([call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), call('Edit', { file_path: OLD, old_string: '});', new_string: "});\nit('logs out everywhere', () => {})" })]);
-  assert.equal(late.steps.find((x) => x.id === 'red').pass, false, 'a case added after the code never ran first');
-  assert.deepEqual(late.observed.tests.notRed, ['auth.service.spec.mjs']);
-  assert.match(late.missing.join('\n'), /auth\.service\.spec\.mjs/, 'the message names the spec');
+  assert.equal(late.steps.find((x) => x.id === 'red').pass, true, 'a case added after the code cannot be seen red in the tree: recorded, no clean copy asked (2.0.21, failure 15)');
+  assert.equal(late.observed.tests.notRed, undefined);
+  assert.deepEqual(late.observed.tests.afterCode, ['auth.service.spec.mjs'], 'and the record names the spec');
+  assert.match(late.findings.join('\n'), /written after the code[^\n]*auth\.service\.spec\.mjs/, 'the finding names the spec');
   assert.equal(red([call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' }), mocks]).steps.find((x) => x.id === 'red').pass, true, 'only mocks changed: nothing to show red');
   // code before the spec: a run counts only when it failed
   const after = (failed) => red([call('Edit', { file_path: 'src/other.mjs', old_string: 'a', new_string: 'b' }), call('Write', { file_path: SPECF, content: "it('retries', () => {})" }), ...ran('r1', 'npm test -- orders', failed), call('Edit', { file_path: FILE, old_string: 'a', new_string: 'b' })]);
-  assert.equal(after(false).steps.find((x) => x.id === 'red').pass, false, 'green after other code proves nothing');
+  assert.equal(after(false).steps.find((x) => x.id === 'red').pass, true, 'green after other code proves nothing, and it asks nothing: recorded as written after the code');
+  assert.deepEqual(after(false).observed.tests.afterCode, ['orders.service.spec.mjs']);
   assert.equal(after(true).steps.find((x) => x.id === 'red').pass, true, 'seen failing');
 });
 

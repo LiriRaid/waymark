@@ -1,75 +1,75 @@
 {
-  "_doc": "Every coding agent Waymark knows (docs/adr/0022). dir: '~/' is the home folder, '$XDG/' is XDG_CONFIG_HOME or ~/.config; env moves the whole folder. instructions: the global instructions file inside dir (null: none). marks: files the agent itself writes, when the folder is shared. skills: true when it reads ~/.agents/skills, else the folder it reads. hooks: its user-level hooks (file inside dir, format nested | flat | plugin | own); adapter: the module in this folder that runs Waymark's hooks for it (null: none yet, dept-devex procedures → Add an agent). Checked against each agent's documentation on the date in checked.",
+  "_doc": "Every coding agent Waymark knows (docs/adr/0022). surface: which of the agent's app, IDE and CLI Waymark's hooks reach, and what was tried live (docs/adr/0063). dir: '~/' is the home folder, '$XDG/' is XDG_CONFIG_HOME or ~/.config; env moves the whole folder. instructions: the global instructions file inside dir (null: none). marks: files the agent itself writes, when the folder is shared. skills: true when it reads ~/.agents/skills, else the folder it reads. hooks: its user-level hooks (file inside dir, format nested | flat | plugin | own); adapter: the module in this folder that runs Waymark's hooks for it (null: none yet, dept-devex procedures → Add an agent). Checked against each agent's documentation on the date in checked.",
   "agents": [
     {
-      "key": "claude", "name": "Claude Code", "primary": true, "dir": "~/.claude", "env": "CLAUDE_CONFIG_DIR", "instructions": "CLAUDE.md", "skills": "~/.claude/skills",
+      "key": "claude", "surface": "CLI, desktop app and IDE extensions: one settings.json (hooks tried live)", "name": "Claude Code", "primary": true, "dir": "~/.claude", "env": "CLAUDE_CONFIG_DIR", "instructions": "CLAUDE.md", "skills": "~/.claude/skills",
       "hooks": { "file": "settings.json", "override": "WAYMARK_CLAUDE_SETTINGS", "format": "nested", "matcher": "Bash|PowerShell|Edit|Write|NotebookEdit|Read|Skill|mcp__engram__mem_save|mcp__engram__mem_update" },
       "adapter": "claude", "docs": "https://code.claude.com/docs/en/hooks", "checked": "2026-10-12"
     },
     {
-      "key": "codex", "name": "Codex", "dir": "~/.codex", "env": "CODEX_HOME", "instructions": "AGENTS.md", "skills": true,
+      "key": "codex", "surface": "CLI and app: one hooks.json, the app asks to trust the hooks (tried live)", "name": "Codex", "dir": "~/.codex", "env": "CODEX_HOME", "instructions": "AGENTS.md", "skills": true,
       "hooks": { "file": "hooks.json", "override": "WAYMARK_CODEX_HOOKS", "format": "nested", "matcher": "Bash|apply_patch", "commandWindows": true },
       "adapter": "codex", "docs": "https://learn.chatgpt.com/docs/hooks", "checked": "2026-10-12"
     },
     {
-      "key": "gemini", "name": "Gemini CLI", "dir": "~/.gemini", "env": "GEMINI_CLI_HOME", "instructions": "GEMINI.md", "skills": true,
+      "key": "gemini", "surface": "CLI only (not tried live)", "name": "Gemini CLI", "dir": "~/.gemini", "env": "GEMINI_CLI_HOME", "instructions": "GEMINI.md", "skills": true,
       "marks": ["settings.json", "projects.json", "installation_id", "oauth_creds.json", "tmp"],
       "hooks": { "file": "settings.json", "override": "WAYMARK_GEMINI_SETTINGS", "format": "nested", "matcher": "run_shell_command|write_file|replace", "extra": ["PostToolUse"],
         "events": { "SessionStart": "SessionStart", "UserPromptSubmit": "BeforeAgent", "PreToolUse": "BeforeTool", "PostToolUse": "AfterTool", "Stop": "AfterAgent" } },
       "adapter": "gemini", "docs": "https://github.com/google-gemini/gemini-cli", "checked": "2026-10-12"
     },
     {
-      "key": "opencode", "name": "OpenCode", "dir": "$XDG/opencode", "instructions": "AGENTS.md", "skills": true,
+      "key": "opencode", "surface": "CLI: a plugin file (tried live)", "name": "OpenCode", "dir": "$XDG/opencode", "instructions": "AGENTS.md", "skills": true,
       "hooks": { "file": "plugins/waymark.js", "override": "WAYMARK_OPENCODE_PLUGIN", "format": "plugin" },
       "adapter": "opencode", "docs": "https://opencode.ai/docs/plugins", "checked": "2026-10-12"
     },
     {
-      "key": "cursor", "name": "Cursor", "dir": "~/.cursor", "env": "CURSOR_CONFIG_DIR", "instructions": null, "skills": true,
+      "key": "cursor", "surface": "IDE: hooks.json (not tried live)", "name": "Cursor", "dir": "~/.cursor", "env": "CURSOR_CONFIG_DIR", "instructions": null, "skills": true,
       "hooks": { "file": "hooks.json", "override": "WAYMARK_CURSOR_HOOKS", "format": "flat", "matcher": null, "extra": ["PostToolUse", "PostToolUseFailure", "AfterAgentResponse"],
         "events": { "SessionStart": "sessionStart", "UserPromptSubmit": "beforeSubmitPrompt", "PreToolUse": "preToolUse", "PostToolUse": "postToolUse", "PostToolUseFailure": "postToolUseFailure", "AfterAgentResponse": "afterAgentResponse", "Stop": "stop" } },
       "adapter": "cursor", "docs": "https://cursor.com/docs/hooks", "checked": "2026-10-12"
     },
     {
-      "key": "antigravity", "name": "Antigravity", "dir": "~/.gemini", "instructions": "GEMINI.md", "skills": "~/.gemini/config/skills",
+      "key": "antigravity", "surface": "IDE and CLI: config/hooks.json (not tried live)", "name": "Antigravity", "dir": "~/.gemini", "instructions": "GEMINI.md", "skills": "~/.gemini/config/skills",
       "marks": ["antigravity", "antigravity-ide", "antigravity-cli"],
       "hooks": { "file": "config/hooks.json", "override": "WAYMARK_ANTIGRAVITY_HOOKS", "format": "own", "matcher": null, "extra": ["PostToolUse"],
         "events": { "SessionStart": "SessionStart", "UserPromptSubmit": "PreInvocation", "PreToolUse": "PreToolUse", "PostToolUse": "PostToolUse", "Stop": "Stop" } },
       "adapter": "antigravity", "docs": "https://antigravity.google/docs/hooks/", "checked": "2026-10-13"
     },
     {
-      "key": "kiro", "name": "Kiro", "dir": "~/.kiro", "env": "KIRO_HOME", "instructions": "steering/AGENTS.md", "skills": "~/.kiro/skills",
+      "key": "kiro", "surface": "IDE reads the workspace only (.kiro/steering/waymark.md and .kiro/hooks/*.kiro.hook: install-hooks --agent kiro --project <folder>); CLI reads the global ~/.kiro (steering/AGENTS.md, hooks/waymark.json)", "name": "Kiro", "dir": "~/.kiro", "env": "KIRO_HOME", "instructions": "steering/AGENTS.md", "skills": "~/.kiro/skills",
       "hooks": { "file": "hooks/waymark.json", "override": "WAYMARK_KIRO_HOOKS", "format": "own", "matcher": null, "extra": ["PostToolUse"] },
       "adapter": "kiro", "docs": "https://kiro.dev/docs/hooks/", "checked": "2026-10-13"
     },
     {
-      "key": "copilot", "name": "Copilot CLI", "dir": "~/.copilot", "env": "COPILOT_HOME", "instructions": "copilot-instructions.md", "skills": true,
+      "key": "copilot", "surface": "CLI only (not tried live)", "name": "Copilot CLI", "dir": "~/.copilot", "env": "COPILOT_HOME", "instructions": "copilot-instructions.md", "skills": true,
       "marks": ["config.json", "session-state", "logs"],
       "hooks": { "file": "hooks/waymark.json", "override": "WAYMARK_COPILOT_HOOKS", "format": "flat", "matcher": "Bash|PowerShell|Edit|Write|bash|powershell|edit|create|apply_patch|str_replace_editor", "extra": ["PostToolUse"] },
       "adapter": "copilot", "docs": "https://docs.github.com/en/copilot/reference/hooks-reference", "checked": "2026-10-13"
     },
     {
-      "key": "windsurf", "name": "Windsurf", "dir": "~/.codeium/windsurf", "instructions": "memories/global_rules.md", "skills": true,
+      "key": "windsurf", "surface": "IDE (no adapter yet)", "name": "Windsurf", "dir": "~/.codeium/windsurf", "instructions": "memories/global_rules.md", "skills": true,
       "hooks": { "file": "hooks.json", "format": "flat" },
       "adapter": null, "soon": "no session start and no documented way to hand the model context (a pre-hook can only exit 2 with stderr), so it cannot carry a card, a task ID, a record or a Cierre",
       "docs": "https://docs.devin.ai/desktop/cascade/hooks", "checked": "2026-10-12"
     },
     {
-      "key": "qwen", "name": "Qwen Code", "dir": "~/.qwen", "env": "QWEN_HOME", "instructions": "QWEN.md", "skills": "~/.qwen/skills",
+      "key": "qwen", "surface": "CLI only (not tried live)", "name": "Qwen Code", "dir": "~/.qwen", "env": "QWEN_HOME", "instructions": "QWEN.md", "skills": "~/.qwen/skills",
       "hooks": { "file": "settings.json", "override": "WAYMARK_QWEN_SETTINGS", "format": "nested", "matcher": "run_shell_command|write_file|edit|replace|read_file", "extra": ["PostToolUse"] },
       "adapter": "qwen", "docs": "https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/", "checked": "2026-10-19"
     },
     {
-      "key": "droid", "name": "Droid", "dir": "~/.factory", "instructions": "AGENTS.md", "skills": true,
+      "key": "droid", "surface": "CLI only (not tried live)", "name": "Droid", "dir": "~/.factory", "instructions": "AGENTS.md", "skills": true,
       "hooks": { "file": "hooks.json", "override": "WAYMARK_DROID_HOOKS", "format": "nested", "top": true, "matcher": "Execute|Create|Edit|ApplyPatch|Read", "extra": ["PostToolUse"] },
       "adapter": "droid", "docs": "https://docs.factory.com/cli/configuration/hooks-guide", "checked": "2026-10-19"
     },
     {
-      "key": "amp", "name": "Amp", "dir": "$XDG/amp", "instructions": "AGENTS.md", "skills": true,
+      "key": "amp", "surface": "CLI: a plugin file (not tried live)", "name": "Amp", "dir": "$XDG/amp", "instructions": "AGENTS.md", "skills": true,
       "hooks": { "file": "plugins/waymark.js", "override": "WAYMARK_AMP_PLUGIN", "format": "plugin" },
       "adapter": "amp", "docs": "https://ampcode.com/docs/customize/plugins", "checked": "2026-10-19"
     },
     {
-      "key": "crush", "name": "Crush", "dir": "$XDG/crush", "instructions": "CRUSH.md", "skills": true,
+      "key": "crush", "surface": "CLI (no adapter yet)", "name": "Crush", "dir": "$XDG/crush", "instructions": "CRUSH.md", "skills": true,
       "hooks": { "file": "crush.json", "format": "flat" },
       "adapter": null, "soon": "one event only (PreToolUse), so it cannot carry a card, a task ID, a record or a Cierre",
       "docs": "https://github.com/charmbracelet/crush/blob/main/docs/hooks/README.md", "checked": "2026-10-12"

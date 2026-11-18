@@ -89,3 +89,30 @@ test('4: CSS/HTML — the same for a styles task: handed it passes, none handed 
   const none = judged([prompt('revisa el margen'), say('Waymark → L1 · dept-frontend'), ...call('Bash', { command: 'git push' })]);
   assert.equal(proc(none).applies, false);
 });
+
+// ---- 2.0.21 (failure 20, ADR 0065): what the hook handed, and when, is kept for the task, so a late or missing procedure can be explained ----
+const { procHistory } = await import(`file://${SCRIPTS}/lib/packed.mjs`);
+test('20: the state keeps, per task, the department routed at the first change and each delivery with how it came', async () => {
+  const d = repo({ 'src/a.mjs': 'a\n', 'src/b.css': 'b\n' }), state = path.join(d, 'packed.json');
+  const base = [prompt('arregla el servicio y el estilo'), say('Waymark → L2 · dept-backend')];
+  await edit(d, 'src/a.mjs', 's-hist', base, state);
+  await edit(d, 'src/b.css', 's-hist', [...base, ...call('Skill', { skill: 'dept-frontend', args: 'L2' })], state);
+  const h = procHistory('s-hist', 0, state);
+  assert.equal(h.first.dept, 'dept-backend', 'the route at the first change');
+  assert.deepEqual(h.deliveries.map((x) => [x.dept, x.by]), [['dept-backend', 'edit'], ['dept-frontend', 'edit']]);
+});
+
+test('20: a first change with no route yet is recorded as having none, so a missing hand-over is explained', async () => {
+  const d = repo({ 'src/a.mjs': 'a\n' }), state = path.join(d, 'packed.json');
+  await edit(d, 'src/a.mjs', 's-hist-none', [prompt('arregla el servicio')], state);
+  const h = procHistory('s-hist-none', 0, state);
+  assert.equal(h.first.dept, null);
+  assert.deepEqual(h.deliveries, []);
+});
+
+test('20: the record of the task carries that history under observed.procedure', () => {
+  const lines = [prompt('arregla el servicio'), say('Waymark → L2 · dept-backend'), ...call('Edit', { file_path: '/work/proj/src/a.mjs' })];
+  const g = judged(lines, { cwd: '/work/proj', procDelivered: ['dept-backend'], procHistory: { first: { dept: 'dept-backend' }, deliveries: [{ dept: 'dept-backend', by: 'edit' }] } });
+  assert.deepEqual(g.observed.procedure.deliveries, [{ dept: 'dept-backend', by: 'edit' }]);
+  assert.equal(g.observed.procedure.firstEditDept, 'dept-backend');
+});

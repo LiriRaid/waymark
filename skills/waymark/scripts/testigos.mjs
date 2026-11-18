@@ -81,7 +81,7 @@ export function gateCommand(root, memoryFile) {
 
 // Runs the gate with a time limit and kills its whole process tree when the limit is hit (spawnSync's own timeout kills
 // only the shell: on Windows the typecheck under it kept running and holding the folder). Exit 124 = timed out.
-// → { cmd, from, ok, s, timedOut }
+// → { cmd, from, ok (null: it ran out of time, not judged), s, timedOut }
 const RUNNER = `const { spawn, spawnSync } = require('node:child_process');
 const [cmd, ms] = process.argv.slice(1), win = process.platform === 'win32';
 const c = spawn(cmd, { shell: true, stdio: 'ignore', windowsHide: true, detached: !win });
@@ -96,6 +96,9 @@ const programOf = (cmd) => {
 };
 export const onPath = (program, env) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], { encoding: 'utf8', timeout: 5000, windowsHide: true, ...(env ? { env } : {}) }).status === 0;
 
+// How `W testigos` shows the re-run, and whether it fails the command: a gate that ran out of time is not judged, never a failure.
+export const gateLine = (run) => (run ? `${run.timedOut ? '—' : run.ok ? '✔' : '✘'} typecheck now (${run.from}): ${run.cmd} · ${run.skipped ? `takes about ${run.s} s (skipped: too slow for the hook; not judged)` : run.timedOut ? `over ${GATE_MS / 1000} s (not judged: the time is no failure)` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
+export const gateFails = (run) => !!run && run.ok === false;
 export function runGate(gate, cwd, ms = GATE_MS) {
   const t0 = Date.now();
   // a toolchain that is not installed here cannot fail the code: the gate did not run, and the result says so
@@ -103,7 +106,7 @@ export function runGate(gate, cwd, ms = GATE_MS) {
   if (program && !onPath(program, gate.env)) return { cmd: gate.cmd, from: gate.from, ok: false, unavailable: program, s: 0, timedOut: false };
   const r = spawnSync(process.execPath, ['-e', RUNNER, gate.cmd, String(ms)], { cwd, encoding: 'utf8', timeout: ms + 5000, windowsHide: true, ...(gate.env ? { env: gate.env } : {}) }); // the runtime row's Node first on the PATH
   const timedOut = r.status === 124 || r.error?.code === 'ETIMEDOUT';
-  return { cmd: gate.cmd, from: gate.from, ok: !timedOut && r.status === 0, s: Math.round((Date.now() - t0) / 1000), timedOut };
+  return { cmd: gate.cmd, from: gate.from, ok: timedOut ? null : r.status === 0, s: Math.round((Date.now() - t0) / 1000), timedOut }; // a time is no verdict: ok is null when the limit was hit
 }
 
 // The gate testigo's fallback when the agent ran no gate after its last code change: the typecheck of the repo that holds
@@ -131,13 +134,33 @@ function treeKey(root, cmd) {
   const installs = ['.package-lock.json', '.modules.yaml', '.yarn-integrity'].map((m) => { try { return `${m}:${fs.statSync(path.join(root, 'node_modules', m)).mtimeMs}`; } catch { return `${m}:none`; } });
   return crypto.createHash('sha1').update([cmd, String(head.stdout || '').trim(), ...stats, ...installs].join('\n')).digest('hex');
 }
+// A typecheck that took longer than SLOW_S the last time is not run again by the Stop hook (an 8 to 60 s wait on every close, the dominant cost of the hook, docs/adr/0065):
+// the run is skipped with the time it takes and the agent is asked to run its own gate. The time is kept per repo and command for a day, then measured again.
+const SLOW_TTL = 86400000; // a day: a slow first run (a cold cache) does not keep the gate skipped for long
+const slowLimit = () => Number(process.env.WAYMARK_SLOW_GATE_S ?? 10);
+const gateTimeFile = () => path.join(waymarkHome(), '.gate-time.json');
+const timeKey = (root, cmd) => `${root}|${cmd}`;
+function knownTime(root, cmd) {
+  try { const e = JSON.parse(read(gateTimeFile()) || '{}')[timeKey(root, cmd)]; return e && Date.now() - e.at < SLOW_TTL ? e.s : null; } catch { return null; }
+}
+function keepTime(root, cmd, s) {
+  try {
+    const all = JSON.parse(read(gateTimeFile()) || '{}');
+    for (const [k, v] of Object.entries(all)) if (Date.now() - v.at > SLOW_TTL) delete all[k];
+    all[timeKey(root, cmd)] = { s, at: Date.now() };
+    fs.mkdirSync(path.dirname(gateTimeFile()), { recursive: true }); fs.writeFileSync(gateTimeFile(), JSON.stringify(all));
+  } catch {}
+}
 function cachedGate(gate, root) {
   let cache = {}, before = null;
   try { cache = JSON.parse(read(gateCacheFile()) || '{}'); } catch {}
   try { before = treeKey(root, gate.cmd); } catch {}
   const hit = cache[root];
   if (before && hit && hit.keys.includes(before) && Date.now() - hit.at < GATE_TTL) return { ...hit.run, cached: true };
+  const slow = slowLimit() > 0 ? knownTime(root, gate.cmd) : null;
+  if (slow !== null && slow >= slowLimit()) return { cmd: gate.cmd, from: gate.from, ok: null, s: slow, timedOut: true, skipped: true };
   const run = runGate(gate, root);
+  if (!run.unavailable) keepTime(root, gate.cmd, run.timedOut ? GATE_MS / 1000 : run.s);
   if (before && run.ok) { // only a pass is kept: a red may have been a transient, and running it again is what clears it
     let after = null;
     try { after = treeKey(root, gate.cmd); } catch {}
@@ -199,8 +222,8 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
   console.log(`${mark(!hits.length)} secrets in the task's commits: ${hits.length ? hits.map((h) => `${h.kind} in ${h.where}`).join('; ') : 'none'}`);
   const gate = gateCommand(top(cwd) || cwd, home.memory);
   const run = gate ? runGate(gate, top(cwd) || cwd) : null;
-  console.log(run ? `${mark(run.ok)} typecheck now (${run.from}): ${run.cmd} · ${run.timedOut ? `over ${GATE_MS / 1000} s` : `${run.s} s`}` : '— typecheck: none found (memory.md Quality gates, package.json, tsconfig)');
+  console.log(gateLine(run));
   const rec = readTaskRecords(home).find((r) => r.id === id);
   if (rec?.evaluation) console.log(`recorded for ${id}: ${Object.entries(rec.evaluation.steps || {}).map(([k, v]) => `${k} ${v === 'na' ? 'n/a' : v === 'exception' || v === 'warn' ? '⚠' : v ? '✔' : '✘'}`).join(' · ')} (${rec.evaluation.score})`);
-  process.exit(chain.ok && !hits.length && (!run || run.ok) ? 0 : 1);
+  process.exit(chain.ok && !hits.length && !gateFails(run) ? 0 : 1);
 }

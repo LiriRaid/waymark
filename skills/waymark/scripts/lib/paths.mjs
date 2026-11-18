@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 export const WAYMARK_CMD = `node "${path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'waymark.mjs').replace(/\\/g, '/')}"`;
 
 // The private layer's folder; read at call time because tests and installs set WAYMARK_HOME after load.
+// The command a hook is registered with: hook-run.cjs finds a Node that can run it (docs/adr/0040); install-hooks.mjs and kiro-workspace.mjs write it.
+export const hookCommand = (scripts, file) => `node "${scripts}/hook-run.cjs" "${scripts}/${file}"`;
 export const waymarkHome = () => process.env.WAYMARK_HOME || path.join(os.homedir(), '.waymark');
 
 // Separators only: the shape a path is shown and compared in, case and trailing slash kept.
@@ -87,3 +89,10 @@ export const repoNamedIn = (name, text) => {
   const parts = String(name).split(/[-_.]/), role = parts.length > 1 ? parts[parts.length - 1] : '';
   return nameIn(name, text) || (ROLE.test(role) && nameIn(role, text));
 };
+
+// The related repositories the user marked "(confirmed …)" in the `Related projects:` line of memory.md, by folder name. "(to confirm)" is the mark Waymark
+// writes for a guess and gives no permission: only the user writes "confirmed". → [name], lower-cased.
+export function confirmedRepos(memory) {
+  const line = String(memory || '').replace(/<!--[\s\S]*?-->/g, '').match(/^[ \t]*[-*]?[ \t]*Related projects?:[ \t]*([^\n]+)$/im)?.[1] || '';
+  return [...line.matchAll(/([\w.-]+)[ \t]*(?:\([^)]*\)[ \t]*)*?\(confirmed\b[^)]*\)/gi)].map((m) => m[1].toLowerCase());
+}

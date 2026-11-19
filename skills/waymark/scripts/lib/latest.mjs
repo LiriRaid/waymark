@@ -33,7 +33,7 @@ export function keepLatest(latest) {
 export function updateLine(installed) {
   const l = readLatest();
   if (!l?.latest || !installed || !newer(l.latest, installed)) return '';
-  return `Update: Waymark ${installed} → ${l.latest} is published. Before the task, offer in your choice window: "Actualizar ahora" / "Más tarde" / "Ver cambios" (CHANGELOG.md entries since ${installed}). "Actualizar ahora" is the clean reinstall of INSTALL.md §12 (backup first; the skills from a signature-verified export of origin/main; read §12 of the new version's INSTALL.md, not the installed one's), asking each step as §12 marks it.`;
+  return `Update: Waymark ${installed} → ${l.latest} is published. Before the task, offer in your choice window: "Actualizar ahora" / "Más tarde" / "Ver cambios" (CHANGELOG.md entries since ${installed}). "Actualizar ahora" is the clean reinstall of INSTALL.md §12 (backup first; the skills from a signature-verified export of origin/main; read §12 of the new version's INSTALL.md at https://github.com/${process.env.WAYMARK_REPO || 'LiriRaid/waymark'}/blob/main/INSTALL.md, since the installed skills carry no INSTALL.md), asking each step as §12 marks it.`;
 }
 // Starts the refresh as a process of its own that outlives the hook.
 export function startRefresh() {

@@ -11,7 +11,7 @@ Read first at Recall. **One line per task, written by the end-of-turn hook from 
 - Stack: <slug from stacks/> (<framework + version>)
 - Architecture: <slug from architectures/> — <how it maps here, e.g. features/<f>/{components,services,entities,routes}> — evidence: <where the pieces live, first structure commit, docs> (to confirm | confirmed <date> | profile default)
 - Package manager / build tool: <pnpm | bundle | uv | gradle | …>
-- Related projects: <e.g. backend API at ../api>
+- Related projects: <e.g. backend API at ../api (to confirm | confirmed <date> by the user)> — only the user writes the mark; `(confirmed …)` lets the guard edit that repository with no denial, `(to confirm)` does not
 
 ## Project map
 Filled by the minimal project scan (waymark `references/project-detection.md`); extended when a task explores a new area. The end-of-turn hook adds and keeps *Areas* (one line per folder a task touched, docs/adr/0023).
@@ -53,6 +53,7 @@ Maintained by ui-system (discover mode). Source of truth for ui-build / ui-refin
 ## Conventions specific to this project
 - …
 <!-- A step that is yours, in your words and dated: "- Deploys: the user (2026-10-25: «yo despliego»)", "- PRs: the user". A task whose only missing step is one of those closes hecho. -->
+<!-- A design host the eyes may open: "- Design link: <url>" (any URL in this section counts; the guard of ego lets a script open that host, never a local-only rule). -->
 <!-- A project that migrates with its own script: "- Migrations: bin/migrate new <name>". A migration file written by hand is asked about first. -->
 
 

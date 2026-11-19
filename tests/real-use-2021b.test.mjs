@@ -188,7 +188,7 @@ test('review: a steering file the user edited is backed up before Waymark rewrit
 // ---- failure 8 (ADR 0065): the Stop hook's own typecheck is not run again where it was too slow the last time ----
 test('8: a typecheck that took longer than the slow limit is not re-run by the hook next time: it is skipped with the time it takes, and the agent is asked to run it', async () => {
   const { rerunGate } = await import(`file://${SCRIPTS}/testigos.mjs`);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slow-')); temps.push(dir); gitK(dir, 'init', '-q');
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slow-'))); temps.push(dir); gitK(dir, 'init', '-q');
   fs.mkdirSync(path.join(dir, '.waymark'));
   const memory = path.join(dir, '.waymark', 'memory.md');
   fs.writeFileSync(memory, '# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | `node -e "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1500)"` | 2026-11-18 |\n');
@@ -222,7 +222,7 @@ test('10.3: a short ask is searched with the session\'s last three tasks beside 
 
 test('8: a slow time older than a day is measured again, so a cold-cache first run does not keep a gate skipped for a week', async () => {
   const { rerunGate } = await import(`file://${SCRIPTS}/testigos.mjs`);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slow2-')); temps.push(dir); gitK(dir, 'init', '-q');
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-slow2-'))); temps.push(dir); gitK(dir, 'init', '-q');
   fs.mkdirSync(path.join(dir, '.waymark'));
   const memory = path.join(dir, '.waymark', 'memory.md'), cmd = 'node -e "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,200)"';
   fs.writeFileSync(memory, `# P\n\n## Quality gates (verified commands)\n| Gate | Command | Verified |\n|---|---|---|\n| typecheck | \`${cmd}\` | 2026-11-18 |\n`);

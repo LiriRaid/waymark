@@ -1,6 +1,6 @@
 // Waymark 2.0.21 · failures 7, 9 and 10 of docs/plans/2.0.21.md, read from three weeks of real use of 2.0.20. Every case is a synthetic copy of a pattern seen
 // there (ADR 0042): no project name, path, prompt or code of a real project. Run: node --test tests/real-use-2021.test.mjs
-import './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
+import { REAL_HOME } from './helpers/isolate.mjs'; // first: no test touches the real home or inherits the session's environment
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -396,8 +396,8 @@ test('17b: a related repository the user marked confirmed in memory.md is not de
 });
 
 test('17b: the gate reads the confirmation from the project memory: an edit in the confirmed repository passes the repository guard', () => {
-  const own = tmpRepo(), other = fs.mkdtempSync(path.join(SCRIPTS, '..', '..', '..', '.wm-ru21-17b-')), transcript = path.join(own, 't17b.jsonl');
-  temps.push(other); gitT(other, 'init', '-q'); fs.mkdirSync(path.join(other, 'src')); fs.writeFileSync(path.join(other, 'src', 'a.mjs'), 'x\n'); // outside the temp folder: a file there is exempt from the guards
+  const own = tmpRepo(), other = fs.mkdtempSync(path.join(REAL_HOME, '.wm-ru21-17b-')), transcript = path.join(own, 't17b.jsonl');
+  temps.push(other); gitT(other, 'init', '-q'); fs.mkdirSync(path.join(other, 'src')); fs.writeFileSync(path.join(other, 'src', 'a.mjs'), 'x\n'); // outside the temp folder (the real home: the sandbox's own is under the temp folder): a file in the temp folder is exempt from the guards
   fs.writeFileSync(transcript, [prompt('ajusta la pantalla')].map((l) => JSON.stringify(l)).join('\n') + '\n');
   const edit = (session) => ToolHook.gate({ tool_name: 'Edit', tool_input: { file_path: path.join(other, 'src', 'a.mjs'), old_string: 'x', new_string: 'y' }, cwd: own, session_id: session, transcript_path: transcript }, claudeAgent) || '';
   assert.match(edit('s17b-gate-1'), NOT_NAMED, 'not listed: asked');

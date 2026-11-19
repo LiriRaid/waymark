@@ -109,7 +109,7 @@ test('28: a failure the detector may have misjudged opens an incident but never 
 test('28: an incident of another Waymark version or older than thirty days ages out; one with no version stays', () => {
   const day = 86400000, now = Date.parse('2026-10-29T12:00:00Z');
   const rec = (id, at, version) => ({ id, at: new Date(at).toISOString(), evaluation: { steps: { Previos: false } }, ...(version ? { inputs: { waymark: version } } : {}) });
-  const open = (list) => incidents(list, { now, version: '2.0.20' }).open.map((o) => o.last);
+  const open = (list) => incidents(list, { now, version: '2.0.20', start: '2026-10-29T22:56:00Z' }).open.map((o) => o.last);
   assert.deepEqual(open([rec('T1', now - 2 * day, '2.0.18')]), [], 'an earlier version\'s');
   assert.deepEqual(open([rec('T1', now - 2 * day, '2.0.20')]), ['T1'], 'this version\'s');
   assert.deepEqual(open([rec('T1', now - 2 * day)]), ['T1'], 'no version recorded: kept');
@@ -144,7 +144,7 @@ test('review fix: Build is suspect only when a build ran and none of the command
 test('28: a failure made with this release\'s build but stamped with the previous version counts for the release (BUILD_START, ADR 0053)', () => {
   const now = Date.parse('2026-11-02T12:00:00Z');
   const rec = (id, at, version) => ({ id, at, evaluation: { steps: { Previos: false } }, inputs: { waymark: version } });
-  const open = (list) => incidents(list, { now, version: '2.0.20' }).open.map((o) => o.last);
+  const open = (list) => incidents(list, { now, version: '2.0.20', start: '2026-10-29T22:56:00Z' }).open.map((o) => o.last);
   assert.deepEqual(open([rec('T1', '2026-10-31T10:00:00Z', '2.0.19')]), ['T1'], 'written after the build was installed');
   assert.deepEqual(open([rec('T1', '2026-10-27T10:00:00Z', '2.0.19')]), [], 'counter-example: written before it');
 });

@@ -33,6 +33,7 @@ if (!process.env.WAYMARK_TEST_SANDBOX) {
   process.env.WAYMARK_TEST_REAL_HOME = REAL_HOME;
   process.env.USERPROFILE = process.env.HOME = sandbox;
   process.env.WAYMARK_HOME = path.join(sandbox, '.waymark');
+  process.env.WAYMARK_NO_REFRESH = '1'; // no test starts the detached refresh of the newest version (it would ask GitHub)
   // one root for everything a test makes: os.tmpdir() answers a folder inside the sandbox (and so does every process the test spawns), so no test leaves a folder
   // of its own in the machine's temp, whether it removes its own or not; the root is removed when the process ends.
   const tmp = path.join(sandbox, 'tmp');

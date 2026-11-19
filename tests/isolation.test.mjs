@@ -19,7 +19,7 @@ test('isolation: the home is a sandbox and nothing of the session\'s environment
   assert.notEqual(path.resolve(os.homedir()), path.resolve(REAL_HOME), 'os.homedir() is not the real home');
   assert.equal(path.resolve(os.homedir()), path.resolve(SANDBOX));
   assert.ok(path.resolve(process.env.WAYMARK_HOME).startsWith(path.resolve(SANDBOX)), 'WAYMARK_HOME lives in the sandbox');
-  const left = Object.keys(process.env).filter((k) => /^(CLAUDE|CODEX_|GEMINI_|CURSOR_|COPILOT_|XDG_)/i.test(k) || (/^WAYMARK_/.test(k) && !/^WAYMARK_(HOME|TEST_)/.test(k)));
+  const left = Object.keys(process.env).filter((k) => /^(CLAUDE|CODEX_|GEMINI_|CURSOR_|COPILOT_|XDG_)/i.test(k) || (/^WAYMARK_/.test(k) && !/^WAYMARK_(HOME|TEST_|NO_REFRESH$)/.test(k)));
   assert.deepEqual(left, [], 'no variable of the session that runs the tests');
 });
 

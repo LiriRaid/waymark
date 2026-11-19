@@ -25,6 +25,7 @@ import { stackOf, stackLine, translate, directBins, gateCell, rowProblem, fillMi
 import { incidents, incidentsLine } from './incidents.mjs';
 import { agentFrom, parseHook, answer } from './agents/index.mjs';
 import { instructionsBlock, newAgents } from './connect-agents.mjs';
+import { updateLine, refreshDue, startRefresh } from './lib/latest.mjs';
 import { newProposals } from './learn.mjs';
 import { waymarkHome } from './lib/paths.mjs';
 import { tagLatency } from './lib/latency.mjs';
@@ -264,6 +265,9 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
     if (held) text += EXTRA.held(held);
     const w = wIn(text);
     try { const p = checkPointer(Date.now(), w); if (p) text += '\n' + p; } catch {}
+    // a newer Waymark is said in every session until the install is updated, from the cached version (no network here); a detached process refreshes the cache (docs/adr/0066)
+    try { const u = updateLine(read(path.join(SCRIPTS, '..', 'VERSION')).trim()); if (u) text += '\n' + u; } catch {}
+    try { if (!process.env.WAYMARK_NO_REFRESH && refreshDue()) startRefresh(); } catch {}
     try { const c = coexistence(); if (c) text = (text ? text + '\n' : '') + c; } catch {}
     const guest = /\nMode:\s*(guest|other-leads|skills-only)\b/.test('\n' + read(path.join(HOME, 'coexistence.md')));
     // an agent installed since the last session, not prepared yet (docs/adr/0022): said once, check has the offers

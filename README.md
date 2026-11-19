@@ -400,6 +400,7 @@ Every design decision is written down in [`docs/adr`](docs/adr), numbered; an ac
 - [0063 · The Kiro adapter writes the workspace files the IDE reads, and uninstall removes them](docs/adr/0063-the-kiro-adapter-writes-the-workspace-files-the-ide-reads-and-uninstall-removes-them.md)
 - [0064 · A gate's time is no failure, a lost notice file is a finding, and the small seen failures are read against the code](docs/adr/0064-a-gates-time-is-no-failure-a-lost-notice-file-is-a-finding-and-the-small-seen-failures-are-read-against-the-code.md)
 - [0065 · The Stop hook skips a typecheck that is too slow, the record keeps what was handed, and a short ask reads three tasks](docs/adr/0065-the-stop-hook-skips-a-typecheck-that-is-too-slow-the-record-keeps-what-was-handed-and-a-short-ask-reads-three-tasks.md)
+- [0066 · A newer Waymark is said in every session from a cached version, and updating is the clean reinstall](docs/adr/0066-a-newer-waymark-is-said-in-every-session-from-a-cached-version-and-updating-is-the-clean-reinstall.md)
 <!-- adr-index:end -->
 
 ## Contributing back

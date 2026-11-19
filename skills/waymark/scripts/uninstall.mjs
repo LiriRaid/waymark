@@ -4,7 +4,7 @@
 //   node uninstall.mjs --apply    after the user's yes: each file is backed up first (~/.waymark-backups/<stamp>-uninstall/)
 // - Hooks: the entries that run waymark/scripts/<hook>.mjs, from Claude Code's settings.json, Codex's hooks.json, Gemini
 //   CLI's settings.json, Cursor's hooks.json and Copilot CLI's hooks/waymark.json (an event left without hooks goes too);
-//   Kiro's hooks/waymark.json and the "waymark" hook in Antigravity's config/hooks.json (install-hooks.mjs withoutOwn).
+//   Kiro's hooks/waymark.json, the files the Kiro adapter wrote in each workspace (kiro-workspace.mjs) and the "waymark" hook in Antigravity's config/hooks.json (install-hooks.mjs withoutOwn).
 // - Claude Code's status line: Waymark's goes; the one the user had (~/.waymark/statusline.json) comes back.
 // - OpenCode: the plugin file (plugins/waymark.js).
 // - The marked blocks (Rule 0 and the pointer) in CLAUDE.md, next to Claude Code's settings, and in the instructions
@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { settingsFile, PLUGIN, PLUGINS, withoutOwn } from './install-hooks.mjs';
+import { removalSteps as kiroWorkspaceSteps } from './kiro-workspace.mjs';
 import { AGENTS, unknownAgents, stripWaymark } from './connect-agents.mjs';
 import { waymarkHome as HOME, slash } from './lib/paths.mjs';
 import { read as readText, readJson } from './lib/fs.mjs';
@@ -65,6 +66,7 @@ export function planUninstall() {
     const { next, removed, empty } = withoutOwn(agent, s);
     if (removed) steps.push({ agent, file, what: `remove ${removed} Waymark hook${removed > 1 ? 's' : ''}${empty ? ' (the file was Waymark\'s: removed)' : ''}`, write: () => (empty ? fs.rmSync(file) : fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n')) });
   }
+  steps.push(...kiroWorkspaceSteps()); // the .kiro files the adapter wrote in each workspace (docs/adr/0063)
   { // Droid's hooks.json keeps its events at the top level: the same removal over { hooks: <the file> }
     const file = settingsFile('droid'), s = readJson(file);
     const { next, removed } = s ? withoutHooks({ hooks: s }) : { next: null, removed: 0 };
@@ -92,7 +94,7 @@ export function planUninstall() {
 export function applyUninstall(steps, now = new Date()) {
   const bk = path.join(BACKUPS(), `${stamp(now)}-uninstall`);
   fs.mkdirSync(bk, { recursive: true });
-  for (const s of steps.filter((x) => x.file)) fs.copyFileSync(s.file, path.join(bk, `${s.agent}-${path.basename(s.file)}`));
+  for (const [i, s] of steps.filter((x) => x.file).entries()) fs.copyFileSync(s.file, path.join(bk, `${s.agent}-${i}-${path.basename(s.file)}`));
   for (const s of steps) {
     if (s.write) s.write();
     else spawnSync(process.execPath, s.run, { encoding: 'utf8', stdio: 'inherit', timeout: 60000 });

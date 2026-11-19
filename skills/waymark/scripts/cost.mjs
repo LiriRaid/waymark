@@ -33,7 +33,7 @@ export function tasksOf(cwd, records) {
     const links = r.evaluation.links || null;
     const u = r.evaluation.usage || {};
     return {
-      id: r.id, session: r.session || null, cwd: r.cwd || null, version: (r.inputs?.waymark && CURRENT && writtenBy(r.inputs.waymark, r.at, CURRENT, BUILD_START)) || r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null, modelChanged: !!r.modelChanged,
+      id: r.id, at: r.at || null, session: r.session || null, cwd: r.cwd || null, version: (r.inputs?.waymark && CURRENT && writtenBy(r.inputs.waymark, r.at, CURRENT, BUILD_START)) || r.inputs?.waymark || 'unknown', level: r.level ?? null, model: r.inputs?.model || null, modelChanged: !!r.modelChanged,
       tokens: r.evaluation.tokens, units: units(u), usage: u, links, subagents: r.evaluation.subagents ?? u.subagents ?? 0,
       responses: links ? LINKS.reduce((a, k) => a + (links[k]?.responses || 0), 0) : null,
       quotaPct: r.evaluation.quotaPct ?? null, quotaBy: r.evaluation.quotaBy || null, taskType: r.taskType || null,

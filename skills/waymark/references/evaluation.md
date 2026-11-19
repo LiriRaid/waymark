@@ -20,6 +20,13 @@ Every closed task is already evaluated automatically: the end-of-turn hook judge
 ## 3. Consumption
 `node <skills-dir>/waymark/scripts/measure.mjs --turns <a>-<b>` in the project folder: attempts, responses, tool calls, tokens, the context at session start and its growth. Compare the record's estimated quota with the % the user noted before and after.
 
+## 3b. What the gates read as of 2.0.21
+
+- A spec written after the code it tests is recorded ("written after the code") and asks no clean copy; it must pass after it. The clean copy (`W copy HEAD`) is asked only when the spec cannot run before the code in the working tree.
+- The Stop hook re-runs the repo's typecheck only when the agent ran none; one that took 10 s or more last time is skipped for a day (`WAYMARK_SLOW_GATE_S`) and the agent is asked to run it. A gate's time is never a failure (`W testigos` shows it as not judged).
+- Ojos (the eyes) is judged only when the request asked for the screen, a browser or ego, or carried a screenshot or a design link.
+- The record keeps the level the routing line declared (`declared`) next to the measured one, and what the hook handed of each procedure (`observed.procedure.deliveries`).
+
 ## 4. Report format
 ```
 ## Waymark evaluation · <task ID>

@@ -33,11 +33,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KNOWN, known, agentDir } from './agents/paths.mjs';
+import { hookCommand } from './lib/paths.mjs';
+import { planWorkspace, applyWorkspace, pending } from './kiro-workspace.mjs';
+import { surfaceLine } from './connect-agents.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url)).replace(/\\/g, '/');
 // A hook is registered as `node hook-run.cjs <hook script> …`: the launcher finds a Node that can run it (docs/adr/0040), and the
 // hook script stays in the command, so everything that looks for `waymark/scripts/<hook>.mjs` in a command still finds it.
-export const hookCommand = (scripts, file) => `node "${scripts}/hook-run.cjs" "${scripts}/${file}"`;
+export { hookCommand };
 export const HOOKS = [
   { event: 'SessionStart', file: 'session-hook.mjs' },
   { event: 'UserPromptSubmit', file: 'rule0-hook.mjs' },
@@ -243,6 +246,20 @@ if (process.argv[1] && fs.realpathSync(path.resolve(process.argv[1])) === fileUR
       : `Agent "${agent}"${a ? ` (${a.name})` : ''}: no adapter yet. Supported: ${[...Object.keys(SETTINGS), ...PLUGINS].join(', ')}.${a?.hooks ? ` Its hooks: ${a.docs}.` : ''} To write one, with the user's yes: dept-devex procedures → Add an agent (templates/agent-adapter.template.mjs).`);
     process.exit(1);
   }
+  if (agent === 'kiro' && args.includes('--project')) { // the IDE reads the workspace, not ~/.kiro (docs/adr/0063)
+    const root = path.resolve(/^--/.test(args[args.indexOf('--project') + 1] || '--') ? '.' : args[args.indexOf('--project') + 1]), plan = planWorkspace(root, { scripts: SCRIPTS });
+    console.log(`${surfaceLine(known('kiro'))}\n${root}:`);
+    if (!pending(plan)) { console.log('  the Kiro IDE workspace files are already in place (hooks, steering, exclude, registered).'); process.exit(0); }
+    for (const f of plan.files.filter((x) => x.state !== 'same')) console.log(`  - ${f.state} ${path.relative(root, f.file).replace(/\\/g, '/')}`);
+    if (plan.exclude) console.log('  - add /.kiro/ to .git/info/exclude (this clone only)');
+    if (!plan.registered) console.log('  - register the folder in ~/.waymark/kiro-workspaces.json (so uninstall finds it)');
+    if (!write) { console.log("\nPlan only: nothing was written. Ask the user, then re-run with --apply. Reopen the folder in Kiro; the live check is the user's: the routing line shows and ~/.waymark/kiro/ gets a journal."); process.exit(0); }
+    applyWorkspace(plan);
+    pinNode();
+    console.log('written. Reopen the folder in the Kiro IDE.');
+    process.exit(0);
+  }
+  if (agent === 'kiro' && !args.includes('--project')) console.log(`${surfaceLine(known('kiro'))}\nThe lines below are the CLI's global hooks; for the IDE re-run with --project <folder>.\n`);
   const mode = coexistMode();
   if (['guest', 'skills-only', 'other-leads'].includes(mode)) { console.log(`Coexistence mode ${mode}: the orchestrator's hooks own the turn; no Waymark hooks are registered.`); process.exit(0); }
   const file = SETTINGS[agent](), raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';

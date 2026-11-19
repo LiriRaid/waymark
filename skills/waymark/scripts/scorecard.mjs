@@ -110,10 +110,26 @@ const recent = async (root, n = 30, full = true) => {
   const last = (await versionTasks(root)).slice(-n);
   return full ? last.filter((r) => r.schema) : last;
 };
-// The cost rows of the tasks the measured version wrote (docs/adr/0049), for the routine shares of every level.
+// The projects the five checks of real use read (docs/adr/0059): this root, then the ones ~/.waymark/projects.md names that exist, each once.
+const poolRoots = (root) => {
+  const me = path.resolve(root), key = (p) => (process.platform === 'win32' ? p.toLowerCase() : p); // a Windows path is the same with any letter case
+  return [me, ...namedProjects().map((p) => path.resolve(p)).filter((p, i, all) => key(p) !== key(me) && all.findIndex((q) => key(q) === key(p)) === i && fs.existsSync(p))];
+};
+const byTime = (a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0); // a record with no date is the oldest, never the newest
+// The tasks of the measured version in all those projects, oldest first: the real use is the user's, wherever the agents closed it.
+const pooledTasks = (root) => once(`pool:${root}`, async () => (await Promise.all(poolRoots(root).map((r) => versionTasks(r)))).flat().sort(byTime));
+const recentPooled = async (root, n = 30, full = true) => {
+  const last = (await pooledTasks(root)).slice(-n);
+  return full ? last.filter((r) => r.schema) : last;
+};
+// The cost rows of the tasks the measured version wrote (docs/adr/0049), for the routine shares of every level: those of all the projects, by date (docs/adr/0059).
 const versionCost = (root) => once(`cost:${root}`, async () => {
-  const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), mine = new Set((await versionTasks(root)).map((r) => r.id));
-  return { C, tasks: C.tasksOf(root, (await rawTasks(root)).records).filter((t) => mine.has(t.id)) };
+  const C = await import(pathToFileURL(path.join(HERE, 'cost.mjs')).href), tasks = [];
+  for (const r of poolRoots(root)) {
+    const mine = new Set((await versionTasks(r)).map((t) => t.id));
+    tasks.push(...C.tasksOf(r, (await rawTasks(r)).records).filter((t) => mine.has(t.id)));
+  }
+  return { C, tasks: tasks.sort(byTime) };
 });
 // The precedent's held-out evaluation, once per run: precision@3 and the hand-over's size come from the same one.
 const precedentEval = (root) => once(`precedent:${root}`, async () => {
@@ -141,9 +157,10 @@ const MEASURES = {
   },
   async 'records.detailShare'(root) { return share(await recent(root, 30, false), (r) => r.schema); },
   // Real use (docs/adr/0049): the share of the last 30 tasks that closed parcial, the agents that closed them, and the median tokens of a task.
-  async 'records.parcialShare'(root) { return parcialOf(await recent(root, 30, false)); },
-  async 'records.agentSpread'(root) { const rs = await recent(root, 30, false); const named = new Set(rs.map((r) => r.agent).filter(Boolean)); return named.size || null; }, // a record with no agent is no second agent
-  async 'records.medianTokens'(root) { return median((await recent(root, 30, true)).map((r) => r.evaluation?.tokens).filter((t) => t > 0)); },
+  // The five checks of real use (13.6, 9.9, 8.9, 8.6, 8.7) read the projects the user names too (docs/adr/0059); 9.9 over every task of the measured release, not the last 30.
+  async 'records.parcialShare'(root) { return parcialOf(await recentPooled(root, 30, false)); },
+  async 'records.agentSpread'(root) { const rs = await pooledTasks(root); const named = new Set(rs.map((r) => r.agent).filter(Boolean)); return named.size || null; }, // a record with no agent is no second agent
+  async 'records.medianTokens'(root) { return median((await recentPooled(root, 30, true)).map((r) => r.evaluation?.tokens).filter((t) => t > 0)); },
   async 'records.pinnedShare'(root) { return share(await recent(root, 20), (r) => r.pinned); },
   async 'records.tokenShare'(root) { return share(await recent(root), (r) => r.evaluation?.tokens > 0 && r.evaluation?.links); },
   async 'records.cierreShare'(root) { return share(await recent(root), (r) => /Resultado:/.test(r.cierre || '') && /Evidencia:/.test(r.cierre || '') && /Aprendido:/.test(r.cierre || '')); },
@@ -286,17 +303,18 @@ export async function projectsReport(roots = namedProjects()) {
   try { card = readScorecard(path.resolve(HERE, '..', '..', '..')); } catch {}
   const FROZEN = { '13.6': { op: 'le', threshold: 0.2 }, '9.9': { op: 'ge', threshold: 2 }, '8.9': { op: 'ge', threshold: null } };
   const checkOf = (id) => card?.criteria.flatMap((k) => k.checks).find((c) => c.id === id) || FROZEN[id];
-  const projects = [], pooled = [], full = [];
+  const projects = [], pooled = [], full = [], release = new Set(); // release: the agents of every task of the measured version, as 9.9 reads them (docs/adr/0059)
   for (const root of roots) {
     const name = path.basename(path.resolve(root));
     if (!fs.existsSync(root)) { projects.push({ name, missing: true }); continue; }
+    for (const r of await versionTasks(root)) if (r.agent) release.add(r.agent);
     const rs = await recent(root, 30, false);
     pooled.push(...rs); full.push(...await recent(root, 30, true));
     projects.push({ name, tasks: rs.length, parcialShare: parcialOf(rs), unresolvedShare: unresolvedOf(rs), agents: countBy(rs.filter((r) => r.agent), (r) => r.agent), egoReturns: egoReturnsOf(rs) });
   }
   const agents = countBy(pooled.filter((r) => r.agent), (r) => r.agent);
   const total = { tasks: pooled.length, parcialShare: parcialOf(pooled), unresolvedShare: unresolvedOf(pooled), agents, oneAgent: Object.keys(agents).length === 1, medianTokens: median(full.map((r) => r.evaluation?.tokens).filter((t) => t > 0)) };
-  const values = { '13.6': total.parcialShare, '9.9': Object.keys(agents).length || null, '8.9': total.medianTokens };
+  const values = { '13.6': total.parcialShare, '9.9': release.size || null, '8.9': total.medianTokens };
   const checks = Object.entries(DIR_CHECKS).map(([id, m]) => {
     const c = checkOf(id), value = values[id];
     return { id, measure: m, value, ...(value === null || !c ? { score: 0, status: 'unmeasured' } : c.threshold === null ? { score: 0, status: 'pending' } : { score: scoreOf(c.op, value, c.threshold), status: scoreOf(c.op, value, c.threshold) >= 1 ? 'pass' : 'fail' }) };

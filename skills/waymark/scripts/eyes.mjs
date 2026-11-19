@@ -39,9 +39,15 @@ export function eyesProvider({ root, env = process.env } = {}) {
 
 const CSS_HTML = /\.(css|scss|sass|less|html)$/i;
 const SPEC = /\.(spec|test)\.[cm]?[jt]sx?$/i;
-// Is the eyes' turn due? A seen change at L2+, or an L1 of styles and templates only with no spec (a spec cannot see layout: jsdom computes none).
-export function eyesDue({ provider, ui, level, changed = [] }) {
-  if (!provider || !ui) return false;
+// Did the user ask for the screen? Words naming ego, the browser or a look at the screen, in any prompt of the task (the screenshots and design links are
+// counted apart, by requestRefs). The eyes are due only then (the user, 2026-11-18): a UI task nobody asked to look at owes no look and shows none in its close.
+const ASKS_EYES = /\bego(?:-browser)?\b|navegador|\bbrowser\b|en pantalla|visualmente|\bojos\b|con los ojos/i;
+export const asksEyes = (prompts) => (prompts || []).some((p) => ASKS_EYES.test(String(p || '')));
+
+// Is the eyes' turn due? A seen change at L2+, or an L1 of styles and templates only with no spec (a spec cannot see layout: jsdom computes none), and only
+// when the request asked for the screen (`asked`: words, a screenshot or a design link; required, so no caller keeps the old rule by omission).
+export function eyesDue({ provider, ui, level, changed = [], asked }) {
+  if (!provider || !ui || asked !== true) return false;
   if (level >= 2) return true;
   const files = changed.filter((f) => !SPEC.test(path.basename(f)));
   return level === 1 && files.length > 0 && files.every((f) => CSS_HTML.test(f)) && files.length === changed.length;
@@ -100,6 +106,15 @@ export function requestRefs(prompts) {
     }
   }
   return { images, hosts: [...hosts] };
+}
+// The hosts the user wrote in the project's Conventions section of memory.md (a `Design link: <url>` line, or any URL there): the same permission as a link in the
+// request, kept in the file so it holds for every task. Other sections, comments and local hosts give none. → [host].
+export function memoryHosts(memory) {
+  const text = String(memory || '').replace(/<!--[\s\S]*?-->/g, '');
+  const section = text.match(/^##[ \t]+Conventions\b[^\n]*\n([\s\S]*?)(?=^##[ \t]|(?![\s\S]))/im)?.[1] || '';
+  const hosts = new Set();
+  for (const u of section.match(URL_RE) || []) { const h = hostOf(u); if (h && whereTo(u) !== 'local') hosts.add(h); }
+  return [...hosts];
 }
 // ego's own reference (references/clearing-state.md): three commands empty the whole profile's cookies or cache and cannot be undone.
 const PROFILE_WIPE = /Network\.clearBrowserCookies|Network\.clearBrowserCache|Storage\.clearCookies["'`]\s*(?:\)|,\s*\{(?![^}]*browserContextId))/;

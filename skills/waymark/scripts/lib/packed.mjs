@@ -26,3 +26,8 @@ export function procLate(session, since = 0, file = PACKED()) {
   const st = readPacked(file)[session || 'unknown'];
   return new Set(st && st.since === since ? st.late || [] : []);
 }
+// → { first: { dept, at } | null, deliveries: [{ dept, by: 'edit' | 'load', late?, at }] }: the route at the task's first change and what the hook handed, in order (the record keeps it, docs/adr/0065).
+export function procHistory(session, since = 0, file = PACKED()) {
+  const st = readPacked(file)[session || 'unknown'];
+  return st && st.since === since ? { first: st.first || null, deliveries: st.deliveries || [] } : { first: null, deliveries: [] };
+}

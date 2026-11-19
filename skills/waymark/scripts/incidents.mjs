@@ -35,10 +35,10 @@ export function suspect(r, label) {
   return false;
 }
 
-export function incidents(records, { now = Date.now(), version = VERSION } = {}) {
+export function incidents(records, { now = Date.now(), version = VERSION, start = BUILD_START } = {}) { // `start`: when the build was installed (a test pins it)
   const open = new Map(), failures = new Map();
   // only what this version produced: a record that names another Waymark version is left out (one with no version is kept), and an old failure ages out
-  const evaluated = records.filter((r) => r.id && r.evaluation?.steps && !(version && r.inputs?.waymark && writtenBy(r.inputs.waymark, r.at, version, BUILD_START) !== release(version))), recent = new Set(evaluated.slice(-WINDOW));
+  const evaluated = records.filter((r) => r.id && r.evaluation?.steps && !(version && r.inputs?.waymark && writtenBy(r.inputs.waymark, r.at, version, start) !== release(version))), recent = new Set(evaluated.slice(-WINDOW));
   for (const r of evaluated) {
     const steps = r.evaluation.steps;
     for (const [label, ok] of Object.entries(steps)) {

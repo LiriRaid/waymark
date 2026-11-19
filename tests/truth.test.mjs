@@ -301,7 +301,7 @@ test('3g: logic — a spec that only moved its cases, a barrel and a red from an
   assert.equal(red([...specEdit(SPEC_B, 0, 2)]), false, 'counter-example: new cases and no run before the code');
   const barrel = run('Write', { file_path: '/work/proj/src/index.mjs', content: "export * from './orders.service.mjs';\n" });
   assert.equal(red([...barrel, ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')]), true, 'a barrel before the spec is no behavior');
-  assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')]), false, 'counter-example: real code first, then a green run');
+  assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')]), true, 'real code first, then a green run: recorded as written after the code, no clean copy (2.0.21, failure 15)');
   assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs | tail -5', { out: 'Error: Failed to resolve import "./orders.service.mjs"' })]), true, 'its import does not resolve: that is a red');
   const earlier = { taskTools: [{ name: 'Edit', id: 'earlier-1', input: { file_path: SPEC_B, new_string: caseText(1) } }] };
   assert.equal(red([...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('node --test src/b.spec.mjs')], earlier), true, 'a spec an earlier turn of the task already changed');
@@ -311,11 +311,11 @@ test('3g: logic — a spec that only moved (git mv, mv, Move-Item), with no writ
   for (const mv of ['git mv src/a.spec.mjs src/b.spec.mjs', 'mv src/a.spec.mjs src/b.spec.mjs', 'Move-Item src/a.spec.mjs src/b.spec.mjs']) {
     assert.equal(red([...edit(), ...sh(mv)], [FILE, SPEC_B]), true, mv);
   }
-  assert.equal(red([...edit(), ...sh('git mv src/a.spec.mjs src/b.spec.mjs'), ...specEdit(SPEC_B, 0, 2)], [FILE, SPEC_B]), false, 'counter-example: moved, then new cases');
+  assert.equal(red([...sh('git mv src/a.spec.mjs src/b.spec.mjs'), ...specEdit(SPEC_B, 0, 2), ...edit()], [FILE, SPEC_B]), false, 'counter-example: moved, then new cases, then the code with no run before it');
   assert.equal(red([...edit()], [FILE, SPEC_B]), false, 'counter-example: a spec changed by a command that is no move');
 });
 test('3g: a runner that cannot start in the copy is the environment, not a red; an import of the code that does not resolve still is', () => {
-  const failedRun = (out) => judge([...opening(2), ...edit(), ...specEdit(SPEC_B, 0, 1), ...sh('pnpm exec vitest run src/b.spec.mjs', { error: true, out })], inRepo);
+  const failedRun = (out) => judge([...opening(2), ...specEdit(SPEC_B, 0, 1), ...sh('pnpm exec vitest run src/b.spec.mjs', { error: true, out }), ...edit()], inRepo); // spec first: its run before the code is the red asked
   for (const out of ["Error: Cannot find module 'vitest/config'", "Error: Cannot find module 'C:/copy/node_modules/jest/bin/jest.js'", "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'mocha' imported from x"]) {
     assert.equal(failedRun(out).observed.tests.red, false, `${out}: no red`);
   }

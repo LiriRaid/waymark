@@ -42,6 +42,7 @@ const shellOf = (cmd) => {
 const asQuestion = (q) => ({ id: q.id, ...question(q, { text: ['question', 'title'] }) });
 const bare = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s*\(recomendad[oa]\)\s*$/, '').replace(/\s+/g, ' ').trim();
 
+const ENVELOPE = /^\s*<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*$/;
 export function toLines(rows) {
   const lines = [], asked = new Map();
   let version = null, model = null, lastTotal = 0, tail = [], choiceInTurn = false, pendingAsync = [], n = 0;
@@ -84,6 +85,23 @@ export function toLines(rows) {
     if (it.type === 'UserMessage') {
       const text = (it.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       const prompt = { type: 'user', uuid: `${p.turn_id || ''}:${it.id || n}`, timestamp: ts, version, message: { role: 'user', content: text } };
+      // the answer to request_user_input_async comes as a user message in an envelope: it answers the window (the task goes on), it is no new prompt (a free text
+      // answer included: its words stay in the recorded answer). 34 of the 102 real calls were refused before, and each answer that did come started a task of its own.
+      const env = text.match(ENVELOPE);
+      if (env) {
+        let replies = [];
+        try { replies = JSON.parse(env[1]); } catch {}
+        if (!Array.isArray(replies)) replies = [];
+        for (const { id, qs } of pendingAsync) {
+          assistant(ts, [{ type: 'tool_use', name: 'AskUserQuestion', id, input: { source: 'async', questions: qs } }]);
+          const answers = {};
+          qs.forEach((q, i) => { const r = replies.find((x) => String(x?.questionItemId || '').includes(`"${id}",${i}`)) || replies[i]; if (r?.answer) answers[q.question] = String(r.answer); });
+          lines.push(answerLine(ts, id, 'answered in the next message', { source: 'async', questions: plainQuestions(qs), answers }, { version }));
+        }
+        pendingAsync = []; choiceInTurn = true;
+        lines.push(prompt); // isPrompt leaves the envelope out: the turn is the task's
+        continue;
+      }
       if (!isPrompt(prompt)) { lines.push(prompt); continue; } // a hook's block reason fed back is not the user answering
       const reply = text.replace(/\s+/g, ' ').trim().slice(0, 300);
       for (const { id, qs } of pendingAsync) { // each question: the options the reply names, else the reply itself
@@ -139,7 +157,7 @@ export function call(hook) {
 }
 
 // One line added to the reminder and to the gate's message: how this agent does what the routine names in Claude terms.
-export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it, otherwise put the options in the chat and end your turn — the user's reply counts as the decision; after request_user_input_async, end your turn too (no sleep, no wait: the answer comes as the user's next message).`;
+export const note = (skillsDir) => ` In Codex: "invoke the skill <name>" = read ${String(skillsDir).replace(/\\/g, '/')}/<name>/SKILL.md (that read is recorded as the call); code-review = node ${String(skillsDir).replace(/\\/g, '/')}/waymark/scripts/waymark.mjs review <the task's files>; a re-route is a new "Waymark → L<n> · <dept>" line; the choice window is request_user_input when you have it (arguments only {"questions":[{"title":"<the question>","options":["A (Recomendado)","B"]}]}, no other field), otherwise put the options in the chat and end your turn — the user's reply counts as the decision; after request_user_input_async, end your turn too (no sleep, no wait: the answer comes as the user's next message).`;
 
 // Rollouts of the sessions opened in cwd, newest first (session_meta.cwd of each file modified in the last 14 days).
 export function sessions(cwd) {
